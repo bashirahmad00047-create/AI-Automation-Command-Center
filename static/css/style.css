@@ -1637,3 +1637,262 @@ input:checked + .slider:before { transform: translateX(18px); }
 }
 
 
+
+/* ==========================================================================
+   ENTERPRISE SAAS EXTENSIONS (RBAC, Multi-Tenancy, Incidents, API Keys)
+   ========================================================================== */
+
+/* Workspace Switcher & User Profile */
+.workspace-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    padding: 6px 12px;
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.workspace-select {
+    background: transparent;
+    border: none;
+    color: var(--cyan-glow);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    outline: none;
+    cursor: pointer;
+}
+.workspace-select option {
+    background: var(--bg-panel);
+    color: var(--text-primary);
+}
+
+.user-profile-widget {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    padding: 5px 12px;
+    border-radius: 6px;
+}
+
+.user-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.role-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.role-badge.owner, .role-badge.admin {
+    background: rgba(178, 75, 243, 0.2);
+    color: #d88eff;
+    border: 1px solid rgba(178, 75, 243, 0.4);
+}
+
+.role-badge.operator {
+    background: rgba(0, 240, 255, 0.15);
+    color: var(--cyan-glow);
+    border: 1px solid rgba(0, 240, 255, 0.3);
+}
+
+.role-badge.viewer {
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+/* Incident Response Center */
+.incidents-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.incident-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    transition: var(--transition);
+}
+
+.incident-card:hover {
+    border-color: var(--border-highlight);
+    background: var(--bg-card-hover);
+}
+
+.incident-main {
+    flex: 1;
+}
+
+.incident-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.incident-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.incident-message {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+}
+
+.incident-meta {
+    display: flex;
+    gap: 16px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+.severity-pill {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    font-family: var(--font-mono);
+}
+
+.severity-pill.critical {
+    background: rgba(255, 51, 102, 0.2);
+    color: var(--red-glow);
+    border: 1px solid rgba(255, 51, 102, 0.5);
+}
+
+.severity-pill.high {
+    background: rgba(255, 184, 0, 0.2);
+    color: var(--amber-glow);
+    border: 1px solid rgba(255, 184, 0, 0.5);
+}
+
+.severity-pill.warning {
+    background: rgba(0, 240, 255, 0.15);
+    color: var(--cyan-glow);
+    border: 1px solid rgba(0, 240, 255, 0.4);
+}
+
+.severity-pill.info {
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.status-badge {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.status-badge.open {
+    background: rgba(255, 51, 102, 0.15);
+    color: #ff6b8b;
+}
+.status-badge.acknowledged {
+    background: rgba(255, 184, 0, 0.15);
+    color: #ffd166;
+}
+.status-badge.resolved {
+    background: rgba(0, 255, 157, 0.15);
+    color: var(--emerald-glow);
+}
+
+/* API Key & Inbound Webhooks */
+.token-reveal-banner {
+    background: rgba(0, 240, 255, 0.08);
+    border: 1px solid var(--cyan-glow);
+    border-radius: 8px;
+    padding: 16px;
+    margin: 16px 0;
+}
+
+.token-code-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-dark);
+    padding: 10px 14px;
+    border-radius: 6px;
+    margin-top: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.token-code {
+    font-family: var(--font-mono);
+    color: var(--cyan-glow);
+    font-size: 0.95rem;
+    flex: 1;
+    word-break: break-all;
+}
+
+.curl-snippet {
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--emerald-glow);
+    overflow-x: auto;
+    position: relative;
+    margin: 8px 0;
+}
+
+.copy-btn {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: var(--transition);
+}
+.copy-btn:hover {
+    border-color: var(--cyan-glow);
+    color: var(--cyan-glow);
+}
+
+/* Team Grid */
+.team-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+}
+.team-table th, .team-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    font-size: 0.85rem;
+}
+.team-table th {
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+}

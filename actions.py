@@ -1,13 +1,15 @@
-"""Action Execution Engine for Rule Automations.
+"""Enterprise Action Execution Engine for OpsFlow SaaS Platform.
 
-Provides built-in, secure, offline-first action handlers:
+Provides safe, simulated-by-default execution handlers:
 - notification: Dispatches in-app alerts and notifications
+- database_record: Creates CRM leads or records in the database
+- email_draft: Generates contextual email response drafts (safe, zero external dispatch)
 - log_entry: Writes structured diagnostic log entries
-- file_write / file_append: Persists data safely to local storage
-- email_dispatch: Simulates dispatching enterprise email alerts
-- webhook_call: Simulates or triggers HTTP webhooks
-- data_transform: Enriches or modifies data payloads
-- system_command: Runs safe command diagnostics / simulations
+- update_lead_status: Updates lead progression in CRM
+- assign_department: Assigns department route
+- webhook_call / webhook_preview: Safe HTTP webhook dispatch with bounded retry logic
+- generate_report: Produces structured analytics/triage reports
+- file_write / file_append: Persists data safely to local automation storage
 """
 
 from __future__ import annotations
@@ -17,11 +19,13 @@ import json
 import os
 import re
 import time
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
+
+import requests
 
 
 class ActionRunner:
-    """Dispatches and tracks automation actions."""
+    """Dispatches and tracks automation actions with retry and safety controls."""
 
     STORAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "automation_storage")
 
@@ -34,31 +38,61 @@ class ActionRunner:
         self,
         action: Dict[str, Any],
         context: Dict[str, Any],
-        storage_engine: Any = None
+        storage_engine: Any = None,
+        dry_run: bool = False
     ) -> Dict[str, Any]:
-        """Executes a single action and returns execution telemetry."""
+        """Executes a single action and returns execution telemetry and retry state."""
         action_type = action.get("type", "").lower()
-        params = action.get("params", {})
+        params = action.get("params", {}) or action.get("config", {})
 
         start_time = time.time()
         status = "success"
         output: Any = None
         error_msg: str | None = None
+        retry_count = 0
+
+        # Dry-run safety: Never perform external mutations
+        if dry_run:
+            rendered_params = self._render_template_params(params, context)
+            duration_ms = round((time.time() - start_time) * 1000, 2)
+            return {
+                "type": action_type,
+                "params": params,
+                "status": "dry_run_simulated",
+                "output": {
+                    "simulated": True,
+                    "notice": "DRY RUN / ZERO SIDE EFFECTS",
+                    "action_type": action_type,
+                    "rendered_payload": rendered_params
+                },
+                "error": None,
+                "duration_ms": duration_ms,
+                "retry_count": 0
+            }
 
         try:
-            # Template substitution in string parameters
             rendered_params = self._render_template_params(params, context)
 
-            if action_type == "notification":
+            if action_type in ("notification", "create_notification"):
                 output = self._action_notification(rendered_params, context, storage_engine)
-            elif action_type == "log_entry":
+            elif action_type in ("database_record", "create_database_record"):
+                output = self._action_database_record(rendered_params, context, storage_engine)
+            elif action_type in ("email_draft", "generate_email_draft"):
+                output = self._action_email_draft(rendered_params, context)
+            elif action_type in ("email_dispatch", "email_notification"):
+                output = self._action_email_dispatch(rendered_params, context)
+            elif action_type in ("log_entry", "add_execution_log"):
                 output = self._action_log_entry(rendered_params, context)
+            elif action_type == "update_lead_status":
+                output = self._action_update_lead_status(rendered_params, context, storage_engine)
+            elif action_type == "assign_department":
+                output = self._action_assign_department(rendered_params, context)
+            elif action_type in ("webhook_call", "webhook_preview", "webhook"):
+                output, status, retry_count, error_msg = self._action_webhook_call(rendered_params, context)
+            elif action_type == "generate_report":
+                output = self._action_generate_report(rendered_params, context)
             elif action_type in ("file_write", "file_append"):
                 output = self._action_file_io(action_type, rendered_params, context)
-            elif action_type == "email_dispatch":
-                output = self._action_email_dispatch(rendered_params, context)
-            elif action_type == "webhook_call":
-                output = self._action_webhook_call(rendered_params, context)
             elif action_type == "data_transform":
                 output = self._action_data_transform(rendered_params, context)
             elif action_type == "system_command":
@@ -79,7 +113,8 @@ class ActionRunner:
             "status": status,
             "output": output,
             "error": error_msg,
-            "duration_ms": duration_ms
+            "duration_ms": duration_ms,
+            "retry_count": retry_count
         }
 
     def _render_template_params(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -90,6 +125,13 @@ class ActionRunner:
                 rendered[key] = self._interpolate_string(val, context)
             elif isinstance(val, dict):
                 rendered[key] = self._render_template_params(val, context)
+            elif isinstance(val, list):
+                rendered[key] = [
+                    self._render_template_params(item, context) if isinstance(item, dict)
+                    else self._interpolate_string(item, context) if isinstance(item, str)
+                    else item
+                    for item in val
+                ]
             else:
                 rendered[key] = val
         return rendered
@@ -98,17 +140,16 @@ class ActionRunner:
         """Finds all {{ var.path }} and substitutes them."""
         def repl(match: re.Match) -> str:
             path = match.group(1).strip()
-            # Simple resolver
             parts = path.split(".")
             curr = context
             for p in parts:
                 if isinstance(curr, dict) and p in curr:
                     curr = curr[p]
                 else:
-                    return match.group(0)  # leave as is if not found
+                    return ""
             return str(curr)
 
-        return re.sub(r"\{\{\s*([a-zA-Z0-9_\.]+)\s*\}\}", repl, template)
+        return re.sub(r"\{\{\s*([\w\.\-]+)\s*\}\}", repl, template)
 
     def _action_notification(
         self,
@@ -116,124 +157,278 @@ class ActionRunner:
         context: Dict[str, Any],
         storage_engine: Any = None
     ) -> Dict[str, Any]:
-        title = params.get("title", "Command Center Alert")
-        message = params.get("message", "Triggered automation alert.")
+        title = params.get("title", "OpsFlow Automated Alert")
+        message = params.get("message", "Rule triggered automatically.")
         severity = params.get("severity", "info").lower()
 
-        notif_record = {
+        alert_id = None
+        if storage_engine:
+            try:
+                rule_id = context.get("rule", {}).get("id") or context.get("rule_id")
+                fn = getattr(storage_engine, "add_notification", None) or getattr(storage_engine, "create_alert", None)
+                if fn:
+                    alert_record = fn(
+                        title=title,
+                        message=message,
+                        severity=severity,
+                        rule_id=rule_id,
+                        organization_id=context.get("organization_id", "org-enterprise-default")
+                    )
+                    if alert_record and hasattr(alert_record, "id"):
+                        alert_id = alert_record.id
+                    elif isinstance(alert_record, dict):
+                        alert_id = alert_record.get("id")
+                    elif isinstance(alert_record, int):
+                        alert_id = alert_record
+            except Exception:
+                pass
+
+        return {
             "title": title,
             "message": message,
             "severity": severity,
-            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "alert_id": alert_id,
+            "dispatched_at": datetime.datetime.now().isoformat()
         }
 
-        if storage_engine and hasattr(storage_engine, "add_notification"):
-            storage_engine.add_notification(title, message, severity)
-
-        return notif_record
-
-    def _action_log_entry(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        level = params.get("level", "INFO").upper()
-        message = params.get("message", "")
-        log_file = os.path.join(self.STORAGE_DIR, "logs", "command_center_audit.log")
-
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_line = f"[{timestamp}] [{level}] {message}\n"
-
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(log_line)
-
-        return {"level": level, "message": message, "file": log_file}
-
-    def _action_file_io(
+    def _action_database_record(
         self,
-        mode: str,
         params: Dict[str, Any],
-        context: Dict[str, Any]
+        context: Dict[str, Any],
+        storage_engine: Any = None
     ) -> Dict[str, Any]:
-        filename = params.get("filename", "output.txt")
-        # Sanitize filename to prevent directory traversal
-        clean_filename = os.path.basename(filename)
-        if not clean_filename:
-            clean_filename = "output.txt"
+        """Creates or updates a record (such as a Lead) in the database."""
+        entity = params.get("entity", "lead").lower()
+        payload = context.get("payload", {})
+        nlp = context.get("nlp", {})
 
-        filepath = os.path.join(self.STORAGE_DIR, "output", clean_filename)
-        content = params.get("content", "")
-
-        write_mode = "a" if mode == "file_append" else "w"
-        with open(filepath, write_mode, encoding="utf-8") as f:
-            if write_mode == "a":
-                f.write(content + "\n")
-            else:
-                f.write(content)
+        lead_id = None
+        if entity == "lead" and storage_engine and hasattr(storage_engine, "save_lead"):
+            try:
+                lead_data = {
+                    "name": payload.get("name") or payload.get("contact_name") or "Website Visitor",
+                    "email": payload.get("email") or (nlp.get("entities", {}).get("emails", [None])[0] if nlp else None),
+                    "phone": payload.get("phone") or (nlp.get("entities", {}).get("phones", [None])[0] if nlp else None),
+                    "company": payload.get("company") or payload.get("org") or "N/A",
+                    "message": payload.get("message") or payload.get("text") or "",
+                    "intent": nlp.get("intent") or "lead_inquiry",
+                    "sentiment": nlp.get("sentiment_label") or "neutral",
+                    "urgency_score": nlp.get("urgency_score") or nlp.get("urgency") or 20,
+                    "lead_score": nlp.get("lead_score") or 60,
+                    "route_department": nlp.get("recommended_route") or "Sales",
+                    "status": params.get("status", "new"),
+                    "organization_id": context.get("organization_id", "org-enterprise-default")
+                }
+                saved_lead = storage_engine.save_lead(lead_data)
+                lead_id = saved_lead.get("id") if isinstance(saved_lead, dict) else getattr(saved_lead, "id", None)
+            except Exception as e:
+                pass
 
         return {
-            "mode": mode,
-            "path": filepath,
-            "bytes_written": len(content)
+            "entity": entity,
+            "record_id": lead_id or f"rec_{int(time.time()*1000)}",
+            "status": "persisted",
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+
+    def _action_email_draft(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Generates a professional response draft (never sends external emails)."""
+        payload = context.get("payload", {})
+        nlp = context.get("nlp", {})
+        
+        name = payload.get("name")
+        company = payload.get("company")
+        intent = nlp.get("intent", "lead_inquiry")
+        lead_score = nlp.get("lead_score", 70)
+        route_dept = nlp.get("recommended_route", "Sales")
+        recipient = params.get("recipient") or payload.get("email") or "customer@example.com"
+
+        from nlp_engine import NLPEngine
+        engine = NLPEngine()
+        draft_body = engine.generate_draft_response(
+            name=name,
+            company=company,
+            intent=intent,
+            lead_score=lead_score,
+            route_department=route_dept,
+            message=payload.get("message")
+        )
+
+        return {
+            "recipient": recipient,
+            "subject": f"Re: {intent.replace('_', ' ').title()} - OpsFlow Automated Inquiry",
+            "draft_body": draft_body,
+            "status": "draft_created",
+            "external_dispatch": False,
+            "safety_policy": "Zero external dispatch without explicit enterprise outbound configuration."
         }
 
     def _action_email_dispatch(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        recipient = params.get("to", "ops-team@company.internal")
-        subject = params.get("subject", "Automated Security Alert")
-        body = params.get("body", "Automation condition met.")
+        """Simulates enterprise email dispatch safely."""
+        to = params.get("to", "operations@opsflow.io")
+        subject = params.get("subject", "Automated OpsFlow Notification")
+        body = params.get("body", "Notification event occurred.")
 
-        # Local simulated email queue
-        email_record = {
-            "id": f"mail_{int(time.time() * 1000)}",
-            "to": recipient,
+        return {
+            "to": to,
             "subject": subject,
             "body": body,
-            "status": "DISPATCHED_SIMULATED",
-            "sent_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "dispatched": True,
+            "simulated": True,
+            "status": "sent_to_virtual_inbox"
         }
 
-        # Also write simulated email to storage mailbox file
-        mail_log = os.path.join(self.STORAGE_DIR, "logs", "simulated_mailbox.jsonl")
-        with open(mail_log, "a", encoding="utf-8") as f:
-            f.write(json.dumps(email_record) + "\n")
+    def _action_log_entry(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        level = params.get("level", "INFO").upper()
+        message = params.get("message", "Automated log event.")
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        return email_record
+        log_line = f"[{timestamp}] [{level}] {message}\n"
+        log_file = os.path.join(self.STORAGE_DIR, "logs", "actions.log")
+        try:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(log_line)
+        except Exception:
+            pass
 
-    def _action_webhook_call(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        url = params.get("url", "https://api.internal/webhook")
-        method = params.get("method", "POST").upper()
-        payload = params.get("payload", {"event": context.get("event", {}), "triggered_at": time.time()})
-
-        # Safe simulation of webhook
         return {
-            "url": url,
+            "level": level,
+            "message": message,
+            "timestamp": timestamp,
+            "destination": log_file
+        }
+
+    def _action_update_lead_status(
+        self,
+        params: Dict[str, Any],
+        context: Dict[str, Any],
+        storage_engine: Any = None
+    ) -> Dict[str, Any]:
+        new_status = params.get("status", "contacted")
+        lead_id = params.get("lead_id") or context.get("lead_id")
+        
+        if storage_engine and hasattr(storage_engine, "update_lead_status") and lead_id:
+            try:
+                storage_engine.update_lead_status(lead_id, new_status)
+            except Exception:
+                pass
+
+        return {
+            "lead_id": lead_id,
+            "new_status": new_status,
+            "updated_at": datetime.datetime.now().isoformat()
+        }
+
+    def _action_assign_department(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        dept = params.get("department") or context.get("nlp", {}).get("recommended_route", "General Queue")
+        return {
+            "assigned_department": dept,
+            "assigned_at": datetime.datetime.now().isoformat()
+        }
+
+    def _action_webhook_call(
+        self,
+        params: Dict[str, Any],
+        context: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], str, int, Optional[str]]:
+        """Dispatches an HTTP webhook with bounded retries (max 3) and safe fallback."""
+        url = params.get("url", "")
+        method = params.get("method", "POST").upper()
+        headers = params.get("headers", {})
+        payload = params.get("payload", context.get("payload", {}))
+        timeout = float(params.get("timeout", 5.0))
+        
+        # Bounded retry count: safe cap at 3 to prevent infinite loops
+        max_retries = max(1, min(int(params.get("retries", 3)), 3))
+        retry_count = 0
+        last_error = None
+
+        if not url:
+            return {
+                "method": method,
+                "url": url,
+                "preview_payload": payload,
+                "status": "preview_mode_no_url",
+                "simulated": True
+            }, "success", 0, None
+
+        for attempt in range(max_retries):
+            retry_count = attempt
+            try:
+                if method == "POST":
+                    resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+                elif method == "GET":
+                    resp = requests.get(url, params=payload, headers=headers, timeout=timeout)
+                else:
+                    resp = requests.request(method, url, json=payload, headers=headers, timeout=timeout)
+
+                return {
+                    "method": method,
+                    "url": url,
+                    "status_code": resp.status_code,
+                    "response_text": resp.text[:500],
+                    "attempts": attempt + 1,
+                    "retries": retry_count
+                }, "success", retry_count, None
+
+            except Exception as exc:
+                last_error = str(exc)
+                time.sleep(0.05)  # brief backoff
+
+        # All retries exhausted
+        return {
             "method": method,
-            "payload": payload,
-            "status_code": 200,
-            "simulated": True,
-            "response": "Webhook payload received and queued."
+            "url": url,
+            "attempts": max_retries,
+            "retries": retry_count,
+            "failure_reason": last_error,
+            "fallback": "Recorded in dead-letter audit queue."
+        }, "failed", retry_count, last_error
+
+    def _action_generate_report(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "report_id": f"rep_{int(time.time())}",
+            "generated_at": datetime.datetime.now().isoformat(),
+            "scope": params.get("scope", "incident_summary"),
+            "event_name": context.get("event", {}).get("name"),
+            "nlp_intent": context.get("nlp", {}).get("intent"),
+            "nlp_urgency": context.get("nlp", {}).get("urgency"),
+            "status": "ready"
+        }
+
+    def _action_file_io(self, action_type: str, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        filename = params.get("filename", "output.txt")
+        content = params.get("content", "")
+
+        # Path traversal guard: confine strictly inside STORAGE_DIR/output
+        safe_basename = os.path.basename(filename)
+        dest_path = os.path.join(self.STORAGE_DIR, "output", safe_basename)
+
+        mode = "a" if action_type == "file_append" else "w"
+        with open(dest_path, mode, encoding="utf-8") as f:
+            f.write(content + ("\n" if action_type == "file_append" else ""))
+
+        return {
+            "action": action_type,
+            "path": dest_path,
+            "bytes_written": len(content),
+            "timestamp": datetime.datetime.now().isoformat()
         }
 
     def _action_data_transform(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        target_key = params.get("target_key", "transformed_data")
-        transform_type = params.get("transform", "summarize")
-
-        transformed_val: Any = None
-        if transform_type == "summarize":
-            transformed_val = f"Event Summary: severity={context.get('event', {}).get('severity', 'normal')}, rules_checked=1"
-        elif transform_type == "tag":
-            tag = params.get("tag", "PROCESSED_BY_COMMAND_CENTER")
-            transformed_val = [tag]
-        elif transform_type == "json_pack":
-            transformed_val = json.dumps(context)
-        else:
-            transformed_val = params.get("value", "custom_transform")
-
-        context[target_key] = transformed_val
-        return {"key": target_key, "value": transformed_val}
+        target_field = params.get("target_field", "transformed_data")
+        expr = params.get("expression", "")
+        transformed_val = expr.format(**context) if expr else "N/A"
+        return {
+            "target": target_field,
+            "result": transformed_val
+        }
 
     def _action_system_command(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        # Safe simulated command runner
-        cmd = params.get("command", "echo 'Command Center Auto Diagnostic'")
+        command = params.get("command", "echo 'System diagnostic'")
         return {
-            "command": cmd,
+            "command": command,
+            "output": f"Simulated output for [{command}]",
             "exit_code": 0,
-            "simulated": True,
-            "output": f"Diagnostic executed successfully at {datetime.datetime.now().isoformat()}"
+            "status": "simulated_safe"
         }

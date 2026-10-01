@@ -1,27 +1,55 @@
-"""Local Rule-Based & Heuristic NLP Engine.
+"""Local Deterministic AI Intelligence & NLP Engine for OpsFlow SaaS.
 
-Zero external APIs, zero costs, 100% offline.
-Provides intent classification, urgency/sentiment scoring, entity extraction,
-and token analysis using optimized heuristic pattern matching.
+100% offline, zero external APIs, zero costs, fully deterministic.
+Provides:
+- Intent Classification (Lead, Support, Security, Incident, DevOps, Billing)
+- Sentiment Polarity (-1.0 to 1.0) & Labeling
+- Urgency Scoring (0 - 100) & Severity Levels
+- Granular Entity Extraction (Emails, Phones, URLs, IPv4s, HTTP Status Codes, Metrics)
+- Predictive B2B Lead Scoring (0 - 100)
+- Smart Department Routing (Sales, Support, Priority Support, Security, Review)
+- Safe Automated Response Draft Generation
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class NLPEngine:
-    """Smart offline rule-based NLP engine."""
+    """Deterministic local AI & heuristic NLP classification engine."""
 
     INTENT_KEYWORDS: Dict[str, Dict[str, Any]] = {
+        "lead_inquiry": {
+            "keywords": [
+                "pricing", "quote", "demo", "buy", "purchase", "enterprise", "sales",
+                "hire", "project", "build", "website", "software", "contract", "consultation",
+                "proposal", "budget", "client", "business", "cost", "features", "custom", "subscription"
+            ],
+            "weight": 1.5
+        },
+        "support_request": {
+            "keywords": [
+                "help", "broken", "issue", "bug", "cannot", "problem", "reset", "login",
+                "password", "support", "ticket", "assistance", "how to", "trouble", "fail"
+            ],
+            "weight": 1.2
+        },
+        "critical_incident": {
+            "keywords": [
+                "outage", "down", "crash", "emergency", "fatal", "sev-1", "p1", "production down",
+                "urgent", "data loss", "deadlock", "unresponsive", "blackout", "catastrophe"
+            ],
+            "weight": 1.6
+        },
         "server_alert": {
             "keywords": [
                 "cpu", "memory", "ram", "disk", "crash", "spike", "down", "outage",
                 "oom", "restart", "timeout", "slow", "overload", "unresponsive",
-                "hung", "throttled", "utilization", "capacity", "load", "deadlock"
+                "hung", "throttled", "utilization", "capacity", "load", "deadlock", "server", "surge"
             ],
-            "weight": 1.2
+            "weight": 1.8
         },
         "security_threat": {
             "keywords": [
@@ -45,6 +73,13 @@ class NLPEngine:
             ],
             "weight": 1.0
         },
+        "billing_inquiry": {
+            "keywords": [
+                "invoice", "refund", "credit card", "charge", "payment", "billing",
+                "receipt", "overcharge", "stripe", "renewal", "tax"
+            ],
+            "weight": 1.2
+        },
         "incident_ticket": {
             "keywords": [
                 "incident", "ticket", "issue", "bug", "broken", "glitch", "error",
@@ -58,6 +93,13 @@ class NLPEngine:
                 "telemetry", "check", "alive", "heartbeat", "stats"
             ],
             "weight": 1.0
+        },
+        "spam_suspicious": {
+            "keywords": [
+                "viagra", "crypto giveaway", "free money", "winner", "casino", "lottery",
+                "telegram", "whatsapp bonus", "earn millions", "invest now"
+            ],
+            "weight": 2.0
         }
     }
 
@@ -75,6 +117,7 @@ class NLPEngine:
         "p1": 30,
         "immediately": 25,
         "urgent": 25,
+        "asap": 20,
         "breach": 30,
         "compromised": 30,
         "panic": 25,
@@ -96,12 +139,12 @@ class NLPEngine:
         "positive": [
             "success", "resolved", "stable", "optimal", "healthy", "good", "great",
             "passed", "restored", "normal", "fine", "complete", "completed", "finished",
-            "smoothly", "successful", "successfully"
+            "smoothly", "successful", "successfully", "love", "awesome", "excellent", "pleased"
         ],
         "negative": [
             "error", "failure", "failed", "crash", "corrupted", "down", "fatal",
             "broken", "critical", "breached", "unstable", "degraded", "threat",
-            "denied", "lost", "compromised", "bad", "slow", "severe"
+            "denied", "lost", "compromised", "bad", "slow", "severe", "frustrated", "angry"
         ]
     }
 
@@ -130,24 +173,37 @@ class NLPEngine:
     )
     REGEX_MEMORY_SIZE = re.compile(r"\b(\d+(?:\.\d+)?)\s*(?:KB|MB|GB|TB)\b", re.IGNORECASE)
     REGEX_EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+    REGEX_PHONE = re.compile(r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b")
+    REGEX_URL = re.compile(r"https?://[^\s/$.?#].[^\s]*", re.IGNORECASE)
+    REGEX_BUDGET = re.compile(r"\$[\d,]+(?:\.\d+)?|\b\d+\s*(?:k|grand|thousand|million|usd|dollars)\b", re.IGNORECASE)
 
     def __init__(self):
         pass
 
     def parse(self, text: str) -> Dict[str, Any]:
-        """Analyzes text and returns structured NLP insights."""
+        """Analyzes text and returns structured NLP insights, entities, scores, and routing."""
         if not text:
             return {
                 "text": "",
                 "intent": "general_query",
+                "classification": "general_query",
                 "confidence": 0.0,
                 "urgency": 0,
+                "urgency_score": 0,
                 "severity_level": "LOW",
+                "severity": "LOW",
                 "sentiment": 0.0,
+                "sentiment_score": 0.0,
                 "sentiment_label": "neutral",
                 "entities": {},
+                "extracted_entities": {},
                 "tokens": [],
-                "matched_keywords": []
+                "matched_keywords": [],
+                "lead_score": 0,
+                "recommended_route": "General Queue",
+                "ai_provider": "local_deterministic",
+                "ai_model": "built-in-heuristics-v1",
+                "label": "Built-in Local Intelligence Engine (100% Offline / Zero API Key Required)"
             }
 
         text_clean = text.strip()
@@ -166,23 +222,38 @@ class NLPEngine:
         # 4. Entity Extraction
         entities = self._extract_entities(text_clean)
 
+        # 5. Predictive Lead Scoring (0 - 100)
+        lead_score = self._compute_lead_score(tokens, lower_text, entities, intent, urgency)
+
+        # 6. Smart Department Routing
+        recommended_route = self._determine_route(intent, urgency, lead_score)
+
         return {
             "text": text_clean,
             "intent": intent,
+            "classification": intent,
             "confidence": round(confidence, 2),
             "urgency": urgency,
+            "urgency_score": urgency,
             "severity_level": severity_level,
+            "severity": severity_level,
             "sentiment": round(sentiment, 2),
+            "sentiment_score": round(sentiment, 2),
             "sentiment_label": sentiment_label,
             "entities": entities,
-            "tokens": tokens[:20],
-            "matched_keywords": matched_keywords
+            "extracted_entities": entities,
+            "tokens": tokens[:25],
+            "matched_keywords": matched_keywords,
+            "lead_score": lead_score,
+            "recommended_route": recommended_route,
+            "ai_provider": "local_deterministic",
+            "ai_model": "built-in-heuristics-v1",
+            "label": "Built-in Local Intelligence Engine (100% Offline / Zero API Key Required)"
         }
 
-    def _classify_intent(self, tokens: List[str], text: str) -> tuple[str, float, List[str]]:
+    def _classify_intent(self, tokens: List[str], text: str) -> Tuple[str, float, List[str]]:
         scores: Dict[str, float] = {}
         matched_map: Dict[str, List[str]] = {}
-
         token_set = set(tokens)
 
         for intent, config in self.INTENT_KEYWORDS.items():
@@ -211,7 +282,7 @@ class NLPEngine:
         confidence = min(0.98, max(0.45, 0.40 + (max_score * 0.15)))
         return best_intent, confidence, matched_map.get(best_intent, [])
 
-    def _compute_urgency(self, tokens: List[str], text: str) -> tuple[int, str]:
+    def _compute_urgency(self, tokens: List[str], text: str) -> Tuple[int, str]:
         urgency = 20  # Base level
 
         for kw, boost in self.URGENCY_KEYWORDS.items():
@@ -248,7 +319,7 @@ class NLPEngine:
 
         return urgency, severity
 
-    def _compute_sentiment(self, tokens: List[str]) -> tuple[float, str]:
+    def _compute_sentiment(self, tokens: List[str]) -> Tuple[float, str]:
         pos_count = sum(1 for t in tokens if t in self.SENTIMENT_LEXICON["positive"])
         neg_count = sum(1 for t in tokens if t in self.SENTIMENT_LEXICON["negative"])
 
@@ -267,8 +338,57 @@ class NLPEngine:
 
         return polarity, label
 
+    def _compute_lead_score(
+        self,
+        tokens: List[str],
+        text: str,
+        entities: Dict[str, Any],
+        intent: str,
+        urgency: int
+    ) -> int:
+        """Computes a predictive B2B lead qualification score from 0 to 100."""
+        score = 15  # Base inquiry score
+
+        if intent in ("lead_inquiry", "deploy_request"):
+            score += 30
+
+        # Contact channels
+        if entities.get("emails"):
+            score += 15
+        if entities.get("phones"):
+            score += 15
+
+        # High-intent buyer signals
+        high_intent_words = [
+            "pricing", "quote", "demo", "buy", "purchase", "enterprise", "budget",
+            "contract", "proposal", "hire", "custom", "website", "software", "solution", "timeline"
+        ]
+        matches = sum(1 for w in high_intent_words if w in text)
+        score += min(25, matches * 7)
+
+        # Budget mentions
+        if entities.get("budget"):
+            score += 15
+
+        # High urgency indicates immediate buyer readiness
+        if urgency >= 50:
+            score += 10
+
+        return max(5, min(100, score))
+
+    def _determine_route(self, intent: str, urgency: int, lead_score: int) -> str:
+        """Determines the optimal department route based on intent and scores."""
+        if intent == "spam_suspicious":
+            return "Review"
+        if intent in ("critical_incident", "security_threat") or urgency >= 75:
+            return "Priority Support" if intent != "security_threat" else "Security Operations"
+        if lead_score >= 60 or intent == "lead_inquiry":
+            return "Sales"
+        if intent in ("support_request", "incident_ticket", "server_alert"):
+            return "Support"
+        return "General Queue"
+
     def _extract_ipv4(self, text: str) -> List[str]:
-        """Extracts valid IPv4 addresses."""
         raw_matches = self.REGEX_IPV4.findall(text)
         valid_ips = []
         for ip in raw_matches:
@@ -278,15 +398,12 @@ class NLPEngine:
         return list(dict.fromkeys(valid_ips))
 
     def _extract_http_codes(self, text: str) -> List[str]:
-        """Extracts only valid 3-digit HTTP status codes, ignoring IP octets and other numbers."""
-        # Mask out IPv4 occurrences so octets (e.g. 192, 168 in 192.168.1.50) are never extracted as HTTP codes
         text_without_ips = self.REGEX_IPV4.sub(" ", text)
         matches = self.REGEX_HTTP_CODE.findall(text_without_ips)
         valid_codes = [code for code in matches if code in self.VALID_HTTP_STATUS_CODES]
         return list(dict.fromkeys(valid_codes))
 
     def _extract_percentages(self, text: str) -> List[str]:
-        """Extracts percentages, percentile notation (e.g. P90), and metric percentages safely."""
         text_without_ips = self.REGEX_IPV4.sub(" ", text)
         matches = self.REGEX_PERCENT.findall(text_without_ips)
         results = []
@@ -308,8 +425,51 @@ class NLPEngine:
             "http_status": self._extract_http_codes(text),
             "percentages": self._extract_percentages(text),
             "memory_sizes": list(set(self.REGEX_MEMORY_SIZE.findall(text))),
-            "emails": list(set(self.REGEX_EMAIL.findall(text)))
+            "emails": list(set(self.REGEX_EMAIL.findall(text))),
+            "phones": list(set(self.REGEX_PHONE.findall(text))),
+            "urls": list(set(self.REGEX_URL.findall(text))),
+            "budget": list(set(self.REGEX_BUDGET.findall(text)))
         }
 
         # Filter out empty lists for compact output
         return {k: v for k, v in entities.items() if v}
+
+    def generate_draft_response(
+        self,
+        name: Optional[str] = None,
+        company: Optional[str] = None,
+        intent: str = "lead_inquiry",
+        lead_score: int = 70,
+        route_department: str = "Sales",
+        message: Optional[str] = None
+    ) -> str:
+        """Generates a contextual, safe automated response draft."""
+        salutation = f"Hello {name.strip() if name else 'Valued Customer'},"
+        org_phrase = f" for {company.strip()}" if company else ""
+
+        if route_department == "Sales" or intent == "lead_inquiry":
+            body = (
+                f"Thank you for contacting OpsFlow Enterprise regarding your automated solution{org_phrase}.\n\n"
+                f"Our Senior Solutions Architecture team in {route_department} has reviewed your inquiry (Lead Score: {lead_score}/100) "
+                f"and would like to schedule a tailored discovery call to discuss your specifications, technical requirements, and rollout timeline.\n\n"
+                f"A specialist will follow up directly within one business day."
+            )
+        elif route_department in ("Priority Support", "Security Operations") or intent in ("critical_incident", "security_threat"):
+            body = (
+                f"We have registered your critical incident ticket with highest operational priority.\n\n"
+                f"Our Site Reliability & Tier-1 Support engineers have been dispatched. "
+                f"We are monitoring the event logs and diagnostic traces and will provide a status update within 15 minutes."
+            )
+        elif route_department == "Support" or intent == "support_request":
+            body = (
+                f"Thank you for reaching out to OpsFlow Support.\n\n"
+                f"A technical support specialist has been assigned to your ticket and will assist you shortly with troubleshooting."
+            )
+        else:
+            body = (
+                f"Thank you for reaching out to OpsFlow.\n\n"
+                f"Your inquiry has been routed to our {route_department} queue. Our team will review your message and get back to you shortly."
+            )
+
+        signoff = "Sincerely,\nOpsFlow Intelligent Automation Team\nhttps://opsflow.io"
+        return f"{salutation}\n\n{body}\n\n{signoff}"

@@ -1,7 +1,15 @@
-"""Preset Automation Blueprints for the AI Automation Command Center.
+"""Preset Automation Blueprints & Production Templates for OpsFlow Cloud.
 
-Pre-configured, production-ready rule templates across System, Security,
-DevOps, NLP, and Data management domains.
+Includes 8 Working Enterprise SaaS Templates:
+1. AI Lead Qualification
+2. Customer Support Router
+3. Critical Incident Router
+4. Sales Lead Follow-up
+5. Website Contact Form Automation
+6. API Failure Alert
+7. Security Incident Detection
+8. Document/Inquiry Triage
+Plus diagnostic blueprints (High CPU Resource Sentinel, Security Threat Quarantine) for infrastructure telemetry.
 """
 
 from __future__ import annotations
@@ -10,6 +18,401 @@ from typing import Any, Dict, List
 
 
 PRESET_BLUEPRINTS: List[Dict[str, Any]] = [
+    # 1. AI Lead Qualification
+    {
+        "id": "template-ai-lead-qualification",
+        "name": "AI Lead Qualification",
+        "description": "Ingests incoming customer leads, analyzes buyer intent & budget, scores lead readiness, and routes hot leads directly to Sales CRM.",
+        "category": "Sales",
+        "priority": 95,
+        "cooldown_seconds": 5,
+        "trigger": {
+            "type": "event",
+            "event_name": "lead.created"
+        },
+        "condition": {
+            "logic": "OR",
+            "conditions": [
+                {"field": "payload.message", "operator": "exists", "value": True},
+                {"field": "nlp.lead_score", "operator": ">=", "value": 40}
+            ]
+        },
+        "actions": [
+            {
+                "type": "database_record",
+                "params": {
+                    "entity": "lead",
+                    "status": "qualified"
+                }
+            },
+            {
+                "type": "email_draft",
+                "params": {
+                    "template": "sales_discovery",
+                    "recipient": "{{ payload.email }}"
+                }
+            },
+            {
+                "type": "notification",
+                "params": {
+                    "title": "Qualified Lead Received (Score: {{ nlp.lead_score }})",
+                    "message": "Inquiry from {{ payload.name }} ({{ payload.email }}) routed to Sales queue.",
+                    "severity": "info"
+                }
+            },
+            {
+                "type": "log_entry",
+                "params": {
+                    "level": "INFO",
+                    "message": "AI Lead Qualification executed for {{ payload.email }}."
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Event: lead.created", "config": {"event_name": "lead.created"}},
+            {"type": "ai_analysis", "name": "Extract Intent & Entities", "config": {"field": "payload.message"}},
+            {"type": "lead_scoring", "name": "Compute Predictive Lead Score", "config": {"threshold": 50}},
+            {"type": "route", "name": "Smart Department Route", "config": {"destination": "Sales"}},
+            {"type": "email_draft", "name": "Draft Tailored Sales Response", "config": {}},
+            {"type": "database_record", "name": "Persist Lead in CRM", "config": {"table": "leads"}},
+            {"type": "notification", "name": "Notify Sales Channel", "config": {}},
+            {"type": "end", "name": "Workflow Complete", "config": {}}
+        ]
+    },
+
+    # 2. Customer Support Router
+    {
+        "id": "template-customer-support-router",
+        "name": "Customer Support Router",
+        "description": "Analyzes inbound support tickets, detects negative sentiment or urgent bugs, and routes to Support specialists.",
+        "category": "Support",
+        "priority": 85,
+        "cooldown_seconds": 5,
+        "trigger": {
+            "type": "event",
+            "event_name": "support.inquiry"
+        },
+        "condition": {
+            "logic": "AND",
+            "conditions": [
+                {"field": "payload.message", "operator": "exists", "value": True}
+            ]
+        },
+        "actions": [
+            {
+                "type": "email_draft",
+                "params": {
+                    "template": "support_ack",
+                    "recipient": "{{ payload.email }}"
+                }
+            },
+            {
+                "type": "notification",
+                "params": {
+                    "title": "Support Ticket Ingested",
+                    "message": "Inquiry from {{ payload.name }} categorized as {{ nlp.intent }}.",
+                    "severity": "info"
+                }
+            },
+            {
+                "type": "log_entry",
+                "params": {
+                    "level": "INFO",
+                    "message": "Support router dispatched ticket for {{ payload.email }}."
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Event: support.inquiry", "config": {"event_name": "support.inquiry"}},
+            {"type": "ai_analysis", "name": "Analyze Issue Severity", "config": {}},
+            {"type": "sentiment_detection", "name": "Detect Customer Sentiment", "config": {}},
+            {"type": "route", "name": "Route to Support Tier", "config": {"destination": "Support"}},
+            {"type": "email_draft", "name": "Generate Acknowledgment Draft", "config": {}},
+            {"type": "notification", "name": "In-App Notification", "config": {}},
+            {"type": "end", "name": "Workflow Complete", "config": {}}
+        ]
+    },
+
+    # 3. Critical Incident Router
+    {
+        "id": "template-critical-incident-router",
+        "name": "Critical Incident Router",
+        "description": "Detects P1/Sev-1 outages, data errors, or system crashes; immediately triggers high-priority alerts and incident response.",
+        "category": "Incident",
+        "priority": 100,
+        "cooldown_seconds": 15,
+        "trigger": {
+            "type": "event",
+            "event_name": "incident.reported"
+        },
+        "condition": {
+            "logic": "OR",
+            "conditions": [
+                {"field": "nlp.urgency", "operator": ">=", "value": 70},
+                {"field": "payload.severity", "operator": "equals", "value": "critical"},
+                {"field": "nlp.intent", "operator": "equals", "value": "critical_incident"}
+            ]
+        },
+        "actions": [
+            {
+                "type": "notification",
+                "params": {
+                    "title": "[SEV-1 CRITICAL] Incident Detected",
+                    "message": "Immediate attention required: {{ payload.message }}.",
+                    "severity": "critical"
+                }
+            },
+            {
+                "type": "log_entry",
+                "params": {
+                    "level": "CRITICAL",
+                    "message": "Critical Incident Router triggered for payload {{ payload }}."
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Event: incident.reported", "config": {}},
+            {"type": "ai_analysis", "name": "Triage Incident Urgency", "config": {}},
+            {"type": "urgency_detection", "name": "Verify SEV-1 Threshold", "config": {"min_urgency": 70}},
+            {"type": "route", "name": "Route to Priority Support", "config": {"destination": "Priority Support"}},
+            {"type": "notification", "name": "Dispatch Critical Alert", "config": {"severity": "critical"}},
+            {"type": "end", "name": "Workflow Complete", "config": {}}
+        ]
+    },
+
+    # 4. Sales Lead Follow-up
+    {
+        "id": "template-sales-lead-followup",
+        "name": "Sales Lead Follow-up",
+        "description": "Triggers automated follow-up drafting and account executive task generation whenever a lead requests a quote or demo.",
+        "category": "Sales",
+        "priority": 90,
+        "cooldown_seconds": 10,
+        "trigger": {
+            "type": "event",
+            "event_name": "sales.demo_requested"
+        },
+        "condition": {
+            "logic": "AND",
+            "conditions": [
+                {"field": "payload.email", "operator": "exists", "value": True}
+            ]
+        },
+        "actions": [
+            {
+                "type": "database_record",
+                "params": {
+                    "entity": "lead",
+                    "status": "contacted"
+                }
+            },
+            {
+                "type": "email_draft",
+                "params": {
+                    "template": "demo_scheduling",
+                    "recipient": "{{ payload.email }}"
+                }
+            },
+            {
+                "type": "notification",
+                "params": {
+                    "title": "Demo Follow-up Drafted",
+                    "message": "Demo scheduling response drafted for {{ payload.name }} ({{ payload.email }}).",
+                    "severity": "info"
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Event: sales.demo_requested", "config": {}},
+            {"type": "ai_analysis", "name": "Parse Company & Timing", "config": {}},
+            {"type": "email_draft", "name": "Draft Demo Invitation", "config": {}},
+            {"type": "database_record", "name": "Update Lead Status", "config": {}},
+            {"type": "notification", "name": "Alert Account Exec", "config": {}},
+            {"type": "end", "name": "Workflow Complete", "config": {}}
+        ]
+    },
+
+    # 5. Website Contact Form Automation
+    {
+        "id": "template-contact-form-automation",
+        "name": "Website Contact Form Automation",
+        "description": "Processes public web contact submissions, extracts emails and phone numbers, and stores clean CRM records.",
+        "category": "Webhooks",
+        "priority": 80,
+        "cooldown_seconds": 0,
+        "trigger": {
+            "type": "event",
+            "event_name": "contact.submitted"
+        },
+        "condition": {
+            "logic": "AND",
+            "conditions": [
+                {"field": "payload.message", "operator": "exists", "value": True}
+            ]
+        },
+        "actions": [
+            {
+                "type": "database_record",
+                "params": {
+                    "entity": "lead",
+                    "status": "new"
+                }
+            },
+            {
+                "type": "notification",
+                "params": {
+                    "title": "Website Contact Submission",
+                    "message": "Submission from {{ payload.name }} ({{ payload.email }}).",
+                    "severity": "info"
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Inbound Webhook: contact.submitted", "config": {}},
+            {"type": "entity_extraction", "name": "Extract Contact Channels", "config": {}},
+            {"type": "database_record", "name": "Create Lead in CRM", "config": {}},
+            {"type": "notification", "name": "Broadcast In-App Alert", "config": {}},
+            {"type": "end", "name": "Workflow Complete", "config": {}}
+        ]
+    },
+
+    # 6. API Failure Alert
+    {
+        "id": "template-api-failure-alert",
+        "name": "API Failure Alert",
+        "description": "Monitors API error events (HTTP 500, 502, 503, 504), extracts error codes and hostnames, and alerts SRE engineers.",
+        "category": "System",
+        "priority": 95,
+        "cooldown_seconds": 20,
+        "trigger": {
+            "type": "event",
+            "event_name": "api.error"
+        },
+        "condition": {
+            "logic": "OR",
+            "conditions": [
+                {"field": "payload.status_code", "operator": ">=", "value": 500},
+                {"field": "payload.error", "operator": "exists", "value": True}
+            ]
+        },
+        "actions": [
+            {
+                "type": "notification",
+                "params": {
+                    "title": "API Gateway Failure ({{ payload.status_code }})",
+                    "message": "Service error detected on route {{ payload.path }}: {{ payload.error }}.",
+                    "severity": "critical"
+                }
+            },
+            {
+                "type": "log_entry",
+                "params": {
+                    "level": "ERROR",
+                    "message": "API Failure Alert: HTTP {{ payload.status_code }} on {{ payload.path }}."
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Event: api.error", "config": {}},
+            {"type": "condition", "name": "Verify HTTP 5xx Status", "config": {}},
+            {"type": "notification", "name": "Dispatch SRE Notification", "config": {}},
+            {"type": "log_entry", "name": "Log Diagnostic Record", "config": {}},
+            {"type": "end", "name": "Workflow Complete", "config": {}}
+        ]
+    },
+
+    # 7. Security Incident Detection
+    {
+        "id": "template-security-incident-detection",
+        "name": "Security Incident Detection",
+        "description": "Detects repeated failed logins, brute-force attempts, or suspicious IPs and triggers quarantine protocols.",
+        "category": "Security",
+        "priority": 100,
+        "cooldown_seconds": 15,
+        "trigger": {
+            "type": "event",
+            "event_name": "auth.failed"
+        },
+        "condition": {
+            "logic": "OR",
+            "conditions": [
+                {"field": "payload.attempts", "operator": ">=", "value": 3},
+                {"field": "nlp.intent", "operator": "equals", "value": "security_threat"}
+            ]
+        },
+        "actions": [
+            {
+                "type": "notification",
+                "params": {
+                    "title": "Security Threat Quarantined",
+                    "message": "Host IP {{ payload.ip }} flagged after repeated failed authentication.",
+                    "severity": "critical"
+                }
+            },
+            {
+                "type": "log_entry",
+                "params": {
+                    "level": "WARNING",
+                    "message": "Quarantined threat candidate IP {{ payload.ip }} with {{ payload.attempts }} attempts."
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Event: auth.failed", "config": {}},
+            {"type": "entity_extraction", "name": "Extract Offending IPv4", "config": {}},
+            {"type": "condition", "name": "Check Attempt Threshold (>=3)", "config": {}},
+            {"type": "route", "name": "Route to Security Operations", "config": {"destination": "Security Operations"}},
+            {"type": "notification", "name": "Trigger SOC Alert", "config": {}},
+            {"type": "end", "name": "Workflow Complete", "config": {}}
+        ]
+    },
+
+    # 8. Document/Inquiry Triage
+    {
+        "id": "template-inquiry-triage",
+        "name": "Document/Inquiry Triage",
+        "description": "Scans unstructured natural language documents, parses key entities and metadata, and routes to appropriate queues.",
+        "category": "NLP",
+        "priority": 75,
+        "cooldown_seconds": 5,
+        "trigger": {
+            "type": "event",
+            "event_name": "document.submitted"
+        },
+        "condition": {
+            "logic": "AND",
+            "conditions": [
+                {"field": "payload.text", "operator": "exists", "value": True}
+            ]
+        },
+        "actions": [
+            {
+                "type": "notification",
+                "params": {
+                    "title": "Document Triage Complete",
+                    "message": "Document triaged into {{ nlp.intent }} queue (Route: {{ nlp.recommended_route }}).",
+                    "severity": "info"
+                }
+            },
+            {
+                "type": "log_entry",
+                "params": {
+                    "level": "INFO",
+                    "message": "Document inquiry processed with sentiment {{ nlp.sentiment_label }}."
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Event: document.submitted", "config": {}},
+            {"type": "ai_analysis", "name": "Extract Metadata & Entities", "config": {}},
+            {"type": "intent_detection", "name": "Determine Inquiry Intent", "config": {}},
+            {"type": "route", "name": "Route to Matching Queue", "config": {}},
+            {"type": "notification", "name": "Notify Queue Lead", "config": {}},
+            {"type": "end", "name": "Workflow Complete", "config": {}}
+        ]
+    },
+
+    # Legacy blueprint compatibility (asserted in test_command_center.py)
     {
         "id": "blueprint-cpu-sentinel",
         "name": "High CPU Resource Sentinel",
@@ -43,6 +446,12 @@ PRESET_BLUEPRINTS: List[Dict[str, Any]] = [
                     "message": "High CPU utilization: {{ payload.cpu_percent }}% recorded on {{ payload.host }}."
                 }
             }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Event: system.metrics", "config": {}},
+            {"type": "condition", "name": "CPU > 85%", "config": {}},
+            {"type": "notification", "name": "Send Spike Alert", "config": {}},
+            {"type": "end", "name": "Workflow Complete", "config": {}}
         ]
     },
     {
@@ -85,181 +494,6 @@ PRESET_BLUEPRINTS: List[Dict[str, Any]] = [
                 "params": {
                     "level": "WARNING",
                     "message": "Quarantined threat candidate IP {{ payload.ip }} with {{ payload.attempts }} attempts."
-                }
-            }
-        ]
-    },
-    {
-        "id": "blueprint-nlp-triage",
-        "name": "Smart NLP Emergency Ticket Router",
-        "description": "Scans incoming textual reports, computes intent & urgency scores, and automatically routes critical reports.",
-        "category": "NLP",
-        "priority": 85,
-        "cooldown_seconds": 10,
-        "trigger": {
-            "type": "natural_text",
-            "event_name": "user.prompt"
-        },
-        "condition": {
-            "logic": "AND",
-            "conditions": [
-                {"field": "nlp.urgency", "operator": ">=", "value": 60}
-            ]
-        },
-        "actions": [
-            {
-                "type": "notification",
-                "params": {
-                    "title": "Urgent Incident Escalated (Score: {{ nlp.urgency }})",
-                    "message": "NLP classified intent '{{ nlp.intent }}' with urgency {{ nlp.urgency }}/100.",
-                    "severity": "warning"
-                }
-            },
-            {
-                "type": "file_append",
-                "params": {
-                    "filename": "urgent_nlp_escalations.log",
-                    "content": "[{{ nlp.severity_level }}] Intent={{ nlp.intent }}, Urgency={{ nlp.urgency }}, Text={{ nlp.text }}"
-                }
-            }
-        ]
-    },
-    {
-        "id": "blueprint-api-outage",
-        "name": "API Service Outage Auto-Recovery",
-        "description": "Monitors gateway HTTP error codes (500, 502, 503) and dispatches auto-recovery webhooks.",
-        "category": "DevOps",
-        "priority": 75,
-        "cooldown_seconds": 20,
-        "trigger": {
-            "type": "event",
-            "event_name": "api.error"
-        },
-        "condition": {
-            "logic": "OR",
-            "conditions": [
-                {"field": "payload.status_code", "operator": ">=", "value": 500}
-            ]
-        },
-        "actions": [
-            {
-                "type": "webhook_call",
-                "params": {
-                    "url": "https://api.internal/v1/auto-restart",
-                    "method": "POST"
-                }
-            },
-            {
-                "type": "notification",
-                "params": {
-                    "title": "API Gateway Outage Detected",
-                    "message": "Encountered HTTP {{ payload.status_code }} on endpoint {{ payload.endpoint }}. Dispatching recovery hook.",
-                    "severity": "critical"
-                }
-            }
-        ]
-    },
-    {
-        "id": "blueprint-daily-backup",
-        "name": "Automated Backup & Archive Verification",
-        "description": "Verifies scheduled database snapshots and automatically records audit logs.",
-        "category": "DevOps",
-        "priority": 50,
-        "cooldown_seconds": 60,
-        "trigger": {
-            "type": "event",
-            "event_name": "backup.completed"
-        },
-        "condition": {
-            "logic": "AND",
-            "conditions": [
-                {"field": "payload.status", "operator": "equals", "value": "success"}
-            ]
-        },
-        "actions": [
-            {
-                "type": "notification",
-                "params": {
-                    "title": "Database Snapshot Verified",
-                    "message": "Snapshot for {{ payload.database }} verified ({{ payload.size_mb }} MB).",
-                    "severity": "success"
-                }
-            },
-            {
-                "type": "file_append",
-                "params": {
-                    "filename": "backup_audit.log",
-                    "content": "Database: {{ payload.database }} | Size: {{ payload.size_mb }}MB | Verified: True"
-                }
-            }
-        ]
-    },
-    {
-        "id": "blueprint-disk-cleaner",
-        "name": "Disk Storage Pressure Guard",
-        "description": "Alerts operations and runs log cleanup scripts whenever disk storage utilization exceeds 90%.",
-        "category": "System",
-        "priority": 80,
-        "cooldown_seconds": 60,
-        "trigger": {
-            "type": "event",
-            "event_name": "system.metrics"
-        },
-        "condition": {
-            "logic": "AND",
-            "conditions": [
-                {"field": "payload.disk_percent", "operator": ">=", "value": 90}
-            ]
-        },
-        "actions": [
-            {
-                "type": "notification",
-                "params": {
-                    "title": "Disk Space Critical ({{ payload.disk_percent }}%)",
-                    "message": "Storage volume capacity exceeded 90%. Automatic cleanup recommended.",
-                    "severity": "critical"
-                }
-            },
-            {
-                "type": "system_command",
-                "params": {
-                    "command": "clean_temp_logs --retention 7d"
-                }
-            }
-        ]
-    },
-    {
-        "id": "blueprint-data-anomaly",
-        "name": "Data Ingestion Pipeline Anomaly Filter",
-        "description": "Validates ETL batch ingest metrics and flags batches containing high corruption or error rates.",
-        "category": "Data",
-        "priority": 65,
-        "cooldown_seconds": 30,
-        "trigger": {
-            "type": "event",
-            "event_name": "etl.batch_processed"
-        },
-        "condition": {
-            "logic": "AND",
-            "conditions": [
-                {"field": "payload.error_rate_pct", "operator": ">", "value": 5.0}
-            ]
-        },
-        "actions": [
-            {
-                "type": "notification",
-                "params": {
-                    "title": "ETL Batch Anomaly Flagged",
-                    "message": "Batch {{ payload.batch_id }} rejected with error rate {{ payload.error_rate_pct }}%.",
-                    "severity": "warning"
-                }
-            },
-            {
-                "type": "data_transform",
-                "params": {
-                    "target_key": "etl_status",
-                    "transform": "tag",
-                    "tag": "BATCH_REQUIRES_MANUAL_REVIEW"
                 }
             }
         ]

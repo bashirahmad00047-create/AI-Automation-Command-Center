@@ -1,18 +1,26 @@
-"""Central Automation Engine Core for AI Command Center.
+"""Central Automation Engine Core for OpsFlow SaaS Platform.
 
-Orchestrates rule matching, event ingestion, condition evaluation,
-action execution, cooldown throttles, and automated background telemetry sweeps.
+Orchestrates:
+- Visual step pipeline execution (Trigger -> AI Analysis -> Lead Scoring -> Routing -> Draft -> Record -> Webhook)
+- Event ingestion & webhook dispatching
+- Deterministic heuristic AI analysis & entity extraction
+- Condition evaluation (AND/OR, dot notation, comparison operators)
+- Bounded action retries & safe simulations
+- Dry-run execution mode with "DRY RUN / ZERO SIDE EFFECTS" guarantees
+- Real-time event streaming buffer & background sweeps
 """
 
 from __future__ import annotations
 
 import datetime
+import json
 import re
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from actions import ActionRunner
+from ai_provider import get_ai_provider
 from evaluator import ConditionEvaluator
 from nlp_engine import NLPEngine
 from storage import Storage
@@ -20,7 +28,7 @@ from telemetry import TelemetryMonitor
 
 
 class AutomationEngine:
-    """Core rule execution engine and event broker."""
+    """Core workflow execution engine, event broker, and step pipeline orchestrator."""
 
     def __init__(self, storage: Optional[Storage] = None):
         self.storage = storage or Storage()
@@ -53,20 +61,24 @@ class AutomationEngine:
         event_name: str,
         payload: Optional[Dict[str, Any]] = None,
         source: str = "manual",
-        dry_run: bool = False
+        dry_run: bool = False,
+        organization_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Ingests an event, matches active rules, evaluates conditions, and runs actions."""
+        """Ingests an event, matches active rules, evaluates conditions, and runs actions/steps."""
         payload = payload or {}
         now_dt = datetime.datetime.now()
         timestamp_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        org_id = organization_id or self.storage.get_default_org_id()
 
-        # 1. NLP parsing if text prompt or event contains natural language
+        # 1. AI & NLP parsing if payload contains text/prompt/message
         nlp_data: Dict[str, Any] = {}
-        text_content = payload.get("text") or payload.get("message") or payload.get("prompt")
+        text_content = payload.get("text") or payload.get("message") or payload.get("prompt") or payload.get("query")
         if text_content and isinstance(text_content, str):
-            nlp_data = self.nlp.parse(text_content)
+            ai_provider = get_ai_provider()
+            nlp_data = ai_provider.analyze_text(text_content)
         elif event_name in ("user.prompt", "nlp.query", "chat.message"):
-            nlp_data = self.nlp.parse(str(payload.get("query", "")))
+            ai_provider = get_ai_provider()
+            nlp_data = ai_provider.analyze_text(str(payload.get("query", "")))
 
         # 1b. Synthesize / enrich payload fields from NLP entities if not explicitly provided
         enriched_payload = dict(payload)
@@ -128,7 +140,8 @@ class AutomationEngine:
             },
             "payload": enriched_payload,
             "nlp": nlp_data,
-            "system": self.telemetry.get_metrics()
+            "system": self.telemetry.get_metrics(),
+            "organization_id": org_id
         }
 
         # 3. Add to recent event stream
@@ -152,10 +165,9 @@ class AutomationEngine:
             }
 
         # 4. Fetch enabled rules
-        rules = self.storage.get_rules(enabled_only=True)
+        rules = self.storage.get_rules(enabled_only=True, organization_id=org_id)
         executed_rules = []
 
-        # Determine all matching event triggers (direct event + inferred from NLP intent/entities)
         matching_events = {event_name, "*"}
         if nlp_data and is_nlp_source:
             matching_events.add("user.prompt")
@@ -182,7 +194,6 @@ class AutomationEngine:
             rule_id = rule["id"]
             trigger = rule.get("trigger", {})
 
-            # Trigger matching
             trigger_type = trigger.get("type", "event")
             trigger_event = trigger.get("event_name", "*")
 
@@ -213,74 +224,9 @@ class AutomationEngine:
                 })
                 continue
 
-            # Condition Evaluation
-            cond_group = rule.get("condition", {})
-            start_eval = time.time()
-            matched, trace = self.evaluator.evaluate_group(cond_group, context)
-            duration_ms = round((time.time() - start_eval) * 1000, 2)
-
-            if not matched:
-                executed_rules.append({
-                    "rule_id": rule_id,
-                    "rule_name": rule["name"],
-                    "priority": rule.get("priority", 10),
-                    "category": rule.get("category", "System"),
-                    "matched": False,
-                    "status": "skipped",
-                    "trace": trace
-                })
-                continue
-
-            # Execute Actions
-            action_results = []
-            overall_status = "success"
-            error_message = None
-
-            actions = rule.get("actions", [])
-            for act in actions:
-                if dry_run:
-                    action_results.append({
-                        "type": act.get("type"),
-                        "params": act.get("params"),
-                        "status": "dry_run_simulated"
-                    })
-                else:
-                    res = self.action_runner.execute_action(act, context, self.storage)
-                    action_results.append(res)
-                    if res.get("status") == "failed":
-                        overall_status = "failed"
-                        error_message = res.get("error")
-
-            if not dry_run:
-                self._cooldown_tracker[rule_id] = now_ts
-                self.storage.record_rule_trigger(rule_id)
-
-                # Persist to execution log
-                self.storage.log_execution({
-                    "rule_id": rule_id,
-                    "rule_name": rule["name"],
-                    "timestamp": timestamp_str,
-                    "trigger_type": trigger_type,
-                    "event_name": event_name,
-                    "matched": True,
-                    "status": overall_status,
-                    "duration_ms": duration_ms,
-                    "trace": trace,
-                    "results": action_results,
-                    "error_message": error_message
-                })
-
-            executed_rules.append({
-                "rule_id": rule_id,
-                "rule_name": rule["name"],
-                "priority": rule.get("priority", 10),
-                "category": rule.get("category", "System"),
-                "matched": True,
-                "status": overall_status,
-                "duration_ms": duration_ms,
-                "trace": trace,
-                "action_results": action_results
-            })
+            # Execute workflow pipeline (handles both visual steps and condition/actions)
+            exec_result = self._execute_workflow_pipeline(rule, context, dry_run=dry_run)
+            executed_rules.append(exec_result)
 
         return {
             "status": "completed",
@@ -290,9 +236,238 @@ class AutomationEngine:
             "dry_run": dry_run
         }
 
-    def execute_rule_manually(self, rule_id: str, custom_payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _execute_workflow_pipeline(
+        self,
+        rule: Dict[str, Any],
+        context: Dict[str, Any],
+        dry_run: bool = False
+    ) -> Dict[str, Any]:
+        """Executes a workflow pipeline through its steps or condition/actions with trace logging."""
+        rule_id = rule["id"]
+        rule_name = rule["name"]
+        event_name = context.get("event", {}).get("name", "workflow.execute")
+        trigger_type = rule.get("trigger", {}).get("type", "event")
+        now_dt = datetime.datetime.now()
+        timestamp_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        start_time = time.time()
+        overall_status = "success"
+        error_message = None
+        steps_trace: List[Dict[str, Any]] = []
+        action_results: List[Dict[str, Any]] = []
+        condition_trace: List[Dict[str, Any]] = []
+        matched = True
+
+        # Check if rule has explicit visual steps
+        configured_steps = rule.get("steps") or []
+
+        # 1. Condition evaluation
+        cond_group = rule.get("condition", {})
+        if cond_group and cond_group.get("conditions"):
+            matched, condition_trace = self.evaluator.evaluate_group(cond_group, context)
+            steps_trace.append({
+                "step_name": "Condition Filter",
+                "step_type": "condition",
+                "status": "SUCCESS" if matched else "SKIPPED",
+                "input": cond_group,
+                "output": {"matched": matched, "trace": condition_trace},
+                "duration_ms": 1.2
+            })
+            if not matched:
+                return {
+                    "rule_id": rule_id,
+                    "rule_name": rule_name,
+                    "priority": rule.get("priority", 10),
+                    "category": rule.get("category", "System"),
+                    "matched": False,
+                    "status": "skipped",
+                    "trace": condition_trace,
+                    "steps_trace": steps_trace
+                }
+
+        # 2. Execute Visual Step Pipeline if configured
+        if configured_steps:
+            for idx, step in enumerate(configured_steps):
+                st_type = step.get("type", "").lower()
+                st_name = step.get("name") or f"Step {idx+1} ({st_type})"
+                st_config = step.get("config", {})
+
+                step_start = time.time()
+                step_status = "SUCCESS" if not dry_run else "DRY_RUN"
+                step_error = None
+                step_output: Any = {}
+
+                try:
+                    if st_type == "trigger":
+                        step_output = {"event": event_name, "matched": True}
+
+                    elif st_type in ("ai_analysis", "intent_detection", "sentiment_detection", "urgency_detection", "entity_extraction"):
+                        text_val = context.get("payload", {}).get("message") or context.get("payload", {}).get("text") or ""
+                        ai_res = self.nlp.parse(text_val)
+                        context["nlp"] = ai_res
+                        step_output = {
+                            "intent": ai_res.get("intent"),
+                            "urgency": ai_res.get("urgency"),
+                            "sentiment": ai_res.get("sentiment_label"),
+                            "lead_score": ai_res.get("lead_score"),
+                            "route": ai_res.get("recommended_route"),
+                            "entities": ai_res.get("entities")
+                        }
+
+                    elif st_type == "lead_scoring":
+                        ai_res = context.get("nlp", {})
+                        score = ai_res.get("lead_score", 50)
+                        step_output = {"lead_score": score, "qualification": "Hot Lead" if score >= 70 else "Standard Lead"}
+
+                    elif st_type == "route":
+                        dest = st_config.get("destination") or context.get("nlp", {}).get("recommended_route", "General Queue")
+                        context.setdefault("route", {})["department"] = dest
+                        step_output = {"destination_department": dest}
+
+                    elif st_type == "email_draft":
+                        draft_res = self.action_runner.execute_action(
+                            {"type": "email_draft", "params": st_config},
+                            context,
+                            self.storage,
+                            dry_run=dry_run
+                        )
+                        step_output = draft_res.get("output", {})
+                        action_results.append(draft_res)
+
+                    elif st_type == "database_record":
+                        db_res = self.action_runner.execute_action(
+                            {"type": "database_record", "params": st_config},
+                            context,
+                            self.storage,
+                            dry_run=dry_run
+                        )
+                        step_output = db_res.get("output", {})
+                        action_results.append(db_res)
+
+                    elif st_type == "notification":
+                        notif_res = self.action_runner.execute_action(
+                            {"type": "notification", "params": st_config},
+                            context,
+                            self.storage,
+                            dry_run=dry_run
+                        )
+                        step_output = notif_res.get("output", {})
+                        action_results.append(notif_res)
+
+                    elif st_type in ("webhook", "webhook_call"):
+                        wh_res = self.action_runner.execute_action(
+                            {"type": "webhook_call", "params": st_config},
+                            context,
+                            self.storage,
+                            dry_run=dry_run
+                        )
+                        step_output = wh_res.get("output", {})
+                        action_results.append(wh_res)
+                        if wh_res.get("status") == "failed":
+                            step_status = "FAILED"
+                            step_error = wh_res.get("error")
+
+                    elif st_type == "delay":
+                        step_output = {"delayed_seconds": min(float(st_config.get("seconds", 1)), 5.0), "simulated": True}
+
+                    elif st_type == "end":
+                        step_output = {"workflow_status": "completed"}
+
+                except Exception as exc:
+                    step_status = "FAILED"
+                    step_error = str(exc)
+                    overall_status = "failed"
+                    error_message = step_error
+
+                step_duration_ms = round((time.time() - step_start) * 1000, 2)
+                steps_trace.append({
+                    "name": st_name,
+                    "type": st_type,
+                    "status": step_status,
+                    "input": st_config,
+                    "output": step_output,
+                    "error": step_error,
+                    "duration_ms": step_duration_ms
+                })
+
+                if step_status == "FAILED":
+                    break
+
+        # 3. Actions execution (execute actions if configured)
+        actions = rule.get("actions", [])
+        if actions:
+            for act in actions:
+                res = self.action_runner.execute_action(act, context, self.storage, dry_run=dry_run)
+                action_results.append(res)
+                steps_trace.append({
+                    "name": act.get("type", "Action"),
+                    "type": act.get("type", "action"),
+                    "status": "DRY_RUN" if dry_run else ("SUCCESS" if res.get("status") == "success" else "FAILED"),
+                    "input": act.get("params", {}),
+                    "output": res.get("output", {}),
+                    "error": res.get("error"),
+                    "duration_ms": res.get("duration_ms", 1.0),
+                    "retry_count": res.get("retry_count", 0)
+                })
+                if res.get("status") == "failed":
+                    overall_status = "failed"
+                    error_message = res.get("error")
+
+        total_duration_ms = round((time.time() - start_time) * 1000, 2)
+
+        # Update cooldown and execution count if not dry run
+        exec_id = 0
+        if not dry_run:
+            self._cooldown_tracker[rule_id] = time.time()
+            self.storage.record_rule_trigger(rule_id)
+
+            # Log execution trace in database
+            exec_id = self.storage.log_execution({
+                "rule_id": rule_id,
+                "rule_name": rule_name,
+                "timestamp": timestamp_str,
+                "trigger_type": trigger_type,
+                "event_name": event_name,
+                "matched": True,
+                "status": overall_status,
+                "duration_ms": total_duration_ms,
+                "trace": condition_trace,
+                "results": action_results,
+                "steps_trace": steps_trace,
+                "ai_result": context.get("nlp"),
+                "is_dry_run": False,
+                "error_message": error_message,
+                "organization_id": context.get("organization_id")
+            })
+
+        return {
+            "execution_id": f"exec-simulated" if dry_run else f"exec-{exec_id}",
+            "rule_id": rule_id,
+            "workflow_id": rule_id,
+            "rule_name": rule_name,
+            "workflow_name": rule_name,
+            "priority": rule.get("priority", 10),
+            "category": rule.get("category", "System"),
+            "matched": True,
+            "status": overall_status,
+            "duration_ms": total_duration_ms,
+            "trace": condition_trace,
+            "action_results": action_results,
+            "steps_trace": steps_trace,
+            "ai_result": context.get("nlp"),
+            "is_dry_run": dry_run,
+            "error_message": error_message
+        }
+
+    def execute_rule_manually(
+        self,
+        rule_id: str,
+        custom_payload: Optional[Dict[str, Any]] = None,
+        dry_run: bool = False,
+        organization_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Directly forces execution of a single rule, evaluating conditions."""
-        rule = self.storage.get_rule(rule_id)
+        rule = self.storage.get_rule(rule_id, organization_id=organization_id)
         if not rule:
             return {"status": "error", "message": f"Rule '{rule_id}' not found."}
 
@@ -301,7 +476,6 @@ class AutomationEngine:
         if event_name == "*":
             event_name = "manual.trigger"
 
-        # Ingest with forced matching
         now_dt = datetime.datetime.now()
         timestamp_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -318,83 +492,44 @@ class AutomationEngine:
             },
             "payload": payload,
             "nlp": nlp_data,
-            "system": self.telemetry.get_metrics()
+            "system": self.telemetry.get_metrics(),
+            "organization_id": organization_id or rule.get("organization_id")
         }
 
-        # Evaluate condition
-        cond_group = rule.get("condition", {})
-        start_eval = time.time()
-        matched, trace = self.evaluator.evaluate_group(cond_group, context)
-        duration_ms = round((time.time() - start_eval) * 1000, 2)
+        return self._execute_workflow_pipeline(rule, context, dry_run=dry_run)
 
-        action_results = []
-        overall_status = "success"
-        error_message = None
-
-        if matched:
-            for act in rule.get("actions", []):
-                res = self.action_runner.execute_action(act, context, self.storage)
-                action_results.append(res)
-                if res.get("status") == "failed":
-                    overall_status = "failed"
-                    error_message = res.get("error")
-
-            self._cooldown_tracker[rule_id] = time.time()
-            self.storage.record_rule_trigger(rule_id)
-
-            self.storage.log_execution({
-                "rule_id": rule_id,
-                "rule_name": rule["name"],
-                "timestamp": timestamp_str,
-                "trigger_type": "manual",
-                "event_name": event_name,
-                "matched": True,
-                "status": overall_status,
-                "duration_ms": duration_ms,
-                "trace": trace,
-                "results": action_results,
-                "error_message": error_message
-            })
-        else:
-            overall_status = "condition_not_met"
-
-        return {
-            "status": overall_status,
-            "rule_id": rule_id,
-            "rule_name": rule["name"],
-            "matched": matched,
-            "duration_ms": duration_ms,
-            "trace": trace,
-            "action_results": action_results,
-            "error_message": error_message
-        }
+    # Alias for modern workflow nomenclature
+    execute_workflow = execute_rule_manually
 
     def _push_event_stream(self, evt: Dict[str, Any]):
         with self._lock:
-            self.event_stream.insert(0, evt)
+            self.event_stream.append(evt)
             if len(self.event_stream) > 50:
-                self.event_stream = self.event_stream[:50]
+                self.event_stream.pop(0)
+
+    def get_event_stream(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            return list(self.event_stream)
 
     def _background_loop(self):
-        """Periodic background monitor (every 15s) checking system thresholds."""
+        """Background thread executing periodic health monitoring events."""
         while True:
             time.sleep(15)
             if not self.is_running:
                 continue
-
             try:
                 metrics = self.telemetry.get_metrics()
-                # If CPU > 85%, trigger system.metrics event
-                if metrics.get("cpu_percent", 0) >= 85:
+                # If CPU spikes over 85%, dispatch background event automatically
+                if metrics.get("cpu_percent", 0) > 85:
                     self.ingest_event(
                         event_name="system.metrics",
                         payload={
-                            "cpu_percent": metrics.get("cpu_percent"),
                             "host": "localhost",
+                            "cpu_percent": metrics.get("cpu_percent"),
                             "memory_percent": metrics.get("memory_percent"),
-                            "source": "background_sentinel"
+                            "source": "telemetry_daemon"
                         },
-                        source="background_sentinel"
+                        source="daemon"
                     )
             except Exception:
                 pass

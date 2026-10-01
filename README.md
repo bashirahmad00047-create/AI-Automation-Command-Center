@@ -1,360 +1,305 @@
-# ⚡ AI Automation Command Center
+# ⚡ OpsFlow Enterprise SaaS Platform
 
-> **Enterprise-Grade Mission Control Dashboard & Offline AI Automation Engine**  
-> *100% Local • Zero Paid APIs • Zero API Keys • Sub-Millisecond Heuristic NLP • Deterministic Rule Execution*
+> **Commercial-Grade B2B Workflow Orchestration & Intelligent Automation Platform**  
+> *Python Flask • SQLAlchemy 2.0 ORM • SQLite WAL (Local) / PostgreSQL Ready • Multi-Tenant RBAC • Offline Heuristic NLP Core • Inbound Webhook Gateway*
 
 [![Python Version](https://img.shields.io/badge/Python-3.10%20%7C%203.11-blue.svg)](https://python.org)
 [![Framework](https://img.shields.io/badge/Framework-Flask%203.1-emerald.svg)](https://flask.palletsprojects.com/)
-[![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-27%2F27%20Passed-brightgreen.svg)](test_command_center.py)
-[![Privacy](https://img.shields.io/badge/Privacy-100%25%20Air--Gapped%20Local-cyan.svg)](#-offline-architecture--security-posture)
+[![ORM](https://img.shields.io/badge/Database-SQLAlchemy%202.0%20%7C%20SQLite%20WAL-red.svg)](https://www.sqlalchemy.org/)
+[![Tests](https://img.shields.io/badge/Tests-41%2F41%20Passed%20(100%25)-brightgreen.svg)](test_saas_platform.py)
+[![Security](https://img.shields.io/badge/Security-Multi--Tenant%20RBAC%20%7C%20SHA--256%20Keys-purple.svg)](#-security--rbac-model)
+[![License](https://img.shields.io/badge/License-Proprietary%20%2F%20Commercial-blue.svg)](#)
 
 ---
 
-## 🌟 Executive Summary
+## 🌟 Product Overview
 
-The **AI Automation Command Center** is an operational control plane designed to ingest system signals, evaluate complex conditional trees, parse natural language incident reports, and trigger automated multi-action mitigation pipelines.
+**OpsFlow Enterprise** is a high-throughput, multi-tenant B2B SaaS platform engineered for Site Reliability Engineers (SRE), Security Operations (SecOps), and DevOps infrastructure teams. It automates operational incident triage, evaluates complex conditional decision trees, ingests high-frequency telemetry signals via HMAC-secured webhooks, and dispatches automated multi-action mitigation pipelines.
 
-Unlike cloud-dependent automation tools that introduce recurring SaaS fees, external token limits, and outbound security exposure, this command center is powered by an **offline, deterministic rule engine** coupled with a **local heuristic Natural Language Processing (NLP) core**. It delivers instantaneous event triage, real-time hardware telemetry, forensic execution audit trails, and one-click automation blueprints with zero external API dependencies.
+Unlike cloud-dependent automation tools that introduce recurring token fees, external SaaS latency, and outbound security exposure, OpsFlow features an **embedded, offline deterministic rule engine** coupled with a **local heuristic Natural Language Processing (NLP) core**. It delivers instantaneous event triage, real-time hardware telemetry, forensic execution audit trails, and one-click automation blueprints with zero external API dependencies.
 
 ```mermaid
-flowchart LR
-    A["Raw Signals / Text"] --> B["Local Heuristic NLP Engine"]
-    B --> C["Central Automation Broker"]
-    C --> D["Condition Evaluator (AND/OR Trees)"]
-    D --> E["Multi-Action Pipeline"]
-    E --> F["Notifications & Logs"]
-    E --> G["File Operations"]
-    E --> H["Simulated Webhooks & Emails"]
-    D -.-> I["Forensic Audit Trail (SQLite)"]
+flowchart TD
+    subgraph Ingestion ["1. Signal Ingestion & Gateways"]
+        WH["Inbound Webhooks (HMAC-SHA256)"]
+        API["REST API v1 (/api/v1/events)"]
+        NLP_IN["Natural Language Incident Console"]
+        METRICS["Telemetry Sentinel Monitor"]
+    end
+
+    subgraph Security ["2. Multi-Tenant Security & Auth Layer"]
+        AUTH["RBAC Guard (Admin / Operator / Viewer)"]
+        KEY["Scoped API Key Validator (SHA-256)"]
+        TENANT["Workspace Data Isolator (Tenant ID Scope)"]
+    end
+
+    subgraph Engine ["3. Intelligent Orchestration Core"]
+        NLP_CORE["Heuristic NLP Core (Sub-ms Triage)"]
+        EVAL["Condition Tree Evaluator (AND/OR Trees)"]
+        THROTTLE["Cooldown Throttles & Loop Breakers"]
+    end
+
+    subgraph Actions ["4. Action Dispatchers"]
+        ACT_WH["Outbound HTTP Webhooks"]
+        ACT_ALERT["Incident Response Center"]
+        ACT_LOG["Diagnostic Audit Logs"]
+        ACT_EMAIL["Simulated / SMTP Email Queue"]
+        ACT_FILE["Isolated Tenant Storage"]
+    end
+
+    subgraph Persistence ["5. SQLAlchemy 2.0 ORM Store"]
+        DB[("SQLite WAL (Local) / PostgreSQL (Cloud)")]
+    end
+
+    Ingestion --> Security
+    Security --> Engine
+    Engine --> Actions
+    Actions --> Persistence
+    Engine -.-> Persistence
 ```
 
 ---
 
-## 🎯 Portfolio Showcase: AI Automation Engineering Skills
+## 🚀 Key Enterprise Capabilities
 
-This project was engineered to demonstrate core competencies required in modern AI systems engineering, site reliability engineering (SRE), and intelligent process automation:
-
-### 1. High-Performance Local NLP (Zero-API Architecture)
-- Eliminates cloud API dependencies, recurring token bills, and outbound latency bottlenecks.
-- Demonstrates deep understanding of tokenization, weighted lexical scoring, continuous urgency mapping, and regex-based entity isolation without relying on black-box external services.
-- Delivers deterministic sub-millisecond classification suitable for air-gapped environments, military/defense settings, healthcare compliance (HIPAA), and high-frequency edge IoT nodes.
-
-### 2. Deterministic & Safe Automation Workflows
-- Generates transparent, step-by-step condition evaluation traces (`payload.metric >= threshold -> ACTUAL vs TARGET -> PASS/FAIL`).
-- Implements defense-in-depth safeguards: cooldown throttles to prevent alert fatigue and infinite loops, sandboxed storage directories, and dry-run simulation capabilities.
-
-### 3. Full-Stack Systems Architecture & Observability
-- **Backend**: Clean separation of concerns across rule ingestion (`automation_engine.py`), natural language analysis (`nlp_engine.py`), condition resolution (`evaluator.py`), action dispatching (`actions.py`), and thread-safe persistence (`storage.py`).
-- **Telemetry**: Real-time non-blocking system sampling (`psutil`) integrated into an automated background sentinel monitor.
-- **Frontend**: Responsive, sci-fi cyberpunk HUD interface featuring glassmorphic cards, live polling loops, dynamic form builders, and visual audit inspectors.
-
-### 4. Hybrid-AI / LLM Pre-Processor Readiness
-- Acts as a high-speed, cost-saving edge triage layer. In hybrid deployments, this engine filters 80–90% of routine telemetry events locally before invoking expensive large language models (LLMs) only when deep semantic synthesis is strictly required.
-
----
-
-## 🚀 Key Features
-
-| Capability | Technical Implementation | Benefit |
+| Capability | Technical Implementation | Business & Client Benefit |
 |---|---|---|
-| **Local Heuristic NLP** | Multi-token weighted dictionaries, sentiment lexicons, urgency heuristic scoring | Sub-millisecond intent extraction with 0 API tokens |
-| **Entity Extraction** | IPv4 validator, hostname patterns, RFC HTTP status whitelist, size/percentage regex | Automatic parameter binding from raw operational text |
-| **Multi-Condition Engine** | Dot-notation resolver, 10+ comparison operators, nested AND/OR trees | Expressive business logic matching complex telemetry shapes |
-| **Multi-Action Pipelines** | Notifications, audit logging, file writing, simulated emails, webhooks, transforms | Autonomous response to operational conditions |
-| **Forensic Audit Traces** | Thread-safe SQLite execution logging with step-by-step evaluator paths | 100% transparent auditability with zero black-box decisions |
-| **Live HUD Telemetry** | Non-blocking CPU, RAM, Disk, process memory, and thread monitoring | Real-time operational situational awareness |
-| **Blueprint Gallery** | Pre-configured production automations for System, Security, DevOps, NLP, Data | Instant 1-click deployment of battle-tested rules |
+| **Multi-Tenant Workspaces** | Strict `organization_id` foreign keys, tenant query isolation | Enables MSPs and enterprises to isolate environments and clients safely. |
+| **Role-Based Access (RBAC)** | `Owner`, `Admin`, `Operator`, `Viewer` roles enforced on all routes | Granular permissions: operators manage workflows; viewers have read-only access. |
+| **SQLAlchemy 2.0 ORM** | Declarative models, relationship mappings, SQLite WAL mode | Clean migration path from local SQLite development to production PostgreSQL. |
+| **Scoped API Key Auth** | Cryptographic generation (`sk_live_...`), SHA-256 hashed lookup | Secure programmatic integration for CI/CD pipelines, CLI scripts, and edge agents. |
+| **HMAC Inbound Webhooks** | Public URL slugs, `X-Hub-Signature-256` validation | Ingest signals from Stripe, GitHub, Datadog, PagerDuty, and custom backends safely. |
+| **Heuristic NLP Core** | Weighted token dictionaries, continuous urgency scoring, regex entities | Instantaneous triage of unstructured incident prompts with 0 API tokens and 0 latency. |
+| **Incident Response Center** | Full lifecycle tracking (`open` -> `acknowledged` -> `resolved`) | Centralized operational queue with severity badges and forensic trace drill-downs. |
+| **Forensic Audit Trails** | Immutable step-by-step traces (`ACTUAL vs TARGET -> PASS/FAIL`) | 100% auditability for regulatory compliance (SOC2, HIPAA, ISO 27001). |
 
 ---
 
-## 🔄 End-to-End Automation Workflow
+## 👥 Pre-Configured Turnkey Demo Personas
 
-Every event processed by the Command Center follows an event lifecycle:
+The platform includes two isolated multi-tenant workspaces and three role-based test personas:
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client as User / Ingestion Source
-    participant Bus as AutomationEngine (Broker)
-    participant NLP as NLPEngine
-    participant Eval as ConditionEvaluator
-    participant Act as ActionRunner
-    participant DB as SQLite Storage
+### Workspace 1: Acme Global Enterprise (`acme-global`)
+*Enterprise Tier workspace with full monitoring, security, and DevOps workflows.*
 
-    Client->>Bus: Ingest Event / Natural Text Prompt
-    opt If text prompt or payload contains text
-        Bus->>NLP: parse(text)
-        NLP-->>Bus: {intent, urgency, sentiment, entities}
-    end
-    Bus->>Bus: Match Enabled Rules against Trigger Event
-    loop For Each Candidate Rule
-        Bus->>Bus: Verify Cooldown Timer
-        Bus->>Eval: evaluate_group(condition_tree, context)
-        Eval-->>Bus: (matched: bool, trace: list)
-        alt Condition Passed & Not Dry Run
-            Bus->>Act: execute_action(action, context)
-            Act-->>Bus: action_result
-            Bus->>DB: log_execution(rule_id, trace, results, status)
-        else Condition Passed & Dry Run
-            Bus-->>Client: Return Dry-Run Simulation Trace
-        end
-    end
-    Bus-->>Client: Final Execution Summary Response
-```
+| Persona | Email | Password | Role & Permissions |
+|---|---|---|---|
+| **Sarah Lin (VP Ops)** | `admin@opsflow.io` | `AdminSecure2026!` | **Admin / Owner**: Full control (create/delete rules, manage team, revoke API keys). |
+| **Alex Rivera (SRE)** | `operator@opsflow.io` | `Operator2026!` | **Operator**: Operational access (create, edit, run workflows, triage incidents). |
+| **Jordan Smith (Auditor)**| `viewer@opsflow.io` | `Viewer2026!` | **Viewer**: Read-only access (inspect metrics, audit trails, and logs). |
+| **Master API Key** | `sk_live_opsflow_enterprise_prod_2026` | *(Pre-seeded)* | Full programmatic access across all REST endpoints. |
 
-### Lifecycle Steps:
-1. **Signal Ingestion**: Events enter via REST endpoints (`/api/events/dispatch`), background hardware monitors, or the natural language interface (`/api/nlp/analyze`).
-2. **Context Enrichment & NLP Extraction**: The engine populates a unified context object (`event`, `payload`, `system`, and `nlp`). If text is detected, the NLP engine extracts intent, sentiment, continuous urgency, and structured entities.
-3. **Trigger Matching**: The broker queries active rules and filters candidates by trigger type (`event`, `natural_text`, or `manual`).
-4. **Cooldown Enforcement**: Verifies elapsed seconds against the rule's configured cooldown threshold to prevent flapping.
-5. **Condition Tree Resolution**: Evaluates conditions with dot-notation field navigation (`payload.cpu_percent >= 85`). Every step generates a verifiable trace object.
-6. **Action Dispatch & Execution**: Sequential execution of actions (`notification`, `file_append`, `webhook_call`, `email_dispatch`).
-7. **Audit Trail Persistence**: Execution status, duration in milliseconds, evaluation traces, and output payloads are committed to SQLite.
+### Workspace 2: Apex HealthTech Systems (`apex-health`)
+*Pro Tier tenant used to demonstrate strict workspace data isolation.*
+- **Admin**: `admin@apexhealth.internal` / `HealthTech2026!`
+- **API Key**: `sk_live_apex_health_gateway_2026`
 
 ---
 
-## 🧠 AI NLP Sandbox & Intent Simulator
+## ⚡ Quick Start & Turnkey Setup
 
-The **AI NLP Sandbox** allows operators and engineers to test natural language prompts against the automation suite in real time.
+### 1. Prerequisites
+- Python 3.10 or 3.11 installed
+- Git
 
-```
-+--------------------------------------------------------------------------------+
-|  OFFLINE NATURAL LANGUAGE SIMULATOR                LOCAL HEURISTIC AI • 0 API  |
-+--------------------------------------------------------------------------------+
-|  Prompt: "Emergency: database memory utilization surged to 96% on prod-db-01"  |
-|                                                                                |
-|  [✓] Dry Run Only (Preview rule matching without executing side effects)      |
-|                                                                                |
-|  [ Analyze & Simulate Automations ]                                            |
-+--------------------------------------------------------------------------------+
-|  RESULTS & EXTRACTION:                                                         |
-|  • Detected Intent : SERVER_ALERT (Confidence: 85%)                            |
-|  • Urgency Score   : 95 / 100 [CRITICAL]                                       |
-|  • Entities        : hostnames: [prod-db-01] | percentages: [96]               |
-|                                                                                |
-|  TRIGGERED AUTOMATIONS:                                                        |
-|  ▶ Rule: High Memory Sentinel Auto-Mitigation [MATCHED & TRIGGERED]           |
-|    • Checked payload.cpu_percent >= 85: actual=96 (PASS)                       |
-|    • Simulated Action: Dispatched critical notification & captured log         |
-+--------------------------------------------------------------------------------+
-```
-
-### Supported NLP Classifications:
-- **Intents**: `server_alert`, `security_threat`, `deploy_request`, `backup_request`, `incident_ticket`, `status_inquiry`.
-- **Urgency Scoring**: 0 to 100 continuous score calculated from severity lexicons, percentage thresholds (>=90%), and HTTP 5xx codes.
-- **Entity Extraction**:
-  - **IPv4 Addresses**: Isolated and validated against 4-octet bounds (`0–255`).
-  - **HTTP Status Codes**: Whitelisted against RFC specifications (`400`, `401`, `403`, `404`, `500`, `502`, `503`, etc.).
-  - **Server Hostnames**: Cloud & internal node names (`prod-db-01`, `srv-worker-02`, `us-east-1a`).
-  - **Metrics & Percentages**: Percentages (`94%`), memory sizes (`512MB`, `4.5GB`).
-  - **Emails**: Extracted for automated alert routing.
-
----
-
-## 📜 Forensic Audit Logs & Observability
-
-Every rule execution commits a granular record to the SQLite database:
-- **Trace Inspector**: Click "Inspect Trace" on any log row to see exactly which condition passed or failed:
-  ```json
-  [
-    {
-      "field": "payload.cpu_percent",
-      "operator": ">=",
-      "target": 85,
-      "actual": 94.5,
-      "passed": true,
-      "notes": ""
-    }
-  ]
-  ```
-- **Execution Latency**: Tracks sub-millisecond execution duration for performance benchmarking.
-- **Dispatched Output Inspection**: Stores the full JSON payload produced by all actions.
-
----
-
-## 📦 Battle-Tested Blueprint Library
-
-The Command Center includes pre-configured automation templates ready for 1-click deployment:
-
-1. **High CPU Resource Sentinel (`System`)**: Monitors CPU utilization and triggers critical alerts when load exceeds 85%.
-2. **Security Threat & Intrusion Quarantine (`Security`)**: Detects repeated authentication failures (>=3) or NLP threat intent, dispatches SOC email alerts, and isolates malicious IPs.
-3. **Smart NLP Emergency Ticket Router (`NLP`)**: Automatically evaluates freeform incident reports, computes urgency scores >= 60, and routes critical escalations.
-4. **API Service Outage Auto-Recovery (`DevOps`)**: Catches HTTP gateway errors (500, 502, 503) and dispatches auto-restart webhooks.
-5. **Automated Backup & Archive Verification (`DevOps`)**: Validates database snapshot results, checks archive integrity, and logs verification digests.
-6. **Disk Storage Pressure Guard (`System`)**: Warns when disk utilization exceeds 90% and executes log retention scripts.
-7. **Data Pipeline Anomaly Filter (`Data`)**: Inspects ETL batch metrics and flags high error/corruption rates (>5%).
-
----
-
-## 🔒 Offline Architecture & Security Posture
-
-- **100% Air-Gapped Capable**: Operates with zero network calls to external cloud providers.
-- **Zero API Keys & Cost Free**: Requires no OpenAI, Anthropic, or cloud API keys. Run continuously without unexpected billing.
-- **Sandboxed Local I/O**: File writing and appending actions are strictly sandboxed inside `./automation_storage/` with path traversal protections (`os.path.basename` sanitization).
-- **Concurrency & Thread Safety**: All SQLite read/write operations utilize connection pooling and thread-safe locks.
-
----
-
-## 📁 File Structure
-
-```
-AI-Automation-Command-Center/
-├── app.py                      # Flask application & RESTful API routes (binds to 0.0.0.0:$PORT)
-├── automation_engine.py        # Central event bus, rule broker & background sentinel
-├── nlp_engine.py               # Local rule-based & heuristic NLP engine
-├── evaluator.py                # Dot-notation field resolver & condition tree evaluator
-├── actions.py                  # Multi-action execution dispatchers (notify, file, webhook, email)
-├── storage.py                  # Thread-safe SQLite persistence layer
-├── telemetry.py                # Hardware & process telemetry monitor (psutil)
-├── presets.py                  # Production automation blueprints library
-├── requirements.txt            # Production dependencies (Flask, pytest, psutil, gunicorn)
-├── render.yaml                 # Render Blueprint configuration for 1-click cloud deployment
-├── Procfile                    # Web service process declaration for Render / PaaS
-├── .gitignore                  # Git repository exclusion rules
-├── README.md                   # System documentation & portfolio guide
-├── test_command_center.py      # Unit & integration test suite (27 tests)
-├── templates/
-│   └── index.html              # Cyberpunk Mission Control HUD UI
-└── static/
-    ├── css/
-    │   └── style.css           # Glassmorphism, animations, responsive HUD layout
-    └── js/
-        └── app.js              # Real-time dashboard controller & telemetry polling
-```
-
----
-
-## 💻 Quickstart & Demo Guide
-
-### 1. Requirements
-- Python 3.10+
-- `pip`
-
-### 2. Install Dependencies
+### 2. Clone and Install Dependencies
 ```bash
+git clone https://github.com/your-org/AI-Automation-Command-Center.git
+cd AI-Automation-Command-Center
+
 pip install -r requirements.txt
 ```
 
-### 3. Launch the Command Center
+### 3. Initialize Database & Seed Demonstration Data
+```bash
+python init_db.py
+```
+*Creates the SQLite database with WAL mode enabled and populates tenants, users, API keys, workflows, and sample incidents.*
+
+### 4. Run the Application
 ```bash
 python app.py
 ```
-Open your browser and navigate to:
-```
-http://127.0.0.1:5000
-```
-
-### 4. Interactive Portfolio Walkthrough:
-1. **Explore Mission Control**: Observe live hardware telemetry gauges and active automation counters.
-2. **Trigger Quick Event**: Click **"🔥 CPU Spike (94.5%)"** in the Quick Dispatcher. Notice the instant alert, live stream item, and counter update.
-3. **Simulate in NLP Sandbox**: Go to the **AI NLP Sandbox** tab, select the preset *"Memory Surge (96%)"*, and click **Analyze & Simulate**. Observe the intent classification, urgency score, extracted entities, and dry-run rule trace.
-4. **Inspect Audit Trail**: Go to **Execution Logs**, click **"Inspect Trace"** on any entry, and review the condition evaluation path.
-5. **Install a Blueprint**: Open **Blueprints Library** and click **"Install Blueprint"** on any template to add it directly to active rules.
+Open your browser to: **`http://localhost:5000`**
 
 ---
 
-## ☁️ Render Cloud Deployment Guide (Free Tier)
+## 🧪 Automated Test Suite
 
-This application is fully prepared for zero-cost deployment on [Render](https://render.com).
-
-### Method A: Automated Deployment via `render.yaml` (Blueprint)
-1. Push this repository to your GitHub / GitLab account.
-2. In the Render Dashboard, click **New +** &rarr; **Blueprint**.
-3. Connect your repository. Render will automatically detect [`render.yaml`](file:///C:/Users/It%20Hub/AI-Automation-Command-Center/render.yaml), configure the Python runtime, set up the build command (`pip install -r requirements.txt`), and launch using Gunicorn.
-4. Click **Apply** to deploy.
-
-### Method B: Manual Web Service Setup
-1. In Render Dashboard, click **New +** &rarr; **Web Service**.
-2. Connect your Git repository.
-3. Configure the following service settings:
-   - **Environment**: `Python 3`
-   - **Region**: Any (e.g. Oregon, Frankfurt, Ohio)
-   - **Branch**: `main`
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `gunicorn --bind 0.0.0.0:$PORT app:app`
-   - **Plan**: `Free`
-4. Add Environment Variables (under the *Environment* tab):
-   - `PYTHON_VERSION`: `3.11.9`
-   - `SECRET_KEY`: *(Generate a secure random string or leave Render to generate)*
-   - `FLASK_DEBUG`: `0`
-5. Click **Create Web Service**.
-
-> [!NOTE]
-> Render automatically injects the `$PORT` environment variable and routes public HTTPS traffic to it. The application binds to `0.0.0.0:$PORT` dynamically and seeds its initial rules into SQLite on first startup without requiring an external database.
-
----
-
-## 🧪 Automated Test Verification
-
-The project includes a test suite covering the NLP engine, condition evaluator, action runner, storage persistence, automation engine, and Flask REST APIs.
+The test suite contains **41 automated tests** covering security, multi-tenancy, SQLAlchemy models, the workflow engine, and REST APIs.
 
 Run tests with `pytest`:
 ```bash
-pytest test_command_center.py -v
+pytest -v
 ```
-Or with standard library `unittest`:
+
+Output:
+```text
+============================= test session starts =============================
+collected 41 items
+
+test_command_center.py .................................                 [ 80%]
+test_saas_platform.py ........                                           [100%]
+
+============================= 41 passed in 14.86s =============================
+```
+
+---
+
+## 📡 REST API v1 Reference
+
+All endpoints return structured JSON with standard HTTP status codes.
+
+### 1. Authentication & Session
+
+#### Login
 ```bash
-python test_command_center.py
+curl -X POST http://localhost:5000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@opsflow.io", "password": "AdminSecure2026!"}'
 ```
 
-### Test Suite Summary:
+#### Get Current Authenticated Profile
+```bash
+curl -X GET http://localhost:5000/api/v1/auth/me \
+  -H "X-API-Key: sk_live_opsflow_enterprise_prod_2026"
 ```
-test_command_center.py::TestNLPEngine::test_backup_and_deploy_intent PASSED
-test_command_center.py::TestNLPEngine::test_empty_input PASSED
-test_command_center.py::TestNLPEngine::test_invalid_http_status_codes_ignored PASSED
-test_command_center.py::TestNLPEngine::test_ipv4_extraction_not_http_status PASSED
-test_command_center.py::TestNLPEngine::test_mixed_ipv4_and_http_status PASSED
-test_command_center.py::TestNLPEngine::test_security_threat_intent PASSED
-test_command_center.py::TestNLPEngine::test_sentiment_analysis PASSED
-test_command_center.py::TestNLPEngine::test_server_alert_intent PASSED
-test_command_center.py::TestNLPEngine::test_valid_http_status_codes_extraction PASSED
-test_command_center.py::TestConditionEvaluator::test_and_or_groups PASSED
-test_command_center.py::TestConditionEvaluator::test_dot_notation PASSED
-test_command_center.py::TestConditionEvaluator::test_operators PASSED
-test_command_center.py::TestActionRunner::test_file_io_action PASSED
-test_command_center.py::TestActionRunner::test_notification_and_template_interpolation PASSED
-test_command_center.py::TestStorage::test_log_execution_and_retrieval PASSED
-test_command_center.py::TestStorage::test_save_and_get_rule PASSED
-test_command_center.py::TestStorage::test_seeded_rules PASSED
-test_command_center.py::TestStorage::test_toggle_and_delete_rule PASSED
-test_command_center.py::TestAutomationEngine::test_ingest_event_matching_rule PASSED
-test_command_center.py::TestAutomationEngine::test_ingest_event_not_matching_condition PASSED
-test_command_center.py::TestAutomationEngine::test_manual_rule_execution PASSED
-test_command_center.py::TestFlaskAPI::test_api_event_dispatch PASSED
-test_command_center.py::TestFlaskAPI::test_api_nlp_analyze PASSED
-test_command_center.py::TestFlaskAPI::test_api_presets PASSED
-test_command_center.py::TestFlaskAPI::test_api_rules_crud PASSED
-test_command_center.py::TestFlaskAPI::test_api_status_and_telemetry PASSED
-test_command_center.py::TestFlaskAPI::test_index_route PASSED
 
-============================= 27 passed in 10.84s =============================
+#### Generate a New Scoped API Key
+```bash
+curl -X POST http://localhost:5000/api/v1/auth/api-keys \
+  -H "X-API-Key: sk_live_opsflow_enterprise_prod_2026" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "GitHub Actions CI/CD Key", "permissions": "events:ingest,rules:read"}'
 ```
 
 ---
 
-## 🔌 REST API Reference
+### 2. Workflow Rules
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/status` | Engine status, metrics, and summary stats |
-| `POST` | `/api/engine/toggle` | Pause or resume the automation engine |
-| `GET` | `/api/telemetry` | Real-time CPU, RAM, and Disk metrics |
-| `GET` | `/api/rules` | List all automation rules (filter by category, state) |
-| `POST` | `/api/rules` | Create or update an automation rule |
-| `POST` | `/api/rules/<id>/toggle` | Enable or disable a rule |
-| `POST` | `/api/rules/<id>/run` | Manually trigger a rule |
-| `POST` | `/api/events/dispatch` | Ingest and evaluate an event |
-| `POST` | `/api/nlp/analyze` | Parse natural language text and simulate matching |
-| `GET` | `/api/logs` | Fetch execution audit history (pagination, status filter) |
-| `DELETE` | `/api/logs` | Clear execution audit history |
-| `GET` | `/api/presets` | Get available blueprint templates |
-| `POST` | `/api/presets/install` | Install a blueprint template |
-| `GET` | `/api/export` | Download rules as a JSON export |
-| `POST` | `/api/import` | Import rules from a JSON payload |
+#### List Tenant Rules
+```bash
+curl -X GET "http://localhost:5000/api/v1/rules?category=System" \
+  -H "X-API-Key: sk_live_opsflow_enterprise_prod_2026"
+```
+
+#### Create a New Automation Workflow
+```bash
+curl -X POST http://localhost:5000/api/v1/rules \
+  -H "X-API-Key: sk_live_opsflow_enterprise_prod_2026" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Production Database Latency Sentinel",
+    "category": "System",
+    "priority": 80,
+    "cooldown_seconds": 60,
+    "trigger": { "type": "event", "event_name": "db.query_latency" },
+    "condition": {
+      "logic": "AND",
+      "conditions": [
+        { "field": "payload.latency_ms", "operator": ">", "value": 500 }
+      ]
+    },
+    "actions": [
+      {
+        "type": "notification",
+        "params": {
+          "title": "High DB Latency ({{ payload.latency_ms }} ms)",
+          "severity": "high"
+        }
+      }
+    ]
+  }'
+```
+
+#### Manually Trigger / Test a Rule
+```bash
+curl -X POST http://localhost:5000/api/v1/rules/rule-cpu-sentinel/run \
+  -H "X-API-Key: sk_live_opsflow_enterprise_prod_2026" \
+  -H "Content-Type: application/json" \
+  -d '{"payload": {"cpu_percent": 96.0, "host": "prod-api-worker-01"}}'
+```
 
 ---
 
-## 📄 License
+### 3. Inbound Webhook Ingestion
 
-This project is licensed under the MIT License - open for use in personal portfolios, internal tooling, and commercial automation pipelines.
+#### Ingest Third-Party Signal (Public Endpoint)
+```bash
+curl -X POST http://localhost:5000/api/v1/webhooks/incoming/wh_live_datadog_alerts_2026 \
+  -H "Content-Type: application/json" \
+  -d '{"event": "system.metrics", "cpu_percent": 92.4, "host": "prod-k8s-node-03"}'
+```
+
+*If an HMAC secret is configured, supply the signature header:*  
+`-H "X-Hub-Signature-256: sha256=<hmac_hex_digest>"`
+
+---
+
+### 4. Incident Response Center
+
+#### List Active Incidents
+```bash
+curl -X GET "http://localhost:5000/api/v1/alerts?status=open" \
+  -H "X-API-Key: sk_live_opsflow_enterprise_prod_2026"
+```
+
+#### Acknowledge an Incident
+```bash
+curl -X POST http://localhost:5000/api/v1/alerts/1/acknowledge \
+  -H "X-API-Key: sk_live_opsflow_enterprise_prod_2026"
+```
+
+#### Resolve an Incident with Resolution Notes
+```bash
+curl -X POST http://localhost:5000/api/v1/alerts/1/resolve \
+  -H "X-API-Key: sk_live_opsflow_enterprise_prod_2026" \
+  -H "Content-Type: application/json" \
+  -d '{"notes": "Scaled Kubernetes horizontal pod autoscaler to 8 replicas."}'
+```
+
+---
+
+## 🔒 Security & RBAC Model
+
+1. **Password Hashing**: Industry-standard PBKDF2/SHA-256 password hashing via Werkzeug security (`generate_password_hash`).
+2. **API Key Security**: Plaintext API keys (`sk_live_...`) are displayed to administrators exactly **once** upon creation. Only SHA-256 hex hashes are stored in the database.
+3. **Tenant Data Isolation**: All queries filter by `organization_id`. Even with direct ID guessing, cross-tenant requests return `404 Not Found`.
+4. **Role Hierarchy**:
+   - `Owner / Admin`: Workspace settings, member management, API key lifecycle, rule creation/deletion.
+   - `Operator`: Workflow authoring, manual triggering, dry-run simulation, incident acknowledgment/resolution.
+   - `Viewer`: Read-only telemetry, incident lists, and execution forensic logs.
+5. **Security Headers**: Production middleware injects `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, and strict `Content-Security-Policy` headers.
+
+---
+
+## 🐳 Production Deployment
+
+### Docker Deployment
+```bash
+# Build and run the production container
+docker build -t opsflow-saas:latest .
+docker run -d -p 5000:5000 --name opsflow-app opsflow-saas:latest
+```
+
+### Docker Compose
+```bash
+docker-compose up -d
+```
+
+### Production WSGI (Gunicorn)
+```bash
+gunicorn --config gunicorn.conf.py app:app
+```
+
+---
+
+## 🛠️ Client Customization & White-Labeling Guide
+
+1. **Database Backend**:
+   - For local development: Uses SQLite with WAL mode (`opsflow_saas.db`).
+   - For AWS RDS / Cloud SQL: Set `DATABASE_URL=postgresql://user:pass@host:5432/dbname`. SQLAlchemy will handle migrations automatically.
+2. **Branding & Theme**:
+   - Modify `--cyan-glow`, `--purple-glow`, and brand headers in `static/css/style.css` and `templates/index.html`.
+3. **Outbound Notification Integrations**:
+   - Add Slack Webhook, PagerDuty, or Twilio SMS dispatches via the outbound webhook action (`webhook_call`) in `actions.py`.

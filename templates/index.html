@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Automation Command Center</title>
+    <title>OpsFlow Cloud - Enterprise Intelligent Automation</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,12 +18,28 @@
                 <span class="brand-symbol">⚡</span>
             </div>
             <div>
-                <h1 class="brand-title">AI AUTOMATION COMMAND CENTER</h1>
-                <p class="brand-subtitle">LOCAL RULE ENGINE • ZERO EXTERNAL API • OFFLINE INTELLIGENCE</p>
+                <h1 class="brand-title">OPSFLOW CLOUD</h1>
+                <p class="brand-subtitle">AI AUTOMATION COMMAND CENTER • ENTERPRISE MULTI-TENANT WORKFLOW ENGINE</p>
             </div>
         </div>
 
         <div class="hud-controls">
+            <!-- Workspace / Organization Switcher -->
+            <div class="workspace-selector">
+                <span>🏢 Workspace:</span>
+                <select id="workspaceSelect" class="workspace-select" onchange="handleWorkspaceChange(this.value)">
+                    <option value="org-enterprise-default">Acme Global Enterprise</option>
+                    <option value="org-apex-health-tenant">Apex HealthTech Systems</option>
+                </select>
+            </div>
+
+            <!-- Active User & RBAC Persona Switcher -->
+            <div class="user-profile-widget">
+                <span class="user-name" id="currentUserName">Sarah Lin</span>
+                <span class="role-badge admin" id="currentUserRoleBadge">ADMIN</span>
+                <button class="hud-btn small" onclick="openPersonaModal()" title="Switch User / Role Persona">Switch Persona</button>
+            </div>
+
             <div class="status-indicator" id="engineStatusBadge">
                 <span class="status-dot green"></span>
                 <span class="status-text" id="engineStatusText">ENGINE ONLINE</span>
@@ -42,14 +58,14 @@
                 </button>
                 <div class="notif-drawer" id="notifDrawer">
                     <div class="notif-header">
-                        <h3>System Alerts</h3>
+                        <h3>Active Incidents & Alerts</h3>
                         <div class="notif-actions">
-                            <button onclick="markNotificationsRead()">Mark Read</button>
+                            <button onclick="markNotificationsRead()">Acknowledge All</button>
                             <button onclick="clearNotifications()">Clear</button>
                         </div>
                     </div>
                     <div class="notif-list" id="notifList">
-                        <div class="notif-empty">No new notifications</div>
+                        <div class="notif-empty">No active incidents</div>
                     </div>
                 </div>
             </div>
@@ -59,38 +75,56 @@
     <!-- Navigation Tabs Bar -->
     <nav class="hud-tabs">
         <button class="hud-tab active" onclick="switchTab('dashboard')">
-            <span class="tab-icon">📊</span> Mission Control
+            <span class="tab-icon">📊</span> Executive Overview
         </button>
         <button class="hud-tab" onclick="switchTab('rules')">
-            <span class="tab-icon">⚡</span> Automation Rules
+            <span class="tab-icon">⚡</span> Workflow Studio
+        </button>
+        <button class="hud-tab" onclick="switchTab('leads')">
+            <span class="tab-icon">🎯</span> CRM Leads (<span id="tabLeadCount">0</span>)
+        </button>
+        <button class="hud-tab" onclick="switchTab('webhooks')">
+            <span class="tab-icon">🔌</span> Inbound Webhooks
         </button>
         <button class="hud-tab" onclick="switchTab('nlp')">
-            <span class="tab-icon">🧠</span> AI NLP Sandbox
+            <span class="tab-icon">🧠</span> AI Engine Sandbox
         </button>
         <button class="hud-tab" onclick="switchTab('simulator')">
             <span class="tab-icon">🧪</span> Metrics Simulator
         </button>
         <button class="hud-tab" onclick="switchTab('logs')">
-            <span class="tab-icon">📜</span> Execution Logs
+            <span class="tab-icon">📜</span> Forensics & Audits
+        </button>
+        <button class="hud-tab" onclick="switchTab('incidents')">
+            <span class="tab-icon">🚨</span> Incidents (<span id="tabIncidentCount">0</span>)
+        </button>
+        <button class="hud-tab" onclick="switchTab('apikeys')">
+            <span class="tab-icon">🔑</span> API Keys
         </button>
         <button class="hud-tab" onclick="switchTab('blueprints')">
-            <span class="tab-icon">📦</span> Blueprints Library
+            <span class="tab-icon">📦</span> Templates
+        </button>
+        <button class="hud-tab" onclick="switchTab('team')">
+            <span class="tab-icon">👥</span> Team & RBAC
+        </button>
+        <button class="hud-tab" onclick="switchTab('apidocs')">
+            <span class="tab-icon">📖</span> API Docs
         </button>
         <button class="hud-tab" onclick="switchTab('settings')">
-            <span class="tab-icon">⚙️</span> Settings & Diagnostics
+            <span class="tab-icon">⚙️</span> Settings
         </button>
     </nav>
 
     <!-- Main Workspace Container -->
     <main class="main-content">
 
-        <!-- TAB 1: MISSION CONTROL DASHBOARD -->
+        <!-- TAB 1: EXECUTIVE OVERVIEW -->
         <section id="tab-dashboard" class="tab-panel active">
             <!-- Key Metric Counters -->
             <div class="metrics-grid">
                 <div class="metric-card cyan">
                     <div class="metric-header">
-                        <span class="metric-title">ACTIVE AUTOMATIONS</span>
+                        <span class="metric-title">ACTIVE WORKFLOWS</span>
                         <span class="metric-badge">RULES</span>
                     </div>
                     <div class="metric-val" id="statActiveRules">0 / 0</div>
@@ -100,385 +134,152 @@
                 <div class="metric-card emerald">
                     <div class="metric-header">
                         <span class="metric-title">TOTAL EXECUTIONS</span>
-                        <span class="metric-badge">LIFETIME</span>
+                        <span class="metric-badge">24H</span>
                     </div>
                     <div class="metric-val" id="statTotalExecutions">0</div>
                     <div class="metric-sub" id="statSuccessExecutions">0 Successful Dispatches</div>
                 </div>
 
-                <div class="metric-card amber">
-                    <div class="metric-header">
-                        <span class="metric-title">SUCCESS RATE</span>
-                        <span class="metric-badge">ACCURACY</span>
-                    </div>
-                    <div class="metric-val" id="statSuccessRate">100%</div>
-                    <div class="metric-sub">Zero Error Rate Target</div>
-                </div>
-
                 <div class="metric-card purple">
                     <div class="metric-header">
+                        <span class="metric-title">SUCCESS RATE</span>
+                        <span class="metric-badge">RELIABILITY</span>
+                    </div>
+                    <div class="metric-val" id="statSuccessRate">100%</div>
+                    <div class="metric-sub">Zero unhandled crashes</div>
+                </div>
+
+                <div class="metric-card amber">
+                    <div class="metric-header">
+                        <span class="metric-title">OPEN INCIDENTS</span>
+                        <span class="metric-badge">TRIAGE</span>
+                    </div>
+                    <div class="metric-val" id="statOpenIncidents">0</div>
+                    <div class="metric-sub" id="statAckIncidents">0 Acknowledged</div>
+                </div>
+
+                <div class="metric-card emerald">
+                    <div class="metric-header">
+                        <span class="metric-title">QUALIFIED LEADS</span>
+                        <span class="metric-badge">AI SCORED</span>
+                    </div>
+                    <div class="metric-val" id="statHighPriorityLeads">0</div>
+                    <div class="metric-sub" id="statTotalLeads">0 Total Inquiries</div>
+                </div>
+
+                <div class="metric-card red">
+                    <div class="metric-header">
+                        <span class="metric-title">INBOUND WEBHOOKS</span>
+                        <span class="metric-badge">GATEWAY</span>
+                    </div>
+                    <div class="metric-val" id="statActiveWebhooks">0</div>
+                    <div class="metric-sub">Live ingestion connectors</div>
+                </div>
+
+                <div class="metric-card cyan">
+                    <div class="metric-header">
                         <span class="metric-title">SYSTEM UPTIME</span>
-                        <span class="metric-badge">LOCAL</span>
+                        <span class="metric-badge">HEALTH</span>
                     </div>
                     <div class="metric-val" id="statUptime">0s</div>
-                    <div class="metric-sub" id="statProcessMem">RSS: 0 MB</div>
+                    <div class="metric-sub">Engine Online</div>
                 </div>
             </div>
 
-            <!-- Two-Column Control Section -->
+            <!-- Telemetry Gauges Section -->
+            <div class="telemetry-bar-card">
+                <div class="card-header">
+                    <h3>⚡ LIVE HARDWARE & CLUSTER TELEMETRY</h3>
+                    <span class="refresh-indicator">POLLING INTERVAL: 2.5s</span>
+                </div>
+                <div class="gauges-grid">
+                    <div class="gauge-item">
+                        <div class="gauge-label">
+                            <span>CPU UTILIZATION</span>
+                            <span class="gauge-val" id="telemCpuVal">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill cyan-glow" id="telemCpuBar" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <div class="gauge-item">
+                        <div class="gauge-label">
+                            <span>RAM ALLOCATION</span>
+                            <span class="gauge-val" id="telemRamVal">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill purple-glow" id="telemRamBar" style="width: 0%;"></div>
+                        </div>
+                        <span class="gauge-sub" id="telemRamGb">0.0 / 0.0 GB</span>
+                    </div>
+
+                    <div class="gauge-item">
+                        <div class="gauge-label">
+                            <span>DISK OCCUPANCY</span>
+                            <span class="gauge-val" id="telemDiskVal">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill emerald-glow" id="telemDiskBar" style="width: 0%;"></div>
+                        </div>
+                        <span class="gauge-sub" id="telemDiskGb">0.0 / 0.0 GB</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Two-Column Operational View -->
             <div class="dashboard-columns">
-                <!-- Left: Hardware Telemetry & Quick Action Bar -->
-                <div class="dashboard-col-left">
-                    <div class="hud-panel">
-                        <div class="panel-header">
-                            <h2 class="panel-title">SYSTEM TELEMETRY GAUGES</h2>
-                            <span class="live-pill">LIVE 1s</span>
-                        </div>
-                        <div class="panel-body">
-                            <!-- CPU Meter -->
-                            <div class="gauge-item">
-                                <div class="gauge-labels">
-                                    <span>CPU Utilization</span>
-                                    <span class="gauge-value" id="telemCpuVal">0%</span>
-                                </div>
-                                <div class="gauge-bar-bg">
-                                    <div class="gauge-bar-fill cyan-fill" id="telemCpuBar" style="width: 0%"></div>
-                                </div>
-                            </div>
-
-                            <!-- RAM Meter -->
-                            <div class="gauge-item">
-                                <div class="gauge-labels">
-                                    <span>RAM Utilization (<span id="telemRamGb">0</span> GB)</span>
-                                    <span class="gauge-value" id="telemRamVal">0%</span>
-                                </div>
-                                <div class="gauge-bar-bg">
-                                    <div class="gauge-bar-fill emerald-fill" id="telemRamBar" style="width: 0%"></div>
-                                </div>
-                            </div>
-
-                            <!-- Disk Meter -->
-                            <div class="gauge-item">
-                                <div class="gauge-labels">
-                                    <span>Disk Storage (<span id="telemDiskGb">0</span> GB Free)</span>
-                                    <span class="gauge-value" id="telemDiskVal">0%</span>
-                                </div>
-                                <div class="gauge-bar-bg">
-                                    <div class="gauge-bar-fill amber-fill" id="telemDiskBar" style="width: 0%"></div>
-                                </div>
-                            </div>
-
-                            <div class="system-meta-grid">
-                                <div class="meta-item">
-                                    <span class="meta-label">Engine Host:</span>
-                                    <span class="meta-val">Localhost (Python 3.11)</span>
-                                </div>
-                                <div class="meta-item">
-                                    <span class="meta-label">Security Sandbox:</span>
-                                    <span class="meta-val green-text">ACTIVE (Offline)</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Quick Event Dispatcher -->
-                    <div class="hud-panel">
-                        <div class="panel-header">
-                            <h2 class="panel-title">QUICK EVENT DISPATCHER</h2>
-                            <span class="panel-badge">TEST HARNESS</span>
-                        </div>
-                        <div class="panel-body">
-                            <p class="section-desc">Broadcast simulated telemetry or incident events to trigger rules instantaneously:</p>
-                            <div class="quick-btn-grid">
-                                <button class="action-btn red-btn" onclick="quickDispatchEvent('system.metrics', {cpu_percent: 94.5, host: 'prod-api-01'})">
-                                    🔥 CPU Spike (94.5%)
-                                </button>
-                                <button class="action-btn amber-btn" onclick="quickDispatchEvent('auth.failed', {ip: '192.168.1.189', attempts: 5})">
-                                    🛡️ Auth Breach (5 Fails)
-                                </button>
-                                <button class="action-btn purple-btn" onclick="quickDispatchEvent('api.error', {status_code: 503, endpoint: '/api/v1/orders'})">
-                                    ⚡ API Outage (503)
-                                </button>
-                                <button class="action-btn green-btn" onclick="quickDispatchEvent('backup.completed', {status: 'success', database: 'prod_cluster', size_mb: 512})">
-                                    💾 DB Backup (Success)
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- System Metrics Simulator & Test Harness -->
-                    <div class="hud-panel" id="systemMetricsSimPanel">
-                        <div class="panel-header">
-                            <h2 class="panel-title">SYSTEM.METRICS SIMULATOR</h2>
-                            <span class="panel-badge">DRY RUN HARNESS</span>
-                        </div>
-                        <div class="panel-body">
-                            <p class="section-desc">Interactive telemetry simulator for <code>system.metrics</code> events. Adjust CPU utilization to test the <strong>High CPU Resource Sentinel (P90)</strong> rule with live PASS / TRIGGERED evaluation traces in safe Dry Run mode:</p>
-                            
-                            <div class="sim-controls-wrapper">
-                                <div class="sim-inputs-grid">
-                                    <div class="form-group flex-2">
-                                        <div class="label-with-val">
-                                            <label for="simCpuInput">CPU Utilization (%):</label>
-                                            <span class="cpu-val-display" id="simCpuValDisplay">92.0%</span>
-                                        </div>
-                                        <div class="cpu-slider-group">
-                                            <input type="range" id="simCpuSlider" class="hud-slider" min="0" max="100" step="0.5" value="92.0" oninput="syncCpuFromSlider(this.value)">
-                                            <input type="number" id="simCpuInput" class="hud-input cpu-number-input" min="0" max="100" step="0.5" value="92.0" oninput="syncCpuFromInput(this.value)">
-                                        </div>
-                                    </div>
-                                    <div class="form-group flex-1">
-                                        <label for="simHostInput">Target Host:</label>
-                                        <input type="text" id="simHostInput" class="hud-input" value="prod-api-01" placeholder="e.g. prod-api-01">
-                                    </div>
-                                </div>
-
-                                <div class="preset-prompts-bar sim-presets-bar">
-                                    <span class="preset-label">Test Thresholds:</span>
-                                    <button type="button" class="prompt-chip" onclick="setSimCpu(45.0)">45% (Normal Load)</button>
-                                    <button type="button" class="prompt-chip" onclick="setSimCpu(85.0)">85% (Boundary - Untriggered)</button>
-                                    <button type="button" class="prompt-chip" onclick="setSimCpu(92.0)">92% (High CPU Spike)</button>
-                                    <button type="button" class="prompt-chip" onclick="setSimCpu(98.5)">98.5% (Critical Alert)</button>
-                                </div>
-
-                                <div class="sim-actions-bar">
-                                    <label class="checkbox-container">
-                                        <input type="checkbox" id="simDryRunCheck" checked>
-                                        <span class="checkmark"></span>
-                                        Dry Run Mode (Safe Preview - Zero Real Side Effects)
-                                    </label>
-                                    <button type="button" class="hud-btn primary" id="btnRunMetricsSim" onclick="runMetricsSimulation()">
-                                        ⚡ Run system.metrics Simulation
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Live Simulation Automation Trace Output -->
-                            <div class="sim-trace-container" id="simTraceContainer" style="display: none;">
-                                <div class="sim-trace-header">
-                                    <h4>SIMULATION AUTOMATION TRACE</h4>
-                                    <span class="sim-status-pill" id="simTraceStatusPill">MATCHED</span>
-                                </div>
-                                <div class="sim-trace-meta" id="simTraceMeta">
-                                    <!-- Populated dynamically -->
-                                </div>
-                                <div class="sim-trace-rules-list" id="simTraceRulesList">
-                                    <!-- Populated dynamically -->
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Right: Live Activity Event Stream -->
-                <div class="dashboard-col-right">
-                    <div class="hud-panel fill-height">
-                        <div class="panel-header">
-                            <h2 class="panel-title">LIVE EVENT ACTIVITY STREAM</h2>
-                            <div class="stream-status">
-                                <span class="status-dot green pulse"></span> MONITORING
-                            </div>
-                        </div>
-                        <div class="panel-body stream-container" id="activityStreamContainer">
-                            <div class="stream-empty">Waiting for automation events...</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- TAB 2: AUTOMATION RULES -->
-        <section id="tab-rules" class="tab-panel">
-            <div class="toolbar">
-                <div class="category-filters" id="categoryFilterContainer">
-                    <button class="filter-pill active" onclick="filterRulesByCategory('All')">All</button>
-                    <button class="filter-pill" onclick="filterRulesByCategory('System')">System</button>
-                    <button class="filter-pill" onclick="filterRulesByCategory('Security')">Security</button>
-                    <button class="filter-pill" onclick="filterRulesByCategory('DevOps')">DevOps</button>
-                    <button class="filter-pill" onclick="filterRulesByCategory('NLP')">NLP</button>
-                    <button class="filter-pill" onclick="filterRulesByCategory('Data')">Data</button>
-                </div>
-                <div class="toolbar-right">
-                    <input type="text" class="search-input" id="ruleSearchInput" placeholder="Search rules..." oninput="searchRules()">
-                    <button class="hud-btn primary" onclick="openCreateRuleModal()">+ New Automation Rule</button>
-                </div>
-            </div>
-
-            <div class="rules-grid" id="rulesGrid">
-                <!-- Dynamically loaded via JavaScript -->
-            </div>
-        </section>
-
-        <!-- TAB 3: AI NLP SANDBOX -->
-        <section id="tab-nlp" class="tab-panel">
-            <div class="nlp-sandbox-layout">
-                <div class="nlp-input-card">
-                    <div class="card-header">
-                        <h2>OFFLINE NATURAL LANGUAGE SIMULATOR</h2>
-                        <span class="local-ai-badge">LOCAL HEURISTIC AI • 0 API KEY</span>
-                    </div>
-                    <p class="card-desc">Type any freeform incident report, system observation, or operational request. The local engine will parse intent, evaluate urgency & sentiment, extract server entities, and match active automation rules in dry-run mode.</p>
-
-                    <div class="preset-prompts-bar">
-                        <span class="preset-label">Sample Prompts:</span>
-                        <button class="prompt-chip" onclick="setNlpPrompt('Critical alert: High CPU Resource Sentinel P90 load surge detected on prod-api-01')">
-                            🔥 High CPU Sentinel (P90)
-                        </button>
-                        <button class="prompt-chip" onclick="setNlpPrompt('Critical emergency: database memory utilization surged to 96% on prod-db-01')">
-                            Memory Surge (96%)
-                        </button>
-                        <button class="prompt-chip" onclick="setNlpPrompt('Security Alert: Detected unauthorized brute force login attempts from IP 192.168.4.88')">
-                            IP Intrusion Threat
-                        </button>
-                        <button class="prompt-chip" onclick="setNlpPrompt('API gateway is down returning HTTP 500 internal errors on billing endpoint')">
-                            HTTP 500 Outage
-                        </button>
-                        <button class="prompt-chip" onclick="setNlpPrompt('Routine daily backup completed smoothly with 480MB archived for customer-vault')">
-                            Routine Backup
-                        </button>
-                    </div>
-
-                    <div class="input-row">
-                        <textarea id="nlpPromptInput" class="nlp-textarea" rows="3" placeholder="Enter incident report or natural language trigger..."></textarea>
-                    </div>
-
-                    <div class="input-actions">
-                        <label class="checkbox-container">
-                            <input type="checkbox" id="nlpDryRunCheck" checked>
-                            <span class="checkmark"></span>
-                            Dry Run Only (Preview rule matching without executing side effects)
-                        </label>
-                        <button class="hud-btn primary" onclick="analyzeNlpPrompt()">
-                            🚀 Analyze & Simulate Automations
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Analysis Results Panel -->
-                <div class="nlp-results-container" id="nlpResultsContainer" style="display:none;">
-                    <div class="results-header">
-                        <h3>NLP EXTRACTION & AUTOMATION TRACE</h3>
-                        <span class="timing-badge" id="nlpConfidenceBadge">Confidence: 0%</span>
-                    </div>
-
-                    <!-- Metrics Badges -->
-                    <div class="nlp-metrics-row">
-                        <div class="nlp-metric-badge">
-                            <span class="label">DETECTED INTENT</span>
-                            <span class="value" id="nlpIntentVal">-</span>
-                        </div>
-                        <div class="nlp-metric-badge">
-                            <span class="label">URGENCY SCORE</span>
-                            <span class="value" id="nlpUrgencyVal">0 / 100</span>
-                        </div>
-                        <div class="nlp-metric-badge">
-                            <span class="label">SEVERITY LEVEL</span>
-                            <span class="value" id="nlpSeverityVal">LOW</span>
-                        </div>
-                        <div class="nlp-metric-badge">
-                            <span class="label">SENTIMENT</span>
-                            <span class="value" id="nlpSentimentVal">Neutral</span>
-                        </div>
-                    </div>
-
-                    <!-- Extracted Entities -->
-                    <div class="entities-card">
-                        <h4>Extracted System Entities:</h4>
-                        <div id="nlpEntitiesContainer" class="entities-tags">
-                            <!-- Filled dynamically -->
-                        </div>
-                    </div>
-
-                    <!-- Rule Matching Simulation Traces -->
-                    <div class="matched-rules-card">
-                        <h4>Triggered Automation Rules:</h4>
-                        <div id="nlpMatchedRulesContainer" class="matched-rules-list">
-                            <!-- Filled dynamically -->
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- TAB: SYSTEM.METRICS SIMULATOR & TEST HARNESS -->
-        <section id="tab-simulator" class="tab-panel">
-            <div class="metrics-sim-page-layout">
-                <div class="hud-panel">
+                <!-- Left: Recent Executions -->
+                <div class="hud-panel flex-2">
                     <div class="panel-header">
-                        <h2 class="panel-title">SYSTEM.METRICS INTERACTIVE SIMULATOR</h2>
-                        <span class="panel-badge">OFFLINE TEST HARNESS</span>
+                        <h3>📜 RECENT FORENSIC EXECUTIONS</h3>
+                        <button class="hud-btn outline small" onclick="switchTab('logs')">Full Audit Trail &rarr;</button>
                     </div>
-                    <div class="panel-body">
-                        <p class="section-desc">Broadcast simulated <code>system.metrics</code> telemetry with custom CPU utilization. Evaluates <strong>High CPU Resource Sentinel (P90)</strong> with live PASS / TRIGGERED evaluation traces in safe Dry Run mode:</p>
+                    <div class="table-container mini-table">
+                        <table class="hud-table">
+                            <thead>
+                                <tr>
+                                    <th>Status</th>
+                                    <th>Workflow Rule</th>
+                                    <th>Trigger Event</th>
+                                    <th>Latency</th>
+                                    <th>Timestamp</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dashboardRecentLogs">
+                                <tr><td colspan="5" class="empty-cell">No recent dispatches</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
 
-                        <div class="sim-controls-wrapper">
-                            <div class="sim-inputs-grid">
-                                <div class="form-group flex-2">
-                                    <div class="label-with-val">
-                                        <label for="pageSimCpuInput">CPU Utilization (%):</label>
-                                        <span class="cpu-val-display" id="pageSimCpuValDisplay">92.0%</span>
-                                    </div>
-                                    <div class="cpu-slider-group">
-                                        <input type="range" id="pageSimCpuSlider" class="hud-slider" min="0" max="100" step="0.5" value="92.0" oninput="syncPageCpuFromSlider(this.value)">
-                                        <input type="number" id="pageSimCpuInput" class="hud-input cpu-number-input" min="0" max="100" step="0.5" value="92.0" oninput="syncPageCpuFromInput(this.value)">
-                                    </div>
-                                </div>
-                                <div class="form-group flex-1">
-                                    <label for="pageSimHostInput">Target Host:</label>
-                                    <input type="text" id="pageSimHostInput" class="hud-input" value="prod-api-01" placeholder="e.g. prod-api-01">
-                                </div>
-                            </div>
-
-                            <div class="preset-prompts-bar sim-presets-bar">
-                                <span class="preset-label">Test Threshold Presets:</span>
-                                <button type="button" class="prompt-chip" onclick="setPageSimCpu(45.0)">45% (Normal Load)</button>
-                                <button type="button" class="prompt-chip" onclick="setPageSimCpu(85.0)">85% (Boundary - Untriggered)</button>
-                                <button type="button" class="prompt-chip" onclick="setPageSimCpu(92.0)">🔥 92% (High CPU Spike - PASS/TRIGGERED)</button>
-                                <button type="button" class="prompt-chip" onclick="setPageSimCpu(98.5)">🚨 98.5% (Critical Alert)</button>
-                            </div>
-
-                            <div class="sim-actions-bar">
-                                <label class="checkbox-container">
-                                    <input type="checkbox" id="pageSimDryRunCheck" checked>
-                                    <span class="checkmark"></span>
-                                    Dry Run Mode (Safe Preview - Zero External Side Effects)
-                                </label>
-                                <button type="button" class="hud-btn primary" id="btnRunPageMetricsSim" onclick="runPageMetricsSimulation()">
-                                    ⚡ Run system.metrics Simulation
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Live Simulation Automation Trace Output -->
-                        <div class="sim-trace-container" id="pageSimTraceContainer" style="display: none;">
-                            <div class="sim-trace-header">
-                                <h4>SIMULATION AUTOMATION TRACE</h4>
-                                <span class="sim-status-pill" id="pageSimTraceStatusPill">MATCHED</span>
-                            </div>
-                            <div class="sim-trace-meta" id="pageSimTraceMeta">
-                                <!-- Populated dynamically -->
-                            </div>
-                            <div class="sim-trace-rules-list" id="pageSimTraceRulesList">
-                                <!-- Populated dynamically -->
-                            </div>
-                        </div>
+                <!-- Right: Active Incidents Quick-View -->
+                <div class="hud-panel flex-1">
+                    <div class="panel-header">
+                        <h3>🚨 CRITICAL ALERTS & INCIDENTS</h3>
+                        <button class="hud-btn outline small" onclick="switchTab('incidents')">Incident Center &rarr;</button>
+                    </div>
+                    <div class="incidents-container" id="dashboardIncidentsList">
+                        <div class="empty-cell">No active open incidents</div>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- TAB 4: EXECUTION LOGS -->
-        <section id="tab-logs" class="tab-panel">
-            <div class="toolbar">
-                <div class="category-filters">
-                    <button class="filter-pill active" onclick="filterLogsByStatus('all')">All Status</button>
-                    <button class="filter-pill" onclick="filterLogsByStatus('success')">Success</button>
-                    <button class="filter-pill" onclick="filterLogsByStatus('failed')">Failed</button>
-                    <button class="filter-pill" onclick="filterLogsByStatus('skipped')">Skipped</button>
+        <!-- TAB 2: WORKFLOW STUDIO -->
+        <section id="tab-rules" class="tab-panel">
+            <div class="panel-toolbar">
+                <div class="filter-group">
+                    <span class="filter-label">Filter Category:</span>
+                    <button class="filter-chip active" onclick="filterRulesCategory('All', this)">All</button>
+                    <button class="filter-chip" onclick="filterRulesCategory('System', this)">System</button>
+                    <button class="filter-chip" onclick="filterRulesCategory('Security', this)">Security</button>
+                    <button class="filter-chip" onclick="filterRulesCategory('DevOps', this)">DevOps</button>
+                    <button class="filter-chip" onclick="filterRulesCategory('NLP', this)">NLP</button>
+                    <button class="filter-chip" onclick="filterRulesCategory('Data', this)">Data</button>
                 </div>
-                <div class="toolbar-right">
-                    <button class="hud-btn outline" onclick="loadExecutionLogs()">🔄 Refresh</button>
-                    <button class="hud-btn red-btn" onclick="clearAllLogs()">🗑️ Clear Logs</button>
+                <div class="action-group">
+                    <button class="hud-btn primary" onclick="openNewRuleModal()">+ New Workflow</button>
                 </div>
             </div>
 
@@ -486,40 +287,398 @@
                 <table class="hud-table">
                     <thead>
                         <tr>
-                            <th>Timestamp</th>
-                            <th>Rule Name</th>
-                            <th>Trigger Event</th>
-                            <th>Status</th>
-                            <th>Duration</th>
+                            <th>State</th>
+                            <th>Workflow Name</th>
+                            <th>Category</th>
+                            <th>Trigger</th>
+                            <th>Priority</th>
+                            <th>Cooldown</th>
+                            <th>Runs</th>
+                            <th>Last Triggered</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
-                    <tbody id="logsTableBody">
-                        <tr><td colspan="6" class="text-center">Loading audit history...</td></tr>
+                    <tbody id="rulesTableBody">
+                        <tr><td colspan="9" class="empty-cell">Loading workflow rules...</td></tr>
                     </tbody>
                 </table>
             </div>
         </section>
 
-        <!-- TAB 5: BLUEPRINTS LIBRARY -->
-        <section id="tab-blueprints" class="tab-panel">
-            <div class="blueprints-intro">
-                <h2>BATTLE-TESTED AUTOMATION BLUEPRINTS</h2>
-                <p>Deploy enterprise-grade rules into your command center with one click. Pre-configured triggers, conditions, and multi-action workflows.</p>
+        <!-- TAB 3: INBOUND WEBHOOKS & EVENT INGESTION -->
+        <section id="tab-webhooks" class="tab-panel">
+            <div class="panel-header">
+                <h2>INBOUND WEBHOOK GATEWAYS & EVENT DISPATCHER</h2>
+                <button class="hud-btn primary" onclick="openNewWebhookModal()">+ Create Inbound Webhook</button>
             </div>
-            <div class="blueprints-grid" id="blueprintsGrid">
-                <!-- Dynamically populated -->
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                Ingest real-time signals from Datadog, Stripe, GitHub, AWS SNS, or custom microservices.
+                Supports optional HMAC-SHA256 signature verification.
+            </p>
+
+            <div class="dashboard-columns">
+                <!-- Left: Webhook Endpoints List -->
+                <div class="hud-panel flex-2">
+                    <div class="panel-header">
+                        <h3>ACTIVE WEBHOOK ENDPOINTS</h3>
+                    </div>
+                    <div class="table-container">
+                        <table class="hud-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Ingestion URL (1-Click Copy)</th>
+                                    <th>Target Rule</th>
+                                    <th>Requests</th>
+                                    <th>Last Received</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="webhooksTableBody">
+                                <tr><td colspan="6" class="empty-cell">No inbound webhooks configured</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Curl Example -->
+                    <div style="margin-top: 24px;">
+                        <h4 style="color: var(--text-primary); margin-bottom: 8px;">Quick Ingest Example (cURL)</h4>
+                        <div class="curl-snippet" id="webhookCurlSnippet">
+curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_stream" \
+  -H "Content-Type: application/json" \
+  -d '{"event": "system.metrics", "cpu_percent": 94.5, "host": "prod-k8s-01"}'
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Manual Event Ingestion Simulator -->
+                <div class="hud-panel flex-1">
+                    <div class="panel-header">
+                        <h3>⚡ MANUAL EVENT DISPATCHER</h3>
+                    </div>
+                    <form onsubmit="handleManualEventDispatch(event)">
+                        <div class="form-group">
+                            <label>Event Name</label>
+                            <input type="text" id="manualEventName" class="hud-input" value="system.metrics" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Quick Preload Payload</label>
+                            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px;">
+                                <button type="button" class="hud-btn small outline" onclick="preloadPayload('cpu_surge')">CPU Surge</button>
+                                <button type="button" class="hud-btn small outline" onclick="preloadPayload('failed_auth')">Failed Auth</button>
+                                <button type="button" class="hud-btn small outline" onclick="preloadPayload('backup_done')">Backup Done</button>
+                                <button type="button" class="hud-btn small outline" onclick="preloadPayload('api_503')">API 503 Outage</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Payload (JSON)</label>
+                            <textarea id="manualEventPayload" class="hud-textarea" rows="6" required>{"cpu_percent": 91.5, "host": "prod-app-01"}</textarea>
+                        </div>
+                        <div class="form-row">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="manualEventDryRun"> Dry-Run Simulation Mode
+                            </label>
+                        </div>
+                        <button type="submit" class="hud-btn primary" style="width: 100%; margin-top: 10px;">Dispatch Event</button>
+                    </form>
+                    <div id="manualEventOutput" style="margin-top: 15px; display: none;">
+                        <h4 style="color: var(--cyan-glow); font-size: 0.85rem; margin-bottom: 6px;">Dispatch Result:</h4>
+                        <pre class="curl-snippet" id="manualEventOutputJson" style="max-height: 180px;"></pre>
+                    </div>
+                </div>
             </div>
         </section>
 
-        <!-- TAB 6: SETTINGS & SYSTEM -->
+        <!-- TAB 4: NLP INCIDENT TRIAGE -->
+        <section id="tab-nlp" class="tab-panel">
+            <div class="panel-header">
+                <h2>LOCAL HEURISTIC NLP INCIDENT TRIAGE CONSOLE</h2>
+                <span class="panel-badge">100% OFFLINE • ZERO CLOUD API • SUB-MILLISECOND LATENCY</span>
+            </div>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                Enter raw operational incident reports or natural language prompts. The heuristic NLP engine extracts intents,
+                calculates continuous urgency scores, parses network entities, and executes matching workflow pipelines.
+            </p>
+
+            <div class="dashboard-columns">
+                <div class="hud-panel flex-1">
+                    <h3>Incident Prompt Input</h3>
+                    <div style="margin-top: 12px;">
+                        <textarea id="nlpInputText" class="hud-textarea" rows="5" placeholder="e.g. Critical intrusion detected from host 192.168.1.100 with 6 failed root login attempts!"></textarea>
+                    </div>
+                    <div style="margin-top: 12px; display: flex; gap: 10px;">
+                        <button class="hud-btn primary flex-1" onclick="runNlpTriage(false)">⚡ Run Live Automated Action</button>
+                        <button class="hud-btn outline flex-1" onclick="runNlpTriage(true)">🧪 Dry-Run Simulation</button>
+                    </div>
+                    <div style="margin-top: 16px;">
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Quick Sample Presets:</span>
+                        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+                            <button class="hud-btn small outline" onclick="setNlpSample(1)">CPU Sentinel Spike</button>
+                            <button class="hud-btn small outline" onclick="setNlpSample(2)">Brute-Force Intrusion</button>
+                            <button class="hud-btn small outline" onclick="setNlpSample(3)">API Gateway 502 Crash</button>
+                            <button class="hud-btn small outline" onclick="setNlpSample(4)">Database Snapshot</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="hud-panel flex-1">
+                    <h3>NLP Extracted Intelligence</h3>
+                    <div id="nlpResultContainer" style="margin-top: 12px;">
+                        <div class="empty-cell">Submit an incident text prompt to view extracted intent, urgency, and entities.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 5: METRICS SIMULATOR -->
+        <section id="tab-simulator" class="tab-panel">
+            <div class="panel-header">
+                <h2>INTERACTIVE HARDWARE & METRICS SIMULATOR</h2>
+                <span class="panel-badge">SAFE TEST HARNESS • DRY-RUN COMPATIBLE</span>
+            </div>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                Slide threshold variables to simulate resource spikes without impacting real hardware. Test trigger conditions in real time.
+            </p>
+
+            <div class="dashboard-columns">
+                <div class="hud-panel flex-1">
+                    <h3>Synthetic Telemetry Controls</h3>
+                    <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 16px;">
+                        <div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                <label>Simulated CPU Load: <span id="simCpuVal" style="color: var(--cyan-glow); font-weight: 700;">88%</span></label>
+                                <span style="font-size: 0.75rem; color: var(--amber-glow);">High CPU Sentinel threshold: 85%</span>
+                            </div>
+                            <input type="range" id="simCpuSlider" min="0" max="100" value="88" class="hud-range" oninput="updateSimVal('simCpuVal', this.value + '%')">
+                        </div>
+
+                        <div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                <label>Failed Login Attempts: <span id="simAuthVal" style="color: var(--red-glow); font-weight: 700;">5</span></label>
+                                <span style="font-size: 0.75rem; color: var(--amber-glow);">Quarantine threshold: &ge; 3</span>
+                            </div>
+                            <input type="range" id="simAuthSlider" min="1" max="10" value="5" class="hud-range" oninput="updateSimVal('simAuthVal', this.value)">
+                        </div>
+
+                        <div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                <label>API Status Code: <span id="simHttpVal" style="color: var(--purple-glow); font-weight: 700;">503</span></label>
+                                <span style="font-size: 0.75rem; color: var(--amber-glow);">Auto-Recovery threshold: &ge; 500</span>
+                            </div>
+                            <select id="simHttpSelect" class="hud-input" onchange="updateSimVal('simHttpVal', this.value)">
+                                <option value="200">200 OK (Healthy)</option>
+                                <option value="400">400 Bad Request</option>
+                                <option value="401">401 Unauthorized</option>
+                                <option value="404">404 Not Found</option>
+                                <option value="500">500 Internal Error</option>
+                                <option value="502">502 Bad Gateway</option>
+                                <option value="503" selected>503 Service Unavailable</option>
+                            </select>
+                        </div>
+
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <button class="hud-btn primary flex-1" onclick="runMetricsSimulation(false)">⚡ Trigger Live Event</button>
+                            <button class="hud-btn outline flex-1" onclick="runMetricsSimulation(true)">🧪 Dry-Run Trace</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="hud-panel flex-1">
+                    <h3>Simulation Output & Evaluation Trace</h3>
+                    <div id="simResultContainer" style="margin-top: 12px;">
+                        <div class="empty-cell">Click 'Trigger Live Event' or 'Dry-Run Trace' to evaluate conditions.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 6: FORENSICS & AUDITS -->
+        <section id="tab-logs" class="tab-panel">
+            <div class="panel-toolbar">
+                <div class="filter-group">
+                    <span class="filter-label">Filter Status:</span>
+                    <button class="filter-chip active" onclick="filterLogsStatus('all', this)">All</button>
+                    <button class="filter-chip" onclick="filterLogsStatus('success', this)">Success</button>
+                    <button class="filter-chip" onclick="filterLogsStatus('skipped', this)">Skipped</button>
+                    <button class="filter-chip" onclick="filterLogsStatus('failed', this)">Failed</button>
+                </div>
+                <div class="action-group">
+                    <button class="action-btn red-btn" onclick="clearAllLogs()">Purge Logs</button>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table class="hud-table">
+                    <thead>
+                        <tr>
+                            <th>Execution ID</th>
+                            <th>Workflow Rule</th>
+                            <th>Trigger Event</th>
+                            <th>Status</th>
+                            <th>Execution Latency</th>
+                            <th>Timestamp</th>
+                            <th>Inspect</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTableBody">
+                        <tr><td colspan="7" class="empty-cell">Loading forensic audit logs...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- TAB 7: INCIDENT RESPONSE CENTER -->
+        <section id="tab-incidents" class="tab-panel">
+            <div class="panel-toolbar">
+                <div class="filter-group">
+                    <span class="filter-label">Status Filter:</span>
+                    <button class="filter-chip active" onclick="filterIncidents('all', this)">All</button>
+                    <button class="filter-chip" onclick="filterIncidents('open', this)">Open Only</button>
+                    <button class="filter-chip" onclick="filterIncidents('acknowledged', this)">Acknowledged</button>
+                    <button class="filter-chip" onclick="filterIncidents('resolved', this)">Resolved</button>
+                </div>
+                <div class="action-group">
+                    <button class="hud-btn outline" onclick="loadIncidents()">Refresh Queue</button>
+                </div>
+            </div>
+
+            <div class="incidents-container" id="incidentsQueueContainer" style="margin-top: 16px;">
+                <div class="empty-cell">Loading incident queue...</div>
+            </div>
+        </section>
+
+        <!-- TAB 8: API KEYS & SECURITY -->
+        <section id="tab-apikeys" class="tab-panel">
+            <div class="panel-header">
+                <h2>PROGRAMMATIC API KEYS & INTEGRATIONS</h2>
+                <button class="hud-btn primary" onclick="openNewApiKeyModal()">+ Generate New API Key</button>
+            </div>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                Authenticate CLI scripts, CI/CD pipelines, or edge ingestion agents via the <code>X-API-Key: sk_live_...</code> header.
+                Keys are stored using SHA-256 hashes and can be revoked instantly.
+            </p>
+
+            <div class="table-container">
+                <table class="hud-table">
+                    <thead>
+                        <tr>
+                            <th>Key Description</th>
+                            <th>Key Prefix</th>
+                            <th>Permissions</th>
+                            <th>Created At</th>
+                            <th>Last Used</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="apiKeysTableBody">
+                        <tr><td colspan="6" class="empty-cell">Loading API keys...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- TAB 9: TEAM & TENANT -->
+        <section id="tab-team" class="tab-panel">
+            <div class="panel-header">
+                <h2>ORGANIZATION WORKSPACE & TEAM RBAC</h2>
+                <button class="hud-btn primary" onclick="openAddMemberModal()">+ Add Team Member</button>
+            </div>
+
+            <!-- Workspace Plan Overview -->
+            <div class="metrics-grid" style="margin-bottom: 24px;">
+                <div class="metric-card purple">
+                    <div class="metric-header">
+                        <span class="metric-title">SUBSCRIPTION TIER</span>
+                        <span class="metric-badge">ENTERPRISE</span>
+                    </div>
+                    <div class="metric-val" id="orgPlanTier">Enterprise Tier</div>
+                    <div class="metric-sub" id="orgSlug">slug: acme-global</div>
+                </div>
+
+                <div class="metric-card cyan">
+                    <div class="metric-header">
+                        <span class="metric-title">MAX WORKFLOW RULES</span>
+                        <span class="metric-badge">QUOTA</span>
+                    </div>
+                    <div class="metric-val" id="orgMaxRules">250 Rules</div>
+                    <div class="metric-sub">Dedicated tenant allocation</div>
+                </div>
+
+                <div class="metric-card emerald">
+                    <div class="metric-header">
+                        <span class="metric-title">MONTHLY EVENT QUOTA</span>
+                        <span class="metric-badge">VOLUME</span>
+                    </div>
+                    <div class="metric-val" id="orgMaxEvents">1,000,000</div>
+                    <div class="metric-sub">Sub-millisecond processing</div>
+                </div>
+            </div>
+
+            <!-- Team Members Table -->
+            <div class="hud-panel" style="margin-bottom: 24px;">
+                <div class="panel-header">
+                    <h3>TEAM MEMBERS & RBAC DIRECTORY</h3>
+                </div>
+                <div class="table-container">
+                    <table class="team-table">
+                        <thead>
+                            <tr>
+                                <th>Full Name</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Created</th>
+                            </tr>
+                        </thead>
+                        <tbody id="teamMembersTableBody">
+                            <tr><td colspan="4" class="empty-cell">Loading team directory...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Compliance Audit Trail Table -->
+            <div class="hud-panel">
+                <div class="panel-header">
+                    <h3>COMPLIANCE & SECURITY AUDIT TRAIL</h3>
+                </div>
+                <div class="table-container">
+                    <table class="hud-table">
+                        <thead>
+                            <tr>
+                                <th>Action</th>
+                                <th>Resource Type</th>
+                                <th>Resource ID</th>
+                                <th>IP Address</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody id="auditTrailTableBody">
+                            <tr><td colspan="5" class="empty-cell">Loading compliance audit logs...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 10: BLUEPRINTS -->
+        <section id="tab-blueprints" class="tab-panel">
+            <div class="blueprints-intro">
+                <h2>ENTERPRISE AUTOMATION BLUEPRINTS</h2>
+                <p>One-click deployment of battle-tested rules into your active workspace. Pre-configured triggers, conditions, and actions.</p>
+            </div>
+            <div class="blueprints-grid" id="blueprintsGrid">
+                <!-- Populated dynamically -->
+            </div>
+        </section>
+
+        <!-- TAB 11: SETTINGS -->
         <section id="tab-settings" class="tab-panel">
             <div class="settings-grid">
                 <div class="settings-card">
                     <h3>DATA MANAGEMENT</h3>
                     <p>Export your configured automation rules or import rule sets from another instance:</p>
                     <div class="settings-btn-row">
-                        <a href="/api/export" class="hud-btn primary" download="command_center_rules.json">
+                        <a href="/api/export" class="hud-btn primary" download="opsflow_rules.json">
                             📥 Export Rules (JSON)
                         </a>
                         <label class="hud-btn outline file-btn">
@@ -541,12 +700,193 @@
                 <div class="settings-card">
                     <h3>ENGINE ARCHITECTURE & SPECS</h3>
                     <div class="specs-list">
-                        <div class="spec-row"><span>Engine Runtime:</span><span>Python 3.11 / Flask</span></div>
-                        <div class="spec-row"><span>Storage Engine:</span><span>SQLite (Thread-safe WAL)</span></div>
-                        <div class="spec-row"><span>NLP Model:</span><span>Local Rule & Heuristic Lexicons (0 API keys)</span></div>
-                        <div class="spec-row"><span>Action Executors:</span><span>Notification, Log, File, Webhook, Email, Command</span></div>
-                        <div class="spec-row"><span>Privacy Guarantee:</span><span>100% Local / Zero Outbound Telemetry</span></div>
+                        <div class="spec-row"><span>Engine Runtime:</span><span>Python Flask 3.1 / SQLAlchemy 2.0</span></div>
+                        <div class="spec-row"><span>Persistence Engine:</span><span>SQLite WAL (Local) / PostgreSQL Ready</span></div>
+                        <div class="spec-row"><span>NLP Model:</span><span>Local Heuristic Core (0 External Tokens)</span></div>
+                        <div class="spec-row"><span>Action Dispatchers:</span><span>Real HTTP Webhook, Alert, Log, File, Email</span></div>
+                        <div class="spec-row"><span>Security Posture:</span><span>Multi-Tenant Scoped / Scoped API Keys</span></div>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 12: CRM LEADS & INQUIRIES -->
+        <section id="tab-leads" class="tab-panel">
+            <div class="rules-header">
+                <div class="rules-header-title">
+                    <h2>CRM LEADS & CUSTOMER INQUIRIES</h2>
+                    <p>AI-scored customer leads, intent classification, automated response drafts, and smart department routing.</p>
+                </div>
+                <div class="rules-header-actions">
+                    <button class="hud-btn primary" onclick="openNewLeadModal()">
+                        <span class="icon">➕</span> Ingest New Lead
+                    </button>
+                    <button class="hud-btn outline" onclick="loadLeads()">
+                        <span class="icon">🔄</span> Refresh Pipeline
+                    </button>
+                </div>
+            </div>
+
+            <!-- Leads Summary KPI Counters -->
+            <div class="metrics-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 20px;">
+                <div class="metric-card cyan">
+                    <div class="metric-header"><span class="metric-title">TOTAL LEADS</span><span class="metric-badge">PIPELINE</span></div>
+                    <div class="metric-val" id="leadsKpiTotal">0</div>
+                    <div class="metric-sub">Inquiries Ingested</div>
+                </div>
+                <div class="metric-card emerald">
+                    <div class="metric-header"><span class="metric-title">HIGH INTENT (>=70)</span><span class="metric-badge">SALES READY</span></div>
+                    <div class="metric-val" id="leadsKpiQualified">0</div>
+                    <div class="metric-sub">Hot Opportunities</div>
+                </div>
+                <div class="metric-card purple">
+                    <div class="metric-header"><span class="metric-title">SALES ROUTED</span><span class="metric-badge">DEPT</span></div>
+                    <div class="metric-val" id="leadsKpiSales">0</div>
+                    <div class="metric-sub">Account Executives</div>
+                </div>
+                <div class="metric-card amber">
+                    <div class="metric-header"><span class="metric-title">SUPPORT ROUTED</span><span class="metric-badge">DEPT</span></div>
+                    <div class="metric-val" id="leadsKpiSupport">0</div>
+                    <div class="metric-sub">Helpdesk / Triage</div>
+                </div>
+            </div>
+
+            <!-- Filter Controls -->
+            <div class="rules-filter-bar" style="margin-bottom: 20px;">
+                <div class="search-box">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="leadSearchInput" class="hud-input" placeholder="Search by name, email, company, or message..." oninput="filterLeads()">
+                </div>
+                <div class="category-filters">
+                    <select id="leadStatusFilter" class="hud-input" onchange="filterLeads()">
+                        <option value="all">All Statuses</option>
+                        <option value="new">New</option>
+                        <option value="qualified">Qualified</option>
+                        <option value="follow_up">Follow Up</option>
+                        <option value="closed">Closed</option>
+                        <option value="archived">Archived</option>
+                    </select>
+                    <select id="leadDeptFilter" class="hud-input" onchange="filterLeads()">
+                        <option value="all">All Departments</option>
+                        <option value="Sales">Sales</option>
+                        <option value="Support">Support</option>
+                        <option value="Priority Support">Priority Support</option>
+                        <option value="General Queue">General Queue</option>
+                        <option value="Review">Review</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Leads Table -->
+            <div class="table-container">
+                <table class="hud-table" id="leadsTable">
+                    <thead>
+                        <tr>
+                            <th>CONTACT / COMPANY</th>
+                            <th>INQUIRY MESSAGE</th>
+                            <th>AI INTENT</th>
+                            <th>LEAD SCORE</th>
+                            <th>ROUTED DEPT</th>
+                            <th>STATUS</th>
+                            <th>RECEIVED</th>
+                            <th>ACTIONS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leadsTableBody">
+                        <tr><td colspan="8" class="text-center">Loading CRM leads...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- TAB 13: API DOCUMENTATION -->
+        <section id="tab-apidocs" class="tab-panel">
+            <div class="blueprints-intro" style="margin-bottom: 24px;">
+                <h2>PROGRAMMATIC REST API DOCUMENTATION</h2>
+                <p>Integrate OpsFlow Cloud directly into your external microservices, webhooks, or third-party CRM platforms. All requests support Bearer API Key authentication or Session cookies.</p>
+                <div style="margin-top: 10px; display: flex; gap: 15px; align-items: center;">
+                    <span class="role-badge admin">Base URL: <code style="color:#00ffff;">/api/v1</code></span>
+                    <span class="role-badge operator">Auth Header: <code style="color:#10b981;">X-API-Key: sk_live_...</code></span>
+                </div>
+            </div>
+
+            <div class="api-docs-grid" style="display: flex; flex-direction: column; gap: 20px;">
+                <!-- Endpoint 1: Event Ingestion -->
+                <div class="settings-card" style="border-left: 4px solid #10b981;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <span class="method-badge post" style="background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-family: monospace;">POST</span>
+                            <span style="font-family: monospace; font-size: 1.1rem; color: #fff;">/api/v1/events/ingest</span>
+                        </div>
+                        <span class="role-badge viewer">Permission: Ingest / Write</span>
+                    </div>
+                    <p style="color: #94a3b8; margin-bottom: 12px;">Ingests an incoming event (e.g. <code>lead.created</code>, <code>system.metrics</code>, <code>customer.inquiry</code>) and triggers matching workflows.</p>
+                    <div style="background: #0b1120; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 0.85rem; color: #e2e8f0; overflow-x: auto; margin-bottom: 10px;">
+<pre style="margin: 0;">curl -X POST https://your-domain.onrender.com/api/v1/events/ingest \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk_live_your_key_here" \
+  -d '{
+    "event": "lead.created",
+    "name": "Jane Smith",
+    "email": "jane@enterprise-client.com",
+    "message": "We need enterprise automation for 500 team members with a $40,000 annual budget.",
+    "phone": "+1 (555) 987-6543",
+    "dry_run": false
+  }'</pre>
+                    </div>
+                    <p style="color: #64748b; font-size: 0.85rem; margin: 0;">Response: <code>200 OK</code> with executed rules, condition results, AI analysis, and CRM lead record ID.</p>
+                </div>
+
+                <!-- Endpoint 2: Workflows CRUD -->
+                <div class="settings-card" style="border-left: 4px solid #06b6d4;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <span class="method-badge get" style="background: rgba(6, 182, 212, 0.2); color: #06b6d4; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-family: monospace;">GET</span>
+                            <span style="font-family: monospace; font-size: 1.1rem; color: #fff;">/api/v1/workflows</span>
+                        </div>
+                        <span class="role-badge viewer">Permission: Read</span>
+                    </div>
+                    <p style="color: #94a3b8; margin-bottom: 12px;">Lists all configured workflows, visual steps, and triggers for the active workspace.</p>
+                    <div style="background: #0b1120; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 0.85rem; color: #e2e8f0; overflow-x: auto; margin-bottom: 10px;">
+<pre style="margin: 0;">curl -X GET https://your-domain.onrender.com/api/v1/workflows \
+  -H "X-API-Key: sk_live_your_key_here"</pre>
+                    </div>
+                </div>
+
+                <!-- Endpoint 3: Manual Execute Workflow -->
+                <div class="settings-card" style="border-left: 4px solid #a855f7;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <span class="method-badge post" style="background: rgba(168, 85, 247, 0.2); color: #a855f7; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-family: monospace;">POST</span>
+                            <span style="font-family: monospace; font-size: 1.1rem; color: #fff;">/api/v1/workflows/{id}/execute</span>
+                        </div>
+                        <span class="role-badge operator">Permission: Execute</span>
+                    </div>
+                    <p style="color: #94a3b8; margin-bottom: 12px;">Triggers explicit immediate execution of a specific workflow rule with custom payload. Supports <code>"dry_run": true</code> for zero side effects.</p>
+                </div>
+
+                <!-- Endpoint 4: CRM Leads Retrieval -->
+                <div class="settings-card" style="border-left: 4px solid #f59e0b;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <span class="method-badge get" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-family: monospace;">GET</span>
+                            <span style="font-family: monospace; font-size: 1.1rem; color: #fff;">/api/v1/leads?status=qualified</span>
+                        </div>
+                        <span class="role-badge viewer">Permission: Read</span>
+                    </div>
+                    <p style="color: #94a3b8; margin-bottom: 12px;">Returns paginated CRM leads filtered by status or search terms, complete with predictive lead score and AI draft response.</p>
+                </div>
+
+                <!-- Endpoint 5: System Health -->
+                <div class="settings-card" style="border-left: 4px solid #10b981;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <span class="method-badge get" style="background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-family: monospace;">GET</span>
+                            <span style="font-family: monospace; font-size: 1.1rem; color: #fff;">/health</span>
+                        </div>
+                        <span class="role-badge" style="background: rgba(255,255,255,0.1); color: #fff;">Public / Load Balancer</span>
+                    </div>
+                    <p style="color: #94a3b8; margin-bottom: 12px;">Cloud health probe returning database connectivity, engine online status, and service uptime. Used by Render and Kubernetes liveness probes.</p>
                 </div>
             </div>
         </section>
@@ -557,7 +897,7 @@
     <div class="hud-modal-overlay" id="ruleModal" style="display:none;">
         <div class="hud-modal">
             <div class="modal-header">
-                <h3 id="modalTitle">Create New Automation Rule</h3>
+                <h3 id="modalTitle">Create New Automation Workflow</h3>
                 <button class="close-btn" onclick="closeRuleModal()">&times;</button>
             </div>
             <div class="modal-body">
@@ -613,6 +953,7 @@
                             <select id="formTriggerType" class="hud-input">
                                 <option value="event">System Event</option>
                                 <option value="natural_text">Natural Text (NLP)</option>
+                                <option value="webhook">Inbound Webhook</option>
                                 <option value="manual">Manual Trigger</option>
                             </select>
                         </div>
@@ -648,18 +989,18 @@
 
                     <div class="modal-footer">
                         <button type="button" class="hud-btn outline" onclick="closeRuleModal()">Cancel</button>
-                        <button type="submit" class="hud-btn primary">Save Automation Rule</button>
+                        <button type="submit" class="hud-btn primary">Save Workflow Rule</button>
                     </div>
                 </form>
             </div>
         </div>
     </div>
 
-    <!-- LOG DETAIL MODAL -->
+    <!-- FORENSIC LOG DETAIL MODAL -->
     <div class="hud-modal-overlay" id="logDetailModal" style="display:none;">
         <div class="hud-modal">
             <div class="modal-header">
-                <h3>Execution Trace Details</h3>
+                <h3>Forensic Execution Trace Details</h3>
                 <button class="close-btn" onclick="closeLogModal()">&times;</button>
             </div>
             <div class="modal-body">
@@ -667,6 +1008,156 @@
             </div>
             <div class="modal-footer">
                 <button class="hud-btn primary" onclick="closeLogModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DEMO PERSONA SWITCHER MODAL -->
+    <div class="hud-modal-overlay" id="personaModal" style="display:none;">
+        <div class="hud-modal" style="max-width: 520px;">
+            <div class="modal-header">
+                <h3>Select Role / User Persona</h3>
+                <button class="close-btn" onclick="closePersonaModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 0.9rem;">
+                    Quickly switch personas to experience Role-Based Access Control (RBAC) in action:
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <button class="incident-card" style="cursor: pointer; text-align: left; width: 100%;" onclick="quickLoginPersona('admin@opsflow.io', 'AdminSecure2026!')">
+                        <div>
+                            <div style="font-weight: 700; color: var(--text-primary);">👑 Sarah Lin (VP Ops) <span class="role-badge admin">ADMIN</span></div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Full administrative control: create/delete rules, manage team, revoke API keys.</div>
+                        </div>
+                    </button>
+                    <button class="incident-card" style="cursor: pointer; text-align: left; width: 100%;" onclick="quickLoginPersona('operator@opsflow.io', 'Operator2026!')">
+                        <div>
+                            <div style="font-weight: 700; color: var(--text-primary);">🛠️ Alex Rivera (Lead SRE) <span class="role-badge operator">OPERATOR</span></div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Operational access: create, edit, run workflows, acknowledge/resolve incidents.</div>
+                        </div>
+                    </button>
+                    <button class="incident-card" style="cursor: pointer; text-align: left; width: 100%;" onclick="quickLoginPersona('viewer@opsflow.io', 'Viewer2026!')">
+                        <div>
+                            <div style="font-weight: 700; color: var(--text-primary);">👁️ Jordan Smith (Auditor) <span class="role-badge viewer">VIEWER</span></div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Read-only access: view metrics, audit logs, and inspection traces.</div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="hud-btn outline" onclick="closePersonaModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW API KEY MODAL -->
+    <div class="hud-modal-overlay" id="newApiKeyModal" style="display:none;">
+        <div class="hud-modal" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>Generate Programmatic API Key</h3>
+                <button class="close-btn" onclick="closeNewApiKeyModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="newApiKeyForm" onsubmit="submitNewApiKey(event)">
+                    <div class="form-group">
+                        <label>Key Name / Description *</label>
+                        <input type="text" id="newKeyName" class="hud-input" required placeholder="e.g., GitHub Actions Deploy Key">
+                    </div>
+                    <div class="form-group">
+                        <label>Permission Scope</label>
+                        <select id="newKeyPermissions" class="hud-input">
+                            <option value="*">Full Access (*)</option>
+                            <option value="events:ingest,rules:read">Ingestion & Read-Only</option>
+                            <option value="events:ingest">Event Ingestion Only</option>
+                        </select>
+                    </div>
+                    <div class="modal-footer" style="margin-top: 20px;">
+                        <button type="button" class="hud-btn outline" onclick="closeNewApiKeyModal()">Cancel</button>
+                        <button type="submit" class="hud-btn primary">Generate Key</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- API KEY REVEAL MODAL -->
+    <div class="hud-modal-overlay" id="apiKeyRevealModal" style="display:none;">
+        <div class="hud-modal" style="max-width: 520px;">
+            <div class="modal-header">
+                <h3 style="color: var(--cyan-glow);">🔒 Secret API Key Generated</h3>
+                <button class="close-btn" onclick="closeApiKeyRevealModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="token-reveal-banner">
+                    <strong>IMPORTANT:</strong> Store this key safely. For security reasons, it cannot be shown again!
+                    <div class="token-code-row">
+                        <span class="token-code" id="revealedSecretToken">sk_live_...</span>
+                        <button class="copy-btn" onclick="copyRevealedToken()">Copy</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="hud-btn primary" onclick="closeApiKeyRevealModal()">I Have Saved My Secret Key</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW WEBHOOK MODAL -->
+    <div class="hud-modal-overlay" id="newWebhookModal" style="display:none;">
+        <div class="hud-modal" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>Create Inbound Webhook Endpoint</h3>
+                <button class="close-btn" onclick="closeNewWebhookModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form onsubmit="submitNewWebhook(event)">
+                    <div class="form-group">
+                        <label>Endpoint Name *</label>
+                        <input type="text" id="newWebhookName" class="hud-input" required placeholder="e.g., Stripe Payment Ingest">
+                    </div>
+                    <div class="form-group">
+                        <label>Optional Secret Token (for HMAC-SHA256)</label>
+                        <input type="text" id="newWebhookSecret" class="hud-input" placeholder="Leave blank to auto-generate">
+                    </div>
+                    <div class="modal-footer" style="margin-top: 20px;">
+                        <button type="button" class="hud-btn outline" onclick="closeNewWebhookModal()">Cancel</button>
+                        <button type="submit" class="hud-btn primary">Create Endpoint</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADD MEMBER MODAL -->
+    <div class="hud-modal-overlay" id="addMemberModal" style="display:none;">
+        <div class="hud-modal" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>Invite Team Member</h3>
+                <button class="close-btn" onclick="closeAddMemberModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form onsubmit="submitAddMember(event)">
+                    <div class="form-group">
+                        <label>Full Name *</label>
+                        <input type="text" id="newMemberName" class="hud-input" required placeholder="e.g., Jordan Smith">
+                    </div>
+                    <div class="form-group">
+                        <label>Email Address *</label>
+                        <input type="email" id="newMemberEmail" class="hud-input" required placeholder="e.g., jordan@company.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Role</label>
+                        <select id="newMemberRole" class="hud-input">
+                            <option value="operator">Operator (Create & Run Automations)</option>
+                            <option value="viewer">Viewer (Read-Only Auditing)</option>
+                            <option value="admin">Admin (Full Control)</option>
+                        </select>
+                    </div>
+                    <div class="modal-footer" style="margin-top: 20px;">
+                        <button type="button" class="hud-btn outline" onclick="closeAddMemberModal()">Cancel</button>
+                        <button type="submit" class="hud-btn primary">Add Member</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>

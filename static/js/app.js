@@ -1,7 +1,8 @@
 /**
- * AI AUTOMATION COMMAND CENTER - FRONTEND ENGINE CONTROLLER
- * Handles HUD telemetry, rule creation/execution, NLP sandbox,
- * audit log inspection, blueprints, and live event streaming.
+ * OpsFlow Cloud Enterprise Frontend Application Controller
+ * Handles Multi-Tenancy, RBAC Persona switching, Visual Workflow Studio,
+ * Inbound Webhooks, NLP Incident Triage, Execution Forensics,
+ * Incident Management, Scoped API Keys, and Team Directory.
  */
 
 // Application State
@@ -11,24 +12,34 @@ const state = {
     logs: [],
     blueprints: [],
     notifications: [],
+    incidents: [],
+    webhooks: [],
+    apiKeys: [],
+    teamMembers: [],
+    auditLogs: [],
+    organizations: [],
+    currentOrg: null,
+    currentUser: null,
+    userRole: 'admin',
     selectedCategory: 'All',
     selectedLogStatus: 'all',
+    selectedIncidentStatus: 'all',
     engineRunning: true
 };
 
 // ==========================================
-// INITIALIZATION & EVENT LOOPS
+// INITIALIZATION & REAL-TIME EVENT LOOPS
 // ==========================================
 
 document.addEventListener('DOMContentLoaded', () => {
     initClock();
+    initAuthAndTenancy();
     refreshAllData();
 
     // Telemetry and status poll (every 2.5 seconds)
     setInterval(pollTelemetry, 2500);
 
-    // Event stream & notifications poll (every 3 seconds)
-    setInterval(pollEventStream, 3000);
+    // Event stream & notifications poll (every 5 seconds)
     setInterval(pollNotifications, 5000);
 });
 
@@ -44,29 +55,137 @@ function initClock() {
     setInterval(updateClock, 1000);
 }
 
+async function initAuthAndTenancy() {
+    try {
+        const res = await fetch('/api/v1/auth/me');
+        if (res.ok) {
+            const data = await res.json();
+            state.currentUser = data.user;
+            state.currentOrg = data.organization;
+            state.userRole = data.role || 'admin';
+            updateUserBadgeUI();
+        }
+        loadOrganizationsList();
+    } catch (e) {
+        console.error('Failed to load user/org state:', e);
+    }
+}
+
+async function loadOrganizationsList() {
+    try {
+        const res = await fetch('/api/v1/organizations');
+        if (!res.ok) return;
+        const data = await res.json();
+        state.organizations = data.organizations || [];
+
+        const select = document.getElementById('workspaceSelect');
+        if (select && state.organizations.length > 0) {
+            select.innerHTML = '';
+            state.organizations.forEach(org => {
+                const opt = document.createElement('option');
+                opt.value = org.id;
+                opt.textContent = `${org.name} (${org.plan_tier.toUpperCase()})`;
+                if (state.currentOrg && org.id === state.currentOrg.id) {
+                    opt.selected = true;
+                }
+                select.appendChild(opt);
+            });
+        }
+    } catch (e) {
+        console.error('Failed to load orgs list:', e);
+    }
+}
+
+function updateUserBadgeUI() {
+    const nameEl = document.getElementById('currentUserName');
+    const badgeEl = document.getElementById('currentUserRoleBadge');
+
+    if (state.currentUser && nameEl) {
+        nameEl.textContent = state.currentUser.full_name;
+    }
+    if (badgeEl) {
+        badgeEl.textContent = state.userRole.toUpperCase();
+        badgeEl.className = `role-badge ${state.userRole.toLowerCase()}`;
+    }
+}
+
+async function handleWorkspaceChange(orgId) {
+    try {
+        const res = await fetch('/api/v1/organizations/switch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ organization_id: orgId })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            state.currentOrg = data.organization;
+            state.userRole = data.role || 'admin';
+            updateUserBadgeUI();
+            showToast(`Switched workspace to ${data.organization.name}`, 'success');
+            refreshAllData();
+        } else {
+            showToast(data.error || 'Failed to switch workspace', 'error');
+        }
+    } catch (e) {
+        showToast(`Workspace switch error: ${e.message}`, 'error');
+    }
+}
+
 function refreshAllData() {
     pollTelemetry();
     loadRules();
     loadBlueprints();
     loadExecutionLogs();
-    pollEventStream();
+    loadIncidents();
+    loadWebhooks();
+    loadApiKeys();
+    loadTeamAndAudits();
     pollNotifications();
 }
 
 // ==========================================
-// HUD TELEMETRY & ENGINE STATUS
+// NAVIGATION & TABS
+// ==========================================
+
+function switchTab(tabId) {
+    state.currentTab = tabId;
+
+    document.querySelectorAll('.hud-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+
+    const tabButtons = document.querySelectorAll('.hud-tab');
+    tabButtons.forEach(btn => {
+        if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(tabId)) {
+            btn.classList.add('active');
+        }
+    });
+
+    const activePanel = document.getElementById(`tab-${tabId}`);
+    if (activePanel) {
+        activePanel.classList.add('active');
+    }
+
+    if (tabId === 'rules') loadRules();
+    if (tabId === 'leads') loadLeads();
+    if (tabId === 'webhooks') loadWebhooks();
+    if (tabId === 'logs') loadExecutionLogs();
+    if (tabId === 'incidents') loadIncidents();
+    if (tabId === 'apikeys') loadApiKeys();
+    if (tabId === 'team') loadTeamAndAudits();
+}
+
+// ==========================================
+// TELEMETRY & SYSTEM HEALTH
 // ==========================================
 
 async function pollTelemetry() {
     try {
-        const res = await fetch('/api/status');
+        const res = await fetch('/api/v1/system/telemetry');
         if (!res.ok) return;
         const data = await res.json();
 
-        // Update Engine State Badge
-        state.engineRunning = data.engine_running;
+        state.engineRunning = data.engine_online;
         const badge = document.getElementById('engineStatusBadge');
-        const text = document.getElementById('engineStatusText');
         const toggleBtnLabel = document.getElementById('toggleEngineLabel');
 
         if (state.engineRunning) {
@@ -77,17 +196,26 @@ async function pollTelemetry() {
             if (toggleBtnLabel) toggleBtnLabel.textContent = 'Resume Engine';
         }
 
-        // Key stats
         const stats = data.stats || {};
         document.getElementById('statActiveRules').textContent = `${stats.active_rules || 0} / ${stats.total_rules || 0}`;
         document.getElementById('statTotalRules').textContent = `${stats.total_rules || 0} Total Configured`;
         document.getElementById('statTotalExecutions').textContent = stats.total_executions || 0;
         document.getElementById('statSuccessExecutions').textContent = `${stats.successful_executions || 0} Successful Dispatches`;
         document.getElementById('statSuccessRate').textContent = `${stats.success_rate || 100}%`;
-        document.getElementById('statUptime').textContent = data.uptime || '0s';
+        document.getElementById('statOpenIncidents').textContent = stats.open_alerts || 0;
+        document.getElementById('statAckIncidents').textContent = `${stats.acknowledged_alerts || 0} Acknowledged`;
+        document.getElementById('statActiveWebhooks').textContent = stats.active_webhooks || 0;
 
-        // Telemetry Gauges
+        const highLeadsEl = document.getElementById('statHighPriorityLeads');
+        if (highLeadsEl) highLeadsEl.textContent = stats.high_priority_leads || 0;
+        const totalLeadsEl = document.getElementById('statTotalLeads');
+        if (totalLeadsEl) totalLeadsEl.textContent = `${stats.total_leads || 0} Total Inquiries`;
+        const tabLeadEl = document.getElementById('tabLeadCount');
+        if (tabLeadEl) tabLeadEl.textContent = stats.total_leads || 0;
+
         const telem = data.telemetry || {};
+        document.getElementById('statUptime').textContent = telem.uptime_formatted || '0s';
+
         const cpu = Math.round(telem.cpu_percent || 0);
         const ram = Math.round(telem.memory_percent || 0);
         const disk = Math.round(telem.disk_percent || 0);
@@ -97,501 +225,229 @@ async function pollTelemetry() {
 
         document.getElementById('telemRamVal').textContent = `${ram}%`;
         document.getElementById('telemRamBar').style.width = `${Math.min(100, ram)}%`;
-        document.getElementById('telemRamGb').textContent = `${telem.memory_used_gb || 0} / ${telem.memory_total_gb || 0}`;
+        document.getElementById('telemRamGb').textContent = `${telem.memory_used_gb || 0} / ${telem.memory_total_gb || 0} GB`;
 
         document.getElementById('telemDiskVal').textContent = `${disk}%`;
         document.getElementById('telemDiskBar').style.width = `${Math.min(100, disk)}%`;
-        document.getElementById('telemDiskGb').textContent = telem.disk_free_gb || 0;
-
-        document.getElementById('statProcessMem').textContent = `RSS: ${telem.process_memory_mb || 0} MB`;
-
-    } catch (err) {
-        console.error('Error polling telemetry:', err);
+        document.getElementById('telemDiskGb').textContent = `${telem.disk_used_gb || 0} / ${telem.disk_total_gb || 0} GB`;
+    } catch (e) {
+        console.error('Failed to poll telemetry:', e);
     }
 }
 
 async function toggleEngineState() {
     try {
-        const res = await fetch('/api/engine/toggle', {
+        const res = await fetch('/api/v1/system/engine/toggle', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ online: !state.engineRunning })
         });
         const data = await res.json();
-        showToast(data.message, data.engine_running ? 'success' : 'error');
-        pollTelemetry();
-    } catch (err) {
-        showToast('Failed to toggle engine state', 'error');
-    }
-}
-
-// ==========================================
-// TAB SWITCHING
-// ==========================================
-
-function switchTab(tabId) {
-    state.currentTab = tabId;
-
-    // Toggle Tab buttons
-    document.querySelectorAll('.hud-tab').forEach(tab => {
-        tab.classList.toggle('active', tab.getAttribute('onclick').includes(tabId));
-    });
-
-    // Toggle Tab panels
-    document.querySelectorAll('.tab-panel').forEach(panel => {
-        panel.classList.remove('active');
-    });
-    const activePanel = document.getElementById(`tab-${tabId}`);
-    if (activePanel) activePanel.classList.add('active');
-
-    // Refresh context data on tab switch
-    if (tabId === 'rules') loadRules();
-    if (tabId === 'logs') loadExecutionLogs();
-    if (tabId === 'blueprints') loadBlueprints();
-}
-
-// ==========================================
-// LIVE EVENT STREAM & QUICK DISPATCH
-// ==========================================
-
-async function pollEventStream() {
-    try {
-        const res = await fetch('/api/events/stream');
-        if (!res.ok) return;
-        const data = await res.json();
-        renderEventStream(data.events || []);
-    } catch (err) {
-        console.error('Error polling event stream:', err);
-    }
-}
-
-function renderEventStream(events) {
-    const container = document.getElementById('activityStreamContainer');
-    if (!container) return;
-
-    if (!events.length) {
-        container.innerHTML = '<div class="stream-empty">Waiting for automation events...</div>';
-        return;
-    }
-
-    container.innerHTML = events.slice(0, 15).map(evt => `
-        <div class="stream-item">
-            <div class="stream-item-header">
-                <span class="stream-event-name">${escapeHtml(evt.name)}</span>
-                <span class="stream-time">${escapeHtml(evt.timestamp)}</span>
-            </div>
-            <div class="stream-details">
-                Payload: ${JSON.stringify(evt.payload || {})}
-            </div>
-        </div>
-    `).join('');
-}
-
-async function quickDispatchEvent(eventName, payload) {
-    try {
-        const res = await fetch('/api/events/dispatch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                event_name: eventName,
-                payload: payload,
-                source: 'quick_dispatcher'
-            })
-        });
-        const data = await res.json();
-        showToast(`Dispatched event: ${eventName}`, 'success');
-        pollEventStream();
-        pollTelemetry();
-        loadExecutionLogs();
-    } catch (err) {
-        showToast(`Failed to dispatch event: ${err.message}`, 'error');
-    }
-}
-
-// ==========================================
-// SYSTEM.METRICS SIMULATOR & DRY RUN HARNESS
-// ==========================================
-
-function setSimCpu(val) {
-    const numVal = parseFloat(val);
-    if (isNaN(numVal)) return;
-
-    ['sim', 'pageSim'].forEach(prefix => {
-        const numInput = document.getElementById(`${prefix}CpuInput`);
-        const slider = document.getElementById(`${prefix}CpuSlider`);
-        const valDisplay = document.getElementById(`${prefix}CpuValDisplay`);
-        if (numInput) numInput.value = numVal.toFixed(1);
-        if (slider) slider.value = numVal;
-        if (valDisplay) valDisplay.textContent = `${numVal.toFixed(1)}%`;
-    });
-}
-
-function setPageSimCpu(val) {
-    setSimCpu(val);
-}
-
-function syncCpuFromSlider(val) {
-    setSimCpu(val);
-}
-
-function syncCpuFromInput(val) {
-    setSimCpu(val);
-}
-
-function syncPageCpuFromSlider(val) {
-    setSimCpu(val);
-}
-
-function syncPageCpuFromInput(val) {
-    setSimCpu(val);
-}
-
-function openMetricsSimulator(cpuVal) {
-    if (cpuVal !== undefined) {
-        setSimCpu(cpuVal);
-    }
-    switchTab('simulator');
-}
-
-async function runPageMetricsSimulation() {
-    await runMetricsSimulation('pageSim');
-}
-
-async function runMetricsSimulation(targetPrefix = 'sim') {
-    const prefix = targetPrefix === 'pageSim' ? 'pageSim' : 'sim';
-    const cpuInput = document.getElementById(`${prefix}CpuInput`) || document.getElementById('simCpuInput');
-    const hostInput = document.getElementById(`${prefix}HostInput`) || document.getElementById('simHostInput');
-    const dryRunCheck = document.getElementById(`${prefix}DryRunCheck`) || document.getElementById('simDryRunCheck');
-
-    let cpuPercent = parseFloat(cpuInput?.value);
-    if (isNaN(cpuPercent)) cpuPercent = 92.0;
-    cpuPercent = Math.max(0, Math.min(100, cpuPercent));
-
-    const host = (hostInput?.value || 'prod-api-01').trim();
-    const dryRun = dryRunCheck ? dryRunCheck.checked : true;
-
-    try {
-        showToast(`Simulating system.metrics (CPU: ${cpuPercent.toFixed(1)}%, Dry Run: ${dryRun})...`, 'info');
-
-        const res = await fetch('/api/events/dispatch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                event_name: 'system.metrics',
-                payload: {
-                    cpu_percent: cpuPercent,
-                    host: host
-                },
-                source: 'system_metrics_simulator',
-                dry_run: dryRun
-            })
-        });
-
-        const data = await res.json();
-        if (data.error) {
-            showToast(`Simulation error: ${data.error}`, 'error');
-            return;
-        }
-
-        renderMetricsSimResults(data, cpuPercent, host, dryRun, 'sim');
-        renderMetricsSimResults(data, cpuPercent, host, dryRun, 'pageSim');
-
-        const cpuSentinelTriggered = (data.executed_rules || []).some(
-            r => r.matched && (r.rule_name.includes('High CPU') || r.priority === 90)
-        );
-
-        if (cpuSentinelTriggered) {
-            showToast(`🔥 High CPU Resource Sentinel MATCHED & TRIGGERED (CPU: ${cpuPercent.toFixed(1)}% > 85%)!`, 'success');
-        } else {
-            showToast(`Normal load: CPU ${cpuPercent.toFixed(1)}% did not exceed 85% threshold (CONDITION SKIPPED).`, 'info');
-        }
-
-        pollEventStream();
-        if (!dryRun) {
+        if (res.ok) {
+            state.engineRunning = data.engine_running;
+            showToast(`Automation Engine is now ${state.engineRunning ? 'ONLINE' : 'PAUSED'}`, 'info');
             pollTelemetry();
-            loadExecutionLogs();
-        }
-    } catch (err) {
-        showToast(`Simulation failed: ${err.message}`, 'error');
-    }
-}
-
-function renderMetricsSimResults(simData, cpuPercent, host, dryRun, prefix = 'sim') {
-    const container = document.getElementById(`${prefix}TraceContainer`);
-    const metaContainer = document.getElementById(`${prefix}TraceMeta`);
-    const listContainer = document.getElementById(`${prefix}TraceRulesList`);
-    const statusPill = document.getElementById(`${prefix}TraceStatusPill`);
-
-    if (!container || !metaContainer || !listContainer || !statusPill) return;
-
-    container.style.display = 'block';
-
-    const executed = simData.executed_rules || [];
-    const cpuRuleMatched = executed.some(r => r.matched && (r.rule_name.includes('High CPU') || r.priority === 90));
-
-    statusPill.className = `sim-status-pill ${cpuRuleMatched ? 'matched' : 'skipped'}`;
-    statusPill.textContent = cpuRuleMatched ? 'PASS / TRIGGERED' : 'FAIL / NOT TRIGGERED';
-
-    metaContainer.innerHTML = `
-        <span>Event: <strong>system.metrics</strong></span>
-        <span>Simulated CPU: <strong style="color: ${cpuPercent > 85 ? 'var(--red-glow)' : 'var(--emerald-glow)'};">${cpuPercent.toFixed(1)}%</strong></span>
-        <span>Threshold: <strong>&gt; 85.0%</strong></span>
-        <span>Host: <strong>${escapeHtml(host)}</strong></span>
-        <span>Mode: <strong style="color: var(--cyan-glow);">${dryRun ? 'DRY RUN (Zero Side Effects)' : 'LIVE EXECUTION'}</strong></span>
-    `;
-
-    if (!executed.length) {
-        listContainer.innerHTML = '<div class="stream-empty">No active automation rules configured for system.metrics.</div>';
-        return;
-    }
-
-    listContainer.innerHTML = executed.map(r => {
-        const isCpuSentinel = r.rule_name.includes('High CPU') || r.priority === 90;
-        const matched = Boolean(r.matched);
-        const traceItems = r.trace || [];
-
-        let traceHtml = '';
-        if (traceItems.length) {
-            traceHtml = traceItems.map(t => {
-                const passed = Boolean(t.passed);
-                return `<div>• Condition Check: <code>${escapeHtml(t.field || 'payload.cpu_percent')}</code> ${escapeHtml(t.operator || '>')} ${escapeHtml(String(t.target || 85))} &rarr; actual: <strong>${escapeHtml(String(t.actual))}%</strong> &bull; <span class="${passed ? 'trace-pass' : 'trace-fail'}">${passed ? 'PASS (Threshold Exceeded)' : 'FAIL (Condition Not Met)'}</span></div>`;
-            }).join('');
         } else {
-            traceHtml = `<div>• Condition Check: ${matched ? '<span class="trace-pass">PASS</span>' : '<span class="trace-fail">FAIL</span>'}</div>`;
+            showToast(data.error || 'Failed to toggle engine', 'error');
         }
-
-        let actionSummary = '';
-        if (matched) {
-            if (dryRun) {
-                const actionTypes = (r.action_results || []).map(a => a.type).filter(Boolean);
-                actionSummary = `<div style="margin-top: 4px; color: var(--emerald-glow);">🛡️ <strong>Dry Run Preview:</strong> Actions safely simulated without real-world side effects: [${escapeHtml(actionTypes.join(', ') || 'Notification, Log Entry')}].</div>`;
-            } else {
-                actionSummary = `<div style="margin-top: 4px; color: var(--emerald-glow);">✅ <strong>Executed Actions:</strong> Actions dispatched to system channels.</div>`;
-            }
-        } else {
-            actionSummary = `<div style="margin-top: 4px; color: var(--text-muted);">⏸️ <strong>No Actions Triggered:</strong> Condition skipped because CPU load (${cpuPercent.toFixed(1)}%) is &le; 85% threshold.</div>`;
-        }
-
-        return `
-            <div class="sim-rule-item ${matched && isCpuSentinel ? 'matched-highlight' : ''}">
-                <div class="sim-rule-head">
-                    <span>
-                        <strong>${escapeHtml(r.rule_name)}</strong>
-                        <span style="font-size:11px; color:var(--text-muted); margin-left:6px;">(Priority: ${escapeHtml(String(r.priority || 90))})</span>
-                    </span>
-                    <span class="status-badge ${matched ? 'success' : 'skipped'}">
-                        ${matched ? 'PASS / TRIGGERED' : 'FAIL / NOT TRIGGERED'}
-                    </span>
-                </div>
-                <div class="sim-rule-trace">
-                    ${traceHtml}
-                    ${actionSummary}
-                </div>
-            </div>
-        `;
-    }).join('');
+    } catch (e) {
+        showToast(`Engine toggle error: ${e.message}`, 'error');
+    }
 }
 
 // ==========================================
-// AUTOMATION RULES MANAGEMENT
+// WORKFLOW RULES STUDIO (CRUD)
 // ==========================================
 
 async function loadRules() {
     try {
-        const res = await fetch('/api/rules');
+        let url = '/api/v1/rules';
+        if (state.selectedCategory !== 'All') {
+            url += `?category=${encodeURIComponent(state.selectedCategory)}`;
+        }
+        const res = await fetch(url);
         if (!res.ok) return;
         const data = await res.json();
         state.rules = data.rules || [];
-        renderRulesGrid();
-    } catch (err) {
-        console.error('Error loading rules:', err);
+        renderRulesTable();
+    } catch (e) {
+        console.error('Failed to load rules:', e);
     }
 }
 
-function filterRulesByCategory(category) {
+function filterRulesCategory(category, btn) {
     state.selectedCategory = category;
-    document.querySelectorAll('#categoryFilterContainer .filter-pill').forEach(pill => {
-        pill.classList.toggle('active', pill.textContent.trim() === category);
-    });
-    renderRulesGrid();
+    document.querySelectorAll('.filter-group .filter-chip').forEach(c => c.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    loadRules();
 }
 
-function searchRules() {
-    renderRulesGrid();
-}
+function renderRulesTable() {
+    const tbody = document.getElementById('rulesTableBody');
+    if (!tbody) return;
 
-function renderRulesGrid() {
-    const container = document.getElementById('rulesGrid');
-    if (!container) return;
-
-    const searchTerm = (document.getElementById('ruleSearchInput')?.value || '').toLowerCase();
-
-    const filtered = state.rules.filter(rule => {
-        const matchesCategory = state.selectedCategory === 'All' || rule.category === state.selectedCategory;
-        const matchesSearch = !searchTerm ||
-            rule.name.toLowerCase().includes(searchTerm) ||
-            (rule.description && rule.description.toLowerCase().includes(searchTerm)) ||
-            rule.category.toLowerCase().includes(searchTerm);
-        return matchesCategory && matchesSearch;
-    });
-
-    if (!filtered.length) {
-        container.innerHTML = '<div class="stream-empty" style="grid-column: 1 / -1;">No matching automation rules found.</div>';
+    if (state.rules.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty-cell">No automation rules configured in this workspace.</td></tr>';
         return;
     }
 
-    container.innerHTML = filtered.map(rule => `
-        <div class="rule-card" id="card-${rule.id}">
-            <div>
-                <div class="rule-card-top">
-                    <span class="rule-category-badge">${escapeHtml(rule.category)}</span>
-                    <span class="rule-priority-tag">P${rule.priority}</span>
-                </div>
-                <div class="rule-name">${escapeHtml(rule.name)}</div>
-                <div class="rule-desc">${escapeHtml(rule.description || 'No description provided.')}</div>
-                <div class="rule-specs">
-                    <div class="rule-spec-row">
-                        <span>Trigger:</span>
-                        <span>${escapeHtml(rule.trigger?.type || 'event')}: <strong>${escapeHtml(rule.trigger?.event_name || '*')}</strong></span>
-                    </div>
-                    <div class="rule-spec-row">
-                        <span>Conditions:</span>
-                        <span>${(rule.condition?.conditions || []).length} (${escapeHtml(rule.condition?.logic || 'AND')})</span>
-                    </div>
-                    <div class="rule-spec-row">
-                        <span>Actions:</span>
-                        <span>${(rule.actions || []).length} Dispatched</span>
-                    </div>
-                    <div class="rule-spec-row">
-                        <span>Executions:</span>
-                        <span>${rule.execution_count || 0} times</span>
-                    </div>
-                </div>
-            </div>
+    tbody.innerHTML = state.rules.map(rule => {
+        const isEnabled = rule.enabled === 1 || rule.enabled === true;
+        const trigger = rule.trigger || {};
+        const triggerDesc = trigger.event_name ? `${trigger.type || 'event'}:${trigger.event_name}` : (trigger.type || 'event');
+        const isViewer = state.userRole === 'viewer';
 
-            <div class="rule-card-footer">
-                <label class="switch">
-                    <input type="checkbox" ${rule.enabled ? 'checked' : ''} onchange="toggleRuleState('${rule.id}', this.checked)">
-                    <span class="slider"></span>
-                </label>
-                <div class="rule-actions-group">
-                    <button class="hud-btn outline" style="padding: 4px 8px; font-size: 11px;" onclick="runRuleManually('${rule.id}')">▶ Run</button>
-                    <button class="hud-btn outline" style="padding: 4px 8px; font-size: 11px;" onclick="openEditRuleModal('${rule.id}')">✏️ Edit</button>
-                    <button class="hud-btn red-btn" style="padding: 4px 8px; font-size: 11px;" onclick="deleteRule('${rule.id}')">🗑️</button>
-                </div>
-            </div>
-        </div>
-    `).join('');
+        return `
+            <tr>
+                <td>
+                    <button class="toggle-switch ${isEnabled ? 'on' : 'off'}" 
+                            onclick="toggleRuleEnabled('${rule.id}')"
+                            title="Toggle Rule State" ${isViewer ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>
+                        <span class="toggle-slider"></span>
+                    </button>
+                </td>
+                <td>
+                    <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(rule.name)}</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(rule.description || '')}</div>
+                </td>
+                <td><span class="category-chip ${rule.category ? rule.category.toLowerCase() : 'system'}">${rule.category || 'System'}</span></td>
+                <td><code style="font-size: 0.75rem; color: var(--cyan-glow);">${escapeHtml(triggerDesc)}</code></td>
+                <td><span style="font-family: var(--font-mono); font-size: 0.8rem;">${rule.priority || 10}</span></td>
+                <td><span style="font-family: var(--font-mono); font-size: 0.8rem;">${rule.cooldown_seconds || 0}s</span></td>
+                <td><span style="font-family: var(--font-mono); font-size: 0.85rem; font-weight:700;">${rule.execution_count || 0}</span></td>
+                <td style="font-size: 0.75rem; color: var(--text-muted);">${rule.last_triggered || 'Never'}</td>
+                <td>
+                    <div class="action-btn-row">
+                        <button class="action-btn cyan-btn" onclick="runRuleTest('${rule.id}')" title="Test Trigger">▶</button>
+                        <button class="action-btn amber-btn" onclick="editRule('${rule.id}')" title="Edit Rule" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>✏️</button>
+                        <button class="action-btn red-btn" onclick="deleteRule('${rule.id}')" title="Delete Rule" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>🗑️</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
 }
 
-async function toggleRuleState(ruleId, isEnabled) {
+async function toggleRuleEnabled(ruleId) {
     try {
-        const res = await fetch(`/api/rules/${ruleId}/toggle`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: isEnabled })
-        });
-        const data = await res.json();
-        showToast(`Rule ${isEnabled ? 'Enabled' : 'Disabled'}`, 'success');
-        loadRules();
-        pollTelemetry();
-    } catch (err) {
-        showToast('Failed to toggle rule state', 'error');
-    }
-}
-
-async function runRuleManually(ruleId) {
-    try {
-        showToast('Executing rule...', 'info');
-        const res = await fetch(`/api/rules/${ruleId}/run`, {
+        const res = await fetch(`/api/v1/rules/${ruleId}/toggle`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({})
         });
         const data = await res.json();
-        if (data.matched) {
-            showToast(`Rule executed successfully! (${data.duration_ms}ms)`, 'success');
+        if (res.ok) {
+            showToast(`Rule is now ${data.enabled ? 'Enabled' : 'Disabled'}`, 'info');
+            loadRules();
+            pollTelemetry();
         } else {
-            showToast(`Rule conditions not met for current state.`, 'error');
+            showToast(data.error || 'Failed to toggle rule', 'error');
         }
-        pollEventStream();
-        loadExecutionLogs();
-        pollTelemetry();
-    } catch (err) {
-        showToast(`Error executing rule: ${err.message}`, 'error');
+    } catch (e) {
+        showToast(`Toggle error: ${e.message}`, 'error');
+    }
+}
+
+async function runRuleTest(ruleId) {
+    try {
+        const res = await fetch(`/api/v1/rules/${ruleId}/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ payload: { test_source: "studio_manual_trigger", timestamp: new Date().toISOString() } })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`Rule executed: ${data.status.toUpperCase()}`, 'success');
+            loadExecutionLogs();
+            loadRules();
+        } else {
+            showToast(data.error || 'Execution failed', 'error');
+        }
+    } catch (e) {
+        showToast(`Execution error: ${e.message}`, 'error');
     }
 }
 
 async function deleteRule(ruleId) {
-    if (!confirm('Are you sure you want to delete this automation rule?')) return;
+    if (!confirm(`Are you sure you want to delete workflow rule '${ruleId}'?`)) return;
     try {
-        const res = await fetch(`/api/rules/${ruleId}`, { method: 'DELETE' });
+        const res = await fetch(`/api/v1/rules/${ruleId}`, { method: 'DELETE' });
+        const data = await res.json();
         if (res.ok) {
-            showToast('Rule deleted', 'success');
+            showToast('Workflow rule deleted.', 'info');
             loadRules();
             pollTelemetry();
         } else {
-            showToast('Failed to delete rule', 'error');
+            showToast(data.error || 'Failed to delete rule', 'error');
         }
-    } catch (err) {
-        showToast('Error deleting rule', 'error');
+    } catch (e) {
+        showToast(`Delete error: ${e.message}`, 'error');
     }
 }
 
-// ==========================================
-// RULE BUILDER MODAL & DYNAMIC FORM
-// ==========================================
-
-function openCreateRuleModal() {
-    document.getElementById('modalTitle').textContent = 'Create New Automation Rule';
-    document.getElementById('ruleForm').reset();
+// Visual Rule Builder Modal
+function openNewRuleModal() {
+    if (state.userRole === 'viewer') {
+        showToast('Viewer role cannot create workflows. Switch to Operator or Admin persona.', 'warning');
+        return;
+    }
+    document.getElementById('modalTitle').textContent = 'Create New Automation Workflow';
     document.getElementById('formRuleId').value = '';
-    document.getElementById('conditionsList').innerHTML = '';
-    document.getElementById('actionsList').innerHTML = '';
+    document.getElementById('formRuleName').value = '';
+    document.getElementById('formRuleDescription').value = '';
+    document.getElementById('formRuleCategory').value = 'System';
+    document.getElementById('formRulePriority').value = '10';
+    document.getElementById('formRuleCooldown').value = '0';
+    document.getElementById('formRuleEnabled').value = '1';
+    document.getElementById('formTriggerType').value = 'event';
+    document.getElementById('formTriggerEvent').value = 'system.metrics';
 
-    // Add 1 default condition and 1 default action
-    addConditionRow('payload.cpu_percent', '>=', '85');
-    addActionRow('notification', { title: 'Alert Title', message: 'Alert Details', severity: 'warning' });
+    document.getElementById('conditionsList').innerHTML = '';
+    addConditionRow('payload.cpu_percent', '>', '85');
+
+    document.getElementById('actionsList').innerHTML = '';
+    addActionRow('notification');
 
     document.getElementById('ruleModal').style.display = 'flex';
 }
 
-function openEditRuleModal(ruleId) {
+function editRule(ruleId) {
     const rule = state.rules.find(r => r.id === ruleId);
     if (!rule) return;
 
-    document.getElementById('modalTitle').textContent = 'Edit Automation Rule';
+    document.getElementById('modalTitle').textContent = `Edit Workflow: ${rule.name}`;
     document.getElementById('formRuleId').value = rule.id;
     document.getElementById('formRuleName').value = rule.name;
-    document.getElementById('formRuleCategory').value = rule.category;
     document.getElementById('formRuleDescription').value = rule.description || '';
+    document.getElementById('formRuleCategory').value = rule.category || 'System';
     document.getElementById('formRulePriority').value = rule.priority || 10;
     document.getElementById('formRuleCooldown').value = rule.cooldown_seconds || 0;
-    document.getElementById('formRuleEnabled').value = rule.enabled ? '1' : '0';
+    document.getElementById('formRuleEnabled').value = (rule.enabled === 1 || rule.enabled === true) ? '1' : '0';
 
-    document.getElementById('formTriggerType').value = rule.trigger?.type || 'event';
-    document.getElementById('formTriggerEvent').value = rule.trigger?.event_name || '*';
-
-    document.getElementById('formConditionLogic').value = rule.condition?.logic || 'AND';
+    const trigger = rule.trigger || {};
+    document.getElementById('formTriggerType').value = trigger.type || 'event';
+    document.getElementById('formTriggerEvent').value = trigger.event_name || 'system.metrics';
 
     // Populate conditions
-    const condContainer = document.getElementById('conditionsList');
-    condContainer.innerHTML = '';
-    const conditions = rule.condition?.conditions || [];
-    if (conditions.length) {
+    const condList = document.getElementById('conditionsList');
+    condList.innerHTML = '';
+    const condGroup = rule.condition || {};
+    document.getElementById('formConditionLogic').value = condGroup.logic || 'AND';
+    const conditions = condGroup.conditions || [];
+    if (conditions.length > 0) {
         conditions.forEach(c => addConditionRow(c.field, c.operator, c.value));
     } else {
-        addConditionRow('', 'equals', '');
+        addConditionRow();
     }
 
     // Populate actions
-    const actContainer = document.getElementById('actionsList');
-    actContainer.innerHTML = '';
+    const actList = document.getElementById('actionsList');
+    actList.innerHTML = '';
     const actions = rule.actions || [];
-    if (actions.length) {
+    if (actions.length > 0) {
         actions.forEach(a => addActionRow(a.type, a.params));
     } else {
-        addActionRow('notification', {});
+        addActionRow('notification');
     }
 
     document.getElementById('ruleModal').style.display = 'flex';
@@ -601,251 +457,523 @@ function closeRuleModal() {
     document.getElementById('ruleModal').style.display = 'none';
 }
 
-function addConditionRow(field = '', operator = 'equals', value = '') {
-    const container = document.getElementById('conditionsList');
+function addConditionRow(field = '', operator = '==', val = '') {
+    const list = document.getElementById('conditionsList');
     const row = document.createElement('div');
-    row.className = 'builder-row condition-row';
+    row.className = 'condition-row';
     row.innerHTML = `
-        <input type="text" class="hud-input flex-2 cond-field" placeholder="Field path (e.g. payload.cpu_percent)" value="${escapeHtml(String(field))}" required>
-        <select class="hud-input flex-1 cond-operator">
-            <option value="equals" ${operator === 'equals' ? 'selected' : ''}>Equals (==)</option>
-            <option value="not_equals" ${operator === 'not_equals' ? 'selected' : ''}>Not Equals (!=)</option>
-            <option value=">=" ${operator === '>=' ? 'selected' : ''}>&gt;=</option>
-            <option value="<=" ${operator === '<=' ? 'selected' : ''}>&lt;=</option>
-            <option value=">" ${operator === '>' ? 'selected' : ''}>&gt;</option>
-            <option value="<" ${operator === '<' ? 'selected' : ''}>&lt;</option>
-            <option value="contains" ${operator === 'contains' ? 'selected' : ''}>Contains</option>
-            <option value="regex_match" ${operator === 'regex_match' ? 'selected' : ''}>Regex Match</option>
-            <option value="in_list" ${operator === 'in_list' ? 'selected' : ''}>In List (comma separated)</option>
+        <input type="text" class="hud-input flex-2 cond-field" placeholder="payload.field or nlp.urgency" value="${escapeHtml(String(field))}" required>
+        <select class="hud-input flex-1 cond-op">
+            <option value="==" ${operator === '==' ? 'selected' : ''}>== (Equals)</option>
+            <option value="!=" ${operator === '!=' ? 'selected' : ''}>!= (Not Equals)</option>
+            <option value=">" ${operator === '>' ? 'selected' : ''}>&gt; (Greater than)</option>
+            <option value=">=" ${operator === '>=' ? 'selected' : ''}>&gt;= (Greater or Equal)</option>
+            <option value="<" ${operator === '<' ? 'selected' : ''}>&lt; (Less than)</option>
+            <option value="<=" ${operator === '<=' ? 'selected' : ''}>&lt;= (Less or Equal)</option>
+            <option value="contains" ${operator === 'contains' ? 'selected' : ''}>contains</option>
+            <option value="in_list" ${operator === 'in_list' ? 'selected' : ''}>in list (CSV)</option>
         </select>
-        <input type="text" class="hud-input flex-2 cond-value" placeholder="Target Value" value="${escapeHtml(String(value))}">
-        <button type="button" class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
+        <input type="text" class="hud-input flex-2 cond-val" placeholder="Comparison Target Value" value="${escapeHtml(String(val))}" required>
+        <button type="button" class="remove-btn" onclick="this.parentElement.remove()">✕</button>
     `;
-    container.appendChild(row);
+    list.appendChild(row);
 }
 
-function addActionRow(type = 'notification', params = {}) {
-    const container = document.getElementById('actionsList');
+function addActionRow(type = 'notification', params = null) {
+    const list = document.getElementById('actionsList');
     const row = document.createElement('div');
-    row.className = 'builder-row action-row';
+    row.className = 'action-row';
 
-    const paramStr = typeof params === 'object' ? JSON.stringify(params) : params;
+    params = params || {};
+    let paramsHtml = '';
+    if (type === 'notification') {
+        paramsHtml = `
+            <input type="text" class="hud-input flex-2 act-title" placeholder="Alert Title" value="${escapeHtml(params.title || 'Incident Alert')}">
+            <select class="hud-input flex-1 act-severity">
+                <option value="critical" ${params.severity === 'critical' ? 'selected' : ''}>Critical</option>
+                <option value="high" ${params.severity === 'high' ? 'selected' : ''}>High</option>
+                <option value="warning" ${params.severity === 'warning' ? 'selected' : ''}>Warning</option>
+                <option value="info" ${params.severity === 'info' || !params.severity ? 'selected' : ''}>Info</option>
+            </select>
+        `;
+    } else if (type === 'webhook_call') {
+        paramsHtml = `
+            <input type="text" class="hud-input flex-3 act-url" placeholder="https://api.internal/v1/webhook" value="${escapeHtml(params.url || '')}">
+            <select class="hud-input flex-1 act-method">
+                <option value="POST" ${params.method === 'POST' ? 'selected' : ''}>POST</option>
+                <option value="GET" ${params.method === 'GET' ? 'selected' : ''}>GET</option>
+                <option value="PUT" ${params.method === 'PUT' ? 'selected' : ''}>PUT</option>
+            </select>
+        `;
+    } else {
+        paramsHtml = `
+            <input type="text" class="hud-input flex-3 act-msg" placeholder="Log / Diagnostic Message" value="${escapeHtml(params.message || '')}">
+        `;
+    }
 
     row.innerHTML = `
-        <select class="hud-input flex-1 act-type">
-            <option value="notification" ${type === 'notification' ? 'selected' : ''}>Notification</option>
-            <option value="log_entry" ${type === 'log_entry' ? 'selected' : ''}>Audit Log Entry</option>
-            <option value="file_append" ${type === 'file_append' ? 'selected' : ''}>Append to File</option>
-            <option value="email_dispatch" ${type === 'email_dispatch' ? 'selected' : ''}>Email Alert</option>
-            <option value="webhook_call" ${type === 'webhook_call' ? 'selected' : ''}>Webhook HTTP Call</option>
+        <select class="hud-input flex-1 act-type" onchange="updateActionParamsUI(this)">
+            <option value="notification" ${type === 'notification' ? 'selected' : ''}>In-App Incident Alert</option>
+            <option value="webhook_call" ${type === 'webhook_call' ? 'selected' : ''}>Outbound HTTP Webhook</option>
+            <option value="log_entry" ${type === 'log_entry' ? 'selected' : ''}>Diagnostic Log Entry</option>
+            <option value="email_dispatch" ${type === 'email_dispatch' ? 'selected' : ''}>Simulated Email Dispatch</option>
+            <option value="file_append" ${type === 'file_append' ? 'selected' : ''}>File Storage Append</option>
         </select>
-        <input type="text" class="hud-input flex-2 act-params" placeholder='JSON params e.g. {"title":"Alert","message":"Spike"}' value='${escapeHtml(paramStr)}'>
-        <button type="button" class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
+        <div class="action-params-container flex-3" style="display:flex; gap:6px;">
+            ${paramsHtml}
+        </div>
+        <button type="button" class="remove-btn" onclick="this.parentElement.remove()">✕</button>
     `;
-    container.appendChild(row);
+    list.appendChild(row);
 }
 
-async function saveRuleForm(event) {
-    event.preventDefault();
+function updateActionParamsUI(selectEl) {
+    const type = selectEl.value;
+    const container = selectEl.parentElement.querySelector('.action-params-container');
+    if (type === 'notification') {
+        container.innerHTML = `
+            <input type="text" class="hud-input flex-2 act-title" placeholder="Alert Title" value="System Alert">
+            <select class="hud-input flex-1 act-severity">
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="warning">Warning</option>
+                <option value="info" selected>Info</option>
+            </select>
+        `;
+    } else if (type === 'webhook_call') {
+        container.innerHTML = `
+            <input type="text" class="hud-input flex-3 act-url" placeholder="https://api.internal/v1/webhook" value="">
+            <select class="hud-input flex-1 act-method"><option value="POST">POST</option><option value="GET">GET</option></select>
+        `;
+    } else {
+        container.innerHTML = `<input type="text" class="hud-input flex-3 act-msg" placeholder="Message or Diagnostic text" value="">`;
+    }
+}
 
+async function saveRuleForm(e) {
+    e.preventDefault();
     const ruleId = document.getElementById('formRuleId').value;
-    const name = document.getElementById('formRuleName').value.trim();
-    const category = document.getElementById('formRuleCategory').value;
-    const description = document.getElementById('formRuleDescription').value.trim();
-    const priority = parseInt(document.getElementById('formRulePriority').value, 10);
-    const cooldown = parseInt(document.getElementById('formRuleCooldown').value, 10);
-    const enabled = document.getElementById('formRuleEnabled').value === '1';
+    const isEdit = Boolean(ruleId);
 
-    const triggerType = document.getElementById('formTriggerType').value;
-    const triggerEvent = document.getElementById('formTriggerEvent').value.trim();
-
-    const conditionLogic = document.getElementById('formConditionLogic').value;
-
-    // Collect conditions
+    // Build conditions
+    const condRows = document.querySelectorAll('.condition-row');
     const conditions = [];
-    document.querySelectorAll('.condition-row').forEach(row => {
-        const field = row.querySelector('.cond-field').value.trim();
-        const operator = row.querySelector('.cond-operator').value;
-        const valStr = row.querySelector('.cond-value').value.trim();
-
-        let parsedVal = valStr;
-        if (!isNaN(valStr) && valStr !== '') {
-            parsedVal = Number(valStr);
-        }
-
-        if (field) {
-            conditions.push({ field, operator, value: parsedVal });
-        }
+    condRows.forEach(r => {
+        const field = r.querySelector('.cond-field').value.trim();
+        const operator = r.querySelector('.cond-op').value;
+        let val = r.querySelector('.cond-val').value.trim();
+        if (!isNaN(val) && val !== '') val = Number(val);
+        conditions.push({ field, operator, value: val });
     });
 
-    // Collect actions
+    // Build actions
+    const actRows = document.querySelectorAll('.action-row');
     const actions = [];
-    document.querySelectorAll('.action-row').forEach(row => {
-        const type = row.querySelector('.act-type').value;
-        const paramStr = row.querySelector('.act-params').value.trim();
-        let params = {};
-        try {
-            params = JSON.parse(paramStr);
-        } catch {
-            params = { message: paramStr };
+    actRows.forEach(r => {
+        const type = r.querySelector('.act-type').value;
+        const params = {};
+        if (type === 'notification') {
+            const titleInput = r.querySelector('.act-title');
+            const sevInput = r.querySelector('.act-severity');
+            params.title = titleInput ? titleInput.value.trim() : 'Alert';
+            params.severity = sevInput ? sevInput.value : 'info';
+            params.message = `Triggered automation action: ${params.title}`;
+        } else if (type === 'webhook_call') {
+            const urlInput = r.querySelector('.act-url');
+            const methodInput = r.querySelector('.act-method');
+            params.url = urlInput ? urlInput.value.trim() : 'https://api.internal/webhook';
+            params.method = methodInput ? methodInput.value : 'POST';
+        } else {
+            const msgInput = r.querySelector('.act-msg');
+            params.message = msgInput ? msgInput.value.trim() : 'Rule action executed';
         }
         actions.push({ type, params });
     });
 
-    const rulePayload = {
-        name,
-        category,
-        description,
-        priority,
-        cooldown_seconds: cooldown,
-        enabled,
+    const payload = {
+        name: document.getElementById('formRuleName').value.trim(),
+        description: document.getElementById('formRuleDescription').value.trim(),
+        category: document.getElementById('formRuleCategory').value,
+        priority: parseInt(document.getElementById('formRulePriority').value, 10),
+        cooldown_seconds: parseInt(document.getElementById('formRuleCooldown').value, 10),
+        enabled: document.getElementById('formRuleEnabled').value === '1' ? 1 : 0,
         trigger: {
-            type: triggerType,
-            event_name: triggerEvent
+            type: document.getElementById('formTriggerType').value,
+            event_name: document.getElementById('formTriggerEvent').value.trim()
         },
         condition: {
-            logic: conditionLogic,
-            conditions
+            logic: document.getElementById('formConditionLogic').value,
+            conditions: conditions
         },
-        actions
+        actions: actions
     };
 
-    if (ruleId) rulePayload.id = ruleId;
-
     try {
-        const res = await fetch('/api/rules', {
-            method: 'POST',
+        const url = isEdit ? `/api/v1/rules/${ruleId}` : '/api/v1/rules';
+        const method = isEdit ? 'PUT' : 'POST';
+        const res = await fetch(url, {
+            method: method,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(rulePayload)
+            body: JSON.stringify(payload)
         });
         const data = await res.json();
-        if (data.success) {
-            showToast('Automation rule saved successfully', 'success');
+        if (res.ok) {
+            showToast(`Workflow '${payload.name}' saved successfully.`, 'success');
             closeRuleModal();
             loadRules();
             pollTelemetry();
         } else {
-            showToast(`Error: ${data.error}`, 'error');
+            showToast(data.error || 'Failed to save workflow', 'error');
         }
     } catch (err) {
-        showToast('Failed to save rule', 'error');
+        showToast(`Save error: ${err.message}`, 'error');
     }
 }
 
 // ==========================================
-// AI NLP SANDBOX
+// INBOUND WEBHOOKS & MANUAL EVENT GATEWAY
 // ==========================================
 
-function setNlpPrompt(text) {
-    const input = document.getElementById('nlpPromptInput');
-    if (input) {
-        input.value = text;
-        input.focus();
+async function loadWebhooks() {
+    try {
+        const res = await fetch('/api/v1/webhooks');
+        if (!res.ok) return;
+        const data = await res.json();
+        state.webhooks = data.webhooks || [];
+        renderWebhooksTable();
+    } catch (e) {
+        console.error('Failed to load webhooks:', e);
     }
 }
 
-async function analyzeNlpPrompt() {
-    const text = document.getElementById('nlpPromptInput')?.value.trim();
-    if (!text) {
-        showToast('Please enter a natural language text prompt', 'error');
+function renderWebhooksTable() {
+    const tbody = document.getElementById('webhooksTableBody');
+    if (!tbody) return;
+
+    if (state.webhooks.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No inbound webhooks configured for this workspace.</td></tr>';
         return;
     }
 
-    const dryRun = document.getElementById('nlpDryRunCheck')?.checked ?? true;
+    tbody.innerHTML = state.webhooks.map(wh => {
+        return `
+            <tr>
+                <td><strong>${escapeHtml(wh.name)}</strong></td>
+                <td>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <code style="font-size:0.75rem; color:var(--emerald-glow);">${escapeHtml(wh.webhook_url)}</code>
+                        <button class="copy-btn" onclick="copyWebhookUrl('${wh.webhook_url}')">Copy</button>
+                    </div>
+                </td>
+                <td><span style="font-size:0.8rem; color:var(--text-muted);">${wh.target_rule_id || 'All Matching Rules'}</span></td>
+                <td><span style="font-weight:700; font-family:var(--font-mono);">${wh.request_count || 0}</span></td>
+                <td style="font-size:0.75rem; color:var(--text-muted);">${wh.last_received_at || 'Never'}</td>
+                <td>
+                    <button class="action-btn red-btn" onclick="deleteWebhook('${wh.id}')" title="Delete Webhook">🗑️</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function copyWebhookUrl(url) {
+    navigator.clipboard.writeText(url).then(() => {
+        showToast('Webhook Ingestion URL copied to clipboard!', 'success');
+    });
+}
+
+function openNewWebhookModal() {
+    document.getElementById('newWebhookName').value = '';
+    document.getElementById('newWebhookSecret').value = '';
+    document.getElementById('newWebhookModal').style.display = 'flex';
+}
+
+function closeNewWebhookModal() {
+    document.getElementById('newWebhookModal').style.display = 'none';
+}
+
+async function submitNewWebhook(e) {
+    e.preventDefault();
+    const name = document.getElementById('newWebhookName').value.trim();
+    const secret = document.getElementById('newWebhookSecret').value.trim();
 
     try {
-        showToast('Analyzing text with local heuristic engine...', 'info');
-        const res = await fetch('/api/nlp/analyze', {
+        const res = await fetch('/api/v1/webhooks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, secret_token: secret })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Inbound webhook created successfully!', 'success');
+            closeNewWebhookModal();
+            loadWebhooks();
+            pollTelemetry();
+        } else {
+            showToast(data.error || 'Failed to create webhook', 'error');
+        }
+    } catch (err) {
+        showToast(`Webhook create error: ${err.message}`, 'error');
+    }
+}
+
+async function deleteWebhook(id) {
+    if (!confirm('Are you sure you want to delete this webhook connector?')) return;
+    try {
+        const res = await fetch(`/api/v1/webhooks/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Webhook connector deleted.', 'info');
+            loadWebhooks();
+            pollTelemetry();
+        } else {
+            showToast(data.error || 'Failed to delete webhook', 'error');
+        }
+    } catch (err) {
+        showToast(`Delete error: ${err.message}`, 'error');
+    }
+}
+
+function preloadPayload(type) {
+    const nameInput = document.getElementById('manualEventName');
+    const payloadInput = document.getElementById('manualEventPayload');
+
+    if (type === 'cpu_surge') {
+        nameInput.value = 'system.metrics';
+        payloadInput.value = JSON.stringify({ cpu_percent: 94.2, memory_percent: 86.0, host: 'prod-k8s-node-01' }, null, 2);
+    } else if (type === 'failed_auth') {
+        nameInput.value = 'auth.failed';
+        payloadInput.value = JSON.stringify({ ip: '198.51.100.88', attempts: 5, user: 'root' }, null, 2);
+    } else if (type === 'backup_done') {
+        nameInput.value = 'backup.completed';
+        payloadInput.value = JSON.stringify({ status: 'success', database: 'customer_orders_db', size_mb: 245.5 }, null, 2);
+    } else if (type === 'api_503') {
+        nameInput.value = 'api.error';
+        payloadInput.value = JSON.stringify({ status_code: 503, endpoint: '/v1/billing/charge', duration_ms: 450 }, null, 2);
+    }
+}
+
+async function handleManualEventDispatch(e) {
+    e.preventDefault();
+    const eventName = document.getElementById('manualEventName').value.trim();
+    const dryRun = document.getElementById('manualEventDryRun').checked;
+    let payload = {};
+
+    try {
+        payload = JSON.parse(document.getElementById('manualEventPayload').value);
+    } catch (err) {
+        showToast('Invalid JSON in payload field', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/v1/events/dispatch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ event_name: eventName, payload: payload, dry_run: dryRun })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`Event '${eventName}' dispatched (${dryRun ? 'DRY-RUN' : 'LIVE'})`, 'success');
+            const outBox = document.getElementById('manualEventOutput');
+            const outJson = document.getElementById('manualEventOutputJson');
+            outBox.style.display = 'block';
+            outJson.textContent = JSON.stringify(data.result, null, 2);
+
+            loadExecutionLogs();
+            loadIncidents();
+            pollTelemetry();
+        } else {
+            showToast(data.error || 'Failed to dispatch event', 'error');
+        }
+    } catch (err) {
+        showToast(`Dispatch error: ${err.message}`, 'error');
+    }
+}
+
+// ==========================================
+// HEURISTIC NLP INCIDENT TRIAGE
+// ==========================================
+
+function setNlpSample(idx) {
+    const input = document.getElementById('nlpInputText');
+    if (idx === 1) {
+        input.value = "CRITICAL: Server load surge detected! High CPU spike at 94% on prod-worker-08, system unresponsive.";
+    } else if (idx === 2) {
+        input.value = "Security Alert: Multiple unauthorized brute-force login attempts detected from host IP 192.168.1.150.";
+    } else if (idx === 3) {
+        input.value = "Gateway reported 502 Bad Gateway and 503 Service Unavailable on payment checkout route.";
+    } else if (idx === 4) {
+        input.value = "Snapshot finished successfully for orders-vault-db with verified dump size of 512 MB.";
+    }
+}
+
+async function runNlpTriage(dryRun) {
+    const text = document.getElementById('nlpInputText').value.trim();
+    if (!text) {
+        showToast('Please enter an incident text prompt', 'warning');
+        return;
+    }
+
+    const container = document.getElementById('nlpResultContainer');
+    container.innerHTML = '<div class="empty-cell">Evaluating heuristic NLP parse trees...</div>';
+
+    try {
+        const res = await fetch('/api/v1/nlp/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text, dry_run: dryRun })
         });
         const data = await res.json();
-        if (data.error) {
-            showToast(data.error, 'error');
-            return;
-        }
+        if (res.ok) {
+            const nlp = data.nlp;
+            const sim = data.simulation || {};
+            const executedRules = sim.executed_rules || [];
 
-        renderNlpResults(data.nlp, data.simulation);
-        showToast('Analysis and automation simulation complete!', 'success');
+            let entityBadges = '';
+            for (const [key, vals] of Object.entries(nlp.entities || {})) {
+                if (vals && vals.length > 0) {
+                    vals.forEach(v => {
+                        entityBadges += `<span class="category-chip data" style="margin-right:4px;">${key}: ${v}</span>`;
+                    });
+                }
+            }
+
+            container.innerHTML = `
+                <div style="background:var(--bg-dark); padding:16px; border-radius:8px; border:1px solid var(--border-color);">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                        <div>
+                            <span style="font-size:0.75rem; color:var(--text-muted);">CLASSIFIED INTENT:</span>
+                            <div style="font-size:1.1rem; font-weight:700; color:var(--cyan-glow);">${nlp.intent.toUpperCase()}</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <span style="font-size:0.75rem; color:var(--text-muted);">URGENCY SCORE:</span>
+                            <div style="font-size:1.1rem; font-weight:700; color:${nlp.urgency >= 70 ? 'var(--red-glow)' : 'var(--amber-glow)'};">${nlp.urgency} / 100 [${nlp.severity_level}]</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom:12px;">
+                        <span style="font-size:0.75rem; color:var(--text-muted);">MAPPED INFERRED EVENT:</span>
+                        <div><code style="color:var(--emerald-glow);">${data.event_inferred}</code></div>
+                    </div>
+
+                    <div style="margin-bottom:12px;">
+                        <span style="font-size:0.75rem; color:var(--text-muted);">EXTRACTED OPERATIONAL ENTITIES:</span>
+                        <div style="margin-top:4px;">${entityBadges || '<span style="color:var(--text-muted);">None</span>'}</div>
+                    </div>
+
+                    <div>
+                        <span style="font-size:0.75rem; color:var(--text-muted);">TRIGGERED WORKFLOW ACTIONS (${executedRules.length}):</span>
+                        <div style="margin-top:6px;">
+                            ${executedRules.map(r => `
+                                <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border-color); font-size:0.85rem;">
+                                    <span>${escapeHtml(r.rule_name)}</span>
+                                    <span style="font-weight:700; color:${r.matched ? 'var(--emerald-glow)' : 'var(--text-muted)'};">${r.matched ? 'PASSED & TRIGGERED' : 'CONDITION SKIPPED'}</span>
+                                </div>
+                            `).join('') || '<div style="color:var(--text-muted);">No rules matched conditions</div>'}
+                        </div>
+                    </div>
+                </div>
+            `;
+            showToast(`NLP triage complete (${dryRun ? 'DRY-RUN' : 'LIVE'})`, 'success');
+            loadExecutionLogs();
+            loadIncidents();
+            pollTelemetry();
+        } else {
+            showToast(data.error || 'NLP triage failed', 'error');
+        }
     } catch (err) {
-        showToast(`NLP analysis failed: ${err.message}`, 'error');
+        showToast(`NLP error: ${err.message}`, 'error');
     }
-}
-
-function renderNlpResults(nlp, sim) {
-    const container = document.getElementById('nlpResultsContainer');
-    if (!container) return;
-
-    container.style.display = 'block';
-
-    document.getElementById('nlpConfidenceBadge').textContent = `Confidence: ${Math.round((nlp.confidence || 0) * 100)}%`;
-    document.getElementById('nlpIntentVal').textContent = (nlp.intent || 'general_query').toUpperCase();
-    document.getElementById('nlpUrgencyVal').textContent = `${nlp.urgency || 0} / 100`;
-
-    const sevEl = document.getElementById('nlpSeverityVal');
-    sevEl.textContent = nlp.severity_level || 'LOW';
-    sevEl.style.color = nlp.severity_level === 'CRITICAL' ? 'var(--red-glow)' :
-                       nlp.severity_level === 'HIGH' ? 'var(--amber-glow)' : 'var(--emerald-glow)';
-
-    document.getElementById('nlpSentimentVal').textContent = `${nlp.sentiment_label || 'neutral'} (${nlp.sentiment || 0})`;
-
-    // Entities
-    const entitiesBox = document.getElementById('nlpEntitiesContainer');
-    const entities = nlp.entities || {};
-    const tags = [];
-
-    for (const [category, values] of Object.entries(entities)) {
-        if (Array.isArray(values)) {
-            values.forEach(v => tags.push(`<span class="entity-tag">${escapeHtml(category)}: ${escapeHtml(String(v))}</span>`));
-        }
-    }
-
-    entitiesBox.innerHTML = tags.length ? tags.join('') : '<span style="font-size:12px; color:var(--text-muted);">No structured entities detected.</span>';
-
-    // Matched rules
-    const matchedRulesBox = document.getElementById('nlpMatchedRulesContainer');
-    const executedRules = sim.executed_rules || [];
-
-    if (!executedRules.length) {
-        matchedRulesBox.innerHTML = '<span style="font-size:12px; color:var(--text-muted);">No rules matched this prompt trigger.</span>';
-        return;
-    }
-
-    matchedRulesBox.innerHTML = executedRules.map(r => `
-        <div class="matched-rule-row">
-            <div class="matched-rule-header">
-                <span>Rule: <strong>${escapeHtml(r.rule_name)}</strong></span>
-                <span class="status-badge ${r.matched ? 'success' : 'skipped'}">${r.matched ? 'PASS / TRIGGERED' : 'CONDITION SKIPPED'}</span>
-            </div>
-            <div class="eval-trace-steps">
-                ${r.trace && r.trace.length ? r.trace.map(t => `<div>• Checked <code>${escapeHtml(t.field || 'group')}</code> ${escapeHtml(t.operator || '')} ${escapeHtml(String(t.target || ''))}: actual=<strong>${escapeHtml(String(t.actual))}</strong> (${t.passed ? '<span class="trace-pass">PASS</span>' : '<span class="trace-fail">FAIL</span>'})</div>`).join('') : 'Evaluated as true'}
-            </div>
-        </div>
-    `).join('');
 }
 
 // ==========================================
-// EXECUTION LOGS TAB
+// METRICS SIMULATOR
+// ==========================================
+
+function updateSimVal(elementId, val) {
+    const el = document.getElementById(elementId);
+    if (el) el.textContent = val;
+}
+
+async function runMetricsSimulation(dryRun) {
+    const cpu = parseFloat(document.getElementById('simCpuSlider').value);
+    const attempts = parseInt(document.getElementById('simAuthSlider').value, 10);
+    const statusCode = parseInt(document.getElementById('simHttpSelect').value, 10);
+
+    const container = document.getElementById('simResultContainer');
+    container.innerHTML = '<div class="empty-cell">Evaluating simulation conditions...</div>';
+
+    try {
+        const res = await fetch('/api/v1/events/dispatch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                event_name: 'system.metrics',
+                payload: { cpu_percent: cpu, attempts: attempts, status_code: statusCode, host: 'simulated-node-01' },
+                source: 'metrics_simulator',
+                dry_run: dryRun
+            })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            const rules = data.result.executed_rules || [];
+            container.innerHTML = `
+                <div style="background:var(--bg-dark); padding:16px; border-radius:8px; border:1px solid var(--border-color);">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                        <span>Mode: <strong>${dryRun ? 'DRY-RUN SIMULATION' : 'LIVE DISPATCH'}</strong></span>
+                        <span style="color:var(--cyan-glow);">Rules Evaluated: ${rules.length}</span>
+                    </div>
+                    ${rules.map(r => `
+                        <div style="padding:10px 0; border-bottom:1px solid var(--border-color);">
+                            <div style="display:flex; justify-content:space-between;">
+                                <strong>${escapeHtml(r.rule_name)}</strong>
+                                <span style="font-weight:700; color:${r.matched ? 'var(--emerald-glow)' : 'var(--text-muted)'};">${r.matched ? 'PASSED & TRIGGERED' : 'CONDITION SKIPPED'}</span>
+                            </div>
+                            <div style="font-size:0.8rem; color:var(--text-secondary); margin-top:4px;">
+                                ${r.trace && r.trace.length > 0 ? r.trace.map(t => `${t.field} ${t.operator} ${t.target} (Actual: ${t.actual}) -> ${t.passed ? 'PASS' : 'FAIL'}`).join('; ') : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            showToast(`Simulation complete (${dryRun ? 'DRY-RUN' : 'LIVE'})`, 'success');
+            loadExecutionLogs();
+            loadIncidents();
+            pollTelemetry();
+        } else {
+            showToast(data.error || 'Simulation error', 'error');
+        }
+    } catch (err) {
+        showToast(`Simulation error: ${err.message}`, 'error');
+    }
+}
+
+// ==========================================
+// FORENSICS & AUDIT LOGS
 // ==========================================
 
 async function loadExecutionLogs() {
     try {
-        const res = await fetch(`/api/logs?status=${state.selectedLogStatus}&limit=50`);
+        let url = '/api/v1/executions?limit=50';
+        if (state.selectedLogStatus !== 'all') {
+            url += `&status=${state.selectedLogStatus}`;
+        }
+        const res = await fetch(url);
         if (!res.ok) return;
         const data = await res.json();
-        state.logs = data.logs || [];
+        state.logs = data.executions || [];
         renderLogsTable();
-    } catch (err) {
-        console.error('Error loading execution logs:', err);
+        renderDashboardMiniLogs();
+    } catch (e) {
+        console.error('Failed to load execution logs:', e);
     }
 }
 
-function filterLogsByStatus(status) {
+function filterLogsStatus(status, btn) {
     state.selectedLogStatus = status;
-    document.querySelectorAll('#tab-logs .filter-pill').forEach(pill => {
-        pill.classList.toggle('active', pill.textContent.toLowerCase().includes(status));
-    });
+    document.querySelectorAll('#tab-logs .filter-chip').forEach(c => c.classList.remove('active'));
+    if (btn) btn.classList.add('active');
     loadExecutionLogs();
 }
 
@@ -853,52 +981,94 @@ function renderLogsTable() {
     const tbody = document.getElementById('logsTableBody');
     if (!tbody) return;
 
-    if (!state.logs.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="padding: 24px; color: var(--text-muted);">No execution logs found.</td></tr>';
+    if (state.logs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">No execution logs found.</td></tr>';
         return;
     }
 
-    tbody.innerHTML = state.logs.map((log, idx) => `
-        <tr>
-            <td style="font-family: var(--font-mono); font-size: 11px;">${escapeHtml(log.timestamp)}</td>
-            <td><strong>${escapeHtml(log.rule_name)}</strong></td>
-            <td><code style="color: var(--cyan-glow);">${escapeHtml(log.event_name)}</code></td>
-            <td><span class="status-badge ${log.status}">${log.status.toUpperCase()}</span></td>
-            <td style="font-family: var(--font-mono);">${log.duration_ms} ms</td>
-            <td>
-                <button class="hud-btn outline" style="padding: 3px 8px; font-size: 11px;" onclick="openLogDetail(${idx})">Inspect Trace</button>
-            </td>
-        </tr>
-    `).join('');
+    tbody.innerHTML = state.logs.map(log => {
+        const isSuccess = log.status === 'success';
+        const isSkipped = log.status === 'skipped';
+        const badgeClass = isSuccess ? 'status-badge resolved' : (isSkipped ? 'status-badge' : 'status-badge open');
+
+        return `
+            <tr>
+                <td><code style="font-size:0.8rem; color:var(--text-muted);">${log.id}</code></td>
+                <td><strong>${escapeHtml(log.rule_name || 'System Dispatcher')}</strong></td>
+                <td><code style="color:var(--cyan-glow);">${escapeHtml(log.trigger_event || log.event_name)}</code></td>
+                <td><span class="${badgeClass}">${log.status.toUpperCase()}</span></td>
+                <td><span style="font-family:var(--font-mono);">${log.duration_ms || log.execution_time_ms || 0} ms</span></td>
+                <td style="font-size:0.75rem; color:var(--text-muted);">${log.timestamp || log.executed_at}</td>
+                <td>
+                    <button class="action-btn cyan-btn" onclick="inspectExecution(${log.id})">🔍 Inspect</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
 }
 
-function openLogDetail(idx) {
-    const log = state.logs[idx];
+function renderDashboardMiniLogs() {
+    const tbody = document.getElementById('dashboardRecentLogs');
+    if (!tbody) return;
+
+    const recent = state.logs.slice(0, 5);
+    if (recent.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">No recent dispatches recorded.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = recent.map(log => {
+        const isSuccess = log.status === 'success';
+        const isSkipped = log.status === 'skipped';
+        const badgeClass = isSuccess ? 'status-badge resolved' : (isSkipped ? 'status-badge' : 'status-badge open');
+        return `
+            <tr>
+                <td><span class="${badgeClass}">${log.status.toUpperCase()}</span></td>
+                <td><strong>${escapeHtml(log.rule_name || 'Dispatcher')}</strong></td>
+                <td><code style="color:var(--cyan-glow);">${escapeHtml(log.trigger_event || log.event_name)}</code></td>
+                <td>${log.duration_ms || log.execution_time_ms || 0} ms</td>
+                <td style="font-size:0.75rem; color:var(--text-muted);">${log.timestamp || log.executed_at}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function inspectExecution(execId) {
+    const log = state.logs.find(l => l.id === execId);
     if (!log) return;
 
-    const modalBody = document.getElementById('logDetailContent');
-    modalBody.innerHTML = `
-        <div style="font-size: 13px; line-height: 1.8;">
-            <p><strong>Rule:</strong> ${escapeHtml(log.rule_name)} (ID: <code>${escapeHtml(log.rule_id)}</code>)</p>
-            <p><strong>Trigger Event:</strong> <code>${escapeHtml(log.event_name)}</code> (${escapeHtml(log.trigger_type)})</p>
-            <p><strong>Execution Status:</strong> <span class="status-badge ${log.status}">${log.status.toUpperCase()}</span></p>
-            <p><strong>Execution Latency:</strong> ${log.duration_ms} ms</p>
-            ${log.error_message ? `<p style="color:var(--red-glow);"><strong>Error:</strong> ${escapeHtml(log.error_message)}</p>` : ''}
-            
-            <h4 style="margin: 16px 0 8px 0; color: var(--cyan-glow); font-family: var(--font-heading);">Condition Evaluation Trace:</h4>
-            <div style="background: rgba(0,0,0,0.4); padding: 12px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px;">
-                ${log.trace && log.trace.length ? log.trace.map(t => `
-                    <div>• Condition [<code>${escapeHtml(t.field || 'subgroup')}</code>] ${escapeHtml(t.operator || '')} ${escapeHtml(String(t.target || ''))}: actual=<strong>${escapeHtml(String(t.actual))}</strong> &rarr; ${t.passed ? '<span style="color:var(--emerald-glow);">TRUE</span>' : '<span style="color:var(--red-glow);">FALSE</span>'}</div>
-                `).join('') : 'No explicit condition checks recorded.'}
-            </div>
+    const modal = document.getElementById('logDetailModal');
+    const content = document.getElementById('logDetailContent');
 
-            <h4 style="margin: 16px 0 8px 0; color: var(--cyan-glow); font-family: var(--font-heading);">Dispatched Action Outputs:</h4>
-            <div style="background: rgba(0,0,0,0.4); padding: 12px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; max-height: 200px; overflow-y: auto;">
-                <pre>${escapeHtml(JSON.stringify(log.results, null, 2))}</pre>
+    content.innerHTML = `
+        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+            <div>
+                <strong>Workflow Rule:</strong> ${escapeHtml(log.rule_name || 'System Dispatcher')}<br>
+                <strong>Trigger Event:</strong> <code style="color:var(--cyan-glow);">${escapeHtml(log.trigger_event || log.event_name)}</code>
+            </div>
+            <div style="text-align:right;">
+                <strong>Execution Status:</strong> <span style="font-weight:700; color:${log.status === 'success' ? 'var(--emerald-glow)' : 'var(--red-glow)'};">${log.status.toUpperCase()}</span><br>
+                <strong>Execution Duration:</strong> ${log.duration_ms || log.execution_time_ms || 0} ms
             </div>
         </div>
+
+        <div style="margin-top:16px;">
+            <h4 style="color:var(--text-primary); margin-bottom:6px;">Input Telemetry / Context Payload:</h4>
+            <pre class="curl-snippet" style="max-height:160px;">${escapeHtml(JSON.stringify(log.payload || {}, null, 2))}</pre>
+        </div>
+
+        <div style="margin-top:16px;">
+            <h4 style="color:var(--text-primary); margin-bottom:6px;">Condition Evaluation Step Trace:</h4>
+            <pre class="curl-snippet" style="max-height:160px;">${escapeHtml(JSON.stringify(log.trace || [], null, 2))}</pre>
+        </div>
+
+        <div style="margin-top:16px;">
+            <h4 style="color:var(--text-primary); margin-bottom:6px;">Action Pipeline Dispatches:</h4>
+            <pre class="curl-snippet" style="max-height:160px;">${escapeHtml(JSON.stringify(log.action_results || log.results || [], null, 2))}</pre>
+        </div>
     `;
-    document.getElementById('logDetailModal').style.display = 'flex';
+
+    modal.style.display = 'flex';
 }
 
 function closeLogModal() {
@@ -906,21 +1076,411 @@ function closeLogModal() {
 }
 
 async function clearAllLogs() {
-    if (!confirm('Are you sure you want to clear all execution audit logs?')) return;
+    if (!confirm('Are you sure you want to purge all execution forensic logs?')) return;
     try {
-        const res = await fetch('/api/logs', { method: 'DELETE' });
+        const res = await fetch('/api/v1/executions', { method: 'DELETE' });
+        const data = await res.json();
         if (res.ok) {
-            showToast('Execution logs cleared', 'success');
+            showToast('Execution logs cleared.', 'info');
             loadExecutionLogs();
             pollTelemetry();
+        } else {
+            showToast(data.error || 'Failed to clear logs', 'error');
         }
-    } catch (err) {
-        showToast('Failed to clear logs', 'error');
+    } catch (e) {
+        showToast(`Clear error: ${e.message}`, 'error');
     }
 }
 
 // ==========================================
-// BLUEPRINTS GALLERY
+// INCIDENT RESPONSE CENTER
+// ==========================================
+
+async function loadIncidents() {
+    try {
+        let url = '/api/v1/alerts';
+        if (state.selectedIncidentStatus !== 'all') {
+            url += `?status=${state.selectedIncidentStatus}`;
+        }
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        state.incidents = data.alerts || [];
+
+        renderIncidentsQueue();
+        renderDashboardIncidents();
+
+        // Update tab counter
+        const openCount = state.incidents.filter(i => i.status === 'open').length;
+        const countBadge = document.getElementById('tabIncidentCount');
+        if (countBadge) countBadge.textContent = openCount;
+    } catch (e) {
+        console.error('Failed to load incidents:', e);
+    }
+}
+
+function filterIncidents(status, btn) {
+    state.selectedIncidentStatus = status;
+    document.querySelectorAll('#tab-incidents .filter-chip').forEach(c => c.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    loadIncidents();
+}
+
+function renderIncidentsQueue() {
+    const container = document.getElementById('incidentsQueueContainer');
+    if (!container) return;
+
+    if (state.incidents.length === 0) {
+        container.innerHTML = '<div class="empty-cell">No incidents in this queue. All systems operating normally.</div>';
+        return;
+    }
+
+    const isViewer = state.userRole === 'viewer';
+
+    container.innerHTML = state.incidents.map(inc => {
+        const sevClass = `severity-pill ${inc.severity ? inc.severity.toLowerCase() : 'info'}`;
+        const statusClass = `status-badge ${inc.status.toLowerCase()}`;
+
+        return `
+            <div class="incident-card">
+                <div class="incident-main">
+                    <div class="incident-title-row">
+                        <span class="${sevClass}">${inc.severity.toUpperCase()}</span>
+                        <span class="incident-title">${escapeHtml(inc.title)}</span>
+                        <span class="${statusClass}">${inc.status.toUpperCase()}</span>
+                    </div>
+                    <div class="incident-message">${escapeHtml(inc.message)}</div>
+                    <div class="incident-meta">
+                        <span>Incident ID: #${inc.id}</span>
+                        <span>Created: ${inc.created_at}</span>
+                        ${inc.acknowledged_at ? `<span>Acked: ${inc.acknowledged_at}</span>` : ''}
+                        ${inc.resolved_at ? `<span>Resolved: ${inc.resolved_at}</span>` : ''}
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    ${inc.status === 'open' ? `
+                        <button class="hud-btn small outline" onclick="acknowledgeIncident(${inc.id})" ${isViewer ? 'disabled' : ''}>Acknowledge</button>
+                    ` : ''}
+                    ${inc.status !== 'resolved' ? `
+                        <button class="hud-btn small primary" onclick="resolveIncident(${inc.id})" ${isViewer ? 'disabled' : ''}>Resolve</button>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderDashboardIncidents() {
+    const container = document.getElementById('dashboardIncidentsList');
+    if (!container) return;
+
+    const openList = state.incidents.filter(i => i.status === 'open').slice(0, 3);
+    if (openList.length === 0) {
+        container.innerHTML = '<div class="empty-cell">No active open incidents. System healthy.</div>';
+        return;
+    }
+
+    container.innerHTML = openList.map(inc => {
+        const sevClass = `severity-pill ${inc.severity ? inc.severity.toLowerCase() : 'info'}`;
+        return `
+            <div class="incident-card" style="margin-bottom:8px;">
+                <div class="incident-main">
+                    <div class="incident-title-row">
+                        <span class="${sevClass}">${inc.severity.toUpperCase()}</span>
+                        <span style="font-weight:600; font-size:0.9rem;">${escapeHtml(inc.title)}</span>
+                    </div>
+                    <div style="font-size:0.8rem; color:var(--text-secondary);">${escapeHtml(inc.message)}</div>
+                </div>
+                <button class="hud-btn small outline" onclick="acknowledgeIncident(${inc.id})">Ack</button>
+            </div>
+        `;
+    }).join('');
+}
+
+async function acknowledgeIncident(alertId) {
+    try {
+        const res = await fetch(`/api/v1/alerts/${alertId}/acknowledge`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Incident acknowledged.', 'info');
+            loadIncidents();
+            pollTelemetry();
+        } else {
+            showToast(data.error || 'Failed to acknowledge incident', 'error');
+        }
+    } catch (e) {
+        showToast(`Acknowledge error: ${e.message}`, 'error');
+    }
+}
+
+async function resolveIncident(alertId) {
+    const notes = prompt('Enter resolution notes (optional):', 'Mitigated and verified.');
+    if (notes === null) return;
+
+    try {
+        const res = await fetch(`/api/v1/alerts/${alertId}/resolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notes })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Incident marked resolved.', 'success');
+            loadIncidents();
+            pollTelemetry();
+        } else {
+            showToast(data.error || 'Failed to resolve incident', 'error');
+        }
+    } catch (e) {
+        showToast(`Resolve error: ${e.message}`, 'error');
+    }
+}
+
+// ==========================================
+// API KEYS MANAGEMENT
+// ==========================================
+
+async function loadApiKeys() {
+    try {
+        const res = await fetch('/api/v1/auth/api-keys');
+        if (!res.ok) return;
+        const data = await res.json();
+        state.apiKeys = data.api_keys || [];
+        renderApiKeysTable();
+    } catch (e) {
+        console.error('Failed to load API keys:', e);
+    }
+}
+
+function renderApiKeysTable() {
+    const tbody = document.getElementById('apiKeysTableBody');
+    if (!tbody) return;
+
+    if (state.apiKeys.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No API keys created in this workspace.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = state.apiKeys.map(k => {
+        return `
+            <tr>
+                <td><strong>${escapeHtml(k.name)}</strong></td>
+                <td><code style="color:var(--cyan-glow);">${escapeHtml(k.key_prefix)}</code></td>
+                <td><span style="font-size:0.8rem; color:var(--text-muted);">${escapeHtml(Array.isArray(k.permissions) ? k.permissions.join(', ') : k.permissions)}</span></td>
+                <td style="font-size:0.75rem; color:var(--text-muted);">${k.created_at}</td>
+                <td style="font-size:0.75rem; color:var(--text-muted);">${k.last_used_at || 'Never'}</td>
+                <td>
+                    <button class="action-btn red-btn" onclick="revokeApiKey('${k.id}')" title="Revoke Key">Revoke</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function openNewApiKeyModal() {
+    document.getElementById('newKeyName').value = '';
+    document.getElementById('newApiKeyModal').style.display = 'flex';
+}
+
+function closeNewApiKeyModal() {
+    document.getElementById('newApiKeyModal').style.display = 'none';
+}
+
+async function submitNewApiKey(e) {
+    e.preventDefault();
+    const name = document.getElementById('newKeyName').value.trim();
+    const permissions = document.getElementById('newKeyPermissions').value;
+
+    try {
+        const res = await fetch('/api/v1/auth/api-keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, permissions })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeNewApiKeyModal();
+            loadApiKeys();
+
+            // Reveal secret token modal
+            document.getElementById('revealedSecretToken').textContent = data.secret_token;
+            document.getElementById('apiKeyRevealModal').style.display = 'flex';
+        } else {
+            showToast(data.error || 'Failed to generate API key', 'error');
+        }
+    } catch (err) {
+        showToast(`API Key error: ${err.message}`, 'error');
+    }
+}
+
+function closeApiKeyRevealModal() {
+    document.getElementById('apiKeyRevealModal').style.display = 'none';
+}
+
+function copyRevealedToken() {
+    const text = document.getElementById('revealedSecretToken').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('Secret API Key copied to clipboard!', 'success');
+    });
+}
+
+async function revokeApiKey(keyId) {
+    if (!confirm('Are you sure you want to revoke this API key? Applications using it will immediately be rejected.')) return;
+    try {
+        const res = await fetch(`/api/v1/auth/api-keys/${keyId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('API key revoked.', 'info');
+            loadApiKeys();
+        } else {
+            showToast(data.error || 'Failed to revoke key', 'error');
+        }
+    } catch (e) {
+        showToast(`Revocation error: ${e.message}`, 'error');
+    }
+}
+
+// ==========================================
+// TEAM DIRECTORY & AUDIT LOGS
+// ==========================================
+
+async function loadTeamAndAudits() {
+    try {
+        const memRes = await fetch('/api/v1/organizations/members');
+        if (memRes.ok) {
+            const data = await memRes.json();
+            state.teamMembers = data.members || [];
+            renderTeamMembers();
+        }
+
+        const auditRes = await fetch('/api/v1/audit-trail');
+        if (auditRes.ok) {
+            const data = await auditRes.json();
+            state.auditLogs = data.audit_trail || [];
+            renderAuditTrail();
+        }
+    } catch (e) {
+        console.error('Failed to load team or audits:', e);
+    }
+}
+
+function renderTeamMembers() {
+    const tbody = document.getElementById('teamMembersTableBody');
+    if (!tbody) return;
+
+    if (state.teamMembers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">No team members found.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = state.teamMembers.map(m => {
+        const u = m.user || {};
+        return `
+            <tr>
+                <td><strong>${escapeHtml(u.full_name || 'Member')}</strong></td>
+                <td><code style="color:var(--text-secondary);">${escapeHtml(u.email || '')}</code></td>
+                <td><span class="role-badge ${m.role.toLowerCase()}">${m.role.toUpperCase()}</span></td>
+                <td style="font-size:0.75rem; color:var(--text-muted);">${m.created_at}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderAuditTrail() {
+    const tbody = document.getElementById('auditTrailTableBody');
+    if (!tbody) return;
+
+    if (state.auditLogs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">No audit log records yet.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = state.auditLogs.map(a => {
+        return `
+            <tr>
+                <td><strong>${escapeHtml(a.action)}</strong></td>
+                <td><span style="font-size:0.8rem; color:var(--text-secondary);">${escapeHtml(a.resource_type)}</span></td>
+                <td><code style="font-size:0.75rem; color:var(--cyan-glow);">${escapeHtml(a.resource_id || '-')}</code></td>
+                <td><span style="font-family:var(--font-mono); font-size:0.8rem;">${escapeHtml(a.ip_address || '127.0.0.1')}</span></td>
+                <td style="font-size:0.75rem; color:var(--text-muted);">${a.created_at}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function openAddMemberModal() {
+    document.getElementById('newMemberName').value = '';
+    document.getElementById('newMemberEmail').value = '';
+    document.getElementById('addMemberModal').style.display = 'flex';
+}
+
+function closeAddMemberModal() {
+    document.getElementById('addMemberModal').style.display = 'none';
+}
+
+async function submitAddMember(e) {
+    e.preventDefault();
+    const full_name = document.getElementById('newMemberName').value.trim();
+    const email = document.getElementById('newMemberEmail').value.trim();
+    const role = document.getElementById('newMemberRole').value;
+
+    try {
+        const res = await fetch('/api/v1/organizations/members', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, full_name, role })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`Added ${email} as ${role.toUpperCase()}`, 'success');
+            closeAddMemberModal();
+            loadTeamAndAudits();
+        } else {
+            showToast(data.error || 'Failed to add member', 'error');
+        }
+    } catch (err) {
+        showToast(`Add member error: ${err.message}`, 'error');
+    }
+}
+
+// ==========================================
+// DEMO PERSONA SWITCHER
+// ==========================================
+
+function openPersonaModal() {
+    document.getElementById('personaModal').style.display = 'flex';
+}
+
+function closePersonaModal() {
+    document.getElementById('personaModal').style.display = 'none';
+}
+
+async function quickLoginPersona(email, password) {
+    try {
+        const res = await fetch('/api/v1/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            state.currentUser = data.user;
+            state.currentOrg = data.organization;
+            state.userRole = data.role;
+            updateUserBadgeUI();
+            closePersonaModal();
+            showToast(`Logged in as ${data.user.full_name} (${data.role.toUpperCase()})`, 'success');
+            refreshAllData();
+        } else {
+            showToast(data.error || 'Login failed', 'error');
+        }
+    } catch (err) {
+        showToast(`Login error: ${err.message}`, 'error');
+    }
+}
+
+// ==========================================
+// BLUEPRINTS
 // ==========================================
 
 async function loadBlueprints() {
@@ -930,45 +1490,30 @@ async function loadBlueprints() {
         const data = await res.json();
         state.blueprints = data.presets || [];
         renderBlueprintsGrid();
-    } catch (err) {
-        console.error('Error loading blueprints:', err);
+    } catch (e) {
+        console.error('Failed to load blueprints:', e);
     }
 }
 
 function renderBlueprintsGrid() {
-    const container = document.getElementById('blueprintsGrid');
-    if (!container) return;
+    const grid = document.getElementById('blueprintsGrid');
+    if (!grid) return;
 
-    container.innerHTML = state.blueprints.map(bp => `
-        <div class="blueprint-card">
-            <div>
-                <div class="blueprint-header">
-                    <span class="rule-category-badge">${escapeHtml(bp.category)}</span>
-                    <span class="rule-priority-tag">P${bp.priority}</span>
+    grid.innerHTML = state.blueprints.map(bp => {
+        return `
+            <div class="blueprint-card">
+                <div class="bp-header">
+                    <span class="category-chip ${bp.category.toLowerCase()}">${bp.category}</span>
+                    <span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--text-muted);">Priority: ${bp.priority}</span>
                 </div>
-                <div class="blueprint-name">${escapeHtml(bp.name)}</div>
-                <div class="blueprint-desc">${escapeHtml(bp.description)}</div>
-                <div class="rule-specs">
-                    <div class="rule-spec-row">
-                        <span>Trigger:</span>
-                        <span>${escapeHtml(bp.trigger?.event_name || '*')}</span>
-                    </div>
-                    <div class="rule-spec-row">
-                        <span>Actions:</span>
-                        <span>${(bp.actions || []).length} Configured</span>
-                    </div>
+                <h3 class="bp-title">${escapeHtml(bp.name)}</h3>
+                <p class="bp-desc">${escapeHtml(bp.description)}</p>
+                <div class="bp-footer">
+                    <button class="hud-btn outline small" onclick="installBlueprint('${bp.id}')">Install Blueprint</button>
                 </div>
-            <div style="display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap;">
-                <button class="hud-btn primary" style="flex: 1; justify-content: center; min-width: 140px;" onclick="installBlueprint('${bp.id}')">
-                    ⚡ Install Blueprint
-                </button>
-                ${bp.id === 'blueprint-cpu-sentinel' ? `
-                <button type="button" class="hud-btn outline" style="flex: 1; justify-content: center; min-width: 140px;" onclick="openMetricsSimulator(92.0)">
-                    🧪 Simulate Dry Run (92%)
-                </button>` : ''}
             </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
 async function installBlueprint(blueprintId) {
@@ -979,134 +1524,96 @@ async function installBlueprint(blueprintId) {
             body: JSON.stringify({ preset_id: blueprintId })
         });
         const data = await res.json();
-        if (data.success) {
-            showToast(data.message, 'success');
+        if (res.ok) {
+            showToast(data.message || 'Blueprint installed!', 'success');
             loadRules();
             pollTelemetry();
         } else {
-            showToast(`Install error: ${data.error}`, 'error');
+            showToast(data.error || 'Failed to install blueprint', 'error');
         }
-    } catch (err) {
-        showToast('Failed to install blueprint', 'error');
+    } catch (e) {
+        showToast(`Install error: ${e.message}`, 'error');
     }
 }
 
 // ==========================================
-// IN-APP NOTIFICATIONS DRAWER
+// NOTIFICATIONS DRAWER
 // ==========================================
 
 function toggleNotificationsDrawer() {
     const drawer = document.getElementById('notifDrawer');
-    if (!drawer) return;
-    drawer.style.display = drawer.style.display === 'block' ? 'none' : 'block';
+    if (drawer) {
+        drawer.style.display = drawer.style.display === 'flex' ? 'none' : 'flex';
+    }
 }
 
 async function pollNotifications() {
     try {
-        const res = await fetch('/api/notifications');
+        const res = await fetch('/api/notifications?unread=true');
         if (!res.ok) return;
         const data = await res.json();
-        state.notifications = data.notifications || [];
+        const list = data.notifications || [];
 
-        const unreadCount = state.notifications.filter(n => !n.read).length;
         const badge = document.getElementById('notifCountBadge');
         if (badge) {
-            if (unreadCount > 0) {
-                badge.textContent = unreadCount;
-                badge.style.display = 'inline-block';
+            if (list.length > 0) {
+                badge.style.display = 'block';
+                badge.textContent = list.length;
             } else {
                 badge.style.display = 'none';
             }
         }
 
-        renderNotificationsList();
-    } catch (err) {
-        console.error('Error polling notifications:', err);
+        const notifList = document.getElementById('notifList');
+        if (notifList) {
+            if (list.length === 0) {
+                notifList.innerHTML = '<div class="notif-empty">No active notifications</div>';
+            } else {
+                notifList.innerHTML = list.map(n => `
+                    <div class="notif-item">
+                        <div style="font-weight:700; color:var(--text-primary); font-size:0.85rem;">${escapeHtml(n.title)}</div>
+                        <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:2px;">${escapeHtml(n.message)}</div>
+                        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px;">${n.timestamp}</div>
+                    </div>
+                `).join('');
+            }
+        }
+    } catch (e) {
+        console.error('Failed to poll notifications:', e);
     }
-}
-
-function renderNotificationsList() {
-    const list = document.getElementById('notifList');
-    if (!list) return;
-
-    if (!state.notifications.length) {
-        list.innerHTML = '<div class="notif-empty">No alerts in system</div>';
-        return;
-    }
-
-    list.innerHTML = state.notifications.slice(0, 10).map(n => `
-        <div class="notif-item ${n.severity}">
-            <div class="title">${escapeHtml(n.title)}</div>
-            <div class="msg">${escapeHtml(n.message)}</div>
-            <div class="time">${escapeHtml(n.timestamp)}</div>
-        </div>
-    `).join('');
 }
 
 async function markNotificationsRead() {
     try {
         await fetch('/api/notifications/read', { method: 'POST' });
         pollNotifications();
-    } catch (err) {}
+        showToast('Notifications marked as read.', 'info');
+    } catch (e) {}
 }
 
 async function clearNotifications() {
     try {
         await fetch('/api/notifications', { method: 'DELETE' });
         pollNotifications();
-        showToast('Alerts cleared', 'success');
-    } catch (err) {}
+        showToast('Notifications cleared.', 'info');
+    } catch (e) {}
 }
 
 // ==========================================
-// SETTINGS IMPORT
+// UTILITIES & TOASTS
 // ==========================================
 
-async function importRulesFile(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-        try {
-            const json = JSON.parse(e.target.result);
-            const res = await fetch('/api/import', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(json)
-            });
-            const data = await res.json();
-            if (data.success) {
-                showToast(data.message, 'success');
-                loadRules();
-                pollTelemetry();
-            } else {
-                showToast(data.error, 'error');
-            }
-        } catch (err) {
-            showToast('Invalid JSON file format', 'error');
-        }
-    };
-    reader.readAsText(file);
-}
-
-// ==========================================
-// TOAST MESSAGES & UTILITIES
-// ==========================================
-
-function showToast(message, type = 'info') {
+function showToast(msg, type = 'info') {
     const container = document.getElementById('toastContainer');
     if (!container) return;
 
     const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    const icon = type === 'success' ? '✓' : type === 'error' ? '⚠' : 'ℹ';
-    toast.innerHTML = `<span>${icon}</span> <span>${escapeHtml(message)}</span>`;
-    container.appendChild(toast);
+    toast.className = `hud-toast ${type}`;
+    toast.textContent = msg;
 
+    container.appendChild(toast);
     setTimeout(() => {
         toast.style.opacity = '0';
-        toast.style.transform = 'translateY(10px)';
         setTimeout(() => toast.remove(), 300);
     }, 3500);
 }
@@ -1120,3 +1627,252 @@ function escapeHtml(str) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 }
+
+function importRulesFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        try {
+            const data = JSON.parse(e.target.result);
+            const res = await fetch('/api/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await res.json();
+            if (res.ok) {
+                showToast(result.message || 'Rules imported successfully.', 'success');
+                loadRules();
+                pollTelemetry();
+            } else {
+                showToast(result.error || 'Import failed', 'error');
+            }
+        } catch (err) {
+            showToast('Invalid JSON file format', 'error');
+        }
+    };
+    reader.readAsText(file);
+}
+
+// ==========================================
+// CRM LEADS CONTROLLER & REAL-TIME PIPELINE
+// ==========================================
+
+let leadsCache = [];
+
+async function loadLeads() {
+    const tbody = document.getElementById('leadsTableBody');
+    if (!tbody) return;
+
+    try {
+        const res = await fetch('/api/v1/leads');
+        if (!res.ok) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="color:#ef4444;">Failed to load CRM leads.</td></tr>';
+            return;
+        }
+        const data = await res.json();
+        leadsCache = data.leads || [];
+        renderLeads(leadsCache);
+        updateLeadsKpis(leadsCache);
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center" style="color:#ef4444;">Error fetching leads: ${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+function updateLeadsKpis(leads) {
+    const totalEl = document.getElementById('leadsKpiTotal');
+    const qualifiedEl = document.getElementById('leadsKpiQualified');
+    const salesEl = document.getElementById('leadsKpiSales');
+    const supportEl = document.getElementById('leadsKpiSupport');
+
+    if (totalEl) totalEl.textContent = leads.length;
+    if (qualifiedEl) qualifiedEl.textContent = leads.filter(l => (l.lead_score || 0) >= 70).length;
+    if (salesEl) salesEl.textContent = leads.filter(l => (l.route_department || '').toLowerCase() === 'sales').length;
+    if (supportEl) supportEl.textContent = leads.filter(l => (l.route_department || '').toLowerCase().includes('support')).length;
+
+    const tabBadge = document.getElementById('tabLeadCount');
+    if (tabBadge) tabBadge.textContent = leads.length;
+}
+
+function renderLeads(leads) {
+    const tbody = document.getElementById('leadsTableBody');
+    if (!tbody) return;
+
+    if (!leads.length) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" class="text-center" style="padding: 40px; color: #64748b;">
+                    <div style="font-size: 2rem; margin-bottom: 8px;">📭</div>
+                    <div>No CRM leads found matching current filters.</div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = leads.map(l => {
+        const score = l.lead_score || 0;
+        let scoreBadgeClass = 'viewer';
+        if (score >= 75) scoreBadgeClass = 'admin';
+        else if (score >= 50) scoreBadgeClass = 'operator';
+
+        const dept = l.route_department || 'General Queue';
+        let deptColor = '#94a3b8';
+        if (dept === 'Sales') deptColor = '#10b981';
+        else if (dept.includes('Support')) deptColor = '#06b6d4';
+        else if (dept.includes('Security')) deptColor = '#ef4444';
+
+        const previewMsg = escapeHtml((l.message || '').length > 60 ? (l.message || '').slice(0, 60) + '...' : l.message || 'No inquiry text');
+
+        return `
+            <tr>
+                <td>
+                    <div style="font-weight: 600; color: #fff;">${escapeHtml(l.name || 'Anonymous Lead')}</div>
+                    <div style="font-size: 0.8rem; color: #06b6d4; font-family: monospace;">${escapeHtml(l.email || 'No email')}</div>
+                    ${l.company ? `<div style="font-size: 0.75rem; color: #94a3b8;">🏢 ${escapeHtml(l.company)}</div>` : ''}
+                </td>
+                <td style="max-width: 250px; font-size: 0.85rem; color: #cbd5e1;" title="${escapeHtml(l.message || '')}">
+                    "${previewMsg}"
+                </td>
+                <td>
+                    <span class="role-badge" style="background: rgba(255,255,255,0.06); font-family: monospace; font-size: 0.75rem;">
+                        ${escapeHtml(l.intent || 'inquiry')}
+                    </span>
+                </td>
+                <td>
+                    <span class="role-badge ${scoreBadgeClass}" style="font-weight: bold; font-family: monospace;">
+                        ${score} / 100
+                    </span>
+                </td>
+                <td>
+                    <span style="color: ${deptColor}; font-weight: 600; font-size: 0.85rem;">
+                        ● ${escapeHtml(dept)}
+                    </span>
+                </td>
+                <td>
+                    <select class="hud-input" style="padding: 4px 8px; font-size: 0.8rem; width: auto;" onchange="updateLeadStatus('${l.id}', this.value)">
+                        <option value="new" ${l.status === 'new' ? 'selected' : ''}>New</option>
+                        <option value="qualified" ${l.status === 'qualified' ? 'selected' : ''}>Qualified</option>
+                        <option value="follow_up" ${l.status === 'follow_up' ? 'selected' : ''}>Follow Up</option>
+                        <option value="closed" ${l.status === 'closed' ? 'selected' : ''}>Closed</option>
+                        <option value="archived" ${l.status === 'archived' ? 'selected' : ''}>Archived</option>
+                    </select>
+                </td>
+                <td style="font-size: 0.8rem; color: #64748b; font-family: monospace; white-space: nowrap;">
+                    ${escapeHtml(l.created_at || 'Just now')}
+                </td>
+                <td style="white-space: nowrap;">
+                    <button class="action-btn cyan-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="viewLeadDetail('${l.id}')">Inspect</button>
+                    <button class="action-btn red-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="deleteLead('${l.id}')">Delete</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function filterLeads() {
+    const searchVal = (document.getElementById('leadSearchInput')?.value || '').toLowerCase().trim();
+    const statusVal = document.getElementById('leadStatusFilter')?.value || 'all';
+    const deptVal = document.getElementById('leadDeptFilter')?.value || 'all';
+
+    const filtered = leadsCache.filter(l => {
+        const matchesSearch = !searchVal || 
+            (l.name || '').toLowerCase().includes(searchVal) ||
+            (l.email || '').toLowerCase().includes(searchVal) ||
+            (l.company || '').toLowerCase().includes(searchVal) ||
+            (l.message || '').toLowerCase().includes(searchVal);
+
+        const matchesStatus = statusVal === 'all' || l.status === statusVal;
+        const matchesDept = deptVal === 'all' || (l.route_department || '').toLowerCase() === deptVal.toLowerCase();
+
+        return matchesSearch && matchesStatus && matchesDept;
+    });
+
+    renderLeads(filtered);
+}
+
+async function updateLeadStatus(leadId, newStatus) {
+    try {
+        const res = await fetch(`/api/v1/leads/${leadId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus })
+        });
+        if (res.ok) {
+            showToast(`Lead status updated to '${newStatus}'.`, 'success');
+            loadLeads();
+            pollTelemetry();
+        } else {
+            showToast('Failed to update lead status.', 'error');
+        }
+    } catch (err) {
+        showToast(`Update error: ${err.message}`, 'error');
+    }
+}
+
+async function deleteLead(leadId) {
+    if (!confirm('Are you sure you want to delete this CRM lead record?')) return;
+    try {
+        const res = await fetch(`/api/v1/leads/${leadId}`, { method: 'DELETE' });
+        if (res.ok) {
+            showToast('Lead record removed successfully.', 'info');
+            loadLeads();
+            pollTelemetry();
+        } else {
+            showToast('Failed to delete lead.', 'error');
+        }
+    } catch (err) {
+        showToast(`Delete error: ${err.message}`, 'error');
+    }
+}
+
+function viewLeadDetail(leadId) {
+    const lead = leadsCache.find(l => l.id === leadId);
+    if (!lead) return;
+
+    alert(
+        `LEAD DETAILS & AI ANALYSIS\n` +
+        `-----------------------------------------\n` +
+        `Name: ${lead.name || 'N/A'}\n` +
+        `Email: ${lead.email || 'N/A'}\n` +
+        `Company: ${lead.company || 'N/A'}\n` +
+        `Lead Score: ${lead.lead_score || 0} / 100\n` +
+        `AI Intent: ${lead.intent || 'N/A'}\n` +
+        `Urgency Score: ${lead.urgency_score || 0} / 100\n` +
+        `Routed Department: ${lead.route_department || 'General Queue'}\n` +
+        `Status: ${lead.status || 'new'}\n\n` +
+        `Customer Inquiry Message:\n` +
+        `"${lead.message || ''}"\n\n` +
+        (lead.draft_response ? `Automated AI Response Draft:\n"${lead.draft_response}"\n` : '')
+    );
+}
+
+function openNewLeadModal() {
+    const name = prompt('Customer / Contact Name:');
+    if (!name) return;
+    const email = prompt('Contact Email Address:');
+    if (!email) return;
+    const message = prompt('Customer Inquiry Message / Requirement:');
+    if (!message) return;
+
+    fetch('/api/v1/events/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            event: 'lead.created',
+            name: name,
+            email: email,
+            message: message,
+            dry_run: false
+        })
+    }).then(res => res.json()).then(data => {
+        showToast('New lead ingested & processed through automation pipeline!', 'success');
+        loadLeads();
+        pollTelemetry();
+    }).catch(err => {
+        showToast('Ingestion error: ' + err.message, 'error');
+    });
+}
+
