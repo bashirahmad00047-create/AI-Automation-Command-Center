@@ -318,7 +318,9 @@ function renderRulesTable() {
                 <td style="font-size: 0.75rem; color: var(--text-muted);">${rule.last_triggered || 'Never'}</td>
                 <td>
                     <div class="action-btn-row">
-                        <button class="action-btn cyan-btn" onclick="runRuleTest('${rule.id}')" title="Test Trigger">▶</button>
+                        <button class="action-btn cyan-btn" onclick="runRuleTest('${rule.id}')" title="Live Execute">▶</button>
+                        <button class="action-btn purple-btn" onclick="runDryRunTest('${rule.id}')" title="Dry Run / Simulation (Zero Side Effects)">🧪</button>
+                        <button class="action-btn" style="background:rgba(255,255,255,0.08); color:#e2e8f0;" onclick="duplicateRule('${rule.id}')" title="Duplicate Workflow" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>📋</button>
                         <button class="action-btn amber-btn" onclick="editRule('${rule.id}')" title="Edit Rule" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>✏️</button>
                         <button class="action-btn red-btn" onclick="deleteRule('${rule.id}')" title="Delete Rule" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>🗑️</button>
                     </div>
@@ -382,6 +384,54 @@ async function deleteRule(ruleId) {
         }
     } catch (e) {
         showToast(`Delete error: ${e.message}`, 'error');
+    }
+}
+
+async function duplicateRule(ruleId) {
+    try {
+        const res = await fetch(`/api/v1/workflows/${ruleId}/duplicate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`Workflow duplicated: '${data.workflow.name}'`, 'success');
+            loadRules();
+            pollTelemetry();
+        } else {
+            showToast(data.error || 'Failed to duplicate workflow', 'error');
+        }
+    } catch (e) {
+        showToast(`Duplicate error: ${e.message}`, 'error');
+    }
+}
+
+async function runDryRunTest(ruleId) {
+    try {
+        const res = await fetch(`/api/v1/workflows/${ruleId}/execute`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: true, payload: { simulation_test: true, timestamp: new Date().toISOString() } })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Dry Run simulated with ZERO side effects!', 'success');
+            alert(
+                `🧪 DRY RUN SIMULATION TRACE (ZERO SIDE EFFECTS)\n` +
+                `--------------------------------------------------\n` +
+                `Workflow: ${data.workflow_name || data.rule_name || ruleId}\n` +
+                `Status: ${data.status.toUpperCase()}\n` +
+                `Condition Matched: ${data.matched ? 'YES' : 'NO'}\n` +
+                `Execution Duration: ${data.duration_ms || 0}ms\n` +
+                `Notice: DRY RUN / ZERO SIDE EFFECTS\n\n` +
+                `Action Results (Simulated): \n` +
+                JSON.stringify(data.action_results || data.steps_trace || [], null, 2)
+            );
+        } else {
+            showToast(data.error || 'Dry run simulation failed', 'error');
+        }
+    } catch (e) {
+        showToast(`Simulation error: ${e.message}`, 'error');
     }
 }
 
@@ -505,6 +555,30 @@ function addActionRow(type = 'notification', params = null) {
                 <option value="PUT" ${params.method === 'PUT' ? 'selected' : ''}>PUT</option>
             </select>
         `;
+    } else if (type === 'database_record') {
+        paramsHtml = `
+            <input type="text" class="hud-input flex-2 act-entity" placeholder="Entity (lead)" value="${escapeHtml(params.entity || 'lead')}">
+            <select class="hud-input flex-1 act-status">
+                <option value="qualified" ${params.status === 'qualified' ? 'selected' : ''}>Qualified</option>
+                <option value="new" ${params.status === 'new' ? 'selected' : ''}>New</option>
+                <option value="follow_up" ${params.status === 'follow_up' ? 'selected' : ''}>Follow Up</option>
+            </select>
+        `;
+    } else if (type === 'email_draft') {
+        paramsHtml = `
+            <input type="text" class="hud-input flex-2 act-template" placeholder="Template (e.g. sales_discovery)" value="${escapeHtml(params.template || 'sales_discovery')}">
+            <input type="text" class="hud-input flex-2 act-recipient" placeholder="{{ payload.email }}" value="${escapeHtml(params.recipient || '{{ payload.email }}')}">
+        `;
+    } else if (type === 'assign_department') {
+        paramsHtml = `
+            <select class="hud-input flex-3 act-dept">
+                <option value="auto" ${params.department === 'auto' ? 'selected' : ''}>AI Auto Smart Routing</option>
+                <option value="Sales" ${params.department === 'Sales' ? 'selected' : ''}>Sales (Hot Leads)</option>
+                <option value="Support" ${params.department === 'Support' ? 'selected' : ''}>Support</option>
+                <option value="Priority Support" ${params.department === 'Priority Support' ? 'selected' : ''}>Priority Support</option>
+                <option value="Security Operations" ${params.department === 'Security Operations' ? 'selected' : ''}>Security Operations</option>
+            </select>
+        `;
     } else {
         paramsHtml = `
             <input type="text" class="hud-input flex-3 act-msg" placeholder="Log / Diagnostic Message" value="${escapeHtml(params.message || '')}">
@@ -514,6 +588,9 @@ function addActionRow(type = 'notification', params = null) {
     row.innerHTML = `
         <select class="hud-input flex-1 act-type" onchange="updateActionParamsUI(this)">
             <option value="notification" ${type === 'notification' ? 'selected' : ''}>In-App Incident Alert</option>
+            <option value="database_record" ${type === 'database_record' ? 'selected' : ''}>CRM Lead / DB Record</option>
+            <option value="email_draft" ${type === 'email_draft' ? 'selected' : ''}>AI Email Response Draft</option>
+            <option value="assign_department" ${type === 'assign_department' ? 'selected' : ''}>Smart Dept Route</option>
             <option value="webhook_call" ${type === 'webhook_call' ? 'selected' : ''}>Outbound HTTP Webhook</option>
             <option value="log_entry" ${type === 'log_entry' ? 'selected' : ''}>Diagnostic Log Entry</option>
             <option value="email_dispatch" ${type === 'email_dispatch' ? 'selected' : ''}>Simulated Email Dispatch</option>
@@ -544,6 +621,26 @@ function updateActionParamsUI(selectEl) {
         container.innerHTML = `
             <input type="text" class="hud-input flex-3 act-url" placeholder="https://api.internal/v1/webhook" value="">
             <select class="hud-input flex-1 act-method"><option value="POST">POST</option><option value="GET">GET</option></select>
+        `;
+    } else if (type === 'database_record') {
+        container.innerHTML = `
+            <input type="text" class="hud-input flex-2 act-entity" placeholder="Entity (lead)" value="lead">
+            <select class="hud-input flex-1 act-status"><option value="qualified">Qualified</option><option value="new">New</option><option value="follow_up">Follow Up</option></select>
+        `;
+    } else if (type === 'email_draft') {
+        container.innerHTML = `
+            <input type="text" class="hud-input flex-2 act-template" placeholder="Template (e.g. sales_discovery)" value="sales_discovery">
+            <input type="text" class="hud-input flex-2 act-recipient" placeholder="{{ payload.email }}" value="{{ payload.email }}">
+        `;
+    } else if (type === 'assign_department') {
+        container.innerHTML = `
+            <select class="hud-input flex-3 act-dept">
+                <option value="auto">AI Auto Smart Routing</option>
+                <option value="Sales">Sales (Hot Leads)</option>
+                <option value="Support">Support</option>
+                <option value="Priority Support">Priority Support</option>
+                <option value="Security Operations">Security Operations</option>
+            </select>
         `;
     } else {
         container.innerHTML = `<input type="text" class="hud-input flex-3 act-msg" placeholder="Message or Diagnostic text" value="">`;
@@ -583,6 +680,19 @@ async function saveRuleForm(e) {
             const methodInput = r.querySelector('.act-method');
             params.url = urlInput ? urlInput.value.trim() : 'https://api.internal/webhook';
             params.method = methodInput ? methodInput.value : 'POST';
+        } else if (type === 'database_record') {
+            const entityInput = r.querySelector('.act-entity');
+            const statusInput = r.querySelector('.act-status');
+            params.entity = entityInput ? entityInput.value.trim() : 'lead';
+            params.status = statusInput ? statusInput.value : 'qualified';
+        } else if (type === 'email_draft') {
+            const tmplInput = r.querySelector('.act-template');
+            const recipInput = r.querySelector('.act-recipient');
+            params.template = tmplInput ? tmplInput.value.trim() : 'sales_discovery';
+            params.recipient = recipInput ? recipInput.value.trim() : '{{ payload.email }}';
+        } else if (type === 'assign_department') {
+            const deptInput = r.querySelector('.act-dept');
+            params.department = deptInput ? deptInput.value : 'auto';
         } else {
             const msgInput = r.querySelector('.act-msg');
             params.message = msgInput ? msgInput.value.trim() : 'Rule action executed';
@@ -1052,19 +1162,49 @@ function inspectExecution(execId) {
             </div>
         </div>
 
+        ${log.ai_result && Object.keys(log.ai_result).length ? `
+        <div style="margin-top:16px;">
+            <h4 style="color:#06b6d4; margin-bottom:6px;">🧠 Local AI Intelligence Analysis:</h4>
+            <div style="background:#0b1120; padding:12px; border-radius:6px; font-family:monospace; font-size:0.85rem;">
+                <div><strong>Intent:</strong> ${escapeHtml(log.ai_result.intent || 'N/A')}</div>
+                <div><strong>Urgency Score:</strong> ${log.ai_result.urgency || 0}/100</div>
+                <div><strong>Lead Score:</strong> ${log.ai_result.lead_score || 0}/100</div>
+                <div><strong>Recommended Route:</strong> ${escapeHtml(log.ai_result.recommended_route || 'N/A')}</div>
+                ${log.ai_result.draft_response ? `<div style="margin-top:6px; color:#10b981;"><strong>Draft Response:</strong> "${escapeHtml(log.ai_result.draft_response)}"</div>` : ''}
+            </div>
+        </div>
+        ` : ''}
+
+        ${log.steps_trace && log.steps_trace.length ? `
+        <div style="margin-top:16px;">
+            <h4 style="color:#a855f7; margin-bottom:6px;">⚡ Visual Step Waterfall:</h4>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                ${log.steps_trace.map((st, idx) => `
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:#0f172a; padding:8px 12px; border-radius:4px; font-size:0.85rem; border-left:3px solid ${st.status === 'SUCCESS' ? '#10b981' : (st.status === 'DRY_RUN' ? '#a855f7' : '#ef4444')};">
+                        <span><strong>Step ${idx+1}:</strong> ${escapeHtml(st.name || st.step_name)} (${escapeHtml(st.type || st.step_type)})</span>
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <span class="role-badge" style="font-size:0.75rem;">${st.duration_ms || 0}ms</span>
+                            <span class="role-badge ${st.status === 'SUCCESS' ? 'admin' : (st.status === 'DRY_RUN' ? 'operator' : 'viewer')}">${st.status}</span>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+        ` : ''}
+
         <div style="margin-top:16px;">
             <h4 style="color:var(--text-primary); margin-bottom:6px;">Input Telemetry / Context Payload:</h4>
-            <pre class="curl-snippet" style="max-height:160px;">${escapeHtml(JSON.stringify(log.payload || {}, null, 2))}</pre>
+            <pre class="curl-snippet" style="max-height:140px;">${escapeHtml(JSON.stringify(log.payload || {}, null, 2))}</pre>
         </div>
 
         <div style="margin-top:16px;">
             <h4 style="color:var(--text-primary); margin-bottom:6px;">Condition Evaluation Step Trace:</h4>
-            <pre class="curl-snippet" style="max-height:160px;">${escapeHtml(JSON.stringify(log.trace || [], null, 2))}</pre>
+            <pre class="curl-snippet" style="max-height:140px;">${escapeHtml(JSON.stringify(log.trace || [], null, 2))}</pre>
         </div>
 
         <div style="margin-top:16px;">
             <h4 style="color:var(--text-primary); margin-bottom:6px;">Action Pipeline Dispatches:</h4>
-            <pre class="curl-snippet" style="max-height:160px;">${escapeHtml(JSON.stringify(log.action_results || log.results || [], null, 2))}</pre>
+            <pre class="curl-snippet" style="max-height:140px;">${escapeHtml(JSON.stringify(log.action_results || log.results || [], null, 2))}</pre>
         </div>
     `;
 

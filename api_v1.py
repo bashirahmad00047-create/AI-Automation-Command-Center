@@ -190,6 +190,7 @@ def auth_login():
     session["user_id"] = user.id
     if org_id:
         session["active_org_id"] = org_id
+        session["org_id"] = org_id
 
     log_audit_event("auth.login", "user", user.id, {"email": email})
 
@@ -269,6 +270,7 @@ def switch_organization():
             return jsonify({"error": "Access denied to target organization.", "code": "FORBIDDEN"}), 403
 
     session["active_org_id"] = target_org.id
+    session["org_id"] = target_org.id
     return jsonify({
         "success": True,
         "message": f"Switched to workspace: {target_org.name}",
@@ -601,6 +603,8 @@ def incoming_webhook_receiver(endpoint_token: str):
 # ==========================================
 
 @api_v1.route("/events/dispatch", methods=["POST"])
+@api_v1.route("/events/ingest", methods=["POST"])
+@api_v1.route("/events", methods=["POST"])
 @require_auth
 def dispatch_event():
     data = request.get_json(silent=True) or {}
@@ -614,6 +618,40 @@ def dispatch_event():
     dry_run = bool(data.get("dry_run", False))
     org = g.current_org
 
+    # If this is a lead ingestion event, automatically qualify and persist the CRM Lead
+    if (event_name == "lead.created" or "lead" in event_name) and not dry_run:
+        message = payload.get("message") or payload.get("text") or ""
+        ai_provider = get_ai_provider()
+        analysis = ai_provider.analyze_text(message)
+        email = payload.get("email") or (analysis.get("entities", {}).get("emails", [None])[0])
+        name = payload.get("name") or "Website Visitor"
+        if email or name:
+            storage = get_storage()
+            lead_data = {
+                "name": name,
+                "email": email,
+                "phone": payload.get("phone") or (analysis.get("entities", {}).get("phones", [None])[0]),
+                "company": payload.get("company") or "N/A",
+                "message": message,
+                "intent": analysis.get("intent", "lead_inquiry"),
+                "sentiment": analysis.get("sentiment_label", "neutral"),
+                "urgency_score": analysis.get("urgency_score", 20),
+                "lead_score": analysis.get("lead_score", 50),
+                "route_department": analysis.get("recommended_route", "Sales"),
+                "status": "new",
+                "draft_response": ai_provider.generate_draft_response(
+                    name=name,
+                    company=payload.get("company"),
+                    intent=analysis.get("intent", "lead_inquiry"),
+                    lead_score=analysis.get("lead_score", 50),
+                    route_department=analysis.get("recommended_route", "Sales"),
+                    message=message
+                ),
+                "organization_id": org.id
+            }
+            saved_lead = storage.save_lead(lead_data, organization_id=org.id)
+            payload["lead_id"] = saved_lead.get("id")
+
     engine = get_engine()
     result = engine.ingest_event(
         event_name=event_name,
@@ -625,7 +663,10 @@ def dispatch_event():
 
     log_audit_event("event.dispatch", "event", event_name, {"event": event_name, "dry_run": dry_run})
 
-    return jsonify({"success": True, "result": result})
+    response_payload = dict(result)
+    response_payload["success"] = True
+    response_payload["result"] = result
+    return jsonify(response_payload)
 
 
 @api_v1.route("/nlp/analyze", methods=["POST"])
@@ -764,6 +805,7 @@ def get_lead_detail(lead_id: str):
 
 
 @api_v1.route("/leads/<lead_id>", methods=["PATCH", "PUT"])
+@api_v1.route("/leads/<lead_id>/status", methods=["PATCH", "PUT", "POST"])
 @require_role(["owner", "admin", "operator"])
 def update_lead(lead_id: str):
     data = request.get_json(silent=True) or {}

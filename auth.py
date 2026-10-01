@@ -70,14 +70,22 @@ def get_current_org() -> Optional[Organization]:
             return org
 
     # 2. From session
-    org_id = session.get("org_id")
+    org_id = session.get("active_org_id") or session.get("org_id")
     if org_id:
         org = db.session.get(Organization, org_id)
         if org and org.is_active:
             g.current_org = org
             return org
 
-    # 3. Default fallback to first active org
+    # 3. User's primary organization membership
+    user = get_current_user()
+    if user:
+        mem = Membership.query.filter_by(user_id=user.id).first()
+        if mem and mem.organization and mem.organization.is_active:
+            g.current_org = mem.organization
+            return mem.organization
+
+    # 4. Default fallback to first active org
     default_org = Organization.query.filter_by(is_active=True).first()
     if default_org:
         g.current_org = default_org

@@ -27,6 +27,7 @@ from models import (
     AuditLog,
     AutomationRule,
     IncidentAlert,
+    Lead,
     Membership,
     Organization,
     User,
@@ -365,6 +366,192 @@ class TestIncidentAlertLifecycle(unittest.TestCase):
         resolved_data = res_solve.get_json()["alert"]
         self.assertEqual(resolved_data["status"], "resolved")
         self.assertIn("Scaled connection pool", resolved_data["message"])
+
+
+class TestCRMLeadsAndAutomation(unittest.TestCase):
+    def setUp(self):
+        self.app = app
+        self.app.config["TESTING"] = True
+        self.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        self.client = self.app.test_client()
+        self.ctx = self.app.app_context()
+        self.ctx.push()
+        db.create_all()
+
+        self.org = Organization(id="org-crm-test", name="CRM Enterprise", slug="crm-test", is_active=True)
+        self.admin = User(id="usr-crm-admin", email="sales@crm.test", full_name="Sales Director", is_active=True)
+        self.admin.set_password("SalesPass2026!")
+        self.mem = Membership(id="mem-crm", user_id=self.admin.id, organization_id=self.org.id, role="admin")
+        db.session.add_all([self.org, self.admin, self.mem])
+        db.session.commit()
+
+        # Login
+        self.client.post("/api/v1/auth/login", json={"email": "sales@crm.test", "password": "SalesPass2026!"})
+
+    def tearDown(self):
+        db.session.remove()
+        db.drop_all()
+        self.ctx.pop()
+
+    def test_lead_ingestion_and_scoring(self):
+        res = self.client.post("/api/v1/events/ingest", json={
+            "event": "lead.created",
+            "name": "Marcus Vance",
+            "email": "marcus@enterprise-cloud.io",
+            "message": "We have an urgent enterprise requirement with a $75,000 budget for 250 seats.",
+            "phone": "+1-800-555-0199"
+        })
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["status"], "completed")
+
+        # Verify Lead in CRM API
+        leads_res = self.client.get("/api/v1/leads")
+        self.assertEqual(leads_res.status_code, 200)
+        leads = leads_res.get_json()["leads"]
+        self.assertGreaterEqual(len(leads), 1)
+        lead = next(l for l in leads if l["email"] == "marcus@enterprise-cloud.io")
+        self.assertGreaterEqual(lead["lead_score"], 60)
+        self.assertEqual(lead["route_department"], "Sales")
+
+    def test_lead_status_patching_and_filtering(self):
+        lead = Lead(
+            id="lead-status-test",
+            organization_id=self.org.id,
+            name="Alice Walker",
+            email="alice@cloudcorp.com",
+            message="Looking for integration support.",
+            intent="support_request",
+            lead_score=50,
+            urgency_score=40,
+            route_department="Support",
+            status="new"
+        )
+        db.session.add(lead)
+        db.session.commit()
+
+        # Patch status to qualified
+        patch_res = self.client.patch(f"/api/v1/leads/{lead.id}/status", json={"status": "qualified"})
+        self.assertEqual(patch_res.status_code, 200)
+        self.assertEqual(patch_res.get_json()["lead"]["status"], "qualified")
+
+        # Filter by status
+        filter_res = self.client.get("/api/v1/leads?status=qualified")
+        self.assertEqual(filter_res.status_code, 200)
+        self.assertTrue(any(l["id"] == lead.id for l in filter_res.get_json()["leads"]))
+
+    def test_lead_deletion(self):
+        lead = Lead(
+            id="lead-del-test",
+            organization_id=self.org.id,
+            name="Delete Candidate",
+            email="del@spam.com",
+            message="Spam inquiry",
+            status="archived"
+        )
+        db.session.add(lead)
+        db.session.commit()
+
+        del_res = self.client.delete(f"/api/v1/leads/{lead.id}")
+        self.assertEqual(del_res.status_code, 200)
+        self.assertTrue(del_res.get_json()["success"])
+
+        # Ensure deleted from DB
+        get_res = self.client.get(f"/api/v1/leads/{lead.id}")
+        self.assertEqual(get_res.status_code, 404)
+
+
+class TestWorkflowAdvancedFeatures(unittest.TestCase):
+    def setUp(self):
+        self.app = app
+        self.app.config["TESTING"] = True
+        self.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        self.client = self.app.test_client()
+        self.ctx = self.app.app_context()
+        self.ctx.push()
+        db.create_all()
+
+        self.org = Organization(id="org-wf-test", name="Workflow Enterprise", slug="wf-test", is_active=True)
+        self.admin = User(id="usr-wf-admin", email="admin@wf.test", full_name="Ops Admin", is_active=True)
+        self.admin.set_password("AdminPass2026!")
+        self.mem = Membership(id="mem-wf", user_id=self.admin.id, organization_id=self.org.id, role="admin")
+        db.session.add_all([self.org, self.admin, self.mem])
+        db.session.commit()
+
+        self.client.post("/api/v1/auth/login", json={"email": "admin@wf.test", "password": "AdminPass2026!"})
+
+    def tearDown(self):
+        db.session.remove()
+        db.drop_all()
+        self.ctx.pop()
+
+    def test_workflow_duplication(self):
+        rule = AutomationRule(
+            id="rule-to-clone",
+            organization_id=self.org.id,
+            name="Original Production Pipeline",
+            category="DevOps",
+            priority=80,
+            enabled=True,
+            trigger_json='{"type": "event", "event_name": "deploy.pipeline"}',
+            condition_json='{"logic": "AND", "conditions": []}',
+            actions_json='[{"type": "notification", "params": {"title": "Deploy Alert"}}]'
+        )
+        db.session.add(rule)
+        db.session.commit()
+
+        clone_res = self.client.post(f"/api/v1/workflows/{rule.id}/duplicate")
+        self.assertEqual(clone_res.status_code, 201)
+        cloned = clone_res.get_json()["workflow"]
+        self.assertEqual(cloned["name"], "Original Production Pipeline (Copy)")
+        self.assertFalse(cloned["enabled"])
+
+    def test_workflow_dry_run_simulation_mode(self):
+        rule = AutomationRule(
+            id="rule-simulation-test",
+            organization_id=self.org.id,
+            name="Simulation Test Rule",
+            category="System",
+            priority=90,
+            enabled=True,
+            trigger_json='{"type": "event", "event_name": "system.metrics"}',
+            condition_json='{"logic": "AND", "conditions": [{"field": "payload.cpu_percent", "operator": ">", "value": 80}]}',
+            actions_json='[{"type": "notification", "params": {"title": "Dry Run Alert"}}]'
+        )
+        db.session.add(rule)
+        db.session.commit()
+
+        initial_exec_count = WorkflowExecution.query.count()
+
+        # Execute in dry-run mode
+        exec_res = self.client.post(f"/api/v1/workflows/{rule.id}/execute", json={
+            "dry_run": True,
+            "payload": {"cpu_percent": 92.0, "host": "srv-prod-sim"}
+        })
+        self.assertEqual(exec_res.status_code, 200)
+        data = exec_res.get_json()
+        self.assertTrue(data["is_dry_run"])
+        self.assertEqual(data["status"], "success")
+
+        # Verify zero persistent side effects in database
+        self.assertEqual(WorkflowExecution.query.count(), initial_exec_count)
+
+    def test_real_database_analytics_summary(self):
+        analytics_res = self.client.get("/api/v1/analytics")
+        self.assertEqual(analytics_res.status_code, 200)
+        analytics = analytics_res.get_json()["analytics"]
+        self.assertIn("total_executions", analytics)
+        self.assertIn("success_rate", analytics)
+        self.assertIn("total_leads", analytics)
+        self.assertIn("department_routing", analytics)
+
+    def test_cloud_health_probe(self):
+        res = self.client.get("/health")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["status"], "healthy")
+        self.assertTrue(data["engine_online"])
+        self.assertIn("database", data)
 
 
 if __name__ == "__main__":
