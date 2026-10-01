@@ -176,7 +176,7 @@ def analyze_nlp_and_simulate():
 
     nlp_result = engine.nlp.parse(text)
 
-    # Ingest as user.prompt
+    # Ingest event for natural language sandbox simulation
     ingest_result = engine.ingest_event(
         event_name="user.prompt",
         payload={

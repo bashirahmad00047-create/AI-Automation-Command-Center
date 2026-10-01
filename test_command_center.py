@@ -393,6 +393,20 @@ class TestFlaskAPI(unittest.TestCase):
         presets = res.get_json()["presets"]
         self.assertGreaterEqual(len(presets), 4)
 
+    def test_nlp_sandbox_triggers_cpu_sentinel(self):
+        # Verify that natural language prompts trigger the High CPU Resource Sentinel blueprint
+        self.client.post("/api/presets/install", json={"preset_id": "blueprint-cpu-sentinel"})
+
+        res = self.client.post("/api/nlp/analyze", json={
+            "text": "Critical emergency: database memory utilization surged to 96% on prod-db-01",
+            "dry_run": True
+        })
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        executed = data.get("simulation", {}).get("executed_rules", [])
+        matched_names = [r["rule_name"] for r in executed if r.get("matched")]
+        self.assertTrue(any("CPU" in name for name in matched_names))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@ action execution, cooldown throttles, and automated background telemetry sweeps.
 from __future__ import annotations
 
 import datetime
+import re
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -67,6 +68,52 @@ class AutomationEngine:
         elif event_name in ("user.prompt", "nlp.query", "chat.message"):
             nlp_data = self.nlp.parse(str(payload.get("query", "")))
 
+        # 1b. Synthesize / enrich payload fields from NLP entities if not explicitly provided
+        enriched_payload = dict(payload)
+        is_nlp_source = (event_name in ("user.prompt", "nlp.query", "chat.message") or source == "nlp_sandbox" or bool(nlp_data))
+        if nlp_data and is_nlp_source:
+            entities = nlp_data.get("entities", {})
+            if "cpu_percent" not in enriched_payload and entities.get("percentages"):
+                try:
+                    pct_val = float(entities["percentages"][0])
+                    enriched_payload["cpu_percent"] = pct_val
+                    enriched_payload.setdefault("memory_percent", pct_val)
+                    enriched_payload.setdefault("disk_percent", pct_val)
+                except (ValueError, TypeError):
+                    pass
+
+            if "host" not in enriched_payload and entities.get("hostnames"):
+                enriched_payload["host"] = entities["hostnames"][0]
+
+            if "ip" not in enriched_payload and entities.get("ipv4"):
+                enriched_payload["ip"] = entities["ipv4"][0]
+
+            if "attempts" not in enriched_payload and nlp_data.get("intent") == "security_threat":
+                enriched_payload["attempts"] = 5
+
+            if "status_code" not in enriched_payload and entities.get("http_status"):
+                try:
+                    enriched_payload["status_code"] = int(entities["http_status"][0])
+                except (ValueError, TypeError):
+                    pass
+
+            if "status" not in enriched_payload:
+                if nlp_data.get("sentiment_label") == "positive" or any(w in (text_content or "").lower() for w in ("success", "completed", "smoothly", "finished", "verified")):
+                    enriched_payload["status"] = "success"
+
+            if "database" not in enriched_payload and nlp_data.get("intent") == "backup_request":
+                if entities.get("hostnames"):
+                    enriched_payload["database"] = entities["hostnames"][0]
+                else:
+                    vault_match = re.search(r"\b([a-zA-Z0-9_\-]+(?:-vault|-db|_db|cluster))\b", text_content or "", re.IGNORECASE)
+                    enriched_payload["database"] = vault_match.group(1) if vault_match else "primary_db"
+
+            if "size_mb" not in enriched_payload and entities.get("memory_sizes"):
+                try:
+                    enriched_payload["size_mb"] = float(entities["memory_sizes"][0])
+                except (ValueError, TypeError):
+                    pass
+
         # 2. Build full evaluation context
         context: Dict[str, Any] = {
             "event": {
@@ -74,7 +121,7 @@ class AutomationEngine:
                 "source": source,
                 "timestamp": timestamp_str
             },
-            "payload": payload,
+            "payload": enriched_payload,
             "nlp": nlp_data,
             "system": self.telemetry.get_metrics()
         }
@@ -85,7 +132,7 @@ class AutomationEngine:
             "name": event_name,
             "source": source,
             "timestamp": timestamp_str,
-            "payload": payload,
+            "payload": enriched_payload,
             "nlp_intent": nlp_data.get("intent"),
             "nlp_urgency": nlp_data.get("urgency")
         })
@@ -102,6 +149,27 @@ class AutomationEngine:
         rules = self.storage.get_rules(enabled_only=True)
         executed_rules = []
 
+        # Determine all matching event triggers (direct event + inferred from NLP intent/entities)
+        matching_events = {event_name, "*"}
+        if nlp_data and is_nlp_source:
+            intent = nlp_data.get("intent")
+            if intent in ("server_alert", "status_inquiry"):
+                matching_events.add("system.metrics")
+            elif intent == "security_threat":
+                matching_events.add("auth.failed")
+            elif intent == "backup_request":
+                matching_events.add("backup.completed")
+            elif intent == "deploy_request":
+                matching_events.add("deploy.pipeline")
+
+            entities = nlp_data.get("entities", {})
+            if entities.get("percentages"):
+                matching_events.add("system.metrics")
+            if entities.get("http_status"):
+                matching_events.add("api.error")
+            if entities.get("ipv4"):
+                matching_events.add("auth.failed")
+
         for rule in rules:
             rule_id = rule["id"]
             trigger = rule.get("trigger", {})
@@ -111,7 +179,7 @@ class AutomationEngine:
             trigger_event = trigger.get("event_name", "*")
 
             matches_trigger = False
-            if trigger_event == "*" or trigger_event == event_name:
+            if trigger_event == "*" or trigger_event in matching_events:
                 matches_trigger = True
             elif trigger_type == "natural_text" and bool(nlp_data):
                 matches_trigger = True

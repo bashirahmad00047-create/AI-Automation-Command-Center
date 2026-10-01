@@ -95,7 +95,8 @@ class NLPEngine:
     SENTIMENT_LEXICON = {
         "positive": [
             "success", "resolved", "stable", "optimal", "healthy", "good", "great",
-            "passed", "restored", "normal", "fine", "complete", "finished"
+            "passed", "restored", "normal", "fine", "complete", "completed", "finished",
+            "smoothly", "successful", "successfully"
         ],
         "negative": [
             "error", "failure", "failed", "crash", "corrupted", "down", "fatal",
