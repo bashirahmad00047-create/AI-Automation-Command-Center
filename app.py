@@ -32,7 +32,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     application = Flask(__name__)
 
     # Load environment configuration
-    env_name = config_name or os.environ.get("FLASK_ENV", "development")
+    env_name = config_name or os.environ.get("FLASK_ENV") or ("production" if os.environ.get("RENDER") else "development")
     cfg = config_by_name.get(env_name, config_by_name["default"])
     application.config.from_object(cfg)
 
@@ -73,6 +73,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "connect-src 'self';"
         )
         response.headers["Content-Security-Policy"] = csp
+        if application.config.get("SESSION_COOKIE_SECURE"):
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
     # Global Health Check (Render, K8s, Cloud Load Balancers)

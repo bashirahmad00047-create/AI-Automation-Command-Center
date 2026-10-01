@@ -22,6 +22,7 @@ class Config:
 
     # Session security
     PERMANENT_SESSION_LIFETIME = timedelta(days=7)
+    SESSION_COOKIE_NAME = "opsflow_session"
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "0") == "1"
@@ -36,12 +37,14 @@ class DevelopmentConfig(Config):
     """Local development configuration."""
     DEBUG = True
     TESTING = False
+    SESSION_COOKIE_SECURE = False
 
 
 class TestingConfig(Config):
     """Testing configuration with in-memory or dedicated test database."""
     DEBUG = False
     TESTING = True
+    SESSION_COOKIE_SECURE = False
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     WTF_CSRF_ENABLED = False
 
