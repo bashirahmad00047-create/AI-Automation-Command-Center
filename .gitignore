@@ -1,0 +1,44 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caches and test artifacts
+.pytest_cache/
+*.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Virtual Environments
+.env
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# SQLite databases & lock files (auto-seeded on startup)
+*.db
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Ephemeral runtime logs & automation storage outputs
+automation_storage/logs/*.log
+automation_storage/logs/*.jsonl
+automation_storage/output/*
+!automation_storage/output/.gitkeep
+!automation_storage/logs/.gitkeep
+
+# IDEs and OS metadata
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Automation Command Center</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="command-center-body">
+    <!-- Top HUD Navigation Header -->
+    <header class="hud-header">
+        <div class="hud-brand">
+            <div class="brand-hexagon">
+                <span class="pulse-ring"></span>
+                <span class="brand-symbol">⚡</span>
+            </div>
+            <div>
+                <h1 class="brand-title">AI AUTOMATION COMMAND CENTER</h1>
+                <p class="brand-subtitle">LOCAL RULE ENGINE • ZERO EXTERNAL API • OFFLINE INTELLIGENCE</p>
+            </div>
+        </div>
+
+        <div class="hud-controls">
+            <div class="status-indicator" id="engineStatusBadge">
+                <span class="status-dot green"></span>
+                <span class="status-text" id="engineStatusText">ENGINE ONLINE</span>
+            </div>
+
+            <button class="hud-btn engine-toggle-btn" id="toggleEngineBtn" onclick="toggleEngineState()">
+                <span class="icon">⏸</span> <span id="toggleEngineLabel">Pause Engine</span>
+            </button>
+
+            <div class="clock-display" id="hudClock">00:00:00</div>
+
+            <div class="notif-wrapper">
+                <button class="hud-icon-btn" id="notifBellBtn" onclick="toggleNotificationsDrawer()">
+                    🔔
+                    <span class="notif-badge" id="notifCountBadge" style="display:none;">0</span>
+                </button>
+                <div class="notif-drawer" id="notifDrawer">
+                    <div class="notif-header">
+                        <h3>System Alerts</h3>
+                        <div class="notif-actions">
+                            <button onclick="markNotificationsRead()">Mark Read</button>
+                            <button onclick="clearNotifications()">Clear</button>
+                        </div>
+                    </div>
+                    <div class="notif-list" id="notifList">
+                        <div class="notif-empty">No new notifications</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs Bar -->
+    <nav class="hud-tabs">
+        <button class="hud-tab active" onclick="switchTab('dashboard')">
+            <span class="tab-icon">📊</span> Mission Control
+        </button>
+        <button class="hud-tab" onclick="switchTab('rules')">
+            <span class="tab-icon">⚡</span> Automation Rules
+        </button>
+        <button class="hud-tab" onclick="switchTab('nlp')">
+            <span class="tab-icon">🧠</span> AI NLP Sandbox
+        </button>
+        <button class="hud-tab" onclick="switchTab('logs')">
+            <span class="tab-icon">📜</span> Execution Logs
+        </button>
+        <button class="hud-tab" onclick="switchTab('blueprints')">
+            <span class="tab-icon">📦</span> Blueprints Library
+        </button>
+        <button class="hud-tab" onclick="switchTab('settings')">
+            <span class="tab-icon">⚙️</span> Settings & Diagnostics
+        </button>
+    </nav>
+
+    <!-- Main Workspace Container -->
+    <main class="main-content">
+
+        <!-- TAB 1: MISSION CONTROL DASHBOARD -->
+        <section id="tab-dashboard" class="tab-panel active">
+            <!-- Key Metric Counters -->
+            <div class="metrics-grid">
+                <div class="metric-card cyan">
+                    <div class="metric-header">
+                        <span class="metric-title">ACTIVE AUTOMATIONS</span>
+                        <span class="metric-badge">RULES</span>
+                    </div>
+                    <div class="metric-val" id="statActiveRules">0 / 0</div>
+                    <div class="metric-sub" id="statTotalRules">0 Total Configured</div>
+                </div>
+
+                <div class="metric-card emerald">
+                    <div class="metric-header">
+                        <span class="metric-title">TOTAL EXECUTIONS</span>
+                        <span class="metric-badge">LIFETIME</span>
+                    </div>
+                    <div class="metric-val" id="statTotalExecutions">0</div>
+                    <div class="metric-sub" id="statSuccessExecutions">0 Successful Dispatches</div>
+                </div>
+
+                <div class="metric-card amber">
+                    <div class="metric-header">
+                        <span class="metric-title">SUCCESS RATE</span>
+                        <span class="metric-badge">ACCURACY</span>
+                    </div>
+                    <div class="metric-val" id="statSuccessRate">100%</div>
+                    <div class="metric-sub">Zero Error Rate Target</div>
+                </div>
+
+                <div class="metric-card purple">
+                    <div class="metric-header">
+                        <span class="metric-title">SYSTEM UPTIME</span>
+                        <span class="metric-badge">LOCAL</span>
+                    </div>
+                    <div class="metric-val" id="statUptime">0s</div>
+                    <div class="metric-sub" id="statProcessMem">RSS: 0 MB</div>
+                </div>
+            </div>
+
+            <!-- Two-Column Control Section -->
+            <div class="dashboard-columns">
+                <!-- Left: Hardware Telemetry & Quick Action Bar -->
+                <div class="dashboard-col-left">
+                    <div class="hud-panel">
+                        <div class="panel-header">
+                            <h2 class="panel-title">SYSTEM TELEMETRY GAUGES</h2>
+                            <span class="live-pill">LIVE 1s</span>
+                        </div>
+                        <div class="panel-body">
+                            <!-- CPU Meter -->
+                            <div class="gauge-item">
+                                <div class="gauge-labels">
+                                    <span>CPU Utilization</span>
+                                    <span class="gauge-value" id="telemCpuVal">0%</span>
+                                </div>
+                                <div class="gauge-bar-bg">
+                                    <div class="gauge-bar-fill cyan-fill" id="telemCpuBar" style="width: 0%"></div>
+                                </div>
+                            </div>
+
+                            <!-- RAM Meter -->
+                            <div class="gauge-item">
+                                <div class="gauge-labels">
+                                    <span>RAM Utilization (<span id="telemRamGb">0</span> GB)</span>
+                                    <span class="gauge-value" id="telemRamVal">0%</span>
+                                </div>
+                                <div class="gauge-bar-bg">
+                                    <div class="gauge-bar-fill emerald-fill" id="telemRamBar" style="width: 0%"></div>
+                                </div>
+                            </div>
+
+                            <!-- Disk Meter -->
+                            <div class="gauge-item">
+                                <div class="gauge-labels">
+                                    <span>Disk Storage (<span id="telemDiskGb">0</span> GB Free)</span>
+                                    <span class="gauge-value" id="telemDiskVal">0%</span>
+                                </div>
+                                <div class="gauge-bar-bg">
+                                    <div class="gauge-bar-fill amber-fill" id="telemDiskBar" style="width: 0%"></div>
+                                </div>
+                            </div>
+
+                            <div class="system-meta-grid">
+                                <div class="meta-item">
+                                    <span class="meta-label">Engine Host:</span>
+                                    <span class="meta-val">Localhost (Python 3.11)</span>
+                                </div>
+                                <div class="meta-item">
+                                    <span class="meta-label">Security Sandbox:</span>
+                                    <span class="meta-val green-text">ACTIVE (Offline)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Event Dispatcher -->
+                    <div class="hud-panel">
+                        <div class="panel-header">
+                            <h2 class="panel-title">QUICK EVENT DISPATCHER</h2>
+                            <span class="panel-badge">TEST HARNESS</span>
+                        </div>
+                        <div class="panel-body">
+                            <p class="section-desc">Broadcast simulated telemetry or incident events to trigger rules instantaneously:</p>
+                            <div class="quick-btn-grid">
+                                <button class="action-btn red-btn" onclick="quickDispatchEvent('system.metrics', {cpu_percent: 94.5, host: 'prod-api-01'})">
+                                    🔥 CPU Spike (94.5%)
+                                </button>
+                                <button class="action-btn amber-btn" onclick="quickDispatchEvent('auth.failed', {ip: '192.168.1.189', attempts: 5})">
+                                    🛡️ Auth Breach (5 Fails)
+                                </button>
+                                <button class="action-btn purple-btn" onclick="quickDispatchEvent('api.error', {status_code: 503, endpoint: '/api/v1/orders'})">
+                                    ⚡ API Outage (503)
+                                </button>
+                                <button class="action-btn green-btn" onclick="quickDispatchEvent('backup.completed', {status: 'success', database: 'prod_cluster', size_mb: 512})">
+                                    💾 DB Backup (Success)
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Live Activity Event Stream -->
+                <div class="dashboard-col-right">
+                    <div class="hud-panel fill-height">
+                        <div class="panel-header">
+                            <h2 class="panel-title">LIVE EVENT ACTIVITY STREAM</h2>
+                            <div class="stream-status">
+                                <span class="status-dot green pulse"></span> MONITORING
+                            </div>
+                        </div>
+                        <div class="panel-body stream-container" id="activityStreamContainer">
+                            <div class="stream-empty">Waiting for automation events...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: AUTOMATION RULES -->
+        <section id="tab-rules" class="tab-panel">
+            <div class="toolbar">
+                <div class="category-filters" id="categoryFilterContainer">
+                    <button class="filter-pill active" onclick="filterRulesByCategory('All')">All</button>
+                    <button class="filter-pill" onclick="filterRulesByCategory('System')">System</button>
+                    <button class="filter-pill" onclick="filterRulesByCategory('Security')">Security</button>
+                    <button class="filter-pill" onclick="filterRulesByCategory('DevOps')">DevOps</button>
+                    <button class="filter-pill" onclick="filterRulesByCategory('NLP')">NLP</button>
+                    <button class="filter-pill" onclick="filterRulesByCategory('Data')">Data</button>
+                </div>
+                <div class="toolbar-right">
+                    <input type="text" class="search-input" id="ruleSearchInput" placeholder="Search rules..." oninput="searchRules()">
+                    <button class="hud-btn primary" onclick="openCreateRuleModal()">+ New Automation Rule</button>
+                </div>
+            </div>
+
+            <div class="rules-grid" id="rulesGrid">
+                <!-- Dynamically loaded via JavaScript -->
+            </div>
+        </section>
+
+        <!-- TAB 3: AI NLP SANDBOX -->
+        <section id="tab-nlp" class="tab-panel">
+            <div class="nlp-sandbox-layout">
+                <div class="nlp-input-card">
+                    <div class="card-header">
+                        <h2>OFFLINE NATURAL LANGUAGE SIMULATOR</h2>
+                        <span class="local-ai-badge">LOCAL HEURISTIC AI • 0 API KEY</span>
+                    </div>
+                    <p class="card-desc">Type any freeform incident report, system observation, or operational request. The local engine will parse intent, evaluate urgency & sentiment, extract server entities, and match active automation rules in dry-run mode.</p>
+
+                    <div class="preset-prompts-bar">
+                        <span class="preset-label">Sample Prompts:</span>
+                        <button class="prompt-chip" onclick="setNlpPrompt('Critical emergency: database memory utilization surged to 96% on prod-db-01')">
+                            Memory Surge (96%)
+                        </button>
+                        <button class="prompt-chip" onclick="setNlpPrompt('Security Alert: Detected unauthorized brute force login attempts from IP 192.168.4.88')">
+                            IP Intrusion Threat
+                        </button>
+                        <button class="prompt-chip" onclick="setNlpPrompt('API gateway is down returning HTTP 500 internal errors on billing endpoint')">
+                            HTTP 500 Outage
+                        </button>
+                        <button class="prompt-chip" onclick="setNlpPrompt('Routine daily backup completed smoothly with 480MB archived for customer-vault')">
+                            Routine Backup
+                        </button>
+                    </div>
+
+                    <div class="input-row">
+                        <textarea id="nlpPromptInput" class="nlp-textarea" rows="3" placeholder="Enter incident report or natural language trigger..."></textarea>
+                    </div>
+
+                    <div class="input-actions">
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="nlpDryRunCheck" checked>
+                            <span class="checkmark"></span>
+                            Dry Run Only (Preview rule matching without executing side effects)
+                        </label>
+                        <button class="hud-btn primary" onclick="analyzeNlpPrompt()">
+                            🚀 Analyze & Simulate Automations
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Analysis Results Panel -->
+                <div class="nlp-results-container" id="nlpResultsContainer" style="display:none;">
+                    <div class="results-header">
+                        <h3>NLP EXTRACTION & AUTOMATION TRACE</h3>
+                        <span class="timing-badge" id="nlpConfidenceBadge">Confidence: 0%</span>
+                    </div>
+
+                    <!-- Metrics Badges -->
+                    <div class="nlp-metrics-row">
+                        <div class="nlp-metric-badge">
+                            <span class="label">DETECTED INTENT</span>
+                            <span class="value" id="nlpIntentVal">-</span>
+                        </div>
+                        <div class="nlp-metric-badge">
+                            <span class="label">URGENCY SCORE</span>
+                            <span class="value" id="nlpUrgencyVal">0 / 100</span>
+                        </div>
+                        <div class="nlp-metric-badge">
+                            <span class="label">SEVERITY LEVEL</span>
+                            <span class="value" id="nlpSeverityVal">LOW</span>
+                        </div>
+                        <div class="nlp-metric-badge">
+                            <span class="label">SENTIMENT</span>
+                            <span class="value" id="nlpSentimentVal">Neutral</span>
+                        </div>
+                    </div>
+
+                    <!-- Extracted Entities -->
+                    <div class="entities-card">
+                        <h4>Extracted System Entities:</h4>
+                        <div id="nlpEntitiesContainer" class="entities-tags">
+                            <!-- Filled dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Rule Matching Simulation Traces -->
+                    <div class="matched-rules-card">
+                        <h4>Triggered Automation Rules:</h4>
+                        <div id="nlpMatchedRulesContainer" class="matched-rules-list">
+                            <!-- Filled dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 4: EXECUTION LOGS -->
+        <section id="tab-logs" class="tab-panel">
+            <div class="toolbar">
+                <div class="category-filters">
+                    <button class="filter-pill active" onclick="filterLogsByStatus('all')">All Status</button>
+                    <button class="filter-pill" onclick="filterLogsByStatus('success')">Success</button>
+                    <button class="filter-pill" onclick="filterLogsByStatus('failed')">Failed</button>
+                    <button class="filter-pill" onclick="filterLogsByStatus('skipped')">Skipped</button>
+                </div>
+                <div class="toolbar-right">
+                    <button class="hud-btn outline" onclick="loadExecutionLogs()">🔄 Refresh</button>
+                    <button class="hud-btn red-btn" onclick="clearAllLogs()">🗑️ Clear Logs</button>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table class="hud-table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Rule Name</th>
+                            <th>Trigger Event</th>
+                            <th>Status</th>
+                            <th>Duration</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTableBody">
+                        <tr><td colspan="6" class="text-center">Loading audit history...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- TAB 5: BLUEPRINTS LIBRARY -->
+        <section id="tab-blueprints" class="tab-panel">
+            <div class="blueprints-intro">
+                <h2>BATTLE-TESTED AUTOMATION BLUEPRINTS</h2>
+                <p>Deploy enterprise-grade rules into your command center with one click. Pre-configured triggers, conditions, and multi-action workflows.</p>
+            </div>
+            <div class="blueprints-grid" id="blueprintsGrid">
+                <!-- Dynamically populated -->
+            </div>
+        </section>
+
+        <!-- TAB 6: SETTINGS & SYSTEM -->
+        <section id="tab-settings" class="tab-panel">
+            <div class="settings-grid">
+                <div class="settings-card">
+                    <h3>DATA MANAGEMENT</h3>
+                    <p>Export your configured automation rules or import rule sets from another instance:</p>
+                    <div class="settings-btn-row">
+                        <a href="/api/export" class="hud-btn primary" download="command_center_rules.json">
+                            📥 Export Rules (JSON)
+                        </a>
+                        <label class="hud-btn outline file-btn">
+                            📤 Import Rules (JSON)
+                            <input type="file" id="importFileInput" accept=".json" onchange="importRulesFile(event)">
+                        </label>
+                    </div>
+                </div>
+
+                <div class="settings-card">
+                    <h3>DATABASE & LOGS MAINTENANCE</h3>
+                    <p>Reset audit trail logs or purge historical event archives:</p>
+                    <div class="settings-btn-row">
+                        <button class="action-btn red-btn" onclick="clearAllLogs()">Purge Execution Logs</button>
+                        <button class="action-btn amber-btn" onclick="clearNotifications()">Clear All Alerts</button>
+                    </div>
+                </div>
+
+                <div class="settings-card">
+                    <h3>ENGINE ARCHITECTURE & SPECS</h3>
+                    <div class="specs-list">
+                        <div class="spec-row"><span>Engine Runtime:</span><span>Python 3.11 / Flask</span></div>
+                        <div class="spec-row"><span>Storage Engine:</span><span>SQLite (Thread-safe WAL)</span></div>
+                        <div class="spec-row"><span>NLP Model:</span><span>Local Rule & Heuristic Lexicons (0 API keys)</span></div>
+                        <div class="spec-row"><span>Action Executors:</span><span>Notification, Log, File, Webhook, Email, Command</span></div>
+                        <div class="spec-row"><span>Privacy Guarantee:</span><span>100% Local / Zero Outbound Telemetry</span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- RULE BUILDER / EDIT MODAL -->
+    <div class="hud-modal-overlay" id="ruleModal" style="display:none;">
+        <div class="hud-modal">
+            <div class="modal-header">
+                <h3 id="modalTitle">Create New Automation Rule</h3>
+                <button class="close-btn" onclick="closeRuleModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="ruleForm" onsubmit="saveRuleForm(event)">
+                    <input type="hidden" id="formRuleId">
+
+                    <!-- Basic Info -->
+                    <div class="form-row">
+                        <div class="form-group flex-2">
+                            <label>Rule Name *</label>
+                            <input type="text" id="formRuleName" class="hud-input" required placeholder="e.g., High Memory Sentinel">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>Category</label>
+                            <select id="formRuleCategory" class="hud-input">
+                                <option value="System">System</option>
+                                <option value="Security">Security</option>
+                                <option value="DevOps">DevOps</option>
+                                <option value="NLP">NLP</option>
+                                <option value="Data">Data</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Description</label>
+                        <input type="text" id="formRuleDescription" class="hud-input" placeholder="What does this automation do?">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label>Priority (1-100)</label>
+                            <input type="number" id="formRulePriority" class="hud-input" value="10" min="1" max="100">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>Cooldown Seconds</label>
+                            <input type="number" id="formRuleCooldown" class="hud-input" value="0" min="0">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>Initial Status</label>
+                            <select id="formRuleEnabled" class="hud-input">
+                                <option value="1">Enabled</option>
+                                <option value="0">Disabled</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Trigger Definition -->
+                    <div class="form-section-title">Trigger Definition</div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label>Trigger Type</label>
+                            <select id="formTriggerType" class="hud-input">
+                                <option value="event">System Event</option>
+                                <option value="natural_text">Natural Text (NLP)</option>
+                                <option value="manual">Manual Trigger</option>
+                            </select>
+                        </div>
+                        <div class="form-group flex-2">
+                            <label>Event Name (e.g. system.metrics, auth.failed, or * for all)</label>
+                            <input type="text" id="formTriggerEvent" class="hud-input" value="system.metrics" required>
+                        </div>
+                    </div>
+
+                    <!-- Condition Definition -->
+                    <div class="form-section-title">Condition Logic</div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label>Logic Mode</label>
+                            <select id="formConditionLogic" class="hud-input">
+                                <option value="AND">AND (All conditions must pass)</option>
+                                <option value="OR">OR (Any condition can pass)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="conditionsList" class="conditions-builder-list">
+                        <!-- Condition rows dynamically added -->
+                    </div>
+                    <button type="button" class="hud-btn outline small-btn" onclick="addConditionRow()">+ Add Condition</button>
+
+                    <!-- Actions Definition -->
+                    <div class="form-section-title">Actions Pipeline</div>
+                    <div id="actionsList" class="actions-builder-list">
+                        <!-- Action rows dynamically added -->
+                    </div>
+                    <button type="button" class="hud-btn outline small-btn" onclick="addActionRow()">+ Add Action</button>
+
+                    <div class="modal-footer">
+                        <button type="button" class="hud-btn outline" onclick="closeRuleModal()">Cancel</button>
+                        <button type="submit" class="hud-btn primary">Save Automation Rule</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOG DETAIL MODAL -->
+    <div class="hud-modal-overlay" id="logDetailModal" style="display:none;">
+        <div class="hud-modal">
+            <div class="modal-header">
+                <h3>Execution Trace Details</h3>
+                <button class="close-btn" onclick="closeLogModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="logDetailContent"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="hud-btn primary" onclick="closeLogModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
