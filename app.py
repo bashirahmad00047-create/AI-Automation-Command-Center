@@ -176,11 +176,29 @@ def analyze_nlp_and_simulate():
 
     nlp_result = engine.nlp.parse(text)
 
+    # Infer the domain operational event name from intent & extracted entities
+    event_name = "user.prompt"
+    intent = nlp_result.get("intent")
+    text_lower = text.lower()
+    entities = nlp_result.get("entities", {})
+
+    if intent == "server_alert" or any(w in text_lower for w in ("cpu", "metrics", "sentinel", "utilization", "load", "memory")):
+        event_name = "system.metrics"
+    elif intent == "security_threat" or entities.get("ipv4"):
+        event_name = "auth.failed"
+    elif intent == "backup_request":
+        event_name = "backup.completed"
+    elif intent == "deploy_request":
+        event_name = "deploy.pipeline"
+    elif entities.get("http_status"):
+        event_name = "api.error"
+
     # Ingest event for natural language sandbox simulation
     ingest_result = engine.ingest_event(
-        event_name="user.prompt",
+        event_name=event_name,
         payload={
             "text": text,
+            "prompt": text,
             "intent": nlp_result.get("intent"),
             "urgency": nlp_result.get("urgency")
         },

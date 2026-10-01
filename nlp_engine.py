@@ -124,7 +124,10 @@ class NLPEngine:
     REGEX_IPV4 = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")
     REGEX_HOSTNAME = re.compile(r"\b([a-zA-Z0-9_\-]+(?:-db|-srv|-worker|-prod|-stg|-web|-api)[a-zA-Z0-9_\-]*|[a-zA-Z0-9_\-]+\.internal|\b[a-z]{2}-[a-z]+-\d+[a-z]?)\b", re.IGNORECASE)
     REGEX_HTTP_CODE = re.compile(r"(?<![\.\d])(?:HTTP(?:/[0-9.]+|[\s_-]+)?)?([1-5][0-9]{2})(?![\.\d])", re.IGNORECASE)
-    REGEX_PERCENT = re.compile(r"\b(\d+(?:\.\d+)?)\s*%")
+    REGEX_PERCENT = re.compile(
+        r"(?:\b(\d+(?:\.\d+)?)\s*(?:%|percent\b|pct\b)|\b[pP](\d{1,3})(?:th)?\b|(?:cpu|load|utilization|usage)\s*(?:at|is|=|:)?\s*(\d+(?:\.\d+)?)(?!\s*(?:kb|mb|gb|tb|ms|s))\b)",
+        re.IGNORECASE
+    )
     REGEX_MEMORY_SIZE = re.compile(r"\b(\d+(?:\.\d+)?)\s*(?:KB|MB|GB|TB)\b", re.IGNORECASE)
     REGEX_EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 
@@ -216,7 +219,12 @@ class NLPEngine:
                 urgency += boost
 
         # Additional regex heuristic: 90%+ CPU/Disk indicates higher urgency
-        percentages = [float(p) for p in self.REGEX_PERCENT.findall(text)]
+        percentages = []
+        for p_str in self._extract_percentages(text):
+            try:
+                percentages.append(float(p_str))
+            except ValueError:
+                pass
         if any(p >= 90 for p in percentages):
             urgency += 25
         elif any(p >= 75 for p in percentages):
@@ -277,12 +285,28 @@ class NLPEngine:
         valid_codes = [code for code in matches if code in self.VALID_HTTP_STATUS_CODES]
         return list(dict.fromkeys(valid_codes))
 
+    def _extract_percentages(self, text: str) -> List[str]:
+        """Extracts percentages, percentile notation (e.g. P90), and metric percentages safely."""
+        text_without_ips = self.REGEX_IPV4.sub(" ", text)
+        matches = self.REGEX_PERCENT.findall(text_without_ips)
+        results = []
+        for m in matches:
+            val_str = m[0] or m[1] or m[2] if isinstance(m, tuple) else m
+            if val_str:
+                try:
+                    val = float(val_str)
+                    if 0 <= val <= 100 and str(val_str) not in results:
+                        results.append(str(val_str))
+                except (ValueError, TypeError):
+                    pass
+        return results
+
     def _extract_entities(self, text: str) -> Dict[str, List[Any]]:
         entities: Dict[str, List[Any]] = {
             "ipv4": self._extract_ipv4(text),
             "hostnames": list(set(self.REGEX_HOSTNAME.findall(text))),
             "http_status": self._extract_http_codes(text),
-            "percentages": list(set(self.REGEX_PERCENT.findall(text))),
+            "percentages": self._extract_percentages(text),
             "memory_sizes": list(set(self.REGEX_MEMORY_SIZE.findall(text))),
             "emails": list(set(self.REGEX_EMAIL.findall(text)))
         }

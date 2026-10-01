@@ -521,6 +521,29 @@ class TestFlaskAPI(unittest.TestCase):
         for act in cpu_rule_95["action_results"]:
             self.assertEqual(act["status"], "dry_run_simulated")
 
+    def test_nlp_sandbox_p90_triggers_cpu_sentinel(self):
+        """Verify that prompts referencing P90 or High CPU Sentinel trigger High CPU Resource Sentinel."""
+        self.client.post("/api/presets/install", json={"preset_id": "blueprint-cpu-sentinel"})
+
+        res = self.client.post("/api/nlp/analyze", json={
+            "text": "Critical alert: High CPU Resource Sentinel P90 load surge detected on prod-api-01",
+            "dry_run": True
+        })
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+
+        # The simulated event should be mapped to system.metrics
+        self.assertEqual(data.get("simulation", {}).get("event_name"), "system.metrics")
+
+        # The High CPU Resource Sentinel rule should be MATCHED & TRIGGERED
+        executed = data.get("simulation", {}).get("executed_rules", [])
+        cpu_rules = [r for r in executed if "CPU" in r["rule_name"] or r.get("priority") == 90]
+        self.assertTrue(any(r.get("matched") for r in cpu_rules))
+
+        # Check that P90 was extracted as percentage
+        percentages = data.get("nlp", {}).get("entities", {}).get("percentages", [])
+        self.assertIn("90", percentages)
+
 
 if __name__ == "__main__":
     unittest.main()

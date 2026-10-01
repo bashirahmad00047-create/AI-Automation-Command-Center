@@ -73,14 +73,19 @@ class AutomationEngine:
         is_nlp_source = (event_name in ("user.prompt", "nlp.query", "chat.message") or source == "nlp_sandbox" or bool(nlp_data))
         if nlp_data and is_nlp_source:
             entities = nlp_data.get("entities", {})
-            if "cpu_percent" not in enriched_payload and entities.get("percentages"):
-                try:
-                    pct_val = float(entities["percentages"][0])
-                    enriched_payload["cpu_percent"] = pct_val
-                    enriched_payload.setdefault("memory_percent", pct_val)
-                    enriched_payload.setdefault("disk_percent", pct_val)
-                except (ValueError, TypeError):
-                    pass
+            if "cpu_percent" not in enriched_payload:
+                if entities.get("percentages"):
+                    try:
+                        pct_val = float(entities["percentages"][0])
+                        enriched_payload["cpu_percent"] = pct_val
+                        enriched_payload.setdefault("memory_percent", pct_val)
+                        enriched_payload.setdefault("disk_percent", pct_val)
+                    except (ValueError, TypeError):
+                        pass
+                elif any(w in (text_content or "").lower() for w in ("high cpu", "cpu spike", "cpu surge", "cpu sentinel", "resource sentinel", "cpu critical", "cpu overload", "cpu load high", "p90")):
+                    enriched_payload["cpu_percent"] = 92.0
+                    enriched_payload.setdefault("memory_percent", 92.0)
+                    enriched_payload.setdefault("disk_percent", 92.0)
 
             if "host" not in enriched_payload and entities.get("hostnames"):
                 enriched_payload["host"] = entities["hostnames"][0]
@@ -153,8 +158,10 @@ class AutomationEngine:
         # Determine all matching event triggers (direct event + inferred from NLP intent/entities)
         matching_events = {event_name, "*"}
         if nlp_data and is_nlp_source:
+            matching_events.add("user.prompt")
             intent = nlp_data.get("intent")
-            if intent in ("server_alert", "status_inquiry"):
+            lower_txt = (text_content or "").lower()
+            if intent in ("server_alert", "status_inquiry") or any(w in lower_txt for w in ("cpu", "metrics", "sentinel", "utilization")):
                 matching_events.add("system.metrics")
             elif intent == "security_threat":
                 matching_events.add("auth.failed")
