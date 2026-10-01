@@ -67,6 +67,9 @@
         <button class="hud-tab" onclick="switchTab('nlp')">
             <span class="tab-icon">🧠</span> AI NLP Sandbox
         </button>
+        <button class="hud-tab" onclick="switchTab('simulator')">
+            <span class="tab-icon">🧪</span> Metrics Simulator
+        </button>
         <button class="hud-tab" onclick="switchTab('logs')">
             <span class="tab-icon">📜</span> Execution Logs
         </button>
@@ -391,6 +394,73 @@
                         <h4>Triggered Automation Rules:</h4>
                         <div id="nlpMatchedRulesContainer" class="matched-rules-list">
                             <!-- Filled dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB: SYSTEM.METRICS SIMULATOR & TEST HARNESS -->
+        <section id="tab-simulator" class="tab-panel">
+            <div class="metrics-sim-page-layout">
+                <div class="hud-panel">
+                    <div class="panel-header">
+                        <h2 class="panel-title">SYSTEM.METRICS INTERACTIVE SIMULATOR</h2>
+                        <span class="panel-badge">OFFLINE TEST HARNESS</span>
+                    </div>
+                    <div class="panel-body">
+                        <p class="section-desc">Broadcast simulated <code>system.metrics</code> telemetry with custom CPU utilization. Evaluates <strong>High CPU Resource Sentinel (P90)</strong> with live PASS / TRIGGERED evaluation traces in safe Dry Run mode:</p>
+
+                        <div class="sim-controls-wrapper">
+                            <div class="sim-inputs-grid">
+                                <div class="form-group flex-2">
+                                    <div class="label-with-val">
+                                        <label for="pageSimCpuInput">CPU Utilization (%):</label>
+                                        <span class="cpu-val-display" id="pageSimCpuValDisplay">92.0%</span>
+                                    </div>
+                                    <div class="cpu-slider-group">
+                                        <input type="range" id="pageSimCpuSlider" class="hud-slider" min="0" max="100" step="0.5" value="92.0" oninput="syncPageCpuFromSlider(this.value)">
+                                        <input type="number" id="pageSimCpuInput" class="hud-input cpu-number-input" min="0" max="100" step="0.5" value="92.0" oninput="syncPageCpuFromInput(this.value)">
+                                    </div>
+                                </div>
+                                <div class="form-group flex-1">
+                                    <label for="pageSimHostInput">Target Host:</label>
+                                    <input type="text" id="pageSimHostInput" class="hud-input" value="prod-api-01" placeholder="e.g. prod-api-01">
+                                </div>
+                            </div>
+
+                            <div class="preset-prompts-bar sim-presets-bar">
+                                <span class="preset-label">Test Threshold Presets:</span>
+                                <button type="button" class="prompt-chip" onclick="setPageSimCpu(45.0)">45% (Normal Load)</button>
+                                <button type="button" class="prompt-chip" onclick="setPageSimCpu(85.0)">85% (Boundary - Untriggered)</button>
+                                <button type="button" class="prompt-chip" onclick="setPageSimCpu(92.0)">🔥 92% (High CPU Spike - PASS/TRIGGERED)</button>
+                                <button type="button" class="prompt-chip" onclick="setPageSimCpu(98.5)">🚨 98.5% (Critical Alert)</button>
+                            </div>
+
+                            <div class="sim-actions-bar">
+                                <label class="checkbox-container">
+                                    <input type="checkbox" id="pageSimDryRunCheck" checked>
+                                    <span class="checkmark"></span>
+                                    Dry Run Mode (Safe Preview - Zero External Side Effects)
+                                </label>
+                                <button type="button" class="hud-btn primary" id="btnRunPageMetricsSim" onclick="runPageMetricsSimulation()">
+                                    ⚡ Run system.metrics Simulation
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Live Simulation Automation Trace Output -->
+                        <div class="sim-trace-container" id="pageSimTraceContainer" style="display: none;">
+                            <div class="sim-trace-header">
+                                <h4>SIMULATION AUTOMATION TRACE</h4>
+                                <span class="sim-status-pill" id="pageSimTraceStatusPill">MATCHED</span>
+                            </div>
+                            <div class="sim-trace-meta" id="pageSimTraceMeta">
+                                <!-- Populated dynamically -->
+                            </div>
+                            <div class="sim-trace-rules-list" id="pageSimTraceRulesList">
+                                <!-- Populated dynamically -->
+                            </div>
                         </div>
                     </div>
                 </div>

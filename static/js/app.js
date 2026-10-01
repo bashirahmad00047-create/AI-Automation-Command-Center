@@ -213,38 +213,55 @@ async function quickDispatchEvent(eventName, payload) {
 // ==========================================
 
 function setSimCpu(val) {
-    const numInput = document.getElementById('simCpuInput');
-    const slider = document.getElementById('simCpuSlider');
-    const valDisplay = document.getElementById('simCpuValDisplay');
     const numVal = parseFloat(val);
-    if (numInput) numInput.value = numVal.toFixed(1);
-    if (slider) slider.value = numVal;
-    if (valDisplay) valDisplay.textContent = `${numVal.toFixed(1)}%`;
+    if (isNaN(numVal)) return;
+
+    ['sim', 'pageSim'].forEach(prefix => {
+        const numInput = document.getElementById(`${prefix}CpuInput`);
+        const slider = document.getElementById(`${prefix}CpuSlider`);
+        const valDisplay = document.getElementById(`${prefix}CpuValDisplay`);
+        if (numInput) numInput.value = numVal.toFixed(1);
+        if (slider) slider.value = numVal;
+        if (valDisplay) valDisplay.textContent = `${numVal.toFixed(1)}%`;
+    });
+}
+
+function setPageSimCpu(val) {
+    setSimCpu(val);
 }
 
 function syncCpuFromSlider(val) {
-    const numInput = document.getElementById('simCpuInput');
-    const valDisplay = document.getElementById('simCpuValDisplay');
-    const numVal = parseFloat(val);
-    if (numInput) numInput.value = numVal.toFixed(1);
-    if (valDisplay) valDisplay.textContent = `${numVal.toFixed(1)}%`;
+    setSimCpu(val);
 }
 
 function syncCpuFromInput(val) {
-    const slider = document.getElementById('simCpuSlider');
-    const valDisplay = document.getElementById('simCpuValDisplay');
-    let numVal = parseFloat(val);
-    if (isNaN(numVal)) numVal = 0;
-    if (numVal < 0) numVal = 0;
-    if (numVal > 100) numVal = 100;
-    if (slider) slider.value = numVal;
-    if (valDisplay) valDisplay.textContent = `${numVal.toFixed(1)}%`;
+    setSimCpu(val);
 }
 
-async function runMetricsSimulation() {
-    const cpuInput = document.getElementById('simCpuInput');
-    const hostInput = document.getElementById('simHostInput');
-    const dryRunCheck = document.getElementById('simDryRunCheck');
+function syncPageCpuFromSlider(val) {
+    setSimCpu(val);
+}
+
+function syncPageCpuFromInput(val) {
+    setSimCpu(val);
+}
+
+function openMetricsSimulator(cpuVal) {
+    if (cpuVal !== undefined) {
+        setSimCpu(cpuVal);
+    }
+    switchTab('simulator');
+}
+
+async function runPageMetricsSimulation() {
+    await runMetricsSimulation('pageSim');
+}
+
+async function runMetricsSimulation(targetPrefix = 'sim') {
+    const prefix = targetPrefix === 'pageSim' ? 'pageSim' : 'sim';
+    const cpuInput = document.getElementById(`${prefix}CpuInput`) || document.getElementById('simCpuInput');
+    const hostInput = document.getElementById(`${prefix}HostInput`) || document.getElementById('simHostInput');
+    const dryRunCheck = document.getElementById(`${prefix}DryRunCheck`) || document.getElementById('simDryRunCheck');
 
     let cpuPercent = parseFloat(cpuInput?.value);
     if (isNaN(cpuPercent)) cpuPercent = 92.0;
@@ -276,7 +293,8 @@ async function runMetricsSimulation() {
             return;
         }
 
-        renderMetricsSimResults(data, cpuPercent, host, dryRun);
+        renderMetricsSimResults(data, cpuPercent, host, dryRun, 'sim');
+        renderMetricsSimResults(data, cpuPercent, host, dryRun, 'pageSim');
 
         const cpuSentinelTriggered = (data.executed_rules || []).some(
             r => r.matched && (r.rule_name.includes('High CPU') || r.priority === 90)
@@ -298,11 +316,11 @@ async function runMetricsSimulation() {
     }
 }
 
-function renderMetricsSimResults(simData, cpuPercent, host, dryRun) {
-    const container = document.getElementById('simTraceContainer');
-    const metaContainer = document.getElementById('simTraceMeta');
-    const listContainer = document.getElementById('simTraceRulesList');
-    const statusPill = document.getElementById('simTraceStatusPill');
+function renderMetricsSimResults(simData, cpuPercent, host, dryRun, prefix = 'sim') {
+    const container = document.getElementById(`${prefix}TraceContainer`);
+    const metaContainer = document.getElementById(`${prefix}TraceMeta`);
+    const listContainer = document.getElementById(`${prefix}TraceRulesList`);
+    const statusPill = document.getElementById(`${prefix}TraceStatusPill`);
 
     if (!container || !metaContainer || !listContainer || !statusPill) return;
 
@@ -798,10 +816,10 @@ function renderNlpResults(nlp, sim) {
         <div class="matched-rule-row">
             <div class="matched-rule-header">
                 <span>Rule: <strong>${escapeHtml(r.rule_name)}</strong></span>
-                <span class="status-badge ${r.matched ? 'success' : 'skipped'}">${r.matched ? 'MATCHED & TRIGGERED' : 'CONDITION SKIPPED'}</span>
+                <span class="status-badge ${r.matched ? 'success' : 'skipped'}">${r.matched ? 'PASS / TRIGGERED' : 'CONDITION SKIPPED'}</span>
             </div>
             <div class="eval-trace-steps">
-                ${r.trace && r.trace.length ? r.trace.map(t => `<div>• Checked <code>${escapeHtml(t.field || 'group')}</code> ${escapeHtml(t.operator || '')} ${escapeHtml(String(t.target || ''))}: actual=<strong>${escapeHtml(String(t.actual))}</strong> (${t.passed ? 'PASS' : 'FAIL'})</div>`).join('') : 'Evaluated as true'}
+                ${r.trace && r.trace.length ? r.trace.map(t => `<div>• Checked <code>${escapeHtml(t.field || 'group')}</code> ${escapeHtml(t.operator || '')} ${escapeHtml(String(t.target || ''))}: actual=<strong>${escapeHtml(String(t.actual))}</strong> (${t.passed ? '<span class="trace-pass">PASS</span>' : '<span class="trace-fail">FAIL</span>'})</div>`).join('') : 'Evaluated as true'}
             </div>
         </div>
     `).join('');
@@ -940,10 +958,15 @@ function renderBlueprintsGrid() {
                         <span>${(bp.actions || []).length} Configured</span>
                     </div>
                 </div>
+            <div style="display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap;">
+                <button class="hud-btn primary" style="flex: 1; justify-content: center; min-width: 140px;" onclick="installBlueprint('${bp.id}')">
+                    ⚡ Install Blueprint
+                </button>
+                ${bp.id === 'blueprint-cpu-sentinel' ? `
+                <button type="button" class="hud-btn outline" style="flex: 1; justify-content: center; min-width: 140px;" onclick="openMetricsSimulator(92.0)">
+                    🧪 Simulate Dry Run (92%)
+                </button>` : ''}
             </div>
-            <button class="hud-btn primary" style="width: 100%; justify-content: center; margin-top: 14px;" onclick="installBlueprint('${bp.id}')">
-                ⚡ Install Blueprint
-            </button>
         </div>
     `).join('');
 }

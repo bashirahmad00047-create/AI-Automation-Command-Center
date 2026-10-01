@@ -1631,3 +1631,9 @@ input:checked + .slider:before { transform: translateX(18px); }
     font-weight: 700;
 }
 
+.metrics-sim-page-layout {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+
