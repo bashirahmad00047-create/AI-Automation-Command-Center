@@ -287,6 +287,38 @@ docker run -d -p 5000:5000 --name opsflow-app opsflow-saas:latest
 docker-compose up -d
 ```
 
+### Cloud Deployment on Render
+
+#### Option A: One-Click Render Blueprint (`render.yaml`)
+OpsFlow includes a production-ready `render.yaml` Blueprint specification:
+1. Log in to your [Render Dashboard](https://dashboard.render.com/).
+2. Click **New +** and select **Blueprint**.
+3. Connect your GitHub repository (`AI-Automation-Command-Center`).
+4. Render automatically parses `render.yaml`, configures Python 3.11, generates a secure `SECRET_KEY`, sets the healthcheck to `/health`, and runs the build command:
+   ```bash
+   pip install -r requirements.txt && python init_db.py
+   ```
+5. Click **Apply**. Your SaaS platform will be live with full demo data and HTTPS in ~2 minutes!
+
+#### Option B: Manual Web Service on Render
+If configuring manually as a **Web Service**:
+1. Click **New +** -> **Web Service**.
+2. Connect your GitHub repository.
+3. Configure the service settings:
+   - **Name**: `opsflow-command-center` (or your choice)
+   - **Environment**: `Python 3`
+   - **Branch**: `main`
+   - **Build Command**: `pip install -r requirements.txt && python init_db.py`
+   - **Start Command**: `gunicorn app:app`
+   - **Health Check Path**: `/health`
+4. In **Environment Variables**, add:
+   - `PYTHON_VERSION`: `3.11.9`
+   - `FLASK_ENV`: `production`
+   - `FLASK_DEBUG`: `0`
+   - `SECRET_KEY`: *(Generate a secure random string)*
+   - `DATABASE_URL`: *(Optional: connect Render PostgreSQL or omit to use built-in SQLite)*
+5. Click **Create Web Service**.
+
 ### Production WSGI (Gunicorn)
 ```bash
 gunicorn --config gunicorn.conf.py app:app

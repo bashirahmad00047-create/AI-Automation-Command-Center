@@ -42,6 +42,17 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Initialize persistence and automation engine inside app context
     with application.app_context():
         db.create_all()
+
+        # Seed initial database if empty on fresh cloud deployment
+        if not application.config.get("TESTING"):
+            try:
+                from models import Organization
+                if not Organization.query.first():
+                    from init_db import init_and_seed_database
+                    init_and_seed_database()
+            except Exception as _seed_err:
+                application.logger.warning(f"Database auto-seed check: {_seed_err}")
+
         storage_instance = Storage()
         engine_instance = AutomationEngine(storage=storage_instance)
         application.config["STORAGE_ENGINE"] = storage_instance
