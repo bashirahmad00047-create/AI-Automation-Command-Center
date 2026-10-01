@@ -1453,3 +1453,181 @@ input:checked + .slider:before { transform: translateX(18px); }
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
 }
+
+/* ==========================================================================
+   SYSTEM.METRICS SIMULATOR & TEST HARNESS STYLES
+   ========================================================================== */
+
+.sim-controls-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 10px;
+}
+
+.sim-inputs-grid {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.label-with-val {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.cpu-val-display {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: var(--cyan-glow);
+    font-size: 13px;
+}
+
+.cpu-slider-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.hud-slider {
+    flex: 1;
+    accent-color: var(--cyan-glow);
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+}
+
+.cpu-number-input {
+    width: 80px;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-weight: 700;
+}
+
+.sim-presets-bar {
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+.sim-actions-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 6px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.sim-trace-container {
+    margin-top: 16px;
+    background: rgba(10, 15, 28, 0.95);
+    border: 1px solid var(--cyan-glow);
+    border-radius: 8px;
+    padding: 14px;
+    animation: slideIn 0.3s ease-out;
+}
+
+.sim-trace-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(0, 240, 255, 0.2);
+}
+
+.sim-trace-header h4 {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: var(--cyan-glow);
+}
+
+.sim-status-pill {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 12px;
+}
+
+.sim-status-pill.matched {
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--emerald-glow);
+    border: 1px solid var(--emerald-glow);
+}
+
+.sim-status-pill.skipped {
+    background: rgba(245, 158, 11, 0.2);
+    color: var(--amber-glow);
+    border: 1px solid var(--amber-glow);
+}
+
+.sim-trace-meta {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: rgba(0, 0, 0, 0.35);
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.sim-trace-rules-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.sim-rule-item {
+    background: rgba(19, 31, 56, 0.6);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+    transition: var(--transition);
+}
+
+.sim-rule-item.matched-highlight {
+    border-color: var(--emerald-glow);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+}
+
+.sim-rule-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+
+.sim-rule-trace {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: rgba(0, 0, 0, 0.4);
+    padding: 8px 10px;
+    border-radius: 4px;
+    margin-top: 6px;
+    line-height: 1.5;
+}
+
+.trace-pass {
+    color: var(--emerald-glow);
+    font-weight: 700;
+}
+
+.trace-fail {
+    color: var(--amber-glow);
+    font-weight: 700;
+}
+

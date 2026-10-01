@@ -134,7 +134,8 @@ class AutomationEngine:
             "timestamp": timestamp_str,
             "payload": enriched_payload,
             "nlp_intent": nlp_data.get("intent"),
-            "nlp_urgency": nlp_data.get("urgency")
+            "nlp_urgency": nlp_data.get("urgency"),
+            "dry_run": dry_run
         })
 
         if not self.is_running and not dry_run:
@@ -196,6 +197,8 @@ class AutomationEngine:
                 executed_rules.append({
                     "rule_id": rule_id,
                     "rule_name": rule["name"],
+                    "priority": rule.get("priority", 10),
+                    "category": rule.get("category", "System"),
                     "matched": True,
                     "status": "skipped",
                     "reason": f"Cooldown active ({int(cooldown_sec - (now_ts - last_run_ts))}s remaining)",
@@ -213,6 +216,8 @@ class AutomationEngine:
                 executed_rules.append({
                     "rule_id": rule_id,
                     "rule_name": rule["name"],
+                    "priority": rule.get("priority", 10),
+                    "category": rule.get("category", "System"),
                     "matched": False,
                     "status": "skipped",
                     "trace": trace
@@ -261,6 +266,8 @@ class AutomationEngine:
             executed_rules.append({
                 "rule_id": rule_id,
                 "rule_name": rule["name"],
+                "priority": rule.get("priority", 10),
+                "category": rule.get("category", "System"),
                 "matched": True,
                 "status": overall_status,
                 "duration_ms": duration_ms,

@@ -314,6 +314,89 @@ class TestAutomationEngine(unittest.TestCase):
         self.assertEqual(res["status"], "success")
         self.assertTrue(res["matched"])
 
+    def test_system_metrics_cpu_below_or_equal_85(self):
+        """Verify that CPU <= 85% does NOT trigger High CPU Resource Sentinel."""
+        # 1. CPU below 85 (e.g. 75.0%)
+        res_75 = self.engine.ingest_event(
+            event_name="system.metrics",
+            payload={"cpu_percent": 75.0, "host": "prod-api-01"},
+            source="system_metrics_simulator",
+            dry_run=True
+        )
+        cpu_rules_75 = [r for r in res_75["executed_rules"] if "CPU" in r["rule_name"] or r.get("priority") == 90]
+        self.assertTrue(len(cpu_rules_75) >= 1)
+        for r in cpu_rules_75:
+            self.assertFalse(r["matched"])
+            self.assertEqual(r["status"], "skipped")
+            # Trace should report passed == False
+            self.assertFalse(r["trace"][0]["passed"])
+
+        # 2. CPU exactly equal to 85 (85.0% boundary)
+        res_85 = self.engine.ingest_event(
+            event_name="system.metrics",
+            payload={"cpu_percent": 85.0, "host": "prod-api-01"},
+            source="system_metrics_simulator",
+            dry_run=True
+        )
+        cpu_rules_85 = [r for r in res_85["executed_rules"] if "CPU" in r["rule_name"] or r.get("priority") == 90]
+        self.assertTrue(len(cpu_rules_85) >= 1)
+        for r in cpu_rules_85:
+            self.assertFalse(r["matched"])
+            self.assertEqual(r["status"], "skipped")
+            self.assertFalse(r["trace"][0]["passed"])
+
+    def test_system_metrics_cpu_above_85(self):
+        """Verify that CPU > 85% matches High CPU Resource Sentinel and returns PASS/TRIGGERED in trace."""
+        # 1. CPU marginally above 85 (85.1%)
+        res_851 = self.engine.ingest_event(
+            event_name="system.metrics",
+            payload={"cpu_percent": 85.1, "host": "prod-api-01"},
+            source="system_metrics_simulator",
+            dry_run=True
+        )
+        cpu_rules_851 = [r for r in res_851["executed_rules"] if "CPU" in r["rule_name"] or r.get("priority") == 90]
+        self.assertTrue(len(cpu_rules_851) >= 1)
+        for r in cpu_rules_851:
+            self.assertTrue(r["matched"])
+            self.assertEqual(r["status"], "success")
+            self.assertTrue(r["trace"][0]["passed"])
+
+        # 2. CPU well above 85 (94.5%)
+        res_94 = self.engine.ingest_event(
+            event_name="system.metrics",
+            payload={"cpu_percent": 94.5, "host": "prod-api-01"},
+            source="system_metrics_simulator",
+            dry_run=True
+        )
+        cpu_rules_94 = [r for r in res_94["executed_rules"] if "CPU" in r["rule_name"] or r.get("priority") == 90]
+        self.assertTrue(len(cpu_rules_94) >= 1)
+        for r in cpu_rules_94:
+            self.assertTrue(r["matched"])
+            self.assertEqual(r["status"], "success")
+            self.assertTrue(r["trace"][0]["passed"])
+
+    def test_system_metrics_dry_run_safety(self):
+        """Verify that dry-run executions produce zero side effects (no logs or notifications saved)."""
+        initial_logs = len(self.storage.get_logs())
+        initial_notifs = len(self.storage.get_notifications())
+
+        res = self.engine.ingest_event(
+            event_name="system.metrics",
+            payload={"cpu_percent": 96.0, "host": "test-host"},
+            source="system_metrics_simulator",
+            dry_run=True
+        )
+        self.assertTrue(res["dry_run"])
+        matched_cpu = [r for r in res["executed_rules"] if r.get("matched")]
+        self.assertTrue(len(matched_cpu) >= 1)
+        for r in matched_cpu:
+            for act in r["action_results"]:
+                self.assertEqual(act["status"], "dry_run_simulated")
+
+        # Zero persistent side effects in database
+        self.assertEqual(len(self.storage.get_logs()), initial_logs)
+        self.assertEqual(len(self.storage.get_notifications()), initial_notifs)
+
 
 class TestFlaskAPI(unittest.TestCase):
     @classmethod
@@ -407,6 +490,38 @@ class TestFlaskAPI(unittest.TestCase):
         matched_names = [r["rule_name"] for r in executed if r.get("matched")]
         self.assertTrue(any("CPU" in name for name in matched_names))
 
+    def test_api_dispatch_system_metrics_simulation_path(self):
+        # 1. Dispatch below/equal 85% via API with dry_run
+        res_85 = self.client.post("/api/events/dispatch", json={
+            "event_name": "system.metrics",
+            "payload": {"cpu_percent": 85.0, "host": "prod-api-01"},
+            "source": "system_metrics_simulator",
+            "dry_run": True
+        })
+        self.assertEqual(res_85.status_code, 200)
+        data_85 = res_85.get_json()
+        cpu_rule_85 = next(r for r in data_85["executed_rules"] if "CPU" in r["rule_name"] or r.get("priority") == 90)
+        self.assertFalse(cpu_rule_85["matched"])
+        self.assertEqual(cpu_rule_85["status"], "skipped")
+        self.assertFalse(cpu_rule_85["trace"][0]["passed"])
+
+        # 2. Dispatch above 85% via API with dry_run
+        res_95 = self.client.post("/api/events/dispatch", json={
+            "event_name": "system.metrics",
+            "payload": {"cpu_percent": 95.0, "host": "prod-api-01"},
+            "source": "system_metrics_simulator",
+            "dry_run": True
+        })
+        self.assertEqual(res_95.status_code, 200)
+        data_95 = res_95.get_json()
+        cpu_rule_95 = next(r for r in data_95["executed_rules"] if "CPU" in r["rule_name"] or r.get("priority") == 90)
+        self.assertTrue(cpu_rule_95["matched"])
+        self.assertEqual(cpu_rule_95["status"], "success")
+        self.assertTrue(cpu_rule_95["trace"][0]["passed"])
+        for act in cpu_rule_95["action_results"]:
+            self.assertEqual(act["status"], "dry_run_simulated")
+
 
 if __name__ == "__main__":
     unittest.main()
+

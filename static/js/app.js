@@ -209,6 +209,172 @@ async function quickDispatchEvent(eventName, payload) {
 }
 
 // ==========================================
+// SYSTEM.METRICS SIMULATOR & DRY RUN HARNESS
+// ==========================================
+
+function setSimCpu(val) {
+    const numInput = document.getElementById('simCpuInput');
+    const slider = document.getElementById('simCpuSlider');
+    const valDisplay = document.getElementById('simCpuValDisplay');
+    const numVal = parseFloat(val);
+    if (numInput) numInput.value = numVal.toFixed(1);
+    if (slider) slider.value = numVal;
+    if (valDisplay) valDisplay.textContent = `${numVal.toFixed(1)}%`;
+}
+
+function syncCpuFromSlider(val) {
+    const numInput = document.getElementById('simCpuInput');
+    const valDisplay = document.getElementById('simCpuValDisplay');
+    const numVal = parseFloat(val);
+    if (numInput) numInput.value = numVal.toFixed(1);
+    if (valDisplay) valDisplay.textContent = `${numVal.toFixed(1)}%`;
+}
+
+function syncCpuFromInput(val) {
+    const slider = document.getElementById('simCpuSlider');
+    const valDisplay = document.getElementById('simCpuValDisplay');
+    let numVal = parseFloat(val);
+    if (isNaN(numVal)) numVal = 0;
+    if (numVal < 0) numVal = 0;
+    if (numVal > 100) numVal = 100;
+    if (slider) slider.value = numVal;
+    if (valDisplay) valDisplay.textContent = `${numVal.toFixed(1)}%`;
+}
+
+async function runMetricsSimulation() {
+    const cpuInput = document.getElementById('simCpuInput');
+    const hostInput = document.getElementById('simHostInput');
+    const dryRunCheck = document.getElementById('simDryRunCheck');
+
+    let cpuPercent = parseFloat(cpuInput?.value);
+    if (isNaN(cpuPercent)) cpuPercent = 92.0;
+    cpuPercent = Math.max(0, Math.min(100, cpuPercent));
+
+    const host = (hostInput?.value || 'prod-api-01').trim();
+    const dryRun = dryRunCheck ? dryRunCheck.checked : true;
+
+    try {
+        showToast(`Simulating system.metrics (CPU: ${cpuPercent.toFixed(1)}%, Dry Run: ${dryRun})...`, 'info');
+
+        const res = await fetch('/api/events/dispatch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                event_name: 'system.metrics',
+                payload: {
+                    cpu_percent: cpuPercent,
+                    host: host
+                },
+                source: 'system_metrics_simulator',
+                dry_run: dryRun
+            })
+        });
+
+        const data = await res.json();
+        if (data.error) {
+            showToast(`Simulation error: ${data.error}`, 'error');
+            return;
+        }
+
+        renderMetricsSimResults(data, cpuPercent, host, dryRun);
+
+        const cpuSentinelTriggered = (data.executed_rules || []).some(
+            r => r.matched && (r.rule_name.includes('High CPU') || r.priority === 90)
+        );
+
+        if (cpuSentinelTriggered) {
+            showToast(`🔥 High CPU Resource Sentinel MATCHED & TRIGGERED (CPU: ${cpuPercent.toFixed(1)}% > 85%)!`, 'success');
+        } else {
+            showToast(`Normal load: CPU ${cpuPercent.toFixed(1)}% did not exceed 85% threshold (CONDITION SKIPPED).`, 'info');
+        }
+
+        pollEventStream();
+        if (!dryRun) {
+            pollTelemetry();
+            loadExecutionLogs();
+        }
+    } catch (err) {
+        showToast(`Simulation failed: ${err.message}`, 'error');
+    }
+}
+
+function renderMetricsSimResults(simData, cpuPercent, host, dryRun) {
+    const container = document.getElementById('simTraceContainer');
+    const metaContainer = document.getElementById('simTraceMeta');
+    const listContainer = document.getElementById('simTraceRulesList');
+    const statusPill = document.getElementById('simTraceStatusPill');
+
+    if (!container || !metaContainer || !listContainer || !statusPill) return;
+
+    container.style.display = 'block';
+
+    const executed = simData.executed_rules || [];
+    const cpuRuleMatched = executed.some(r => r.matched && (r.rule_name.includes('High CPU') || r.priority === 90));
+
+    statusPill.className = `sim-status-pill ${cpuRuleMatched ? 'matched' : 'skipped'}`;
+    statusPill.textContent = cpuRuleMatched ? 'PASS / TRIGGERED' : 'FAIL / NOT TRIGGERED';
+
+    metaContainer.innerHTML = `
+        <span>Event: <strong>system.metrics</strong></span>
+        <span>Simulated CPU: <strong style="color: ${cpuPercent > 85 ? 'var(--red-glow)' : 'var(--emerald-glow)'};">${cpuPercent.toFixed(1)}%</strong></span>
+        <span>Threshold: <strong>&gt; 85.0%</strong></span>
+        <span>Host: <strong>${escapeHtml(host)}</strong></span>
+        <span>Mode: <strong style="color: var(--cyan-glow);">${dryRun ? 'DRY RUN (Zero Side Effects)' : 'LIVE EXECUTION'}</strong></span>
+    `;
+
+    if (!executed.length) {
+        listContainer.innerHTML = '<div class="stream-empty">No active automation rules configured for system.metrics.</div>';
+        return;
+    }
+
+    listContainer.innerHTML = executed.map(r => {
+        const isCpuSentinel = r.rule_name.includes('High CPU') || r.priority === 90;
+        const matched = Boolean(r.matched);
+        const traceItems = r.trace || [];
+
+        let traceHtml = '';
+        if (traceItems.length) {
+            traceHtml = traceItems.map(t => {
+                const passed = Boolean(t.passed);
+                return `<div>• Condition Check: <code>${escapeHtml(t.field || 'payload.cpu_percent')}</code> ${escapeHtml(t.operator || '>')} ${escapeHtml(String(t.target || 85))} &rarr; actual: <strong>${escapeHtml(String(t.actual))}%</strong> &bull; <span class="${passed ? 'trace-pass' : 'trace-fail'}">${passed ? 'PASS (Threshold Exceeded)' : 'FAIL (Condition Not Met)'}</span></div>`;
+            }).join('');
+        } else {
+            traceHtml = `<div>• Condition Check: ${matched ? '<span class="trace-pass">PASS</span>' : '<span class="trace-fail">FAIL</span>'}</div>`;
+        }
+
+        let actionSummary = '';
+        if (matched) {
+            if (dryRun) {
+                const actionTypes = (r.action_results || []).map(a => a.type).filter(Boolean);
+                actionSummary = `<div style="margin-top: 4px; color: var(--emerald-glow);">🛡️ <strong>Dry Run Preview:</strong> Actions safely simulated without real-world side effects: [${escapeHtml(actionTypes.join(', ') || 'Notification, Log Entry')}].</div>`;
+            } else {
+                actionSummary = `<div style="margin-top: 4px; color: var(--emerald-glow);">✅ <strong>Executed Actions:</strong> Actions dispatched to system channels.</div>`;
+            }
+        } else {
+            actionSummary = `<div style="margin-top: 4px; color: var(--text-muted);">⏸️ <strong>No Actions Triggered:</strong> Condition skipped because CPU load (${cpuPercent.toFixed(1)}%) is &le; 85% threshold.</div>`;
+        }
+
+        return `
+            <div class="sim-rule-item ${matched && isCpuSentinel ? 'matched-highlight' : ''}">
+                <div class="sim-rule-head">
+                    <span>
+                        <strong>${escapeHtml(r.rule_name)}</strong>
+                        <span style="font-size:11px; color:var(--text-muted); margin-left:6px;">(Priority: ${escapeHtml(String(r.priority || 90))})</span>
+                    </span>
+                    <span class="status-badge ${matched ? 'success' : 'skipped'}">
+                        ${matched ? 'PASS / TRIGGERED' : 'FAIL / NOT TRIGGERED'}
+                    </span>
+                </div>
+                <div class="sim-rule-trace">
+                    ${traceHtml}
+                    ${actionSummary}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// ==========================================
 // AUTOMATION RULES MANAGEMENT
 // ==========================================
 

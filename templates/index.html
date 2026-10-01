@@ -202,6 +202,69 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- System Metrics Simulator & Test Harness -->
+                    <div class="hud-panel" id="systemMetricsSimPanel">
+                        <div class="panel-header">
+                            <h2 class="panel-title">SYSTEM.METRICS SIMULATOR</h2>
+                            <span class="panel-badge">DRY RUN HARNESS</span>
+                        </div>
+                        <div class="panel-body">
+                            <p class="section-desc">Interactive telemetry simulator for <code>system.metrics</code> events. Adjust CPU utilization to test the <strong>High CPU Resource Sentinel (P90)</strong> rule with live PASS / TRIGGERED evaluation traces in safe Dry Run mode:</p>
+                            
+                            <div class="sim-controls-wrapper">
+                                <div class="sim-inputs-grid">
+                                    <div class="form-group flex-2">
+                                        <div class="label-with-val">
+                                            <label for="simCpuInput">CPU Utilization (%):</label>
+                                            <span class="cpu-val-display" id="simCpuValDisplay">92.0%</span>
+                                        </div>
+                                        <div class="cpu-slider-group">
+                                            <input type="range" id="simCpuSlider" class="hud-slider" min="0" max="100" step="0.5" value="92.0" oninput="syncCpuFromSlider(this.value)">
+                                            <input type="number" id="simCpuInput" class="hud-input cpu-number-input" min="0" max="100" step="0.5" value="92.0" oninput="syncCpuFromInput(this.value)">
+                                        </div>
+                                    </div>
+                                    <div class="form-group flex-1">
+                                        <label for="simHostInput">Target Host:</label>
+                                        <input type="text" id="simHostInput" class="hud-input" value="prod-api-01" placeholder="e.g. prod-api-01">
+                                    </div>
+                                </div>
+
+                                <div class="preset-prompts-bar sim-presets-bar">
+                                    <span class="preset-label">Test Thresholds:</span>
+                                    <button type="button" class="prompt-chip" onclick="setSimCpu(45.0)">45% (Normal Load)</button>
+                                    <button type="button" class="prompt-chip" onclick="setSimCpu(85.0)">85% (Boundary - Untriggered)</button>
+                                    <button type="button" class="prompt-chip" onclick="setSimCpu(92.0)">92% (High CPU Spike)</button>
+                                    <button type="button" class="prompt-chip" onclick="setSimCpu(98.5)">98.5% (Critical Alert)</button>
+                                </div>
+
+                                <div class="sim-actions-bar">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="simDryRunCheck" checked>
+                                        <span class="checkmark"></span>
+                                        Dry Run Mode (Safe Preview - Zero Real Side Effects)
+                                    </label>
+                                    <button type="button" class="hud-btn primary" id="btnRunMetricsSim" onclick="runMetricsSimulation()">
+                                        ⚡ Run system.metrics Simulation
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Live Simulation Automation Trace Output -->
+                            <div class="sim-trace-container" id="simTraceContainer" style="display: none;">
+                                <div class="sim-trace-header">
+                                    <h4>SIMULATION AUTOMATION TRACE</h4>
+                                    <span class="sim-status-pill" id="simTraceStatusPill">MATCHED</span>
+                                </div>
+                                <div class="sim-trace-meta" id="simTraceMeta">
+                                    <!-- Populated dynamically -->
+                                </div>
+                                <div class="sim-trace-rules-list" id="simTraceRulesList">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Right: Live Activity Event Stream -->

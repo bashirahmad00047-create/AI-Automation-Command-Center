@@ -24,7 +24,7 @@ PRESET_BLUEPRINTS: List[Dict[str, Any]] = [
         "condition": {
             "logic": "AND",
             "conditions": [
-                {"field": "payload.cpu_percent", "operator": ">=", "value": 85}
+                {"field": "payload.cpu_percent", "operator": ">", "value": 85}
             ]
         },
         "actions": [

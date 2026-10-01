@@ -86,6 +86,18 @@ class Storage:
                     )
                 """)
 
+                # Align CPU Sentinel condition to > 85 and standard naming
+                cursor.execute("""
+                    UPDATE rules
+                    SET condition_json = REPLACE(condition_json, '"operator": ">="', '"operator": ">"')
+                    WHERE (id LIKE '%cpu%' OR name LIKE '%CPU%') AND condition_json LIKE '%cpu_percent%' AND condition_json LIKE '%85%'
+                """)
+                cursor.execute("""
+                    UPDATE rules
+                    SET name = 'High CPU Resource Sentinel'
+                    WHERE id = 'rule-cpu-sentinel'
+                """)
+
                 conn.commit()
 
         # Seed presets if database is freshly created and has no rules
@@ -101,7 +113,7 @@ class Storage:
         preset_rules = [
             {
                 "id": "rule-cpu-sentinel",
-                "name": "High CPU Sentinel Auto-Mitigation",
+                "name": "High CPU Resource Sentinel",
                 "description": "Alerts operations and records diagnostics whenever CPU utilization exceeds 85%.",
                 "category": "System",
                 "enabled": 1,
@@ -111,7 +123,7 @@ class Storage:
                 "condition": {
                     "logic": "AND",
                     "conditions": [
-                        {"field": "payload.cpu_percent", "operator": ">=", "value": 85}
+                        {"field": "payload.cpu_percent", "operator": ">", "value": 85}
                     ]
                 },
                 "actions": [
