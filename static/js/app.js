@@ -309,7 +309,7 @@ function renderRulesTable() {
         const isViewer = state.userRole === 'viewer';
 
         return `
-            <tr>
+            <tr class="workflow-row" style="cursor: pointer;" onclick="handleRuleRowClick(event, '${rule.id}')" title="Click anywhere to inspect or edit workflow">
                 <td>
                     <button class="toggle-switch ${isEnabled ? 'on' : 'off'}" 
                             onclick="toggleRuleEnabled('${rule.id}')"
@@ -318,7 +318,7 @@ function renderRulesTable() {
                     </button>
                 </td>
                 <td>
-                    <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(rule.name)}</div>
+                    <div style="font-weight: 600; color: var(--cyan-glow);">${escapeHtml(rule.name)}</div>
                     <div style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(rule.description || '')}</div>
                 </td>
                 <td><span class="category-chip ${rule.category ? rule.category.toLowerCase() : 'system'}">${rule.category || 'System'}</span></td>
@@ -339,6 +339,14 @@ function renderRulesTable() {
             </tr>
         `;
     }).join('');
+}
+
+function handleRuleRowClick(event, ruleId) {
+    // If the click originated from an interactive button, toggle switch, or action icon, do not trigger row edit
+    if (event.target.closest('button') || event.target.closest('.toggle-switch') || event.target.closest('input') || event.target.closest('a') || event.target.closest('.action-btn-row')) {
+        return;
+    }
+    editRule(ruleId);
 }
 
 async function toggleRuleEnabled(ruleId) {
@@ -472,8 +480,19 @@ function openNewRuleModal() {
     document.getElementById('ruleModal').style.display = 'flex';
 }
 
-function editRule(ruleId) {
-    const rule = state.rules.find(r => r.id === ruleId);
+async function editRule(ruleId) {
+    let rule = state.rules.find(r => String(r.id) === String(ruleId));
+    if (!rule) {
+        try {
+            const res = await fetch(`/api/v1/rules/${ruleId}`);
+            if (res.ok) {
+                const data = await res.json();
+                rule = data.rule || data;
+            }
+        } catch (e) {
+            console.error('Failed to fetch rule details:', e);
+        }
+    }
     if (!rule) return;
 
     document.getElementById('modalTitle').textContent = `Edit Workflow: ${rule.name}`;
@@ -1665,7 +1684,7 @@ function renderBlueprintsGrid() {
 
     grid.innerHTML = state.blueprints.map(bp => {
         return `
-            <div class="blueprint-card">
+            <div class="blueprint-card" style="cursor: pointer;" onclick="if (!event.target.closest('button')) installBlueprint('${bp.id}')" title="Click to install template into active workspace">
                 <div class="bp-header">
                     <span class="category-chip ${bp.category.toLowerCase()}">${bp.category}</span>
                     <span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--text-muted);">Priority: ${bp.priority}</span>

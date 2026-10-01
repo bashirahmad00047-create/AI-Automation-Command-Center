@@ -753,6 +753,19 @@ body.command-center-body {
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
 }
 
+.workflow-row {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.workflow-row:hover {
+    background-color: rgba(0, 240, 255, 0.07) !important;
+}
+
+.workflow-row:hover td {
+    color: var(--text-glow);
+}
+
 .rule-card-top {
     display: flex;
     justify-content: space-between;

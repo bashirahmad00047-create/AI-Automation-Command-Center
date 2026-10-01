@@ -19,7 +19,8 @@ import json
 import os
 import unittest
 
-from app import app
+from sqlalchemy import text
+from app import create_app
 from auth import generate_secure_api_key, verify_api_key
 from database import db
 from models import (
@@ -38,9 +39,7 @@ from models import (
 
 class TestSaaSSecurityAndAuth(unittest.TestCase):
     def setUp(self):
-        self.app = app
-        self.app.config["TESTING"] = True
-        self.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        self.app = create_app("testing")
         self.client = self.app.test_client()
         self.ctx = self.app.app_context()
         self.ctx.push()
@@ -48,7 +47,11 @@ class TestSaaSSecurityAndAuth(unittest.TestCase):
 
     def tearDown(self):
         db.session.remove()
-        db.drop_all()
+        try:
+            db.session.execute(text("PRAGMA foreign_keys = OFF;"))
+            db.drop_all()
+        except Exception:
+            pass
         self.ctx.pop()
 
     def test_user_password_hashing(self):
@@ -106,9 +109,7 @@ class TestSaaSSecurityAndAuth(unittest.TestCase):
 
 class TestMultiTenantIsolation(unittest.TestCase):
     def setUp(self):
-        self.app = app
-        self.app.config["TESTING"] = True
-        self.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        self.app = create_app("testing")
         self.client = self.app.test_client()
         self.ctx = self.app.app_context()
         self.ctx.push()
@@ -155,7 +156,11 @@ class TestMultiTenantIsolation(unittest.TestCase):
 
     def tearDown(self):
         db.session.remove()
-        db.drop_all()
+        try:
+            db.session.execute(text("PRAGMA foreign_keys = OFF;"))
+            db.drop_all()
+        except Exception:
+            pass
         self.ctx.pop()
 
     def test_tenant_rule_isolation(self):
@@ -183,9 +188,7 @@ class TestMultiTenantIsolation(unittest.TestCase):
 
 class TestRBACAndAPIKeys(unittest.TestCase):
     def setUp(self):
-        self.app = app
-        self.app.config["TESTING"] = True
-        self.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        self.app = create_app("testing")
         self.client = self.app.test_client()
         self.ctx = self.app.app_context()
         self.ctx.push()
@@ -208,7 +211,11 @@ class TestRBACAndAPIKeys(unittest.TestCase):
 
     def tearDown(self):
         db.session.remove()
-        db.drop_all()
+        try:
+            db.session.execute(text("PRAGMA foreign_keys = OFF;"))
+            db.drop_all()
+        except Exception:
+            pass
         self.ctx.pop()
 
     def test_viewer_cannot_create_or_delete_rules(self):
@@ -257,9 +264,7 @@ class TestRBACAndAPIKeys(unittest.TestCase):
 
 class TestInboundWebhooksAndSignatures(unittest.TestCase):
     def setUp(self):
-        self.app = app
-        self.app.config["TESTING"] = True
-        self.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        self.app = create_app("testing")
         self.client = self.app.test_client()
         self.ctx = self.app.app_context()
         self.ctx.push()
@@ -285,7 +290,11 @@ class TestInboundWebhooksAndSignatures(unittest.TestCase):
 
     def tearDown(self):
         db.session.remove()
-        db.drop_all()
+        try:
+            db.session.execute(text("PRAGMA foreign_keys = OFF;"))
+            db.drop_all()
+        except Exception:
+            pass
         self.ctx.pop()
 
     def test_webhook_hmac_verification_pass_and_fail(self):
@@ -315,9 +324,7 @@ class TestInboundWebhooksAndSignatures(unittest.TestCase):
 
 class TestIncidentAlertLifecycle(unittest.TestCase):
     def setUp(self):
-        self.app = app
-        self.app.config["TESTING"] = True
-        self.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        self.app = create_app("testing")
         self.client = self.app.test_client()
         self.ctx = self.app.app_context()
         self.ctx.push()
@@ -341,7 +348,11 @@ class TestIncidentAlertLifecycle(unittest.TestCase):
 
     def tearDown(self):
         db.session.remove()
-        db.drop_all()
+        try:
+            db.session.execute(text("PRAGMA foreign_keys = OFF;"))
+            db.drop_all()
+        except Exception:
+            pass
         self.ctx.pop()
 
     def test_incident_acknowledge_and_resolve(self):
@@ -370,9 +381,7 @@ class TestIncidentAlertLifecycle(unittest.TestCase):
 
 class TestCRMLeadsAndAutomation(unittest.TestCase):
     def setUp(self):
-        self.app = app
-        self.app.config["TESTING"] = True
-        self.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        self.app = create_app("testing")
         self.client = self.app.test_client()
         self.ctx = self.app.app_context()
         self.ctx.push()
@@ -390,7 +399,11 @@ class TestCRMLeadsAndAutomation(unittest.TestCase):
 
     def tearDown(self):
         db.session.remove()
-        db.drop_all()
+        try:
+            db.session.execute(text("PRAGMA foreign_keys = OFF;"))
+            db.drop_all()
+        except Exception:
+            pass
         self.ctx.pop()
 
     def test_lead_ingestion_and_scoring(self):
@@ -463,9 +476,7 @@ class TestCRMLeadsAndAutomation(unittest.TestCase):
 
 class TestWorkflowAdvancedFeatures(unittest.TestCase):
     def setUp(self):
-        self.app = app
-        self.app.config["TESTING"] = True
-        self.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        self.app = create_app("testing")
         self.client = self.app.test_client()
         self.ctx = self.app.app_context()
         self.ctx.push()
@@ -482,7 +493,11 @@ class TestWorkflowAdvancedFeatures(unittest.TestCase):
 
     def tearDown(self):
         db.session.remove()
-        db.drop_all()
+        try:
+            db.session.execute(text("PRAGMA foreign_keys = OFF;"))
+            db.drop_all()
+        except Exception:
+            pass
         self.ctx.pop()
 
     def test_workflow_duplication(self):
