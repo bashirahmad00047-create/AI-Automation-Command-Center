@@ -187,6 +187,7 @@ def auth_login():
     membership = Membership.query.filter_by(user_id=user.id).first()
     org_id = membership.organization_id if membership else None
 
+    session.pop("logged_out", None)
     session["user_id"] = user.id
     if org_id:
         session["active_org_id"] = org_id
@@ -209,6 +210,7 @@ def auth_logout():
     if user:
         log_audit_event("auth.logout", "user", user.id)
     session.clear()
+    session["logged_out"] = True
     return jsonify({"success": True, "message": "Successfully logged out."})
 
 
