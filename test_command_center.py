@@ -403,6 +403,30 @@ class TestFlaskAPI(unittest.TestCase):
     def setUpClass(cls):
         flask_app_module.app.config["TESTING"] = True
         cls.client = flask_app_module.app.test_client()
+        with flask_app_module.app.app_context():
+            from init_db import init_and_seed_database
+            from models import User
+            if not User.query.filter_by(email="admin@opsflow.io").first():
+                init_and_seed_database()
+        cls.client.post("/api/v1/auth/login", json={"email": "admin@opsflow.io", "password": "AdminSecure2026!"})
+
+    def test_unauthenticated_nlp_analyze_rejected(self):
+        unauth_client = flask_app_module.app.test_client()
+        res = unauth_client.post("/api/nlp/analyze", json={"text": "High CPU utilization emergency"})
+        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.get_json()["code"], "UNAUTHORIZED")
+
+    def test_unauthenticated_legacy_protected_routes_rejected(self):
+        unauth_client = flask_app_module.app.test_client()
+        self.assertEqual(unauth_client.get("/api/rules").status_code, 401)
+        self.assertEqual(unauth_client.get("/api/status").status_code, 401)
+        self.assertEqual(unauth_client.post("/api/engine/toggle", json={"online": True}).status_code, 401)
+        self.assertEqual(unauth_client.get("/api/telemetry").status_code, 401)
+
+    def test_authenticated_legacy_route_works(self):
+        res = self.client.get("/api/rules")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("rules", res.get_json())
 
     def test_index_route(self):
         res = self.client.get("/")
@@ -416,6 +440,7 @@ class TestFlaskAPI(unittest.TestCase):
         self.assertIn("engine_running", status_data)
         self.assertIn("stats", status_data)
 
+    def test_api_telemetry(self):
         res_telem = self.client.get("/api/telemetry")
         self.assertEqual(res_telem.status_code, 200)
         telem_data = res_telem.get_json()

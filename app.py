@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional
 from flask import Flask, Response, jsonify, render_template, request, session
 
 from api_v1 import api_v1
+from auth import require_auth
 from automation_engine import AutomationEngine
 from config import config_by_name
 from database import db
@@ -95,7 +96,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Frontend Dashboard View
     @application.route("/")
     def index():
-        if "user_id" not in session:
+        if "user_id" not in session and not session.get("logged_out"):
             admin_user = User.query.filter_by(email="admin@opsflow.io").first()
             if admin_user:
                 membership = Membership.query.filter_by(user_id=admin_user.id).first()
@@ -105,11 +106,27 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     session["org_id"] = membership.organization_id
         return render_template("index.html")
 
+    # Top-Level Authentication Endpoints
+    @application.route("/login", methods=["GET", "POST"])
+    def top_level_login():
+        if request.method == "POST":
+            from api_v1 import auth_login
+            return auth_login()
+        return render_template("index.html")
+
+    @application.route("/register", methods=["GET", "POST"])
+    def top_level_register():
+        if request.method == "POST":
+            from api_v1 import auth_register
+            return auth_register()
+        return render_template("index.html")
+
     # ==========================================
     # Backward-Compatible Legacy Endpoints
     # ==========================================
 
     @application.route("/api/status", methods=["GET"])
+    @require_auth
     def legacy_status():
         st = application.config.get("STORAGE_ENGINE")
         eng = application.config.get("AUTOMATION_ENGINE")
@@ -123,6 +140,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         })
 
     @application.route("/api/engine/toggle", methods=["POST"])
+    @require_auth
     def legacy_toggle_engine():
         eng = application.config.get("AUTOMATION_ENGINE")
         data = request.get_json(silent=True) or {}
@@ -135,12 +153,14 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         })
 
     @application.route("/api/telemetry", methods=["GET"])
+    @require_auth
     def legacy_telemetry():
         eng = application.config.get("AUTOMATION_ENGINE")
         return jsonify(eng.telemetry.get_metrics() if eng else {})
 
     @application.route("/api/rules", methods=["GET"])
     @application.route("/api/workflows", methods=["GET"])
+    @require_auth
     def legacy_list_rules():
         st = application.config.get("STORAGE_ENGINE")
         category = request.args.get("category")
@@ -150,6 +170,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/rules/<rule_id>", methods=["GET"])
     @application.route("/api/workflows/<rule_id>", methods=["GET"])
+    @require_auth
     def legacy_get_rule(rule_id: str):
         st = application.config.get("STORAGE_ENGINE")
         rule = st.get_rule(rule_id) if st else None
@@ -159,6 +180,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/rules", methods=["POST"])
     @application.route("/api/workflows", methods=["POST"])
+    @require_auth
     def legacy_create_rule():
         st = application.config.get("STORAGE_ENGINE")
         rule_data = request.get_json(silent=True)
@@ -181,6 +203,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/rules/<rule_id>", methods=["PUT"])
     @application.route("/api/workflows/<rule_id>", methods=["PUT"])
+    @require_auth
     def legacy_update_rule(rule_id: str):
         st = application.config.get("STORAGE_ENGINE")
         rule_data = request.get_json(silent=True)
@@ -194,6 +217,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/rules/<rule_id>", methods=["DELETE"])
     @application.route("/api/workflows/<rule_id>", methods=["DELETE"])
+    @require_auth
     def legacy_delete_rule(rule_id: str):
         st = application.config.get("STORAGE_ENGINE")
         success = st.delete_rule(rule_id)
@@ -203,6 +227,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/rules/<rule_id>/toggle", methods=["POST"])
     @application.route("/api/workflows/<rule_id>/toggle", methods=["POST"])
+    @require_auth
     def legacy_toggle_rule(rule_id: str):
         st = application.config.get("STORAGE_ENGINE")
         data = request.get_json(silent=True) or {}
@@ -215,6 +240,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/api/rules/<rule_id>/execute", methods=["POST"])
     @application.route("/api/workflows/<rule_id>/run", methods=["POST"])
     @application.route("/api/workflows/<rule_id>/execute", methods=["POST"])
+    @require_auth
     def legacy_run_rule(rule_id: str):
         eng = application.config.get("AUTOMATION_ENGINE")
         data = request.get_json(silent=True) or {}
@@ -224,6 +250,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         return jsonify(result)
 
     @application.route("/api/events/dispatch", methods=["POST"])
+    @require_auth
     def legacy_dispatch_event():
         eng = application.config.get("AUTOMATION_ENGINE")
         data = request.get_json(silent=True)
@@ -247,6 +274,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         return jsonify(result)
 
     @application.route("/api/nlp/analyze", methods=["POST"])
+    @require_auth
     def legacy_nlp_analyze():
         eng = application.config.get("AUTOMATION_ENGINE")
         data = request.get_json(silent=True) or {}
@@ -295,12 +323,14 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         })
 
     @application.route("/api/events/stream", methods=["GET"])
+    @require_auth
     def legacy_event_stream():
         eng = application.config.get("AUTOMATION_ENGINE")
         return jsonify({"events": eng.event_stream if eng else []})
 
     @application.route("/api/logs", methods=["GET"])
     @application.route("/api/executions", methods=["GET"])
+    @require_auth
     def legacy_get_logs():
         st = application.config.get("STORAGE_ENGINE")
         limit = int(request.args.get("limit", 50))
@@ -313,6 +343,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/logs", methods=["DELETE"])
     @application.route("/api/executions", methods=["DELETE"])
+    @require_auth
     def legacy_clear_logs():
         st = application.config.get("STORAGE_ENGINE")
         if st:
@@ -320,6 +351,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         return jsonify({"success": True, "message": "Execution logs cleared."})
 
     @application.route("/api/notifications", methods=["GET"])
+    @require_auth
     def legacy_get_notifications():
         st = application.config.get("STORAGE_ENGINE")
         unread_only = request.args.get("unread", "").lower() == "true"
@@ -328,6 +360,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         return jsonify({"notifications": notifications, "count": len(notifications)})
 
     @application.route("/api/notifications/read", methods=["POST"])
+    @require_auth
     def legacy_mark_notifications_read():
         st = application.config.get("STORAGE_ENGINE")
         if st:
@@ -335,6 +368,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         return jsonify({"success": True})
 
     @application.route("/api/notifications", methods=["DELETE"])
+    @require_auth
     def legacy_clear_notifications():
         st = application.config.get("STORAGE_ENGINE")
         if st:
@@ -343,10 +377,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/presets", methods=["GET"])
     @application.route("/api/templates", methods=["GET"])
+    @require_auth
     def legacy_get_presets():
         return jsonify({"presets": PRESET_BLUEPRINTS, "templates": PRESET_BLUEPRINTS})
 
     @application.route("/api/presets/install", methods=["POST"])
+    @require_auth
     def legacy_install_preset():
         st = application.config.get("STORAGE_ENGINE")
         data = request.get_json(silent=True) or {}
@@ -369,6 +405,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         }), 201
 
     @application.route("/api/leads", methods=["GET"])
+    @require_auth
     def legacy_get_leads():
         st = application.config.get("STORAGE_ENGINE")
         status_val = request.args.get("status")
@@ -377,12 +414,14 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         return jsonify({"leads": leads, "count": len(leads)})
 
     @application.route("/api/analytics", methods=["GET"])
+    @require_auth
     def legacy_get_analytics():
         st = application.config.get("STORAGE_ENGINE")
         analytics = st.get_analytics_summary() if st else {}
         return jsonify({"analytics": analytics})
 
     @application.route("/api/export", methods=["GET"])
+    @require_auth
     def legacy_export_rules():
         st = application.config.get("STORAGE_ENGINE")
         rules = st.get_rules() if st else []
@@ -398,6 +437,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         )
 
     @application.route("/api/import", methods=["POST"])
+    @require_auth
     def legacy_import_rules():
         st = application.config.get("STORAGE_ENGINE")
         data = request.get_json(silent=True)
@@ -418,17 +458,62 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Error Handlers
     @application.errorhandler(400)
     def handle_bad_request(e):
-        return jsonify({"error": "Bad Request", "message": str(e), "code": "BAD_REQUEST"}), 400
+        return jsonify({
+            "error": "Bad Request",
+            "message": "The request payload or parameters were invalid.",
+            "code": "BAD_REQUEST"
+        }), 400
+
+    @application.errorhandler(401)
+    def handle_unauthorized(e):
+        return jsonify({
+            "error": "Unauthorized",
+            "message": "Authentication required. Please log in or provide a valid API key.",
+            "code": "UNAUTHORIZED"
+        }), 401
+
+    @application.errorhandler(403)
+    def handle_forbidden(e):
+        return jsonify({
+            "error": "Forbidden",
+            "message": "You do not have permission to perform this action.",
+            "code": "FORBIDDEN"
+        }), 403
 
     @application.errorhandler(404)
     def handle_not_found(e):
         if request.path.startswith("/api"):
-            return jsonify({"error": "Resource Not Found", "path": request.path, "code": "NOT_FOUND"}), 404
+            return jsonify({
+                "error": "Resource Not Found",
+                "path": request.path,
+                "code": "NOT_FOUND"
+            }), 404
         return render_template("index.html"), 404
+
+    @application.errorhandler(429)
+    def handle_too_many_requests(e):
+        return jsonify({
+            "error": "Too Many Requests",
+            "message": "Rate limit exceeded. Please retry after some time.",
+            "code": "TOO_MANY_REQUESTS"
+        }), 429
 
     @application.errorhandler(500)
     def handle_server_error(e):
-        return jsonify({"error": "Internal Server Error", "code": "INTERNAL_SERVER_ERROR"}), 500
+        return jsonify({
+            "error": "Internal Server Error",
+            "message": "An internal server error occurred.",
+            "code": "INTERNAL_SERVER_ERROR"
+        }), 500
+
+    @application.errorhandler(Exception)
+    def handle_unhandled_exception(e):
+        application.logger.error("Unhandled Exception: %s", e, exc_info=True)
+        return jsonify({
+            "error": "Internal Server Error",
+            "message": "An internal server error occurred.",
+            "code": "INTERNAL_SERVER_ERROR"
+        }), 500
 
     return application
 

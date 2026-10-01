@@ -54,20 +54,6 @@ def get_current_user() -> Optional[User]:
         if user and user.is_active:
             g.current_user = user
             return user
-
-    # If in active browser dashboard session without explicit user_id,
-    # resolve to the active tenant admin unless explicitly logged out
-    if not session.get("logged_out"):
-        admin_user = User.query.filter_by(email="admin@opsflow.io", is_active=True).first()
-        if admin_user:
-            session["user_id"] = admin_user.id
-            membership = Membership.query.filter_by(user_id=admin_user.id).first()
-            if membership:
-                session["active_org_id"] = membership.organization_id
-                session["org_id"] = membership.organization_id
-            g.current_user = admin_user
-            return admin_user
-
     return None
 
 
@@ -120,28 +106,26 @@ def require_auth(f: Callable) -> Callable:
     def decorated_function(*args, **kwargs):
         # 1. Check API Key in headers (X-API-Key or Authorization Bearer)
         auth_header = request.headers.get("X-API-Key") or request.headers.get("Authorization")
-        token = None
         if auth_header:
             if auth_header.startswith("Bearer "):
                 token = auth_header.split(" ", 1)[1].strip()
             else:
                 token = auth_header.strip()
 
-        if token and token.startswith("sk_"):
-            res = verify_api_key(token)
-            if not res:
-                return jsonify({"error": "Invalid or revoked API key.", "code": "UNAUTHORIZED"}), 401
-            api_key, org, user = res
-            g.api_key = api_key
-            g.current_org = org
-            g.current_user = user
-            g.is_api_key_auth = True
-            return f(*args, **kwargs)
+            if token:
+                res = verify_api_key(token)
+                if not res:
+                    return jsonify({"error": "Invalid or revoked API key.", "code": "UNAUTHORIZED"}), 401
+                api_key, org, user = res
+                g.api_key = api_key
+                g.current_org = org
+                g.current_user = user
+                g.is_api_key_auth = True
+                return f(*args, **kwargs)
 
         # 2. Check Session Login
         user = get_current_user()
         if not user:
-            # For API requests return JSON, otherwise 401
             return jsonify({"error": "Authentication required. Please log in or provide an API key.", "code": "UNAUTHORIZED"}), 401
 
         org = get_current_org()
@@ -190,6 +174,22 @@ def require_role(allowed_roles: List[str]) -> Callable:
     return decorator
 
 
+def sanitize_sensitive_data(data: Any) -> Any:
+    """Recursively redacts passwords, secrets, hashes, and tokens from payloads."""
+    if isinstance(data, dict):
+        sanitized = {}
+        for k, v in data.items():
+            k_lower = str(k).lower()
+            if any(term in k_lower for term in ("password", "secret", "token", "hash", "api_key")):
+                sanitized[k] = "[REDACTED]"
+            else:
+                sanitized[k] = sanitize_sensitive_data(v)
+        return sanitized
+    elif isinstance(data, list):
+        return [sanitize_sensitive_data(item) for item in data]
+    return data
+
+
 def log_audit_event(
     action: str,
     resource_type: str,
@@ -210,13 +210,15 @@ def log_audit_event(
             first_org = Organization.query.first()
             org_id = first_org.id if first_org else "system"
 
+        clean_details = sanitize_sensitive_data(details or {})
+
         audit = AuditLog(
             organization_id=org_id,
             user_id=user_id,
             action=action,
             resource_type=resource_type,
             resource_id=resource_id,
-            details_json=json.dumps(details or {}),
+            details_json=json.dumps(clean_details),
             ip_address=request.remote_addr if request else "127.0.0.1"
         )
         db.session.add(audit)

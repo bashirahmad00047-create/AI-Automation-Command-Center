@@ -22,8 +22,9 @@ import datetime
 import hashlib
 import hmac
 import json
+import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from flask import Blueprint, current_app, g, jsonify, request, session
 from sqlalchemy import desc
 
@@ -38,6 +39,7 @@ from auth import (
     require_role,
 )
 from database import db
+from limiter import limiter, rate_limit
 from models import (
     ApiKey,
     AuditLog,
@@ -77,8 +79,9 @@ def get_storage():
 # ==========================================
 
 @api_v1.route("/auth/register", methods=["POST"])
+@rate_limit(limit=5, window=60, config_key="REGISTER_RATE_LIMIT", message="Too many registration attempts. Please try again later.")
 def auth_register():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
     email = data.get("email", "").strip().lower()
     password = data.get("password", "").strip()
     full_name = data.get("full_name", "").strip()
@@ -161,12 +164,14 @@ def auth_register():
 
     except Exception as exc:
         db.session.rollback()
-        return jsonify({"error": "Registration failed due to a server error.", "details": str(exc)}), 500
+        current_app.logger.error("Registration server error: %s", exc, exc_info=True)
+        return jsonify({"error": "Registration failed due to a server error.", "code": "REGISTRATION_ERROR"}), 500
 
 
 @api_v1.route("/auth/login", methods=["POST"])
+@rate_limit(limit=10, window=60, config_key="LOGIN_RATE_LIMIT", message="Too many login attempts. Please try again later.")
 def auth_login():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
     email = data.get("email", "").strip().lower()
     password = data.get("password", "").strip()
 
@@ -552,6 +557,20 @@ def delete_webhook(endpoint_id: str):
     return jsonify({"success": True, "message": "Webhook endpoint deleted."})
 
 
+def check_webhook_rate_limit(endpoint_token: str) -> Tuple[bool, int]:
+    """Sliding-window rate limiter for inbound webhook endpoints.
+    
+    Returns:
+        (is_allowed, retry_after_seconds)
+    """
+    if current_app.config.get("RATELIMIT_ENABLED") is False:
+        return True, 0
+    window = current_app.config.get("WEBHOOK_RATE_LIMIT_WINDOW", 60)
+    limit = current_app.config.get("WEBHOOK_RATE_LIMIT", int(os.environ.get("WEBHOOK_RATE_LIMIT", 60)))
+    is_limited, retry_after = limiter.is_rate_limited(f"webhook:{endpoint_token}", limit=limit, window=window)
+    return not is_limited, retry_after
+
+
 @api_v1.route("/webhooks/incoming/<endpoint_token>", methods=["POST"])
 def incoming_webhook_receiver(endpoint_token: str):
     """PUBLIC GATEWAY for receiving webhooks from third-party services (GitHub, Stripe, Datadog)."""
@@ -559,18 +578,30 @@ def incoming_webhook_receiver(endpoint_token: str):
     if not endpoint:
         return jsonify({"error": "Invalid or inactive webhook endpoint.", "code": "NOT_FOUND"}), 404
 
-    # HMAC Signature verification if secret configured
+    # 1. Rate Limiting Check
+    allowed, retry_after = check_webhook_rate_limit(endpoint_token)
+    if not allowed:
+        resp = jsonify({
+            "error": "Rate limit exceeded for webhook endpoint.",
+            "code": "TOO_MANY_REQUESTS",
+            "retry_after": retry_after
+        })
+        resp.headers["Retry-After"] = str(retry_after)
+        return resp, 429
+
+    # 2. HMAC Signature verification if secret configured
     if endpoint.secret_token:
         signature = request.headers.get("X-Hub-Signature-256") or request.headers.get("X-Signature")
-        if signature:
-            raw_body = request.get_data()
-            expected_sig = "sha256=" + hmac.new(
-                endpoint.secret_token.encode("utf-8"),
-                raw_body,
-                hashlib.sha256
-            ).hexdigest()
-            if not hmac.compare_digest(signature, expected_sig):
-                return jsonify({"error": "HMAC signature mismatch.", "code": "UNAUTHORIZED"}), 401
+        if not signature:
+            return jsonify({"error": "Missing HMAC signature header.", "code": "UNAUTHORIZED"}), 401
+        raw_body = request.get_data()
+        expected_sig = "sha256=" + hmac.new(
+            endpoint.secret_token.encode("utf-8"),
+            raw_body,
+            hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected_sig):
+            return jsonify({"error": "HMAC signature mismatch.", "code": "UNAUTHORIZED"}), 401
 
     payload = request.get_json(silent=True) or {}
     endpoint.request_count += 1

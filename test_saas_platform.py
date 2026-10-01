@@ -23,6 +23,7 @@ from sqlalchemy import text
 from app import create_app
 from auth import generate_secure_api_key, verify_api_key
 from database import db
+from limiter import limiter
 from models import (
     ApiKey,
     AuditLog,
@@ -269,6 +270,7 @@ class TestInboundWebhooksAndSignatures(unittest.TestCase):
         self.ctx = self.app.app_context()
         self.ctx.push()
         db.create_all()
+        limiter.reset()
 
         self.org = Organization(id="org-wh-test", name="Webhook Enterprise", slug="wh-test", is_active=True)
         self.admin = User(id="usr-wh-admin", email="wh@test.com", full_name="Webhook Admin", is_active=True)
@@ -320,6 +322,44 @@ class TestInboundWebhooksAndSignatures(unittest.TestCase):
             headers={"X-Hub-Signature-256": "sha256=badsignature000000000000"}
         )
         self.assertEqual(invalid_res.status_code, 401)
+        self.assertEqual(invalid_res.get_json()["code"], "UNAUTHORIZED")
+
+        # 3. Missing signature header when secret is configured -> 401 Unauthorized
+        missing_res = self.client.post(
+            f"/api/v1/webhooks/incoming/{self.endpoint_token}",
+            data=raw_body,
+            content_type="application/json"
+        )
+        self.assertEqual(missing_res.status_code, 401)
+        self.assertEqual(missing_res.get_json()["code"], "UNAUTHORIZED")
+
+    def test_webhook_rate_limiting_returns_429(self):
+        self.app.config["WEBHOOK_RATE_LIMIT"] = 3
+        payload_dict = {"event": "payment.succeeded", "amount_cents": 1000}
+        raw_body = json.dumps(payload_dict).encode("utf-8")
+        valid_sig = "sha256=" + hmac.new(self.secret_token.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+        headers = {"X-Hub-Signature-256": valid_sig}
+
+        # 3 requests succeed
+        for _ in range(3):
+            res = self.client.post(
+                f"/api/v1/webhooks/incoming/{self.endpoint_token}",
+                data=raw_body,
+                content_type="application/json",
+                headers=headers
+            )
+            self.assertEqual(res.status_code, 200)
+
+        # 4th request exceeds rate limit -> 429
+        throttled = self.client.post(
+            f"/api/v1/webhooks/incoming/{self.endpoint_token}",
+            data=raw_body,
+            content_type="application/json",
+            headers=headers
+        )
+        self.assertEqual(throttled.status_code, 429)
+        self.assertEqual(throttled.get_json()["code"], "TOO_MANY_REQUESTS")
+        self.assertIn("Retry-After", throttled.headers)
 
 
 class TestIncidentAlertLifecycle(unittest.TestCase):
@@ -567,6 +607,229 @@ class TestWorkflowAdvancedFeatures(unittest.TestCase):
         self.assertEqual(data["status"], "healthy")
         self.assertTrue(data["engine_online"])
         self.assertIn("database", data)
+
+
+class TestTopLevelAuthAndSession(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app("testing")
+        self.client = self.app.test_client()
+        self.ctx = self.app.app_context()
+        self.ctx.push()
+        db.create_all()
+        limiter.reset()
+
+    def tearDown(self):
+        db.session.remove()
+        try:
+            db.session.execute(text("PRAGMA foreign_keys = OFF;"))
+            db.drop_all()
+        except Exception:
+            pass
+        self.ctx.pop()
+
+    def test_top_level_register_and_login_flow(self):
+        # 1. GET /register
+        get_reg = self.client.get("/register")
+        self.assertEqual(get_reg.status_code, 200)
+
+        # 2. POST /register
+        reg_res = self.client.post("/register", json={
+            "email": "sarah.connor@cyberdyne.io",
+            "password": "Resistance2026!",
+            "full_name": "Sarah Connor",
+            "org_name": "Cyberdyne Systems"
+        })
+        self.assertEqual(reg_res.status_code, 201)
+        data = reg_res.get_json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["user"]["email"], "sarah.connor@cyberdyne.io")
+        self.assertEqual(data["role"], "owner")
+
+        # 3. GET /login
+        get_log = self.client.get("/login")
+        self.assertEqual(get_log.status_code, 200)
+
+        # 4. POST /login with correct password
+        log_res = self.client.post("/login", json={
+            "email": "sarah.connor@cyberdyne.io",
+            "password": "Resistance2026!"
+        })
+        self.assertEqual(log_res.status_code, 200)
+        self.assertTrue(log_res.get_json()["success"])
+
+        # 5. POST /login with incorrect password
+        bad_log = self.client.post("/login", json={
+            "email": "sarah.connor@cyberdyne.io",
+            "password": "WrongPassword!"
+        })
+        self.assertEqual(bad_log.status_code, 401)
+        self.assertEqual(bad_log.get_json()["code"], "UNAUTHORIZED")
+
+    def test_auth_rate_limiting_on_login(self):
+        self.app.config["LOGIN_RATE_LIMIT"] = 2
+        for _ in range(2):
+            self.client.post("/login", json={"email": "nobody@test.com", "password": "wrong"})
+        third = self.client.post("/login", json={"email": "nobody@test.com", "password": "wrong"})
+        self.assertEqual(third.status_code, 429)
+        self.assertEqual(third.get_json()["code"], "TOO_MANY_REQUESTS")
+        self.assertIn("Retry-After", third.headers)
+
+
+class TestLegacyRouteProtection(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app("testing")
+        self.client = self.app.test_client()
+        self.ctx = self.app.app_context()
+        self.ctx.push()
+        db.create_all()
+        limiter.reset()
+
+        self.org = Organization(id="org-legacy-test", name="Legacy Org", slug="legacy-org", is_active=True)
+        self.user = User(id="usr-legacy-admin", email="legacy_admin@test.com", full_name="Legacy Admin", is_active=True)
+        self.user.set_password("AdminSecure2026!")
+        self.mem = Membership(id="mem-legacy", user_id=self.user.id, organization_id=self.org.id, role="admin")
+
+        secret_key, prefix, key_hash = generate_secure_api_key()
+        self.raw_api_key = secret_key
+        self.api_key = ApiKey(
+            id="key-legacy",
+            organization_id=self.org.id,
+            user_id=self.user.id,
+            name="Legacy Test Key",
+            key_prefix=prefix,
+            key_hash=key_hash,
+            permissions="*"
+        )
+        db.session.add_all([self.org, self.user, self.mem, self.api_key])
+        db.session.commit()
+
+    def tearDown(self):
+        db.session.remove()
+        try:
+            db.session.execute(text("PRAGMA foreign_keys = OFF;"))
+            db.drop_all()
+        except Exception:
+            pass
+        self.ctx.pop()
+
+    def test_unauthenticated_nlp_analyze_rejected(self):
+        res = self.client.post("/api/nlp/analyze", json={"text": "CPU overload"})
+        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.get_json()["code"], "UNAUTHORIZED")
+
+    def test_unauthenticated_v1_nlp_analyze_rejected(self):
+        res = self.client.post("/api/v1/nlp/analyze", json={"text": "CPU overload"})
+        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.get_json()["code"], "UNAUTHORIZED")
+
+    def test_unauthenticated_legacy_routes_rejected(self):
+        self.assertEqual(self.client.get("/api/rules").status_code, 401)
+        self.assertEqual(self.client.get("/api/status").status_code, 401)
+        self.assertEqual(self.client.get("/api/telemetry").status_code, 401)
+        self.assertEqual(self.client.post("/api/engine/toggle", json={"online": True}).status_code, 401)
+        self.assertEqual(self.client.get("/api/logs").status_code, 401)
+        self.assertEqual(self.client.get("/api/leads").status_code, 401)
+        self.assertEqual(self.client.get("/api/analytics").status_code, 401)
+
+    def test_authenticated_legacy_routes_work(self):
+        # 1. Authenticated via session login
+        self.client.post("/login", json={"email": "legacy_admin@test.com", "password": "AdminSecure2026!"})
+        res_rules = self.client.get("/api/rules")
+        self.assertEqual(res_rules.status_code, 200)
+        self.assertIn("rules", res_rules.get_json())
+
+        res_nlp = self.client.post("/api/nlp/analyze", json={"text": "Critical CPU spike 98%", "dry_run": True})
+        self.assertEqual(res_nlp.status_code, 200)
+
+        res_status = self.client.get("/api/status")
+        self.assertEqual(res_status.status_code, 200)
+
+        # 2. Authenticated via API Key
+        self.client.post("/api/v1/auth/logout")
+        res_key = self.client.get("/api/rules", headers={"X-API-Key": self.raw_api_key})
+        self.assertEqual(res_key.status_code, 200)
+
+
+class TestErrorSecurityAndDataProtection(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app("testing")
+        self.client = self.app.test_client()
+        self.ctx = self.app.app_context()
+        self.ctx.push()
+        db.create_all()
+        limiter.reset()
+
+        self.org = Organization(id="org-sec-test", name="Security Org", slug="sec-org", is_active=True)
+        self.user = User(id="usr-sec", email="sec@test.com", full_name="Sec Officer", is_active=True)
+        self.user.set_password("SecPassword2026!")
+        self.mem = Membership(id="mem-sec", user_id=self.user.id, organization_id=self.org.id, role="admin")
+
+        secret_key, prefix, key_hash = generate_secure_api_key()
+        self.raw_api_key = secret_key
+        self.api_key = ApiKey(
+            id="key-sec",
+            organization_id=self.org.id,
+            user_id=self.user.id,
+            name="Security Key",
+            key_prefix=prefix,
+            key_hash=key_hash,
+            permissions="*"
+        )
+        self.wh = WebhookEndpoint(
+            id="wh-sec",
+            organization_id=self.org.id,
+            name="Sec WH",
+            endpoint_token="wh_sec_token_999",
+            secret_token="ultra_secret_hmac_key_999"
+        )
+        db.session.add_all([self.org, self.user, self.mem, self.api_key, self.wh])
+        db.session.commit()
+
+        self.client.post("/login", json={"email": "sec@test.com", "password": "SecPassword2026!"})
+
+    def tearDown(self):
+        db.session.remove()
+        try:
+            db.session.execute(text("PRAGMA foreign_keys = OFF;"))
+            db.drop_all()
+        except Exception:
+            pass
+        self.ctx.pop()
+
+    def test_error_security_does_not_leak_passwords_hashes_or_secrets(self):
+        # 1. User profile serialization does NOT expose password or password_hash
+        me_res = self.client.get("/api/v1/auth/me")
+        self.assertEqual(me_res.status_code, 200)
+        user_dict = me_res.get_json()["user"]
+        self.assertNotIn("password", user_dict)
+        self.assertNotIn("password_hash", user_dict)
+
+        # 2. API Key listing does NOT expose key_hash or full raw secret
+        keys_res = self.client.get("/api/v1/api-keys")
+        self.assertEqual(keys_res.status_code, 200)
+        keys = keys_res.get_json()["api_keys"]
+        self.assertTrue(len(keys) >= 1)
+        for k in keys:
+            self.assertNotIn("key_hash", k)
+            self.assertNotIn("secret_key", k)
+            self.assertNotIn(self.raw_api_key, json.dumps(k))
+
+        # 3. Webhook listing does NOT expose secret_token
+        wh_res = self.client.get("/api/v1/webhooks")
+        self.assertEqual(wh_res.status_code, 200)
+        whs = wh_res.get_json()["webhooks"]
+        for w in whs:
+            self.assertNotIn("secret_token", w)
+            self.assertNotIn("ultra_secret_hmac_key_999", json.dumps(w))
+            self.assertTrue(w["secret_configured"])
+
+    def test_error_security_400_and_500_sanitize_tracebacks_and_internals(self):
+        bad_req = self.client.post("/api/rules", json="invalid-json-not-dict", content_type="application/json")
+        self.assertIn(bad_req.status_code, [400])
+        body_str = bad_req.get_data(as_text=True)
+        self.assertNotIn("Traceback", body_str)
+        self.assertNotIn("sqlite", body_str.lower())
+        self.assertNotIn("psycopg2", body_str.lower())
 
 
 if __name__ == "__main__":
