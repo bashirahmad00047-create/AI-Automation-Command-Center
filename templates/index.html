@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpsFlow Cloud - Enterprise Intelligent Automation</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=2.4.1">
+    <link rel="stylesheet" href="/static/css/style.css?v=2.5.0">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -41,6 +41,19 @@
                 <span class="user-name" id="currentUserName">Sarah Lin</span>
                 <span class="role-badge admin" id="currentUserRoleBadge">ADMIN</span>
                 <button class="hud-btn small" onclick="openPersonaModal()" title="Switch User / Role Persona">Switch Persona</button>
+            </div>
+
+            <!-- Session Auth Controls -->
+            <div class="auth-controls" id="headerAuthControls" style="display: flex; align-items: center; gap: 6px;">
+                <button type="button" class="hud-btn small outline" id="headerSignInBtn" onclick="openAuthModal('login')" style="display:none;" title="Sign In to Existing Workspace">
+                    <span class="icon">🔑</span> Sign In
+                </button>
+                <button type="button" class="hud-btn small cyan" id="headerRegisterBtn" onclick="openAuthModal('register')" style="display:none;" title="Create New Workspace">
+                    <span class="icon">✨</span> Sign Up
+                </button>
+                <button type="button" class="hud-btn small red" id="headerSignOutBtn" onclick="handleLogout()" title="Sign Out of OpsFlow Cloud">
+                    <span class="icon">🚪</span> Sign Out
+                </button>
             </div>
 
             <div class="status-indicator" id="engineStatusBadge">
@@ -682,6 +695,9 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
             <div class="hud-panel" style="margin-bottom: 24px;">
                 <div class="panel-header">
                     <h3>TEAM MEMBERS & RBAC DIRECTORY</h3>
+                    <div style="font-size: 13px; color: var(--text-dim);">
+                        Seats Occupied: <strong id="teamSeatCount" style="color: var(--cyan-glow);">-</strong> / <span id="teamSeatLimit">-</span>
+                    </div>
                 </div>
                 <div class="table-container">
                     <table class="team-table">
@@ -691,10 +707,11 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                                 <th>Email</th>
                                 <th>Role</th>
                                 <th>Created</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="teamMembersTableBody">
-                            <tr><td colspan="4" class="empty-cell">Loading team directory...</td></tr>
+                            <tr><td colspan="5" class="empty-cell">Loading team directory...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1485,9 +1502,234 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
         </div>
     </div>
 
+    <!-- AUTHENTICATION MODAL (LOGIN & WORKSPACE REGISTRATION) -->
+    <div class="hud-modal-overlay" id="authModal" style="display:none;">
+        <div class="hud-modal" style="max-width: 540px;">
+            <div class="modal-header">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 20px;">⚡</span>
+                    <h3 id="authModalTitle">OpsFlow Cloud Authentication</h3>
+                </div>
+                <button class="close-btn" id="authModalCloseBtn" onclick="closeAuthModal()">&times;</button>
+            </div>
+
+            <!-- Auth Tabs -->
+            <div style="display: flex; border-bottom: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.2);">
+                <button type="button" class="hud-tab active" id="authTabLogin" onclick="switchAuthTab('login')" style="flex: 1; padding: 12px; border: none; background: transparent; color: var(--cyan-glow, #00f0ff); cursor: pointer; font-weight: 600; text-align: center;">
+                    🔑 Sign In
+                </button>
+                <button type="button" class="hud-tab" id="authTabRegister" onclick="switchAuthTab('register')" style="flex: 1; padding: 12px; border: none; background: transparent; color: var(--text-muted, #888); cursor: pointer; font-weight: 600; text-align: center;">
+                    🏢 Create Workspace
+                </button>
+            </div>
+
+            <div class="modal-body" style="padding: 24px; overflow-y: auto;">
+                <!-- SIGN IN FORM -->
+                <form id="loginForm" onsubmit="handleLogin(event)">
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Work Email *</label>
+                        <input type="email" id="loginEmail" class="hud-input" required placeholder="admin@opsflow.io" style="width: 100%;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 18px;">
+                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Password *</label>
+                        <input type="password" id="loginPassword" class="hud-input" required placeholder="••••••••••••" style="width: 100%;">
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <a href="javascript:void(0)" onclick="fillDemoCredentials()" style="color: var(--cyan-glow, #00f0ff); font-size: 12px; text-decoration: underline;">Use Demo Credentials</a>
+                        <a href="javascript:void(0)" onclick="switchAuthTab('register')" style="color: var(--text-dim, #888); font-size: 12px;">New here? Create Workspace &rarr;</a>
+                    </div>
+                    <div id="loginErrorMessage" style="display:none; color: #ef4444; font-size: 13px; margin-bottom: 14px; padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 6px; border-left: 3px solid #ef4444;"></div>
+                    <button type="submit" class="hud-btn primary" id="loginSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600;">Sign In to Workspace</button>
+                </form>
+
+                <!-- REGISTER / CREATE WORKSPACE FORM -->
+                <form id="registerForm" onsubmit="handleRegister(event)" style="display:none;">
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Full Name *</label>
+                        <input type="text" id="regFullName" class="hud-input" required placeholder="Alex Mercer" style="width: 100%;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Work Email Address *</label>
+                        <input type="email" id="regEmail" class="hud-input" required placeholder="alex@quantumcorp.com" style="width: 100%;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Secure Password * (min 8 chars)</label>
+                        <input type="password" id="regPassword" class="hud-input" required minlength="8" placeholder="••••••••••••" style="width: 100%;">
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 6px;">
+                        <div class="form-group">
+                            <label style="display:block; margin-bottom: 6px; font-weight: 500;">Workspace / Org Name *</label>
+                            <input type="text" id="regOrgName" class="hud-input" required placeholder="Quantum Dynamics" oninput="autoPopulateSlug(this.value)" style="width: 100%;">
+                        </div>
+                        <div class="form-group">
+                            <label style="display:block; margin-bottom: 6px; font-weight: 500;">Workspace Slug *</label>
+                            <input type="text" id="regOrgSlug" class="hud-input" required placeholder="quantum-dynamics" oninput="handleSlugInput(this.value)" style="width: 100%;">
+                        </div>
+                    </div>
+                    <div id="slugFeedback" style="font-size: 11px; margin-bottom: 14px; min-height: 18px; color: var(--text-dim, #888);"></div>
+
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Select Initial Plan Tier</label>
+                        <select id="regPlanTier" class="hud-input" style="width: 100%;">
+                            <option value="free" selected>Free Community ($0/mo - 3 Rules, 1k Events, 1 Seat)</option>
+                            <option value="starter">Starter ($29/mo - 10 Rules, 5k Events, 2 Seats)</option>
+                            <option value="pro">Professional ($99/mo - 50 Rules, 200k Events, 10 Seats, Gemini AI)</option>
+                            <option value="enterprise">Enterprise ($499/mo - 250 Rules, 1M Events, 100 Seats, Dedicated SLA)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 18px;">
+                        <label style="display:flex; align-items:center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--text-secondary, #aaa);">
+                            <input type="checkbox" id="regStarterBlueprints" checked style="cursor: pointer;">
+                            Deploy turnkey starter automation blueprints (Incident Dispatcher, CRM Enricher, DevOps Monitor)
+                        </label>
+                    </div>
+
+                    <div id="registerErrorMessage" style="display:none; color: #ef4444; font-size: 13px; margin-bottom: 14px; padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 6px; border-left: 3px solid #ef4444;"></div>
+                    <button type="submit" class="hud-btn primary" id="registerSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600;">Launch Workspace &amp; Begin Tour</button>
+                    <div style="text-align: center; margin-top: 14px;">
+                        <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color: var(--text-dim, #888); font-size: 12px;">Already have an account? Sign In &rarr;</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- TURNKEY ONBOARDING WIZARD MODAL -->
+    <div class="hud-modal-overlay" id="onboardingWizardModal" style="display:none;">
+        <div class="hud-modal" style="max-width: 680px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, rgba(16,185,129,0.15), rgba(0,240,255,0.15));">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 24px;">🚀</span>
+                    <div>
+                        <h3 id="onboardingWizardTitle" style="color: #10b981; margin: 0;">Welcome to OpsFlow Cloud!</h3>
+                        <p style="font-size: 12px; color: var(--text-dim, #888); margin: 2px 0 0 0;">Your turnkey intelligent automation command center is live</p>
+                    </div>
+                </div>
+                <button class="close-btn" onclick="closeOnboardingWizard()">&times;</button>
+            </div>
+
+            <!-- Wizard Step Indicators -->
+            <div style="display: flex; justify-content: space-around; padding: 12px 20px; background: rgba(0,0,0,0.25); border-bottom: 1px solid var(--border-color, #2a2e3d); font-size: 12px;">
+                <div class="wizard-step-pill active" id="wizardPill1" style="color: var(--cyan-glow, #00f0ff); font-weight: 600;">1. Workspace</div>
+                <div class="wizard-step-pill" id="wizardPill2" style="color: var(--text-dim, #888);">2. Blueprints</div>
+                <div class="wizard-step-pill" id="wizardPill3" style="color: var(--text-dim, #888);">3. API Key</div>
+                <div class="wizard-step-pill" id="wizardPill4" style="color: var(--text-dim, #888);">4. Team</div>
+                <div class="wizard-step-pill" id="wizardPill5" style="color: var(--text-dim, #888);">5. Launch</div>
+            </div>
+
+            <div class="modal-body" style="padding: 24px; min-height: 280px;">
+                <!-- Step 1: Workspace Initialized -->
+                <div id="wizardStep1" class="wizard-step-content">
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <div style="font-size: 40px; margin-bottom: 10px;">🏢</div>
+                        <h4 style="font-size: 18px; margin: 0 0 8px 0;" id="wizOrgName">Quantum Dynamics</h4>
+                        <p style="color: var(--text-dim, #888); font-size: 13px;">Organization workspace created with dedicated multi-tenant isolation.</p>
+                    </div>
+                    <div class="metrics-grid" style="grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                        <div class="hud-panel" style="padding: 14px; text-align: center; border-radius: 8px;">
+                            <span style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase;">Workspace Slug</span>
+                            <div style="font-weight: 600; font-family: var(--font-mono); color: var(--cyan-glow, #00f0ff); margin-top: 4px;" id="wizOrgSlug">quantum-dynamics</div>
+                        </div>
+                        <div class="hud-panel" style="padding: 14px; text-align: center; border-radius: 8px;">
+                            <span style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase;">Subscription Plan</span>
+                            <div style="font-weight: 600; text-transform: uppercase; color: #10b981; margin-top: 4px;" id="wizOrgPlan">FREE COMMUNITY</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Starter Blueprints -->
+                <div id="wizardStep2" class="wizard-step-content" style="display:none;">
+                    <div style="text-align: center; margin-bottom: 16px;">
+                        <div style="font-size: 40px; margin-bottom: 10px;">📦</div>
+                        <h4 style="font-size: 18px; margin: 0 0 6px 0;">Turnkey Automation Blueprints Installed</h4>
+                        <p style="color: var(--text-dim, #888); font-size: 13px;">Pre-configured enterprise rules ready for real-time signals.</p>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <div class="hud-panel" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; border-radius: 8px;">
+                            <div>
+                                <strong style="color: var(--cyan-glow, #00f0ff); font-size: 13px;">⚡ High-Severity Incident Auto-Mitigator</strong>
+                                <div style="font-size: 11px; color: var(--text-dim, #888);">Trigger: <code>incident.created</code> with severity >= 4 &rarr; Dispatches alert</div>
+                            </div>
+                            <span class="status-badge active" style="font-size: 10px; background: rgba(16,185,129,0.2); color: #10b981; padding: 2px 8px; border-radius: 4px;">ACTIVE</span>
+                        </div>
+                        <div class="hud-panel" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; border-radius: 8px;">
+                            <div>
+                                <strong style="color: #10b981; font-size: 13px;">🎯 Intelligent CRM Lead Auto-Enricher</strong>
+                                <div style="font-size: 11px; color: var(--text-dim, #888);">Trigger: <code>lead.submitted</code> &rarr; Computes score & tags priority</div>
+                            </div>
+                            <span class="status-badge active" style="font-size: 10px; background: rgba(16,185,129,0.2); color: #10b981; padding: 2px 8px; border-radius: 4px;">ACTIVE</span>
+                        </div>
+                        <div class="hud-panel" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; border-radius: 8px;">
+                            <div>
+                                <strong style="color: #a78bfa; font-size: 13px;">🚨 Automated DevOps Health Check Monitor</strong>
+                                <div style="font-size: 11px; color: var(--text-dim, #888);">Trigger: <code>metric.anomaly</code> with error rate > 5% &rarr; Triggers rollback</div>
+                            </div>
+                            <span class="status-badge active" style="font-size: 10px; background: rgba(16,185,129,0.2); color: #10b981; padding: 2px 8px; border-radius: 4px;">ACTIVE</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: API Key Revealed -->
+                <div id="wizardStep3" class="wizard-step-content" style="display:none;">
+                    <div style="text-align: center; margin-bottom: 16px;">
+                        <div style="font-size: 40px; margin-bottom: 10px;">🔑</div>
+                        <h4 style="font-size: 18px; margin: 0 0 6px 0;">Primary Secret API Key</h4>
+                        <p style="color: var(--text-dim, #888); font-size: 13px;">Use this token to authenticate SDKs, CLI tools, and inbound webhooks.</p>
+                    </div>
+                    <div class="hud-panel" style="padding: 16px; background: rgba(0,0,0,0.4); border: 1px solid var(--border-color, #2a2e3d); border-radius: 8px;">
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <input type="text" id="wizApiKeyInput" readonly class="hud-input" style="font-family: var(--font-mono); font-size: 13px; color: #00f0ff; width: 100%;" value="sk_live_...">
+                            <button type="button" class="hud-btn primary" onclick="copyOnboardingApiKey()" id="wizCopyKeyBtn">📋 Copy</button>
+                        </div>
+                        <p style="font-size: 11px; color: #f59e0b; margin: 10px 0 0 0;">⚠️ Please store this key securely. OpsFlow Cloud stores SHA-256 hashes and will not display this secret token again!</p>
+                    </div>
+                </div>
+
+                <!-- Step 4: Invite Teammates -->
+                <div id="wizardStep4" class="wizard-step-content" style="display:none;">
+                    <div style="text-align: center; margin-bottom: 16px;">
+                        <div style="font-size: 40px; margin-bottom: 10px;">👥</div>
+                        <h4 style="font-size: 18px; margin: 0 0 6px 0;">Invite Team Members</h4>
+                        <p style="color: var(--text-dim, #888); font-size: 13px;">Collaborate across engineers, operators, and compliance auditors.</p>
+                    </div>
+                    <div style="display: flex; gap: 8px; margin-bottom: 14px;">
+                        <input type="email" id="wizInviteEmail" class="hud-input" placeholder="colleague@company.com" style="flex: 2;">
+                        <select id="wizInviteRole" class="hud-input" style="flex: 1;">
+                            <option value="operator">Operator</option>
+                            <option value="admin">Admin</option>
+                            <option value="viewer">Viewer</option>
+                        </select>
+                        <button type="button" class="hud-btn primary" onclick="sendWizardInvite()">Invite</button>
+                    </div>
+                    <div id="wizInviteStatus" style="font-size: 12px; color: #10b981; min-height: 20px;"></div>
+                </div>
+
+                <!-- Step 5: Ready to Launch -->
+                <div id="wizardStep5" class="wizard-step-content" style="display:none; text-align: center;">
+                    <div style="font-size: 48px; margin-bottom: 14px;">🎉</div>
+                    <h4 style="font-size: 20px; color: #10b981; margin: 0 0 10px 0;">Setup Complete &amp; Ready to Automate!</h4>
+                    <p style="color: var(--text-secondary, #aaa); max-width: 480px; margin: 0 auto 20px auto; font-size: 13px; line-height: 1.6;">
+                        Your organization workspace is fully configured with multi-tenant quotas, starter rules, and security credentials.
+                    </p>
+                    <button type="button" class="hud-btn primary" onclick="finishOnboarding()" style="padding: 12px 28px; font-size: 14px; font-weight: 700;">
+                        Open Command Center Dashboard &rarr;
+                    </button>
+                </div>
+            </div>
+
+            <!-- Wizard Footer Buttons -->
+            <div class="modal-footer" style="padding: 16px 24px; border-top: 1px solid var(--border-color, #2a2e3d); display: flex; justify-content: space-between; align-items: center;">
+                <button type="button" class="hud-btn outline" id="wizPrevBtn" onclick="prevWizardStep()" style="visibility: hidden;">&larr; Back</button>
+                <div style="font-size: 12px; color: var(--text-dim, #888);" id="wizStepCounter">Step 1 of 5</div>
+                <button type="button" class="hud-btn primary" id="wizNextBtn" onclick="nextWizardStep()">Next Step &rarr;</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification Container -->
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="/static/js/app.js?v=2.4.1"></script>
+    <script src="/static/js/app.js?v=2.5.0"></script>
 </body>
 </html>

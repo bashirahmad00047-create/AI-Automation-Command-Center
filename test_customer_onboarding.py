@@ -323,6 +323,181 @@ class TestCustomerOnboarding(unittest.TestCase):
         res_verify = self.client.get("/api/v1/organizations/current")
         self.assertEqual(res_verify.get_json()["organization"]["name"], "DataCore Global Enterprise")
 
+    def test_login_and_logout_flow(self):
+        """Verifies session lifecycle: login, logout, session clearance, and re-authentication."""
+        # 1. Register a new user
+        reg_res = self.client.post("/api/v1/auth/register", json={
+            "email": "dev@cloudmatrix.io",
+            "password": "CloudMatrixPassword2026!",
+            "full_name": "Dev User",
+            "org_name": "Cloud Matrix",
+            "slug": "cloud-matrix"
+        })
+        self.assertEqual(reg_res.status_code, 201)
+
+        # 2. Currently authenticated via session
+        me_res1 = self.client.get("/api/v1/auth/me")
+        self.assertEqual(me_res1.status_code, 200)
+        self.assertEqual(me_res1.get_json()["user"]["email"], "dev@cloudmatrix.io")
+
+        # 3. Logout
+        logout_res = self.client.post("/api/v1/auth/logout")
+        self.assertEqual(logout_res.status_code, 200)
+        self.assertTrue(logout_res.get_json()["success"])
+
+        # 4. Now unauthenticated
+        me_res2 = self.client.get("/api/v1/auth/me")
+        self.assertEqual(me_res2.status_code, 401)
+
+        # 5. Invalid credentials return 401
+        limiter.reset()
+        bad_login = self.client.post("/api/v1/auth/login", json={
+            "email": "dev@cloudmatrix.io",
+            "password": "WrongPassword!"
+        })
+        self.assertEqual(bad_login.status_code, 401)
+        self.assertEqual(bad_login.get_json()["code"], "UNAUTHORIZED")
+
+        # 6. Correct credentials re-establishes session
+        limiter.reset()
+        good_login = self.client.post("/api/v1/auth/login", json={
+            "email": "dev@cloudmatrix.io",
+            "password": "CloudMatrixPassword2026!"
+        })
+        self.assertEqual(good_login.status_code, 200)
+        self.assertEqual(good_login.get_json()["user"]["email"], "dev@cloudmatrix.io")
+
+        # 7. Session is active again
+        me_res3 = self.client.get("/api/v1/auth/me")
+        self.assertEqual(me_res3.status_code, 200)
+
+    def test_ui_template_contains_phase5_components(self):
+        """Verifies index.html renders authentication modal, onboarding wizard, and seat counters."""
+        res = self.client.get("/")
+        self.assertEqual(res.status_code, 200)
+        html = res.data.decode("utf-8")
+
+        # 1. Header session auth buttons
+        self.assertIn('id="headerAuthControls"', html)
+        self.assertIn('id="headerSignInBtn"', html)
+        self.assertIn('id="headerRegisterBtn"', html)
+        self.assertIn('id="headerSignOutBtn"', html)
+
+        # 2. Authentication Modal & Tabs
+        self.assertIn('id="authModal"', html)
+        self.assertIn('id="authTabLogin"', html)
+        self.assertIn('id="authTabRegister"', html)
+        self.assertIn('id="loginForm"', html)
+        self.assertIn('id="registerForm"', html)
+        self.assertIn('id="regOrgSlug"', html)
+        self.assertIn('id="slugFeedback"', html)
+
+        # 3. Turnkey Customer Onboarding Wizard
+        self.assertIn('id="onboardingWizardModal"', html)
+        self.assertIn('id="wizardStep1"', html)
+        self.assertIn('id="wizardStep2"', html)
+        self.assertIn('id="wizardStep3"', html)
+        self.assertIn('id="wizardStep4"', html)
+        self.assertIn('id="wizardStep5"', html)
+        self.assertIn('id="wizApiKeyInput"', html)
+        self.assertIn('id="wizCopyKeyBtn"', html)
+
+        # 4. Team seat quota displays
+        self.assertIn('id="teamSeatCount"', html)
+        self.assertIn('id="teamSeatLimit"', html)
+
+    def test_onboarding_turnkey_blueprints_installed(self):
+        """Verifies starter blueprints and audit records are auto-provisioned upon registration."""
+        reg_res = self.client.post("/api/v1/auth/register", json={
+            "email": "founder@zenith.ai",
+            "password": "ZenithPass2026!",
+            "full_name": "Zenith Founder",
+            "org_name": "Zenith AI Systems",
+            "slug": "zenith-ai",
+            "starter_blueprints": True
+        })
+        self.assertEqual(reg_res.status_code, 201)
+        data = reg_res.get_json()
+        org_id = data["organization"]["id"]
+
+        # Verify 3 starter automation rules created
+        rules = AutomationRule.query.filter_by(organization_id=org_id).all()
+        rule_names = [r.name for r in rules]
+        self.assertEqual(len(rules), 3)
+        self.assertIn("Critical Incident Router", rule_names)
+        self.assertIn("AI Lead Qualification", rule_names)
+        self.assertIn("API Failure Alert", rule_names)
+
+        # Verify audit log records
+        audits = AuditLog.query.filter_by(organization_id=org_id).all()
+        actions = [a.action for a in audits]
+        self.assertIn("auth.register", actions)
+
+    def test_unauthenticated_visitor_gets_unauthenticated_me_response(self):
+        """Verifies unauthenticated visitors receive 401 on /api/v1/auth/me and no auto-login occurs."""
+        # 1. Unauthenticated request to /api/v1/auth/me
+        res_me = self.client.get("/api/v1/auth/me")
+        self.assertEqual(res_me.status_code, 401)
+        self.assertEqual(res_me.get_json()["code"], "UNAUTHORIZED")
+
+        # 2. Unauthenticated request to / renders template containing login screen
+        res_index = self.client.get("/")
+        self.assertEqual(res_index.status_code, 200)
+        html = res_index.data.decode("utf-8")
+        self.assertIn('id="authModal"', html)
+        self.assertIn('id="loginForm"', html)
+        self.assertIn('id="registerForm"', html)
+
+        # 3. /api/v1/auth/me is STILL 401 (proves visiting / does NOT auto-login as admin)
+        res_me_again = self.client.get("/api/v1/auth/me")
+        self.assertEqual(res_me_again.status_code, 401)
+
+    def test_tenant_isolation_on_new_registration(self):
+        """Verifies newly registered tenant is isolated and cannot access Acme demo workspace."""
+        # Ensure Acme demo organization exists
+        acme_org = Organization.query.get("org-enterprise-default")
+        if not acme_org:
+            acme_org = Organization(
+                id="org-enterprise-default",
+                name="Acme Global Enterprise",
+                slug="acme-global",
+                plan_tier="enterprise",
+                is_active=True
+            )
+            db.session.add(acme_org)
+            db.session.commit()
+
+        # Register new customer
+        reg_res = self.client.post("/api/v1/auth/register", json={
+            "email": "owner@solarisenergy.io",
+            "password": "SolarisPassword2026!",
+            "full_name": "Elena Rostova",
+            "org_name": "Solaris Energy",
+            "slug": "solaris-energy",
+            "plan_tier": "free"
+        })
+        self.assertEqual(reg_res.status_code, 201)
+        user_id = reg_res.get_json()["user"]["id"]
+        new_org_id = reg_res.get_json()["organization"]["id"]
+
+        # User is active in their OWN organization
+        me_res = self.client.get("/api/v1/auth/me")
+        self.assertEqual(me_res.status_code, 200)
+        self.assertEqual(me_res.get_json()["current_organization"]["id"], new_org_id)
+        self.assertEqual(me_res.get_json()["current_organization"]["slug"], "solaris-energy")
+
+        # User only belongs to Solaris Energy (not Acme)
+        user_memberships = Membership.query.filter_by(user_id=user_id).all()
+        self.assertEqual(len(user_memberships), 1)
+        self.assertEqual(user_memberships[0].organization_id, new_org_id)
+
+        # Attempting to switch to Acme demo organization is blocked
+        switch_res = self.client.post("/api/v1/organizations/switch", json={
+            "organization_id": "org-enterprise-default"
+        })
+        self.assertEqual(switch_res.status_code, 403)
+        self.assertEqual(switch_res.get_json()["code"], "FORBIDDEN")
+
 
 if __name__ == "__main__":
     unittest.main()

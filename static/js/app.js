@@ -59,27 +59,61 @@ function initClock() {
 async function initAuthAndTenancy() {
     try {
         let res = await fetch('/api/v1/auth/me');
-        if (!res.ok) {
-            // Auto-authenticate as primary demo admin persona for seamless experience
-            const loginRes = await fetch('/api/v1/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: 'admin@opsflow.io', password: 'AdminSecure2026!' })
-            });
-            if (loginRes.ok) {
-                res = await fetch('/api/v1/auth/me');
-            }
-        }
         if (res.ok) {
             const data = await res.json();
             state.currentUser = data.user;
             state.currentOrg = data.current_organization || data.organization;
             state.userRole = data.role || 'admin';
             updateUserBadgeUI();
+            updateAuthHeaderUI(true);
+            closeAuthModal(true);
+            loadOrganizationsList();
+        } else {
+            state.currentUser = null;
+            state.currentOrg = null;
+            state.userRole = 'guest';
+            updateUserBadgeUI();
+            updateAuthHeaderUI(false);
+            openAuthModal('login', true);
         }
-        loadOrganizationsList();
     } catch (e) {
         console.error('Failed to load user/org state:', e);
+        state.currentUser = null;
+        state.currentOrg = null;
+        state.userRole = 'guest';
+        updateUserBadgeUI();
+        updateAuthHeaderUI(false);
+        openAuthModal('login', true);
+    }
+}
+
+function updateAuthHeaderUI(isLoggedIn) {
+    const signOutBtn = document.getElementById('headerSignOutBtn');
+    const signInBtn = document.getElementById('headerSignInBtn');
+    const registerBtn = document.getElementById('headerRegisterBtn');
+    const nameEl = document.getElementById('currentUserName');
+    const badgeEl = document.getElementById('currentUserRoleBadge');
+
+    if (isLoggedIn) {
+        if (signOutBtn) signOutBtn.style.display = 'inline-flex';
+        if (signInBtn) signInBtn.style.display = 'none';
+        if (registerBtn) registerBtn.style.display = 'none';
+        if (state.currentUser && nameEl) {
+            nameEl.textContent = state.currentUser.full_name || state.currentUser.email;
+        }
+        if (badgeEl) {
+            badgeEl.textContent = (state.userRole || 'admin').toUpperCase();
+            badgeEl.className = `role-badge ${(state.userRole || 'admin').toLowerCase()}`;
+        }
+    } else {
+        if (signOutBtn) signOutBtn.style.display = 'none';
+        if (signInBtn) signInBtn.style.display = 'inline-flex';
+        if (registerBtn) registerBtn.style.display = 'inline-flex';
+        if (nameEl) nameEl.textContent = 'Guest / Unauthenticated';
+        if (badgeEl) {
+            badgeEl.textContent = 'LOGGED OUT';
+            badgeEl.className = 'role-badge viewer';
+        }
     }
 }
 
@@ -1534,10 +1568,22 @@ async function loadTeamAndAudits() {
     try {
         loadBillingStatus();
 
-        const memRes = await fetch('/api/v1/organizations/members');
+        const memRes = await fetch('/api/v1/team/members');
         if (memRes.ok) {
             const data = await memRes.json();
             state.teamMembers = data.members || [];
+
+            // Update seats count in panel header if present
+            const seatCountEl = document.getElementById('teamSeatCount');
+            const seatLimitEl = document.getElementById('teamSeatLimit');
+            if (data.seats) {
+                if (seatCountEl) seatCountEl.textContent = data.seats.current;
+                if (seatLimitEl) seatLimitEl.textContent = data.seats.limit;
+            } else if (seatCountEl && seatLimitEl) {
+                seatCountEl.textContent = state.teamMembers.length;
+                seatLimitEl.textContent = '10';
+            }
+
             renderTeamMembers();
         }
 
@@ -1557,21 +1603,94 @@ function renderTeamMembers() {
     if (!tbody) return;
 
     if (state.teamMembers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">No team members found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">No team members found.</td></tr>';
         return;
     }
 
+    const isManager = ['owner', 'admin'].includes((state.userRole || '').toLowerCase());
+    const currentUserId = state.currentUser ? state.currentUser.id : null;
+
     tbody.innerHTML = state.teamMembers.map(m => {
         const u = m.user || {};
+        const memberId = m.user_id || u.id || m.membership_id || m.id;
+        const fullName = m.full_name || u.full_name || 'Team Member';
+        const email = m.email || u.email || '';
+        const role = (m.role || 'viewer').toLowerCase();
+        const joined = m.joined_at || m.created_at || 'Active';
+        const isSelf = currentUserId && (currentUserId === memberId || (u && u.id === currentUserId));
+
+        let roleCol = `<span class="role-badge ${role}">${role.toUpperCase()}</span>`;
+        let actionsCol = '<span style="color:var(--text-dim); font-size:11px;">-</span>';
+
+        if (isManager) {
+            roleCol = `
+                <select class="hud-input small" style="padding: 2px 6px; font-size: 11px; background: rgba(0,0,0,0.3);" onchange="changeMemberRole('${memberId}', this.value)">
+                    <option value="owner" ${role === 'owner' ? 'selected' : ''}>Owner</option>
+                    <option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option>
+                    <option value="operator" ${role === 'operator' ? 'selected' : ''}>Operator</option>
+                    <option value="viewer" ${role === 'viewer' ? 'selected' : ''}>Viewer</option>
+                </select>
+            `;
+            if (isSelf) {
+                actionsCol = `<span style="font-size: 11px; color: var(--text-dim);">(You)</span>`;
+            } else {
+                actionsCol = `
+                    <button class="hud-btn small red-btn" style="padding: 2px 8px; font-size: 11px;" onclick="removeTeamMember('${memberId}', '${escapeHtml(fullName)}')">Remove</button>
+                `;
+            }
+        }
+
         return `
             <tr>
-                <td><strong>${escapeHtml(u.full_name || 'Member')}</strong></td>
-                <td><code style="color:var(--text-secondary);">${escapeHtml(u.email || '')}</code></td>
-                <td><span class="role-badge ${m.role.toLowerCase()}">${m.role.toUpperCase()}</span></td>
-                <td style="font-size:0.75rem; color:var(--text-muted);">${m.created_at}</td>
+                <td><strong>${escapeHtml(fullName)}</strong></td>
+                <td><code style="color:var(--text-secondary); font-size:12px;">${escapeHtml(email)}</code></td>
+                <td>${roleCol}</td>
+                <td style="font-size:0.75rem; color:var(--text-muted);">${joined}</td>
+                <td>${actionsCol}</td>
             </tr>
         `;
     }).join('');
+}
+
+async function changeMemberRole(targetId, newRole) {
+    try {
+        const res = await fetch(`/api/v1/team/members/${targetId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: newRole })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`Member role updated to ${newRole.toUpperCase()}`, 'success');
+            loadTeamAndAudits();
+        } else {
+            showToast(data.error || 'Failed to update member role', 'error');
+            loadTeamAndAudits();
+        }
+    } catch (err) {
+        showToast('Role update error: ' + err.message, 'error');
+        loadTeamAndAudits();
+    }
+}
+
+async function removeTeamMember(targetId, name) {
+    if (!confirm(`Are you sure you want to remove ${name || 'this member'} from the workspace?`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/v1/team/members/${targetId}`, {
+            method: 'DELETE'
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Member removed from workspace', 'success');
+            loadTeamAndAudits();
+        } else {
+            showToast(data.error || 'Failed to remove member', 'error');
+        }
+    } catch (err) {
+        showToast('Member removal error: ' + err.message, 'error');
+    }
 }
 
 function renderAuditTrail() {
@@ -1613,7 +1732,7 @@ async function submitAddMember(e) {
     const role = document.getElementById('newMemberRole').value;
 
     try {
-        const res = await fetch('/api/v1/organizations/members', {
+        const res = await fetch('/api/v1/team/invite', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, full_name, role })
@@ -2480,5 +2599,398 @@ function openNewLeadModal() {
     }).catch(err => {
         showToast('Ingestion error: ' + err.message, 'error');
     });
+}
+
+// ==========================================
+// PHASE 5: CUSTOMER AUTHENTICATION & ONBOARDING
+// ==========================================
+
+function openAuthModal(mode = 'login', isForced = false) {
+    const modal = document.getElementById('authModal');
+    if (!modal) return;
+    switchAuthTab(mode);
+    const closeBtn = document.getElementById('authModalCloseBtn');
+    if (closeBtn) {
+        closeBtn.style.display = (isForced || !state.currentUser) ? 'none' : 'block';
+    }
+    modal.style.display = 'flex';
+}
+
+function closeAuthModal(force = false) {
+    if (!state.currentUser && !force) return;
+    const modal = document.getElementById('authModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function switchAuthTab(tab) {
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const tabLogin = document.getElementById('authTabLogin');
+    const tabRegister = document.getElementById('authTabRegister');
+    const title = document.getElementById('authModalTitle');
+    const loginErr = document.getElementById('loginErrorMessage');
+    const regErr = document.getElementById('registerErrorMessage');
+
+    if (loginErr) loginErr.style.display = 'none';
+    if (regErr) regErr.style.display = 'none';
+
+    if (tab === 'register') {
+        if (loginForm) loginForm.style.display = 'none';
+        if (registerForm) registerForm.style.display = 'block';
+        if (tabLogin) {
+            tabLogin.classList.remove('active');
+            tabLogin.style.color = 'var(--text-muted, #888)';
+        }
+        if (tabRegister) {
+            tabRegister.classList.add('active');
+            tabRegister.style.color = 'var(--cyan-glow, #00f0ff)';
+        }
+        if (title) title.textContent = 'Create New Workspace';
+    } else {
+        if (loginForm) loginForm.style.display = 'block';
+        if (registerForm) registerForm.style.display = 'none';
+        if (tabLogin) {
+            tabLogin.classList.add('active');
+            tabLogin.style.color = 'var(--cyan-glow, #00f0ff)';
+        }
+        if (tabRegister) {
+            tabRegister.classList.remove('active');
+            tabRegister.style.color = 'var(--text-muted, #888)';
+        }
+        if (title) title.textContent = 'OpsFlow Cloud Authentication';
+    }
+}
+
+function fillDemoCredentials() {
+    const email = document.getElementById('loginEmail');
+    const pass = document.getElementById('loginPassword');
+    if (email) email.value = 'admin@opsflow.io';
+    if (pass) pass.value = 'AdminSecure2026!';
+}
+
+let slugDebounceTimer = null;
+
+function autoPopulateSlug(name) {
+    const slugInput = document.getElementById('regOrgSlug');
+    if (!slugInput) return;
+    const slug = name.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    slugInput.value = slug;
+    handleSlugInput(slug);
+}
+
+function handleSlugInput(val) {
+    if (slugDebounceTimer) clearTimeout(slugDebounceTimer);
+    slugDebounceTimer = setTimeout(() => {
+        checkSlugAvailability(val);
+    }, 300);
+}
+
+async function checkSlugAvailability(slug) {
+    const feedback = document.getElementById('slugFeedback');
+    if (!feedback) return;
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    if (!cleanSlug) {
+        feedback.innerHTML = '';
+        return;
+    }
+    feedback.innerHTML = '<span style="color:var(--text-dim, #888);">Checking slug availability...</span>';
+
+    try {
+        const res = await fetch(`/api/v1/auth/check-slug?slug=${encodeURIComponent(cleanSlug)}`);
+        const data = await res.json();
+        if (res.ok && data.available) {
+            feedback.innerHTML = `<span style="color:#10b981;">✓ <strong>${escapeHtml(data.slug)}</strong> is available!</span>`;
+        } else {
+            const suggestion = data.suggestion ? ` (suggestion: <code>${escapeHtml(data.suggestion)}</code>)` : '';
+            feedback.innerHTML = `<span style="color:#ef4444;">✗ "${escapeHtml(cleanSlug)}" is taken${suggestion}.</span>`;
+        }
+    } catch (e) {
+        feedback.innerHTML = '';
+    }
+}
+
+async function handleLogin(e) {
+    if (e) e.preventDefault();
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const errBox = document.getElementById('loginErrorMessage');
+    const submitBtn = document.getElementById('loginSubmitBtn');
+
+    if (errBox) errBox.style.display = 'none';
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Authenticating...';
+    }
+
+    try {
+        const res = await fetch('/api/v1/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeAuthModal(true);
+            showToast(`Welcome back, ${data.user ? data.user.full_name : 'Operator'}!`, 'success');
+            await initAuthAndTenancy();
+            refreshAllData();
+        } else {
+            if (errBox) {
+                errBox.textContent = data.error || 'Authentication failed. Please check your credentials.';
+                errBox.style.display = 'block';
+            }
+        }
+    } catch (err) {
+        if (errBox) {
+            errBox.textContent = 'Login network error: ' + err.message;
+            errBox.style.display = 'block';
+        }
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Sign In to Workspace';
+        }
+    }
+}
+
+async function handleRegister(e) {
+    if (e) e.preventDefault();
+    const full_name = document.getElementById('regFullName').value.trim();
+    const email = document.getElementById('regEmail').value.trim();
+    const password = document.getElementById('regPassword').value;
+    const organization_name = document.getElementById('regOrgName').value.trim();
+    const organization_slug = document.getElementById('regOrgSlug').value.trim();
+    const plan_tier = document.getElementById('regPlanTier').value;
+    const starter_blueprints = document.getElementById('regStarterBlueprints').checked;
+    const errBox = document.getElementById('registerErrorMessage');
+    const submitBtn = document.getElementById('registerSubmitBtn');
+
+    if (errBox) errBox.style.display = 'none';
+
+    if (password.length < 8) {
+        if (errBox) {
+            errBox.textContent = 'Password must be at least 8 characters long.';
+            errBox.style.display = 'block';
+        }
+        return;
+    }
+
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Provisioning Workspace...';
+    }
+
+    try {
+        const res = await fetch('/api/v1/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                full_name,
+                email,
+                password,
+                organization_name,
+                org_name: organization_name,
+                organization_slug,
+                slug: organization_slug,
+                plan_tier,
+                starter_blueprints,
+                install_starter_blueprints: starter_blueprints
+            })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeAuthModal(true);
+            showToast(`Workspace '${data.organization ? data.organization.name : organization_name}' created!`, 'success');
+            await initAuthAndTenancy();
+            refreshAllData();
+            // Launch the 5-step onboarding wizard
+            openOnboardingWizard(data);
+        } else {
+            if (errBox) {
+                errBox.textContent = data.error || 'Failed to register workspace.';
+                errBox.style.display = 'block';
+            }
+        }
+    } catch (err) {
+        if (errBox) {
+            errBox.textContent = 'Registration network error: ' + err.message;
+            errBox.style.display = 'block';
+        }
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Launch Workspace & Begin Tour';
+        }
+    }
+}
+
+async function handleLogout() {
+    try {
+        await fetch('/api/v1/auth/logout', { method: 'POST' });
+    } catch (e) {
+        console.error('Logout error:', e);
+    }
+    state.currentUser = null;
+    state.currentOrg = null;
+    state.userRole = 'guest';
+    updateUserBadgeUI();
+    updateAuthHeaderUI(false);
+    showToast('Signed out of OpsFlow Cloud.', 'info');
+    openAuthModal('login', true);
+}
+
+// Onboarding Wizard Implementation
+const wizardState = {
+    currentStep: 1,
+    totalSteps: 5,
+    registrationData: null
+};
+
+function openOnboardingWizard(data) {
+    wizardState.registrationData = data || {};
+    wizardState.currentStep = 1;
+
+    const org = (data && data.organization) || {};
+    const orgNameEl = document.getElementById('wizOrgName');
+    const orgSlugEl = document.getElementById('wizOrgSlug');
+    const orgPlanEl = document.getElementById('wizOrgPlan');
+    const apiKeyInput = document.getElementById('wizApiKeyInput');
+
+    if (orgNameEl) orgNameEl.textContent = org.name || 'Your Workspace';
+    if (orgSlugEl) orgSlugEl.textContent = org.slug || 'workspace-slug';
+    if (orgPlanEl) orgPlanEl.textContent = (org.plan_tier || 'FREE').toUpperCase();
+    if (apiKeyInput) apiKeyInput.value = (data && data.api_key) || 'sk_live_generated_key';
+
+    renderWizardStep();
+    const modal = document.getElementById('onboardingWizardModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeOnboardingWizard() {
+    const modal = document.getElementById('onboardingWizardModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function renderWizardStep() {
+    for (let i = 1; i <= wizardState.totalSteps; i++) {
+        const stepEl = document.getElementById(`wizardStep${i}`);
+        const pillEl = document.getElementById(`wizardPill${i}`);
+        if (stepEl) {
+            stepEl.style.display = (i === wizardState.currentStep) ? 'block' : 'none';
+        }
+        if (pillEl) {
+            if (i === wizardState.currentStep) {
+                pillEl.classList.add('active');
+                pillEl.style.color = 'var(--cyan-glow, #00f0ff)';
+                pillEl.style.fontWeight = '700';
+            } else if (i < wizardState.currentStep) {
+                pillEl.classList.remove('active');
+                pillEl.style.color = '#10b981';
+                pillEl.style.fontWeight = '500';
+            } else {
+                pillEl.classList.remove('active');
+                pillEl.style.color = 'var(--text-dim, #888)';
+                pillEl.style.fontWeight = '400';
+            }
+        }
+    }
+
+    const counter = document.getElementById('wizStepCounter');
+    if (counter) counter.textContent = `Step ${wizardState.currentStep} of ${wizardState.totalSteps}`;
+
+    const prevBtn = document.getElementById('wizPrevBtn');
+    const nextBtn = document.getElementById('wizNextBtn');
+
+    if (prevBtn) {
+        prevBtn.style.visibility = (wizardState.currentStep > 1) ? 'visible' : 'hidden';
+    }
+
+    if (nextBtn) {
+        if (wizardState.currentStep === wizardState.totalSteps) {
+            nextBtn.textContent = 'Finish Tour & Open Dashboard ✓';
+            nextBtn.onclick = finishOnboarding;
+        } else {
+            nextBtn.textContent = 'Next Step →';
+            nextBtn.onclick = nextWizardStep;
+        }
+    }
+}
+
+function nextWizardStep() {
+    if (wizardState.currentStep < wizardState.totalSteps) {
+        wizardState.currentStep++;
+        renderWizardStep();
+    } else {
+        finishOnboarding();
+    }
+}
+
+function prevWizardStep() {
+    if (wizardState.currentStep > 1) {
+        wizardState.currentStep--;
+        renderWizardStep();
+    }
+}
+
+function copyOnboardingApiKey() {
+    const input = document.getElementById('wizApiKeyInput');
+    const btn = document.getElementById('wizCopyKeyBtn');
+    if (!input) return;
+    input.select();
+    navigator.clipboard.writeText(input.value).then(() => {
+        if (btn) {
+            const origText = btn.innerHTML;
+            btn.innerHTML = '✓ Copied!';
+            setTimeout(() => { btn.innerHTML = origText; }, 2000);
+        }
+        showToast('API Key copied to clipboard!', 'success');
+    }).catch(() => {
+        document.execCommand('copy');
+        showToast('API Key copied to clipboard!', 'success');
+    });
+}
+
+async function sendWizardInvite() {
+    const emailInput = document.getElementById('wizInviteEmail');
+    const roleSelect = document.getElementById('wizInviteRole');
+    const statusBox = document.getElementById('wizInviteStatus');
+
+    if (!emailInput || !emailInput.value.trim()) {
+        if (statusBox) statusBox.innerHTML = '<span style="color:#ef4444;">Please enter an email address.</span>';
+        return;
+    }
+
+    const email = emailInput.value.trim();
+    const role = roleSelect ? roleSelect.value : 'operator';
+
+    try {
+        const res = await fetch('/api/v1/team/invite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, role })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            if (statusBox) {
+                statusBox.innerHTML = `<span style="color:#10b981;">✓ Successfully invited ${escapeHtml(email)} as ${role.toUpperCase()}</span>`;
+            }
+            emailInput.value = '';
+        } else {
+            if (statusBox) {
+                statusBox.innerHTML = `<span style="color:#ef4444;">✗ ${escapeHtml(data.error || 'Failed to invite team member')}</span>`;
+            }
+        }
+    } catch (e) {
+        if (statusBox) statusBox.innerHTML = `<span style="color:#ef4444;">Error: ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+function finishOnboarding() {
+    closeOnboardingWizard();
+    switchTab('dashboard');
+    refreshAllData();
+    showToast('Workspace onboarding complete! Welcome aboard.', 'success');
 }
 

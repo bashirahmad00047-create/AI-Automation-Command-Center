@@ -105,14 +105,6 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Frontend Dashboard View
     @application.route("/")
     def index():
-        if "user_id" not in session and not session.get("logged_out"):
-            admin_user = User.query.filter_by(email="admin@opsflow.io").first()
-            if admin_user:
-                membership = Membership.query.filter_by(user_id=admin_user.id).first()
-                session["user_id"] = admin_user.id
-                if membership:
-                    session["active_org_id"] = membership.organization_id
-                    session["org_id"] = membership.organization_id
         return render_template("index.html")
 
     # Top-Level Authentication Endpoints

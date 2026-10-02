@@ -162,9 +162,9 @@ def auth_register():
     email = data.get("email", "").strip().lower()
     password = data.get("password", "").strip()
     full_name = data.get("full_name", "").strip()
-    org_name = data.get("org_name", "").strip() or data.get("workspace_name", "").strip() or f"{full_name}'s Workspace"
-    raw_slug = (data.get("slug") or data.get("workspace_slug") or "").strip().lower()
-    install_starter_blueprints = data.get("install_starter_blueprints", True)
+    org_name = data.get("org_name", "").strip() or data.get("organization_name", "").strip() or data.get("workspace_name", "").strip() or f"{full_name}'s Workspace"
+    raw_slug = (data.get("slug") or data.get("organization_slug") or data.get("workspace_slug") or "").strip().lower()
+    install_starter_blueprints = data.get("install_starter_blueprints", data.get("starter_blueprints", True))
 
     if not email or "@" not in email:
         return jsonify({"error": "A valid email address is required.", "code": "VALIDATION_ERROR"}), 400
@@ -264,11 +264,11 @@ def auth_register():
         if install_starter_blueprints:
             try:
                 storage = get_storage()
-                # Select 2 foundational templates (CPU sentinel & Lead qualification)
+                # Select 3 foundational turnkey templates (Lead qualification, Critical incident, API failure)
                 starter_defs = [
                     bp for bp in PRESET_BLUEPRINTS
-                    if bp.get("id") in ("template-ai-lead-qualification", "template-critical-incident")
-                ][:2]
+                    if bp.get("id") in ("template-ai-lead-qualification", "template-critical-incident-router", "template-api-failure-alert")
+                ][:3]
                 for bp in starter_defs:
                     new_rule = dict(bp)
                     new_rule["id"] = f"wf-{int(time.time() * 1000)}-{generate_uuid()[:4]}"
@@ -286,7 +286,7 @@ def auth_register():
             "organization_name": org.name,
             "slug": org.slug,
             "plan_tier": org.plan_tier
-        })
+        }, org_id=org.id, user_id=user.id)
 
         # Set authenticated session
         session["user_id"] = user.id
