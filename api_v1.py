@@ -1132,14 +1132,39 @@ def system_health():
     engine = get_engine()
     db_uri = current_app.config.get("SQLALCHEMY_DATABASE_URI", "")
     dialect = "postgresql" if "postgres" in db_uri else "sqlite_wal"
+
+    mig_status = {"current_revision": None, "is_up_to_date": True}
+    try:
+        from migrations_manager import get_migration_status
+        m_info = get_migration_status()
+        mig_status = {
+            "current_revision": m_info.get("current_revision"),
+            "head_revision": m_info.get("head_revision"),
+            "is_up_to_date": m_info.get("is_up_to_date", True)
+        }
+    except Exception:
+        pass
+
     return jsonify({
         "status": "healthy",
         "timestamp": datetime.datetime.utcnow().isoformat(),
         "database": dialect,
+        "database_migration": mig_status,
         "engine_online": engine.is_running if engine else False,
         "version": "2.4.0-enterprise",
         "cloud_ready": True
     }), 200
+
+
+@api_v1.route("/system/migration-status", methods=["GET"])
+def system_migration_status():
+    """Returns database migration diagnostics and schema revision details."""
+    try:
+        from migrations_manager import get_migration_status
+        status = get_migration_status()
+        return jsonify(status), 200
+    except Exception as e:
+        return jsonify({"error": str(e), "code": "MIGRATION_ERROR"}), 500
 
 
 @api_v1.route("/system/telemetry", methods=["GET"])

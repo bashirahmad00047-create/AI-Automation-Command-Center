@@ -5,8 +5,8 @@
 
 [![Python Version](https://img.shields.io/badge/Python-3.10%20%7C%203.11-blue.svg)](https://python.org)
 [![Framework](https://img.shields.io/badge/Framework-Flask%203.1-emerald.svg)](https://flask.palletsprojects.com/)
-[![ORM](https://img.shields.io/badge/Database-SQLAlchemy%202.0%20%7C%20SQLite%20WAL-red.svg)](https://www.sqlalchemy.org/)
-[![Tests](https://img.shields.io/badge/Tests-41%2F41%20Passed%20(100%25)-brightgreen.svg)](test_saas_platform.py)
+[![ORM](https://img.shields.io/badge/Database-SQLAlchemy%202.0%20%7C%20Alembic%20Migrations-red.svg)](https://alembic.sqlalchemy.org/)
+[![Tests](https://img.shields.io/badge/Tests-42%2F42%20Passed%20(100%25)-brightgreen.svg)](test_saas_platform.py)
 [![Security](https://img.shields.io/badge/Security-Multi--Tenant%20RBAC%20%7C%20SHA--256%20Keys-purple.svg)](#-security--rbac-model)
 [![License](https://img.shields.io/badge/License-Proprietary%20%2F%20Commercial-blue.svg)](#)
 
@@ -328,9 +328,30 @@ gunicorn --config gunicorn.conf.py app:app
 
 ## 🛠️ Client Customization & White-Labeling Guide
 
-1. **Database Backend**:
-   - For local development: Uses SQLite with WAL mode (`opsflow_saas.db`).
-   - For AWS RDS / Cloud SQL: Set `DATABASE_URL=postgresql://user:pass@host:5432/dbname`. SQLAlchemy will handle migrations automatically.
+1. **Database Backend & Schema Migrations (Phase 3)**:
+   - **Local Development**: Uses SQLite with WAL mode (`opsflow_saas.db`).
+   - **Production PostgreSQL**: Set `DATABASE_URL=postgresql://user:pass@host:5432/dbname`.
+   - **Alembic / Flask-Migrate Engine**: Complete migration tracking and schema versioning via the `migrations/` directory.
+   - **CLI Migration Commands**:
+     ```bash
+     # Check current migration revision and schema status
+     python migrate.py status
+     python migrate.py current
+
+     # Upgrade schema to latest migration head
+     python migrate.py upgrade
+
+     # Roll back migration revision
+     python migrate.py downgrade -1
+
+     # Stamp an existing database to head (for pre-existing unversioned deployments)
+     python migrate.py stamp head
+     ```
+   - **Programmatic Auto-Migrations**: On startup and during build deployments (`python init_db.py --migrate-only`), pending schema migrations are automatically validated and applied without manual intervention.
+   - **Observability Endpoints**:
+     - `GET /api/v1/system/migration-status` - Detailed schema revision, dialect, and table inventory.
+     - `GET /api/v1/system/health` - Includes `database_migration: { current_revision, is_up_to_date }`.
+
 2. **Branding & Theme**:
    - Modify `--cyan-glow`, `--purple-glow`, and brand headers in `static/css/style.css` and `templates/index.html`.
 3. **Outbound Notification Integrations**:

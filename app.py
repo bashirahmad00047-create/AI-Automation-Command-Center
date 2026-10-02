@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import sys
 from typing import Any, Dict, Optional
 from flask import Flask, Response, g, jsonify, render_template, request, session
 
@@ -22,7 +23,7 @@ from api_v1 import api_v1
 from auth import require_auth
 from automation_engine import AutomationEngine
 from config import config_by_name
-from database import db
+from database import db, migrate
 from entitlements import QuotaService, check_feature_entitlement, check_resource_quota
 from models import Membership, Organization, User
 from presets import PRESET_BLUEPRINTS
@@ -38,15 +39,22 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     cfg = config_by_name.get(env_name, config_by_name["default"])
     application.config.from_object(cfg)
 
-    # Initialize SQLAlchemy
+    # Initialize SQLAlchemy & Database Migrations
     db.init_app(application)
+    migrate.init_app(application, db, render_as_batch=True, compare_type=True)
 
     # Initialize persistence and automation engine inside app context
     with application.app_context():
-        db.create_all()
+        is_cli_migration = "db" in sys.argv or os.environ.get("SKIP_DB_INIT") == "1"
+        if not is_cli_migration and not application.config.get("TESTING"):
+            try:
+                from migrations_manager import run_database_migrations
+                run_database_migrations(application)
+            except Exception as _mig_err:
+                application.logger.warning(f"Auto-migration notice: {_mig_err}; falling back to db.create_all()")
+                db.create_all()
 
-        # Seed initial database if empty on fresh cloud deployment
-        if not application.config.get("TESTING"):
+            # Seed initial database if empty on fresh cloud deployment
             try:
                 from models import Organization
                 if not Organization.query.first():
@@ -55,7 +63,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             except Exception as _seed_err:
                 application.logger.warning(f"Database auto-seed check: {_seed_err}")
 
-        storage_instance = Storage()
+        storage_instance = Storage(init_db=not is_cli_migration)
         engine_instance = AutomationEngine(storage=storage_instance)
         application.config["STORAGE_ENGINE"] = storage_instance
         application.config["AUTOMATION_ENGINE"] = engine_instance

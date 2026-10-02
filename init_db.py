@@ -41,14 +41,24 @@ from models import (
 from presets import PRESET_BLUEPRINTS
 
 
-def init_and_seed_database():
-    """Initializes database and populates with enterprise demo data."""
+def init_and_seed_database(seed_data: bool = True):
+    """Initializes database, applies migrations, and optionally populates with enterprise demo data."""
     print("[*] Initializing OpsFlow Enterprise SaaS Database...")
 
     with app.app_context():
-        # Create all tables
-        db.create_all()
-        print("[OK] Database tables created successfully.")
+        # Execute database migrations
+        try:
+            from migrations_manager import run_database_migrations
+            mig_result = run_database_migrations()
+            print(f"[OK] Database migrations applied successfully (Revision: {mig_result.get('current_revision')}, Action: {mig_result.get('action_taken')}).")
+        except Exception as _mig_err:
+            print(f"[WARN] Migration runner notice: {_mig_err}; ensuring schema via db.create_all().")
+            db.create_all()
+            print("[OK] Database tables verified successfully.")
+
+        if not seed_data:
+            print("[OK] Schema initialization complete; skipping demo data seeding.")
+            return
 
         now_dt = datetime.datetime.utcnow()
 
@@ -434,4 +444,16 @@ def init_and_seed_database():
 
 
 if __name__ == "__main__":
-    init_and_seed_database()
+    import argparse
+    parser = argparse.ArgumentParser(description="OpsFlow Database Initialization & Seeding")
+    parser.add_argument("--migrate-only", action="store_true", help="Run migrations without seeding demo data")
+    parser.add_argument("--seed-only", action="store_true", help="Seed data without running migrations")
+    args = parser.parse_args()
+
+    if args.migrate_only:
+        with app.app_context():
+            from migrations_manager import run_database_migrations
+            res = run_database_migrations()
+            print(f"[OK] Migrations applied: revision {res.get('current_revision')}")
+    else:
+        init_and_seed_database(seed_data=not args.migrate_only)

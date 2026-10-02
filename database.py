@@ -1,11 +1,13 @@
 """Database initialization and connection management using SQLAlchemy."""
 
 import os
+from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
 db = SQLAlchemy()
+migrate = Migrate()
 
 
 @event.listens_for(Engine, "connect")

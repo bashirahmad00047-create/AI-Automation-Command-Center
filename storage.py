@@ -17,6 +17,7 @@ import datetime
 import hashlib
 import json
 import os
+import sys
 import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -260,7 +261,7 @@ DEFAULT_PRESET_RULES = [
 class Storage:
     """Enterprise SQLAlchemy Storage Repository with multi-tenant isolation."""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, init_db: bool = True):
         self._lock = threading.Lock()
         self.db_path = db_path
         self._standalone_session = None
@@ -274,7 +275,9 @@ class Storage:
             session_factory = sessionmaker(bind=engine)
             self._standalone_session = scoped_session(session_factory)
 
-        self._init_db()
+        is_cli_migration = "db" in sys.argv or os.environ.get("SKIP_DB_INIT") == "1"
+        if init_db and not is_cli_migration:
+            self._init_db()
 
     def _init_db(self):
         """Initializes tables and seeds default multi-tenant enterprise data."""
