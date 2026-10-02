@@ -764,10 +764,12 @@ class Storage:
             formatted.append(d)
         return formatted
 
-    def get_execution(self, execution_id: int) -> Optional[Dict[str, Any]]:
+    def get_execution(self, execution_id: int, organization_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         session = self._get_session()
         record = session.get(WorkflowExecution, execution_id)
         if not record:
+            return None
+        if organization_id and record.organization_id != organization_id:
             return None
         res = record.to_dict()
         res["execution_steps"] = [step.to_dict() for step in record.execution_steps]

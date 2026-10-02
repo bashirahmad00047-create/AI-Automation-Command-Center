@@ -891,6 +891,9 @@ def run_rule(rule_id: str):
     dry_run = bool(data.get("dry_run", False))
 
     result = engine.execute_rule_manually(rule_id, custom_payload, dry_run=dry_run, organization_id=org.id)
+    if result.get("status") == "error":
+        return jsonify({"error": result.get("message", f"Workflow rule '{rule_id}' not found."), "code": "NOT_FOUND"}), 404
+
     log_audit_event(
         "workflow.dry_run" if dry_run else "workflow.execute",
         "automation_rule",
@@ -1203,7 +1206,10 @@ def incoming_webhook_receiver(endpoint_token: str):
                 "quota": violation
             }), 429
 
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if payload is None:
+        raw_text = request.get_data(as_text=True)
+        payload = {"raw_text": raw_text} if raw_text else {}
     endpoint.request_count += 1
     endpoint.last_received_at = datetime.datetime.utcnow()
     db.session.commit()
@@ -1563,8 +1569,9 @@ def get_executions():
 @api_v1.route("/executions/<int:exec_id>", methods=["GET"])
 @require_auth
 def get_execution_detail(exec_id: int):
+    org = g.current_org
     storage = get_storage()
-    execution = storage.get_execution(exec_id)
+    execution = storage.get_execution(exec_id, organization_id=org.id if org else None)
     if not execution:
         return jsonify({"error": f"Execution '{exec_id}' not found.", "code": "NOT_FOUND"}), 404
     return jsonify({"execution": execution})
