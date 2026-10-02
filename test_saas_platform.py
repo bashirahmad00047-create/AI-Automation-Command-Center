@@ -940,18 +940,46 @@ class TestPlanEntitlementsAndQuotaEnforcement(unittest.TestCase):
         self.assertIn("pro", tiers)
         self.assertIn("enterprise", tiers)
 
+    def test_new_organization_defaults_to_free(self):
+        """Verifies newly registered organizations default to the FREE plan with appropriate limits."""
+        reg_res = self.client.post("/api/v1/auth/register", json={
+            "email": "freeuser@demo.io",
+            "password": "Password123!",
+            "full_name": "Free User",
+            "organization_name": "Free Exploration Org"
+        })
+        self.assertEqual(reg_res.status_code, 201)
+        data = reg_res.get_json()
+        self.assertEqual(data["organization"]["plan_tier"], "free")
+        self.assertEqual(data["organization"]["max_rules"], PLAN_DEFINITIONS[PLAN_FREE]["quotas"]["max_rules"])
+        self.assertEqual(data["organization"]["max_monthly_events"], PLAN_DEFINITIONS[PLAN_FREE]["quotas"]["monthly_events"])
+
+        # Check /api/v1/billing/plan returns FREE
+        plan_info = self.client.get("/api/v1/billing/plan")
+        self.assertEqual(plan_info.status_code, 200)
+        self.assertEqual(plan_info.get_json()["current_plan"], "FREE")
+        self.assertEqual(plan_info.get_json()["max_rules"], PLAN_DEFINITIONS[PLAN_FREE]["quotas"]["max_rules"])
+        self.assertEqual(plan_info.get_json()["monthly_event_limit"], PLAN_DEFINITIONS[PLAN_FREE]["quotas"]["monthly_events"])
+
     def test_quotas_and_entitlements_inspection(self):
-        """Validates GET /api/v1/plan and GET /api/v1/quotas returning live usage & percentage calculations."""
-        res = self.client.get("/api/v1/quotas")
-        self.assertEqual(res.status_code, 200)
-        data = res.get_json()
-        self.assertTrue(data["success"])
-        entitlements = data["entitlements"]
-        self.assertEqual(entitlements["plan_tier"], PLAN_STARTER)
-        self.assertEqual(entitlements["quotas"]["rules"]["limit"], 2)
-        self.assertEqual(entitlements["quotas"]["rules"]["current"], 0)
-        self.assertEqual(entitlements["quotas"]["rules"]["remaining"], 2)
-        self.assertFalse(entitlements["quotas"]["rules"]["is_exceeded"])
+        """Validates GET /api/v1/billing/plan, GET /api/v1/plan, and GET /api/v1/quotas returning plan and usage."""
+        for path in ["/api/v1/billing/plan", "/api/v1/plan", "/api/v1/quotas"]:
+            res = self.client.get(path)
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertTrue(data["success"])
+            self.assertEqual(data["current_plan"], "STARTER")
+            self.assertEqual(data["max_rules"], 2)
+            self.assertEqual(data["current_rule_count"], 0)
+            self.assertEqual(data["monthly_event_limit"], 2)
+            self.assertEqual(data["current_monthly_event_usage"], 0)
+            self.assertIn("custom_webhooks", data["relevant_feature_flags"])
+            entitlements = data["entitlements"]
+            self.assertEqual(entitlements["plan_tier"], PLAN_STARTER)
+            self.assertEqual(entitlements["quotas"]["rules"]["limit"], 2)
+            self.assertEqual(entitlements["quotas"]["rules"]["current"], 0)
+            self.assertEqual(entitlements["quotas"]["rules"]["remaining"], 2)
+            self.assertFalse(entitlements["quotas"]["rules"]["is_exceeded"])
 
     def test_rules_quota_enforcement_blocks_creation_duplication_and_templates(self):
         """Verifies rule creation, duplication, and template installation are blocked when quota is exhausted."""
@@ -978,27 +1006,32 @@ class TestPlanEntitlementsAndQuotaEnforcement(unittest.TestCase):
         # 3. Create 3rd rule via /api/v1/rules -> 403 PLAN_LIMIT_EXCEEDED
         res3 = self.client.post("/api/v1/rules", json={"name": "Third Rule", "event_trigger": "test"})
         self.assertEqual(res3.status_code, 403)
-        self.assertIn(res3.get_json()["code"], ["PLAN_LIMIT_EXCEEDED", "QUOTA_EXCEEDED"])
+        self.assertEqual(res3.get_json()["code"], "PLAN_LIMIT_EXCEEDED")
+        self.assertEqual(res3.get_json()["plan"], "STARTER")
 
         # 4. Duplicate rule -> 403 PLAN_LIMIT_EXCEEDED
         res_dup = self.client.post(f"/api/v1/rules/{rule_id_1}/duplicate")
         self.assertEqual(res_dup.status_code, 403)
-        self.assertIn(res_dup.get_json()["code"], ["PLAN_LIMIT_EXCEEDED", "QUOTA_EXCEEDED"])
+        self.assertEqual(res_dup.get_json()["code"], "PLAN_LIMIT_EXCEEDED")
+        self.assertEqual(res_dup.get_json()["plan"], "STARTER")
 
         # 5. Install template -> 403 PLAN_LIMIT_EXCEEDED
         res_tmpl = self.client.post("/api/v1/templates/tmpl-incident-escalation/install")
         self.assertEqual(res_tmpl.status_code, 403)
-        self.assertIn(res_tmpl.get_json()["code"], ["PLAN_LIMIT_EXCEEDED", "QUOTA_EXCEEDED"])
+        self.assertEqual(res_tmpl.get_json()["code"], "PLAN_LIMIT_EXCEEDED")
+        self.assertEqual(res_tmpl.get_json()["plan"], "STARTER")
 
         # 6. Legacy create rule -> 403 PLAN_LIMIT_EXCEEDED
         res_leg = self.client.post("/api/rules", json={"name": "Legacy Blocked Rule"})
         self.assertEqual(res_leg.status_code, 403)
-        self.assertIn(res_leg.get_json()["code"], ["PLAN_LIMIT_EXCEEDED", "QUOTA_EXCEEDED"])
+        self.assertEqual(res_leg.get_json()["code"], "PLAN_LIMIT_EXCEEDED")
+        self.assertEqual(res_leg.get_json()["plan"], "STARTER")
 
         # 7. Legacy install preset -> 403 PLAN_LIMIT_EXCEEDED
         res_leg_preset = self.client.post("/api/presets/install", json={"preset_id": "template-ai-lead-qualification"})
         self.assertEqual(res_leg_preset.status_code, 403)
-        self.assertIn(res_leg_preset.get_json()["code"], ["PLAN_LIMIT_EXCEEDED", "QUOTA_EXCEEDED"])
+        self.assertEqual(res_leg_preset.get_json()["code"], "PLAN_LIMIT_EXCEEDED")
+        self.assertEqual(res_leg_preset.get_json()["plan"], "STARTER")
 
     def test_monthly_event_quota_enforcement_and_dry_run_immunity(self):
         """Verifies event ingestion pauses at quota while dry-run simulations remain allowed."""
@@ -1010,10 +1043,12 @@ class TestPlanEntitlementsAndQuotaEnforcement(unittest.TestCase):
         res2 = self.client.post("/api/v1/events", json={"event_name": "system.ping", "payload": {"host": "web-2"}})
         self.assertEqual(res2.status_code, 200)
 
-        # 3. Ingest event 3 (exceeds limit 2) -> 429 QUOTA_EXCEEDED
+        # 3. Ingest event 3 (exceeds limit 2) -> 429 QUOTA_EXCEEDED with plan
         res3 = self.client.post("/api/v1/events", json={"event_name": "system.ping", "payload": {"host": "web-3"}})
         self.assertEqual(res3.status_code, 429)
-        self.assertIn(res3.get_json()["code"], ["QUOTA_EXCEEDED", "PLAN_LIMIT_EXCEEDED"])
+        self.assertEqual(res3.get_json()["code"], "QUOTA_EXCEEDED")
+        self.assertEqual(res3.get_json()["plan"], "STARTER")
+        self.assertEqual(res3.get_json()["error"], "Monthly event quota exceeded.")
 
         # 4. Dry-run events bypass monthly quota check
         res_dry = self.client.post("/api/v1/events", json={
@@ -1027,7 +1062,8 @@ class TestPlanEntitlementsAndQuotaEnforcement(unittest.TestCase):
         # 5. Legacy dispatch also respects event quota -> 429
         res_leg = self.client.post("/api/events/dispatch", json={"event_name": "legacy.event", "payload": {}})
         self.assertEqual(res_leg.status_code, 429)
-        self.assertIn(res_leg.get_json()["code"], ["QUOTA_EXCEEDED", "PLAN_LIMIT_EXCEEDED"])
+        self.assertEqual(res_leg.get_json()["code"], "QUOTA_EXCEEDED")
+        self.assertEqual(res_leg.get_json()["plan"], "STARTER")
 
         # 6. Inbound Webhook also pauses when monthly quota is reached -> 429
         wh_res = self.client.post("/api/v1/webhooks", json={"name": "Quota WH", "secret_token": "wh_quota_secret_key"})
@@ -1043,7 +1079,87 @@ class TestPlanEntitlementsAndQuotaEnforcement(unittest.TestCase):
             headers={"Content-Type": "application/json", "X-Hub-Signature-256": sig}
         )
         self.assertEqual(wh_ingest.status_code, 429)
-        self.assertIn(wh_ingest.get_json()["code"], ["QUOTA_EXCEEDED", "PLAN_LIMIT_EXCEEDED"])
+        self.assertEqual(wh_ingest.get_json()["code"], "QUOTA_EXCEEDED")
+        self.assertEqual(wh_ingest.get_json()["plan"], "STARTER")
+
+    def test_event_quota_increments_and_organization_isolation(self):
+        """Verifies event quota increments correctly, rejected events do not count, and usage is isolated per org."""
+        initial_usage = QuotaService.get_monthly_events_count(self.org)
+        self.assertEqual(initial_usage, 0)
+
+        # 1. Ingest valid event -> increments usage to 1
+        res_ok = self.client.post("/api/v1/events", json={"event_name": "lead.created", "payload": {"message": "Inquiry", "email": "lead@test.com"}})
+        self.assertEqual(res_ok.status_code, 200)
+        self.assertEqual(QuotaService.get_monthly_events_count(self.org), 1)
+
+        # 2. Ingest second valid event -> increments usage to 2 (limit reached)
+        res_ok2 = self.client.post("/api/v1/events", json={"event_name": "system.metrics", "payload": {"cpu_percent": 30}})
+        self.assertEqual(res_ok2.status_code, 200)
+        self.assertEqual(QuotaService.get_monthly_events_count(self.org), 2)
+
+        # 3. Third event is rejected (429 QUOTA_EXCEEDED) -> MUST NOT count towards usage!
+        res_rejected = self.client.post("/api/v1/events", json={"event_name": "system.metrics", "payload": {"cpu_percent": 90}})
+        self.assertEqual(res_rejected.status_code, 429)
+        self.assertEqual(QuotaService.get_monthly_events_count(self.org), 2)  # Still 2!
+
+        # 4. Dry-run event -> MUST NOT count towards usage!
+        res_dry = self.client.post("/api/v1/events", json={"event_name": "system.metrics", "dry_run": True})
+        self.assertEqual(res_dry.status_code, 200)
+        self.assertEqual(QuotaService.get_monthly_events_count(self.org), 2)  # Still 2!
+
+        # 5. Organization B isolation: Organization B usage never affects Organization A
+        org_b = Organization(
+            id="org-tenant-b-iso",
+            name="Tenant B Isolation Org",
+            slug="tenant-b-iso-slug",
+            plan_tier=PLAN_STARTER,
+            max_rules=10,
+            max_monthly_events=10,
+            is_active=True
+        )
+        user_b = User(
+            id="usr-tenant-b-iso",
+            email="admin@tenantbiso.io",
+            full_name="Tenant B Iso Admin",
+            is_active=True
+        )
+        user_b.set_password("TenantBIsoPass2026!")
+        mem_b = Membership(
+            id="mem-tenant-b-iso",
+            user_id=user_b.id,
+            organization_id=org_b.id,
+            role="owner"
+        )
+        db.session.add_all([org_b, user_b, mem_b])
+        db.session.commit()
+
+        # Log in as Tenant B
+        self.client.post("/api/v1/auth/logout")
+        b_login = self.client.post("/login", json={"email": "admin@tenantbiso.io", "password": "TenantBIsoPass2026!"})
+        self.assertEqual(b_login.status_code, 200)
+
+        # Tenant B has 0 usage
+        b_plan = self.client.get("/api/v1/billing/plan")
+        self.assertEqual(b_plan.status_code, 200)
+        self.assertEqual(b_plan.get_json()["current_monthly_event_usage"], 0)
+
+        # Tenant B ingests 3 events
+        for i in range(3):
+            self.client.post("/api/v1/events", json={"event_name": f"tenant_b.event.{i}", "payload": {}})
+
+        self.assertEqual(QuotaService.get_monthly_events_count(org_b), 3)
+        # Org A usage remains untouched at 2!
+        self.assertEqual(QuotaService.get_monthly_events_count(self.org), 2)
+
+        # Tenant B cannot see Tenant A's usage
+        b_plan_after = self.client.get("/api/v1/billing/plan")
+        self.assertEqual(b_plan_after.get_json()["current_monthly_event_usage"], 3)
+
+        # Switch back to Tenant A: cannot see Tenant B's usage
+        self.client.post("/api/v1/auth/logout")
+        self.client.post("/login", json={"email": "admin@starterlabs.io", "password": "AdminQuotaPass2026!"})
+        a_plan = self.client.get("/api/v1/billing/plan")
+        self.assertEqual(a_plan.get_json()["current_monthly_event_usage"], 2)
 
     def test_api_key_and_webhook_quotas(self):
         """Verifies API key and webhook creation enforce plan limits."""
@@ -1071,15 +1187,18 @@ class TestPlanEntitlementsAndQuotaEnforcement(unittest.TestCase):
 
     def test_ai_provider_entitlement_gating(self):
         """Verifies Starter cannot switch to cloud AI; Pro gets Gemini; Enterprise gets OpenAI."""
-        # 1. Starter cannot use Google Gemini
+        # 1. Starter cannot use Google Gemini -> FEATURE_NOT_AVAILABLE
         res_gemini = self.client.post("/api/v1/ai/provider", json={"provider": "google_gemini"})
         self.assertEqual(res_gemini.status_code, 403)
-        self.assertEqual(res_gemini.get_json()["code"], "FEATURE_NOT_ENTITLED")
+        self.assertEqual(res_gemini.get_json()["code"], "FEATURE_NOT_AVAILABLE")
+        self.assertEqual(res_gemini.get_json()["plan"], "STARTER")
+        self.assertEqual(res_gemini.get_json()["error"], "This feature is not available on your current plan.")
 
-        # 2. Starter cannot use OpenAI
+        # 2. Starter cannot use OpenAI -> FEATURE_NOT_AVAILABLE
         res_openai = self.client.post("/api/v1/ai/provider", json={"provider": "openai"})
         self.assertEqual(res_openai.status_code, 403)
-        self.assertEqual(res_openai.get_json()["code"], "FEATURE_NOT_ENTITLED")
+        self.assertEqual(res_openai.get_json()["code"], "FEATURE_NOT_AVAILABLE")
+        self.assertEqual(res_openai.get_json()["plan"], "STARTER")
 
         # 3. Local deterministic provider is permitted
         res_local = self.client.post("/api/v1/ai/provider", json={"provider": "local_deterministic"})
@@ -1094,6 +1213,7 @@ class TestPlanEntitlementsAndQuotaEnforcement(unittest.TestCase):
 
         res_openai_pro = self.client.post("/api/v1/ai/provider", json={"provider": "openai"})
         self.assertEqual(res_openai_pro.status_code, 403)
+        self.assertEqual(res_openai_pro.get_json()["code"], "FEATURE_NOT_AVAILABLE")
 
         # 5. Upgrade to Enterprise -> OpenAI permitted
         up_ent = self.client.post("/api/v1/plan/upgrade", json={"plan_tier": "enterprise"})
@@ -1104,20 +1224,24 @@ class TestPlanEntitlementsAndQuotaEnforcement(unittest.TestCase):
 
     def test_feature_gating_audit_trail_and_export(self):
         """Verifies feature flags gate compliance audit trail and rule exports."""
-        # 1. Starter plan cannot access audit trail
+        # 1. Starter plan cannot access audit trail -> FEATURE_NOT_AVAILABLE
         res_audit = self.client.get("/api/v1/audit-trail")
         self.assertEqual(res_audit.status_code, 403)
-        self.assertEqual(res_audit.get_json()["code"], "FEATURE_NOT_ENTITLED")
+        self.assertEqual(res_audit.get_json()["code"], "FEATURE_NOT_AVAILABLE")
+        self.assertEqual(res_audit.get_json()["plan"], "STARTER")
+        self.assertEqual(res_audit.get_json()["error"], "This feature is not available on your current plan.")
 
-        # 2. Starter plan cannot access legacy export
+        # 2. Starter plan cannot access legacy export -> FEATURE_NOT_AVAILABLE
         res_exp_leg = self.client.get("/api/export")
         self.assertEqual(res_exp_leg.status_code, 403)
-        self.assertEqual(res_exp_leg.get_json()["code"], "FEATURE_NOT_ENTITLED")
+        self.assertEqual(res_exp_leg.get_json()["code"], "FEATURE_NOT_AVAILABLE")
+        self.assertEqual(res_exp_leg.get_json()["plan"], "STARTER")
 
-        # 3. Starter plan cannot access modern export
+        # 3. Starter plan cannot access modern export -> FEATURE_NOT_AVAILABLE
         res_exp_v1 = self.client.get("/api/v1/rules/export")
         self.assertEqual(res_exp_v1.status_code, 403)
-        self.assertEqual(res_exp_v1.get_json()["code"], "FEATURE_NOT_ENTITLED")
+        self.assertEqual(res_exp_v1.get_json()["code"], "FEATURE_NOT_AVAILABLE")
+        self.assertEqual(res_exp_v1.get_json()["plan"], "STARTER")
 
         # 4. Upgrade to Pro -> all granted
         self.client.post("/api/v1/plan/upgrade", json={"plan_tier": "pro"})
@@ -1193,6 +1317,12 @@ class TestPlanEntitlementsAndQuotaEnforcement(unittest.TestCase):
         allowed_evt, violation_evt = QuotaService.is_event_allowed(self.org)
         self.assertTrue(allowed_evt)
         self.assertIsNone(violation_evt)
+
+        # 7. Test billing cycle reset functionality
+        QuotaService.record_event(self.org, "test.cycle.event", payload={})
+        self.assertEqual(QuotaService.get_monthly_events_count(self.org), 1)
+        QuotaService.reset_monthly_usage(self.org)
+        self.assertEqual(QuotaService.get_monthly_events_count(self.org), 0)
 
 
 if __name__ == "__main__":

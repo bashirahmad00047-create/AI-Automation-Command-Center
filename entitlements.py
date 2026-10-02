@@ -14,10 +14,11 @@ from models import (
     AutomationRule,
     Membership,
     Organization,
+    OrganizationUsage,
     SystemEvent,
     WebhookEndpoint,
 )
-from plans import PLAN_DEFINITIONS, PLAN_FREE, get_plan
+from plans import PLAN_DEFINITIONS, PLAN_FREE, PLAN_ENTERPRISE, get_plan
 
 
 def get_current_month_start() -> datetime.datetime:
@@ -26,8 +27,19 @@ def get_current_month_start() -> datetime.datetime:
     return datetime.datetime(now.year, now.month, 1, 0, 0, 0)
 
 
+def get_current_period(now: Optional[datetime.datetime] = None) -> str:
+    """Returns YYYY-MM formatted calendar period (e.g. '2026-10')."""
+    dt = now or datetime.datetime.utcnow()
+    return f"{dt.year:04d}-{dt.month:02d}"
+
+
 class QuotaService:
     """Central Entitlement and Quota Service for multi-tenant organizations."""
+
+    @staticmethod
+    def get_current_period(now: Optional[datetime.datetime] = None) -> str:
+        """Returns active billing period string (e.g. '2026-10')."""
+        return get_current_period(now)
 
     @staticmethod
     def get_plan(org: Optional[Organization]) -> Dict[str, Any]:
@@ -51,6 +63,9 @@ class QuotaService:
             return 0
         plan = cls.get_plan(org)
         plan_max = plan["quotas"]["max_rules"]
+        # Allow Enterprise or explicitly customized organizations to have custom limits
+        if org.plan_tier == PLAN_ENTERPRISE and org.max_rules is not None and org.max_rules > 0:
+            return org.max_rules
         if org.max_rules is not None and org.max_rules > 0 and org.max_rules != 100:
             return org.max_rules
         return plan_max
@@ -62,15 +77,25 @@ class QuotaService:
             return 0
         plan = cls.get_plan(org)
         plan_max = plan["quotas"]["max_monthly_events"]
+        # Allow Enterprise or explicitly customized organizations to have custom limits
+        if org.plan_tier == PLAN_ENTERPRISE and org.max_monthly_events is not None and org.max_monthly_events > 0:
+            return org.max_monthly_events
         if org.max_monthly_events is not None and org.max_monthly_events > 0 and org.max_monthly_events != 500000:
             return org.max_monthly_events
         return plan_max
 
     @staticmethod
-    def get_monthly_events_count(org: Optional[Organization]) -> int:
-        """How many monthly events has this organization consumed?"""
+    def get_monthly_events_count(org: Optional[Organization], period: Optional[str] = None) -> int:
+        """How many monthly events has this organization consumed in the specified period?"""
         if not org:
             return 0
+        target_period = period or get_current_period()
+        usage = OrganizationUsage.query.filter_by(
+            organization_id=org.id,
+            period=target_period
+        ).first()
+        if usage:
+            return usage.event_count
         month_start = get_current_month_start()
         return SystemEvent.query.filter(
             SystemEvent.organization_id == org.id,
@@ -163,9 +188,52 @@ class QuotaService:
             return False, required_tier
         return True, None
 
-    @staticmethod
-    def record_event(org: Organization, event_name: str, payload: Any, source: str = "api") -> SystemEvent:
-        """Persists a billable/usage-counted event for the organization."""
+    @classmethod
+    def record_event(
+        cls,
+        org: Organization,
+        event_name: str,
+        payload: Any,
+        source: str = "api",
+        dry_run: bool = False,
+        period: Optional[str] = None
+    ) -> Optional[SystemEvent]:
+        """Atomically increments organization usage and persists event stream record.
+        
+        Rejected and dry-run events are NEVER counted towards usage.
+        Avoids race conditions using atomic database increments.
+        """
+        if dry_run or not org:
+            return None
+
+        target_period = period or get_current_period()
+
+        # Atomic increment of OrganizationUsage: ensure row exists first
+        usage = OrganizationUsage.query.filter_by(
+            organization_id=org.id,
+            period=target_period
+        ).first()
+        if not usage:
+            try:
+                usage = OrganizationUsage(
+                    organization_id=org.id,
+                    period=target_period,
+                    event_count=0
+                )
+                db.session.add(usage)
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+        # Atomic SQL update prevents concurrency race conditions
+        db.session.query(OrganizationUsage).filter(
+            OrganizationUsage.organization_id == org.id,
+            OrganizationUsage.period == target_period
+        ).update(
+            {OrganizationUsage.event_count: OrganizationUsage.event_count + 1},
+            synchronize_session=False
+        )
+
         payload_str = json.dumps(payload) if isinstance(payload, (dict, list)) else str(payload)
         evt = SystemEvent(
             organization_id=org.id,
@@ -179,6 +247,21 @@ class QuotaService:
         db.session.commit()
         return evt
 
+    @classmethod
+    def reset_monthly_usage(cls, org: Organization, period: Optional[str] = None) -> int:
+        """Resets monthly event usage for a specific period (ready for monthly billing cycle resets)."""
+        if not org:
+            return 0
+        target_period = period or get_current_period()
+        usage = OrganizationUsage.query.filter_by(
+            organization_id=org.id,
+            period=target_period
+        ).first()
+        if usage:
+            usage.event_count = 0
+            db.session.commit()
+        return 0
+
 
 # Unified alias for entitlement naming preferences
 PlanEntitlements = QuotaService
@@ -187,11 +270,19 @@ PlanEntitlements = QuotaService
 def get_resource_usage(org_id: str) -> Dict[str, int]:
     """Calculates active resource counts for an organization."""
     rule_count = AutomationRule.query.filter_by(organization_id=org_id).count()
-    month_start = get_current_month_start()
-    event_count = SystemEvent.query.filter(
-        SystemEvent.organization_id == org_id,
-        SystemEvent.created_at >= month_start
-    ).count()
+    period = get_current_period()
+    usage = OrganizationUsage.query.filter_by(
+        organization_id=org_id,
+        period=period
+    ).first()
+    if usage:
+        event_count = usage.event_count
+    else:
+        month_start = get_current_month_start()
+        event_count = SystemEvent.query.filter(
+            SystemEvent.organization_id == org_id,
+            SystemEvent.created_at >= month_start
+        ).count()
     key_count = ApiKey.query.filter_by(organization_id=org_id, is_revoked=False).count()
     webhook_count = WebhookEndpoint.query.filter_by(organization_id=org_id, is_active=True).count()
     member_count = Membership.query.filter_by(organization_id=org_id).count()
@@ -299,11 +390,11 @@ def require_feature(feature_name: str):
                 allowed, required_tier = check_feature_entitlement(org, feature_name)
                 if not allowed:
                     return jsonify({
-                        "error": f"The '{feature_name}' feature is not included in your current plan ({org.plan_tier.upper()}). Please upgrade to {required_tier.capitalize()} to access this capability.",
-                        "code": "FEATURE_NOT_ENTITLED",
+                        "error": "This feature is not available on your current plan.",
+                        "code": "FEATURE_NOT_AVAILABLE",
+                        "plan": org.plan_tier.upper(),
                         "feature": feature_name,
-                        "current_plan": org.plan_tier,
-                        "required_plan": required_tier
+                        "required_plan": required_tier.upper()
                     }), 403
 
             return f(*args, **kwargs)

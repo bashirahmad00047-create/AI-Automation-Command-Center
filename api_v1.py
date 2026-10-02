@@ -428,8 +428,9 @@ def create_rule():
     allowed, violation = check_resource_quota(org, "rules", delta=1)
     if not allowed:
         return jsonify({
-            "error": f"Workflow rule limit reached. Current usage {violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan. Please upgrade to create more workflows.",
+            "error": "Rule limit exceeded for your current plan.",
             "code": "PLAN_LIMIT_EXCEEDED",
+            "plan": org.plan_tier.upper() if org else "FREE",
             "quota": violation
         }), 403
 
@@ -506,8 +507,9 @@ def duplicate_rule(rule_id: str):
     allowed, violation = check_resource_quota(org, "rules", delta=1)
     if not allowed:
         return jsonify({
-            "error": f"Workflow rule limit reached. Current usage {violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan. Please upgrade to duplicate workflows.",
+            "error": "Rule limit exceeded for your current plan.",
             "code": "PLAN_LIMIT_EXCEEDED",
+            "plan": org.plan_tier.upper() if org else "FREE",
             "quota": violation
         }), 403
 
@@ -677,8 +679,9 @@ def incoming_webhook_receiver(endpoint_token: str):
         quota_ok, violation = check_resource_quota(webhook_org, "monthly_events", delta=1)
         if not quota_ok:
             return jsonify({
-                "error": f"Monthly event quota exceeded for organization ({violation['limit']} events on {violation['plan_tier'].upper()} plan).",
+                "error": "Monthly event quota exceeded.",
                 "code": "QUOTA_EXCEEDED",
+                "plan": webhook_org.plan_tier.upper(),
                 "quota": violation
             }), 429
 
@@ -737,8 +740,9 @@ def dispatch_event():
         quota_ok, violation = check_resource_quota(org, "monthly_events", delta=1)
         if not quota_ok:
             return jsonify({
-                "error": f"Monthly event quota exceeded ({violation['limit']:,} events on {violation['plan_tier'].upper()} plan). Ingestion paused until next billing cycle or upgrade.",
+                "error": "Monthly event quota exceeded.",
                 "code": "QUOTA_EXCEEDED",
+                "plan": org.plan_tier.upper() if org else "FREE",
                 "quota": violation
             }), 429
 
@@ -1033,8 +1037,9 @@ def install_template(template_id: str):
     allowed, violation = check_resource_quota(org, "rules", delta=1)
     if not allowed:
         return jsonify({
-            "error": f"Workflow rule limit reached. Current usage {violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan. Please upgrade to install new templates.",
+            "error": "Rule limit exceeded for your current plan.",
             "code": "PLAN_LIMIT_EXCEEDED",
+            "plan": org.plan_tier.upper() if org else "FREE",
             "quota": violation
         }), 403
 
@@ -1204,11 +1209,11 @@ def switch_ai_provider():
     allowed, required_tier = check_ai_provider_entitlement(org, provider_name)
     if not allowed:
         return jsonify({
-            "error": f"The '{provider_name}' AI model requires a {required_tier.capitalize()} or Enterprise plan. Your current plan is {org.plan_tier.upper()}.",
-            "code": "FEATURE_NOT_ENTITLED",
+            "error": "This feature is not available on your current plan.",
+            "code": "FEATURE_NOT_AVAILABLE",
+            "plan": org.plan_tier.upper(),
             "provider": provider_name,
-            "current_plan": org.plan_tier,
-            "required_plan": required_tier
+            "required_plan": required_tier.upper()
         }), 403
 
     manager = AIProviderManager.get_instance()
@@ -1235,15 +1240,38 @@ def get_available_plans():
     return jsonify({"plans": list_plans(), "count": len(list_plans())})
 
 
+@api_v1.route("/billing/plan", methods=["GET"])
 @api_v1.route("/plan", methods=["GET"])
 @api_v1.route("/quotas", methods=["GET"])
 @require_auth
 def get_current_plan_and_quotas():
     """Returns live quota usage, remaining capacity, and plan entitlements for the organization."""
     org = g.current_org
+    plan_def = QuotaService.get_plan(org)
+    max_rules = QuotaService.get_max_rules(org)
+    current_rule_count = QuotaService.get_rules_count(org)
+    monthly_event_limit = QuotaService.get_max_monthly_events(org)
+    current_monthly_event_usage = QuotaService.get_monthly_events_count(org)
+    features = plan_def.get("features", {})
+    entitlements = get_org_entitlements(org)
+
     return jsonify({
         "success": True,
-        "entitlements": get_org_entitlements(org)
+        "current_plan": org.plan_tier.upper(),
+        "plan": org.plan_tier.upper(),
+        "plan_tier": org.plan_tier,
+        "max_rules": max_rules,
+        "current_rule_count": current_rule_count,
+        "rule_count": current_rule_count,
+        "monthly_event_limit": monthly_event_limit,
+        "max_monthly_events": monthly_event_limit,
+        "current_monthly_event_usage": current_monthly_event_usage,
+        "monthly_event_usage": current_monthly_event_usage,
+        "period": QuotaService.get_current_period(),
+        "relevant_feature_flags": features,
+        "feature_flags": features,
+        "features": features,
+        "entitlements": entitlements
     })
 
 

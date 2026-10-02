@@ -118,9 +118,9 @@ PLAN_MATRIX = PLAN_DEFINITIONS
 
 
 def get_plan(plan_tier: Optional[str]) -> Dict[str, Any]:
-    """Retrieves plan specification for a tier, defaulting to Enterprise."""
-    tier = (plan_tier or PLAN_ENTERPRISE).lower().strip()
-    return PLAN_DEFINITIONS.get(tier, PLAN_DEFINITIONS[PLAN_ENTERPRISE])
+    """Retrieves plan specification for a tier, defaulting to Free."""
+    tier = (plan_tier or PLAN_FREE).lower().strip()
+    return PLAN_DEFINITIONS.get(tier, PLAN_DEFINITIONS[PLAN_FREE])
 
 
 def list_plans() -> List[Dict[str, Any]]:

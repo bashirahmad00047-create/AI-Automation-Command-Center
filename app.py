@@ -197,8 +197,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             allowed, violation = check_resource_quota(org, "rules", delta=1)
             if not allowed:
                 return jsonify({
-                    "error": f"Workflow rule limit reached. Current usage {violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan. Please upgrade to create more workflows.",
+                    "error": "Rule limit exceeded for your current plan.",
                     "code": "PLAN_LIMIT_EXCEEDED",
+                    "plan": org.plan_tier.upper(),
                     "quota": violation
                 }), 403
 
@@ -281,8 +282,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             quota_ok, violation = check_resource_quota(org, "monthly_events", delta=1)
             if not quota_ok:
                 return jsonify({
-                    "error": f"Monthly event quota exceeded ({violation['limit']:,} events on {violation['plan_tier'].upper()} plan). Ingestion paused until next billing cycle or upgrade.",
+                    "error": "Monthly event quota exceeded.",
                     "code": "QUOTA_EXCEEDED",
+                    "plan": org.plan_tier.upper(),
                     "quota": violation
                 }), 429
 
@@ -422,8 +424,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             allowed, violation = check_resource_quota(org, "rules", delta=1)
             if not allowed:
                 return jsonify({
-                    "error": f"Workflow rule limit reached. Current usage {violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan. Please upgrade to install new templates.",
+                    "error": "Rule limit exceeded for your current plan.",
                     "code": "PLAN_LIMIT_EXCEEDED",
+                    "plan": org.plan_tier.upper(),
                     "quota": violation
                 }), 403
 
@@ -463,11 +466,11 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             allowed, required_tier = check_feature_entitlement(org, "export_rules")
             if not allowed:
                 return jsonify({
-                    "error": f"The 'export_rules' feature is not included in your current plan ({org.plan_tier.upper()}). Please upgrade to {required_tier.capitalize()} to access this capability.",
-                    "code": "FEATURE_NOT_ENTITLED",
+                    "error": "This feature is not available on your current plan.",
+                    "code": "FEATURE_NOT_AVAILABLE",
+                    "plan": org.plan_tier.upper(),
                     "feature": "export_rules",
-                    "current_plan": org.plan_tier,
-                    "required_plan": required_tier
+                    "required_plan": required_tier.upper()
                 }), 403
 
         st = application.config.get("STORAGE_ENGINE")
@@ -496,8 +499,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             allowed, violation = check_resource_quota(org, "rules", delta=len(data["rules"]))
             if not allowed:
                 return jsonify({
-                    "error": f"Importing {len(data['rules'])} rules exceeds your quota limit ({violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan).",
+                    "error": "Rule limit exceeded for your current plan.",
                     "code": "PLAN_LIMIT_EXCEEDED",
+                    "plan": org.plan_tier.upper(),
                     "quota": violation
                 }), 403
 

@@ -61,6 +61,7 @@ class Organization(db.Model):
     audit_logs = db.relationship("AuditLog", backref="organization", cascade="all, delete-orphan", lazy="select")
     leads = db.relationship("Lead", backref="organization", cascade="all, delete-orphan", lazy="select")
     events = db.relationship("SystemEvent", backref="organization", cascade="all, delete-orphan", lazy="select")
+    usages = db.relationship("OrganizationUsage", backref="organization", cascade="all, delete-orphan", lazy="select")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -587,4 +588,41 @@ class SystemEvent(db.Model):
             "source": self.source,
             "processed": self.processed,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+        }
+
+
+class OrganizationUsage(db.Model):
+    """Tracks organization usage per billing period / month.
+    
+    Attributes:
+        organization_id: Organization tenant identifier.
+        period: YYYY-MM formatted calendar period (e.g. '2026-10').
+        event_count: Total non-dry-run billable events consumed in this period.
+    """
+    __tablename__ = "organization_usages"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("usg"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    period = db.Column(db.String(16), nullable=False, index=True)  # e.g. "2026-10"
+    event_count = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint("organization_id", "period", name="uq_org_period"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "period": self.period,
+            "event_count": self.event_count,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }
