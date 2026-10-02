@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpsFlow Cloud - Enterprise Intelligent Automation</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=2.4.1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -25,12 +25,15 @@
 
         <div class="hud-controls">
             <!-- Workspace / Organization Switcher -->
-            <div class="workspace-selector">
+            <div class="workspace-selector" style="display: flex; align-items: center; gap: 8px;">
                 <span>🏢 Workspace:</span>
                 <select id="workspaceSelect" class="workspace-select" onchange="handleWorkspaceChange(this.value)">
                     <option value="org-enterprise-default">Acme Global Enterprise</option>
                     <option value="org-apex-health-tenant">Apex HealthTech Systems</option>
                 </select>
+                <button type="button" class="hud-btn small purple" id="headerPlanBtn" onclick="switchTab('billing')" title="Click to view Plans &amp; Billing" style="padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
+                    <span>💳</span> <span id="headerPlanText">ENTERPRISE</span>
+                </button>
             </div>
 
             <!-- Active User & RBAC Persona Switcher -->
@@ -80,6 +83,12 @@
         <button class="hud-tab" onclick="switchTab('rules')">
             <span class="tab-icon">⚡</span> Workflow Studio
         </button>
+        <button class="hud-tab" onclick="switchTab('billing')">
+            <span class="tab-icon">💳</span> Plans & Billing
+        </button>
+        <button class="hud-tab" onclick="switchTab('team')">
+            <span class="tab-icon">👥</span> Team & RBAC
+        </button>
         <button class="hud-tab" onclick="switchTab('leads')">
             <span class="tab-icon">🎯</span> CRM Leads (<span id="tabLeadCount">0</span>)
         </button>
@@ -103,12 +112,6 @@
         </button>
         <button class="hud-tab" onclick="switchTab('blueprints')">
             <span class="tab-icon">📦</span> Templates
-        </button>
-        <button class="hud-tab" onclick="switchTab('team')">
-            <span class="tab-icon">👥</span> Team & RBAC
-        </button>
-        <button class="hud-tab" onclick="switchTab('billing')">
-            <span class="tab-icon">💳</span> Plans & Billing
         </button>
         <button class="hud-tab" onclick="switchTab('apidocs')">
             <span class="tab-icon">📖</span> API Docs
@@ -186,6 +189,41 @@
                     </div>
                     <div class="metric-val" id="statUptime">0s</div>
                     <div class="metric-sub">Engine Online</div>
+                </div>
+
+                <div class="metric-card gold" style="cursor: pointer; transition: transform 0.2s ease;" onclick="switchTab('billing')" title="Click to view Plans &amp; Billing dashboard">
+                    <div class="metric-header">
+                        <span class="metric-title">WORKSPACE PLAN</span>
+                        <span class="metric-badge" id="dashBillingBadge">ACTIVE</span>
+                    </div>
+                    <div class="metric-val" id="dashPlanTier" style="color: #f59e0b;">Free Tier</div>
+                    <div class="metric-sub" id="dashPlanCycle" style="display: flex; justify-content: space-between; align-items: center;">
+                        <span id="dashPlanDesc">Free Community Tier</span>
+                        <span style="color: var(--cyan-glow); font-weight: 600;">Manage &rarr;</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Executive Billing & Subscription Strip -->
+            <div class="hud-panel" style="margin-bottom: 24px; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; border-left: 4px solid var(--purple-glow, #8b5cf6); background: rgba(139, 92, 246, 0.04);">
+                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                    <div style="font-size: 24px;">💳</div>
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <strong style="font-size: 14px; letter-spacing: 0.5px;">SUBSCRIPTION &amp; QUOTA STATUS:</strong>
+                            <span id="dashBannerPlanBadge" class="status-badge active" style="font-size: 11px; padding: 2px 10px;">FREE TIER</span>
+                            <span id="dashBannerSubBadge" style="font-size: 11px; color: var(--text-dim);">ACTIVE SUBSCRIPTION</span>
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                            Workflow Rules: <strong id="dashBannerRulesCount" style="color: var(--text-primary);">0 / 3</strong> &bull;
+                            Monthly Events: <strong id="dashBannerEventsCount" style="color: var(--text-primary);">0 / 1,000</strong> &bull;
+                            Team Seats: <strong id="dashBannerSeatsCount" style="color: var(--text-primary);">1 / 1</strong>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button class="hud-btn primary small" onclick="openUpgradePlanModal()"><i class="fas fa-arrow-up"></i> Upgrade Plan</button>
+                    <button class="hud-btn outline small" onclick="switchTab('billing')">Plans &amp; Billing &rarr;</button>
                 </div>
             </div>
 
@@ -1450,6 +1488,6 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
     <!-- Toast Notification Container -->
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=2.4.1"></script>
 </body>
 </html>

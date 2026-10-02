@@ -152,6 +152,7 @@ function refreshAllData() {
     loadWebhooks();
     loadApiKeys();
     loadTeamAndAudits();
+    loadBillingStatus();
     pollNotifications();
 }
 
@@ -1652,20 +1653,70 @@ async function loadBillingStatus() {
         const billingStatusBadge = document.getElementById('billingStatusBadge');
 
         const tierName = (data.plan_tier || 'free').toUpperCase();
+        const tierTitle = (data.plan_tier || 'free').charAt(0).toUpperCase() + (data.plan_tier || 'free').slice(1);
+        const sub = data.subscription || {};
+        const subStatus = (sub.status || (data.plan_tier === 'free' ? 'active' : 'unmanaged')).toUpperCase();
+
+        // Top Header Plan Indicator
+        const headerPlanText = document.getElementById('headerPlanText');
+        if (headerPlanText) headerPlanText.textContent = tierName;
+
+        // Executive Overview Dashboard (tab-dashboard) Cards & Strip
+        const dashPlanTier = document.getElementById('dashPlanTier');
+        if (dashPlanTier) dashPlanTier.textContent = `${tierTitle} Tier`;
+
+        const dashBillingBadge = document.getElementById('dashBillingBadge');
+        if (dashBillingBadge) {
+            dashBillingBadge.textContent = subStatus;
+            dashBillingBadge.className = `metric-badge ${['ACTIVE', 'TRIALING'].includes(subStatus) ? 'active' : 'warn'}`;
+        }
+
+        const dashPlanDesc = document.getElementById('dashPlanDesc');
+        if (dashPlanDesc) {
+            dashPlanDesc.textContent = data.is_stripe_configured
+                ? (sub.cancel_at_period_end ? 'Cancels at period end' : 'Stripe Connected')
+                : 'Local / Free Tier';
+        }
+
+        const dashBannerPlanBadge = document.getElementById('dashBannerPlanBadge');
+        if (dashBannerPlanBadge) {
+            dashBannerPlanBadge.textContent = `${tierName} TIER`;
+            dashBannerPlanBadge.className = `status-badge ${data.plan_tier === 'free' ? '' : 'active'}`;
+        }
+
+        const dashBannerSubBadge = document.getElementById('dashBannerSubBadge');
+        if (dashBannerSubBadge) dashBannerSubBadge.textContent = `${subStatus} SUBSCRIPTION`;
+
+        const dashBannerRules = document.getElementById('dashBannerRulesCount');
+        if (dashBannerRules && data.quotas) {
+            dashBannerRules.textContent = `${data.quotas.current_rules || 0} / ${data.quotas.max_rules || 3}`;
+        }
+
+        const dashBannerEvents = document.getElementById('dashBannerEventsCount');
+        if (dashBannerEvents && data.quotas) {
+            dashBannerEvents.textContent = `${Number(data.quotas.current_monthly_events || 0).toLocaleString()} / ${Number(data.quotas.max_monthly_events || 1000).toLocaleString()}`;
+        }
+
+        const dashBannerSeats = document.getElementById('dashBannerSeatsCount');
+        if (dashBannerSeats) {
+            const curSeats = state.teamMembers ? state.teamMembers.length : 1;
+            const maxSeats = (data.entitlements && data.entitlements.quotas && data.entitlements.quotas.team_members && data.entitlements.quotas.team_members.limit) || 1;
+            dashBannerSeats.textContent = `${curSeats} / ${maxSeats}`;
+        }
+
+        // Team & RBAC Tab (tab-team) Elements
         if (planBadge) planBadge.textContent = `${tierName} TIER`;
         if (slug && data.organization_slug) slug.textContent = `slug: ${data.organization_slug}`;
         if (maxRules && data.quotas) maxRules.textContent = `${data.quotas.max_rules} Rules`;
         if (maxEvents && data.quotas) maxEvents.textContent = Number(data.quotas.max_monthly_events).toLocaleString();
 
-        const sub = data.subscription || {};
-        const subStatus = (sub.status || 'active').toUpperCase();
         if (billingBadge) billingBadge.textContent = subStatus;
         if (billingStatusBadge) {
             billingStatusBadge.textContent = `${subStatus} SUBSCRIPTION`;
             billingStatusBadge.className = `status-badge ${sub.status === 'active' ? 'active' : 'warn'}`;
         }
         if (billingPlanName) {
-            billingPlanName.textContent = `Current Plan: ${tierName} Tier`;
+            billingPlanName.textContent = `Current Plan: ${tierTitle} Tier`;
         }
         if (billingPeriodInfo) {
             const interval = sub.billing_interval || 'monthly';
