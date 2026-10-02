@@ -42,3 +42,4 @@ automation_storage/output/*
 .DS_Store
 Thumbs.db
 Desktop.ini
+backups/

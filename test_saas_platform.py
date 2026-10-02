@@ -23,6 +23,14 @@ from sqlalchemy import text
 from app import create_app
 from auth import generate_secure_api_key, verify_api_key
 from database import db
+from entitlements import (
+    PlanEntitlements,
+    QuotaService,
+    check_ai_provider_entitlement,
+    check_feature_entitlement,
+    check_resource_quota,
+    get_org_entitlements,
+)
 from limiter import limiter
 from models import (
     ApiKey,
@@ -32,9 +40,19 @@ from models import (
     Lead,
     Membership,
     Organization,
+    SystemEvent,
     User,
     WebhookEndpoint,
     WorkflowExecution,
+)
+from plans import (
+    PLAN_DEFINITIONS,
+    PLAN_ENTERPRISE,
+    PLAN_FREE,
+    PLAN_PRO,
+    PLAN_STARTER,
+    get_plan,
+    list_plans,
 )
 
 
@@ -830,6 +848,351 @@ class TestErrorSecurityAndDataProtection(unittest.TestCase):
         self.assertNotIn("Traceback", body_str)
         self.assertNotIn("sqlite", body_str.lower())
         self.assertNotIn("psycopg2", body_str.lower())
+
+
+class TestPlanEntitlementsAndQuotaEnforcement(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app("testing")
+        self.client = self.app.test_client()
+        self.ctx = self.app.app_context()
+        self.ctx.push()
+        db.create_all()
+        limiter.reset()
+
+        # Seed test organization with Starter plan
+        self.org = Organization(
+            id="org-starter-quota",
+            name="Starter Automation Labs",
+            slug="starter-quota-labs",
+            plan_tier=PLAN_STARTER,
+            max_rules=2,
+            max_monthly_events=2,
+            is_active=True
+        )
+        self.user = User(
+            id="usr-quota-admin",
+            email="admin@starterlabs.io",
+            full_name="Quota Admin",
+            is_active=True
+        )
+        self.user.set_password("AdminQuotaPass2026!")
+
+        self.viewer = User(
+            id="usr-quota-viewer",
+            email="viewer@starterlabs.io",
+            full_name="Quota Viewer",
+            is_active=True
+        )
+        self.viewer.set_password("ViewerQuotaPass2026!")
+
+        self.mem_owner = Membership(
+            id="mem-quota-owner",
+            user_id=self.user.id,
+            organization_id=self.org.id,
+            role="owner"
+        )
+        self.mem_viewer = Membership(
+            id="mem-quota-viewer",
+            user_id=self.viewer.id,
+            organization_id=self.org.id,
+            role="viewer"
+        )
+
+        db.session.add_all([self.org, self.user, self.viewer, self.mem_owner, self.mem_viewer])
+        db.session.commit()
+
+        # Log in as owner/admin
+        self.client.post("/login", json={"email": "admin@starterlabs.io", "password": "AdminQuotaPass2026!"})
+
+    def tearDown(self):
+        db.session.remove()
+        try:
+            db.session.execute(text("PRAGMA foreign_keys = OFF;"))
+            db.drop_all()
+        except Exception:
+            pass
+        self.ctx.pop()
+
+    def test_plan_matrix_specifications(self):
+        """Verifies centralized plan configurations for Free, Starter, Pro, and Enterprise."""
+        # 1. Plan definitions exist
+        for tier in [PLAN_FREE, PLAN_STARTER, PLAN_PRO, PLAN_ENTERPRISE]:
+            self.assertIn(tier, PLAN_DEFINITIONS)
+            p = PLAN_DEFINITIONS[tier]
+            self.assertIn("max_rules", p["quotas"])
+            self.assertIn("monthly_events", p["quotas"])
+            self.assertIn("allowed_ai_providers", p)
+            self.assertIn("features", p)
+
+        # 2. Free vs Pro vs Enterprise progression
+        self.assertTrue(PLAN_DEFINITIONS[PLAN_FREE]["quotas"]["max_rules"] < PLAN_DEFINITIONS[PLAN_STARTER]["quotas"]["max_rules"])
+        self.assertTrue(PLAN_DEFINITIONS[PLAN_STARTER]["quotas"]["max_rules"] < PLAN_DEFINITIONS[PLAN_PRO]["quotas"]["max_rules"])
+        self.assertTrue(PLAN_DEFINITIONS[PLAN_PRO]["quotas"]["max_rules"] < PLAN_DEFINITIONS[PLAN_ENTERPRISE]["quotas"]["max_rules"])
+
+        # 3. Public GET /api/v1/plans endpoint
+        res = self.client.get("/api/v1/plans")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["count"], 4)
+        tiers = [p["tier"] for p in data["plans"]]
+        self.assertIn("free", tiers)
+        self.assertIn("starter", tiers)
+        self.assertIn("pro", tiers)
+        self.assertIn("enterprise", tiers)
+
+    def test_quotas_and_entitlements_inspection(self):
+        """Validates GET /api/v1/plan and GET /api/v1/quotas returning live usage & percentage calculations."""
+        res = self.client.get("/api/v1/quotas")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["success"])
+        entitlements = data["entitlements"]
+        self.assertEqual(entitlements["plan_tier"], PLAN_STARTER)
+        self.assertEqual(entitlements["quotas"]["rules"]["limit"], 2)
+        self.assertEqual(entitlements["quotas"]["rules"]["current"], 0)
+        self.assertEqual(entitlements["quotas"]["rules"]["remaining"], 2)
+        self.assertFalse(entitlements["quotas"]["rules"]["is_exceeded"])
+
+    def test_rules_quota_enforcement_blocks_creation_duplication_and_templates(self):
+        """Verifies rule creation, duplication, and template installation are blocked when quota is exhausted."""
+        rule_payload_1 = {
+            "name": "Auto Incident Triage",
+            "event_trigger": "server.alert",
+            "actions": [{"action": "log", "params": {"message": "Incident logged"}}]
+        }
+        rule_payload_2 = {
+            "name": "Lead Ingestion Piper",
+            "event_trigger": "lead.created",
+            "actions": [{"action": "log", "params": {"message": "Lead saved"}}]
+        }
+
+        # 1. Create first rule -> 201
+        res1 = self.client.post("/api/v1/rules", json=rule_payload_1)
+        self.assertEqual(res1.status_code, 201)
+        rule_id_1 = res1.get_json()["rule"]["id"]
+
+        # 2. Create second rule -> 201 (reaches limit of 2)
+        res2 = self.client.post("/api/v1/rules", json=rule_payload_2)
+        self.assertEqual(res2.status_code, 201)
+
+        # 3. Create 3rd rule via /api/v1/rules -> 403 PLAN_LIMIT_EXCEEDED
+        res3 = self.client.post("/api/v1/rules", json={"name": "Third Rule", "event_trigger": "test"})
+        self.assertEqual(res3.status_code, 403)
+        self.assertIn(res3.get_json()["code"], ["PLAN_LIMIT_EXCEEDED", "QUOTA_EXCEEDED"])
+
+        # 4. Duplicate rule -> 403 PLAN_LIMIT_EXCEEDED
+        res_dup = self.client.post(f"/api/v1/rules/{rule_id_1}/duplicate")
+        self.assertEqual(res_dup.status_code, 403)
+        self.assertIn(res_dup.get_json()["code"], ["PLAN_LIMIT_EXCEEDED", "QUOTA_EXCEEDED"])
+
+        # 5. Install template -> 403 PLAN_LIMIT_EXCEEDED
+        res_tmpl = self.client.post("/api/v1/templates/tmpl-incident-escalation/install")
+        self.assertEqual(res_tmpl.status_code, 403)
+        self.assertIn(res_tmpl.get_json()["code"], ["PLAN_LIMIT_EXCEEDED", "QUOTA_EXCEEDED"])
+
+        # 6. Legacy create rule -> 403 PLAN_LIMIT_EXCEEDED
+        res_leg = self.client.post("/api/rules", json={"name": "Legacy Blocked Rule"})
+        self.assertEqual(res_leg.status_code, 403)
+        self.assertIn(res_leg.get_json()["code"], ["PLAN_LIMIT_EXCEEDED", "QUOTA_EXCEEDED"])
+
+        # 7. Legacy install preset -> 403 PLAN_LIMIT_EXCEEDED
+        res_leg_preset = self.client.post("/api/presets/install", json={"preset_id": "template-ai-lead-qualification"})
+        self.assertEqual(res_leg_preset.status_code, 403)
+        self.assertIn(res_leg_preset.get_json()["code"], ["PLAN_LIMIT_EXCEEDED", "QUOTA_EXCEEDED"])
+
+    def test_monthly_event_quota_enforcement_and_dry_run_immunity(self):
+        """Verifies event ingestion pauses at quota while dry-run simulations remain allowed."""
+        # 1. Ingest event 1 -> 200
+        res1 = self.client.post("/api/v1/events", json={"event_name": "system.ping", "payload": {"host": "web-1"}})
+        self.assertEqual(res1.status_code, 200)
+
+        # 2. Ingest event 2 -> 200
+        res2 = self.client.post("/api/v1/events", json={"event_name": "system.ping", "payload": {"host": "web-2"}})
+        self.assertEqual(res2.status_code, 200)
+
+        # 3. Ingest event 3 (exceeds limit 2) -> 429 QUOTA_EXCEEDED
+        res3 = self.client.post("/api/v1/events", json={"event_name": "system.ping", "payload": {"host": "web-3"}})
+        self.assertEqual(res3.status_code, 429)
+        self.assertIn(res3.get_json()["code"], ["QUOTA_EXCEEDED", "PLAN_LIMIT_EXCEEDED"])
+
+        # 4. Dry-run events bypass monthly quota check
+        res_dry = self.client.post("/api/v1/events", json={
+            "event_name": "system.ping",
+            "payload": {"host": "web-dry"},
+            "dry_run": True
+        })
+        self.assertEqual(res_dry.status_code, 200)
+        self.assertTrue(res_dry.get_json()["dry_run"])
+
+        # 5. Legacy dispatch also respects event quota -> 429
+        res_leg = self.client.post("/api/events/dispatch", json={"event_name": "legacy.event", "payload": {}})
+        self.assertEqual(res_leg.status_code, 429)
+        self.assertIn(res_leg.get_json()["code"], ["QUOTA_EXCEEDED", "PLAN_LIMIT_EXCEEDED"])
+
+        # 6. Inbound Webhook also pauses when monthly quota is reached -> 429
+        wh_res = self.client.post("/api/v1/webhooks", json={"name": "Quota WH", "secret_token": "wh_quota_secret_key"})
+        self.assertEqual(wh_res.status_code, 201)
+        endpoint_token = wh_res.get_json()["webhook"]["endpoint_token"]
+
+        raw_data = json.dumps({"data": "test"}).encode("utf-8")
+        sig = "sha256=" + hmac.new(b"wh_quota_secret_key", raw_data, hashlib.sha256).hexdigest()
+
+        wh_ingest = self.client.post(
+            f"/api/v1/webhooks/incoming/{endpoint_token}",
+            data=raw_data,
+            headers={"Content-Type": "application/json", "X-Hub-Signature-256": sig}
+        )
+        self.assertEqual(wh_ingest.status_code, 429)
+        self.assertIn(wh_ingest.get_json()["code"], ["QUOTA_EXCEEDED", "PLAN_LIMIT_EXCEEDED"])
+
+    def test_api_key_and_webhook_quotas(self):
+        """Verifies API key and webhook creation enforce plan limits."""
+        # Starter plan allows max 2 API keys
+        res_k1 = self.client.post("/api/v1/api-keys", json={"name": "Key 1"})
+        self.assertEqual(res_k1.status_code, 201)
+
+        res_k2 = self.client.post("/api/v1/api-keys", json={"name": "Key 2"})
+        self.assertEqual(res_k2.status_code, 201)
+
+        res_k3 = self.client.post("/api/v1/api-keys", json={"name": "Key 3"})
+        self.assertEqual(res_k3.status_code, 403)
+        self.assertEqual(res_k3.get_json()["code"], "QUOTA_EXCEEDED")
+
+        # Starter plan allows max 2 webhooks
+        res_w1 = self.client.post("/api/v1/webhooks", json={"name": "WH 1"})
+        self.assertEqual(res_w1.status_code, 201)
+
+        res_w2 = self.client.post("/api/v1/webhooks", json={"name": "WH 2"})
+        self.assertEqual(res_w2.status_code, 201)
+
+        res_w3 = self.client.post("/api/v1/webhooks", json={"name": "WH 3"})
+        self.assertEqual(res_w3.status_code, 403)
+        self.assertEqual(res_w3.get_json()["code"], "QUOTA_EXCEEDED")
+
+    def test_ai_provider_entitlement_gating(self):
+        """Verifies Starter cannot switch to cloud AI; Pro gets Gemini; Enterprise gets OpenAI."""
+        # 1. Starter cannot use Google Gemini
+        res_gemini = self.client.post("/api/v1/ai/provider", json={"provider": "google_gemini"})
+        self.assertEqual(res_gemini.status_code, 403)
+        self.assertEqual(res_gemini.get_json()["code"], "FEATURE_NOT_ENTITLED")
+
+        # 2. Starter cannot use OpenAI
+        res_openai = self.client.post("/api/v1/ai/provider", json={"provider": "openai"})
+        self.assertEqual(res_openai.status_code, 403)
+        self.assertEqual(res_openai.get_json()["code"], "FEATURE_NOT_ENTITLED")
+
+        # 3. Local deterministic provider is permitted
+        res_local = self.client.post("/api/v1/ai/provider", json={"provider": "local_deterministic"})
+        self.assertEqual(res_local.status_code, 200)
+
+        # 4. Upgrade to Pro -> Gemini permitted, OpenAI still blocked
+        up_res = self.client.post("/api/v1/plan/upgrade", json={"plan_tier": "pro"})
+        self.assertEqual(up_res.status_code, 200)
+
+        res_gemini_pro = self.client.post("/api/v1/ai/provider", json={"provider": "google_gemini"})
+        self.assertEqual(res_gemini_pro.status_code, 200)
+
+        res_openai_pro = self.client.post("/api/v1/ai/provider", json={"provider": "openai"})
+        self.assertEqual(res_openai_pro.status_code, 403)
+
+        # 5. Upgrade to Enterprise -> OpenAI permitted
+        up_ent = self.client.post("/api/v1/plan/upgrade", json={"plan_tier": "enterprise"})
+        self.assertEqual(up_ent.status_code, 200)
+
+        res_openai_ent = self.client.post("/api/v1/ai/provider", json={"provider": "openai"})
+        self.assertEqual(res_openai_ent.status_code, 200)
+
+    def test_feature_gating_audit_trail_and_export(self):
+        """Verifies feature flags gate compliance audit trail and rule exports."""
+        # 1. Starter plan cannot access audit trail
+        res_audit = self.client.get("/api/v1/audit-trail")
+        self.assertEqual(res_audit.status_code, 403)
+        self.assertEqual(res_audit.get_json()["code"], "FEATURE_NOT_ENTITLED")
+
+        # 2. Starter plan cannot access legacy export
+        res_exp_leg = self.client.get("/api/export")
+        self.assertEqual(res_exp_leg.status_code, 403)
+        self.assertEqual(res_exp_leg.get_json()["code"], "FEATURE_NOT_ENTITLED")
+
+        # 3. Starter plan cannot access modern export
+        res_exp_v1 = self.client.get("/api/v1/rules/export")
+        self.assertEqual(res_exp_v1.status_code, 403)
+        self.assertEqual(res_exp_v1.get_json()["code"], "FEATURE_NOT_ENTITLED")
+
+        # 4. Upgrade to Pro -> all granted
+        self.client.post("/api/v1/plan/upgrade", json={"plan_tier": "pro"})
+
+        res_audit_pro = self.client.get("/api/v1/audit-trail")
+        self.assertEqual(res_audit_pro.status_code, 200)
+
+        res_exp_leg_pro = self.client.get("/api/export")
+        self.assertEqual(res_exp_leg_pro.status_code, 200)
+
+        res_exp_v1_pro = self.client.get("/api/v1/rules/export")
+        self.assertEqual(res_exp_v1_pro.status_code, 200)
+
+    def test_plan_upgrade_flow_and_rbac(self):
+        """Verifies upgrading unlocks quotas and only owners/admins can perform upgrades."""
+        # Fill quota
+        self.client.post("/api/v1/rules", json={"name": "R1", "event_trigger": "e1"})
+        self.client.post("/api/v1/rules", json={"name": "R2", "event_trigger": "e2"})
+        res_blocked = self.client.post("/api/v1/rules", json={"name": "R3", "event_trigger": "e3"})
+        self.assertEqual(res_blocked.status_code, 403)
+
+        # Non-admin viewer cannot upgrade
+        self.client.post("/api/v1/auth/logout")
+        res_vlog = self.client.post("/api/v1/auth/login", json={"email": "viewer@starterlabs.io", "password": "ViewerQuotaPass2026!"})
+        self.assertEqual(res_vlog.status_code, 200)
+        res_viewer_up = self.client.post("/api/v1/plan/upgrade", json={"plan_tier": "pro"})
+        self.assertEqual(res_viewer_up.status_code, 403)
+
+        # Owner upgrades to Pro
+        self.client.post("/api/v1/auth/logout")
+        res_alog = self.client.post("/api/v1/auth/login", json={"email": "admin@starterlabs.io", "password": "AdminQuotaPass2026!"})
+        self.assertEqual(res_alog.status_code, 200)
+        res_up = self.client.post("/api/v1/plan/upgrade", json={"plan_tier": "pro"})
+        self.assertEqual(res_up.status_code, 200)
+        self.assertEqual(res_up.get_json()["organization"]["plan_tier"], "pro")
+
+        # R3 creation now succeeds
+        res_allowed = self.client.post("/api/v1/rules", json={"name": "R3", "event_trigger": "e3"})
+        self.assertEqual(res_allowed.status_code, 201)
+
+        # Audit log exists for upgrade
+        audit = AuditLog.query.filter_by(action="plan.upgrade").first()
+        self.assertIsNotNone(audit)
+        self.assertIn("pro", audit.details_json)
+
+        # Invalid plan returns 400
+        res_invalid = self.client.post("/api/v1/plan/upgrade", json={"plan_tier": "nonexistent_tier"})
+        self.assertEqual(res_invalid.status_code, 400)
+        self.assertEqual(res_invalid.get_json()["code"], "VALIDATION_ERROR")
+
+    def test_central_quota_service_api(self):
+        """Verifies QuotaService / PlanEntitlements answers all 6 quota questions directly."""
+        # 1. What plan does this organization have?
+        plan = QuotaService.get_plan(self.org)
+        self.assertEqual(plan["tier"], PLAN_STARTER)
+
+        # 2. Is this feature enabled?
+        self.assertFalse(QuotaService.is_feature_enabled(self.org, "audit_trail"))
+        self.assertTrue(QuotaService.is_feature_enabled(self.org, "basic_telemetry"))
+
+        # 3. How many rules may this organization have?
+        self.assertEqual(QuotaService.get_max_rules(self.org), 2)
+
+        # 4. How many monthly events has this organization consumed?
+        self.assertEqual(QuotaService.get_monthly_events_count(self.org), 0)
+
+        # 5. Is another rule/workflow allowed?
+        allowed_rule, violation_rule = QuotaService.is_rule_allowed(self.org)
+        self.assertTrue(allowed_rule)
+        self.assertIsNone(violation_rule)
+
+        # 6. Is another event allowed?
+        allowed_evt, violation_evt = QuotaService.is_event_allowed(self.org)
+        self.assertTrue(allowed_evt)
+        self.assertIsNone(violation_evt)
 
 
 if __name__ == "__main__":

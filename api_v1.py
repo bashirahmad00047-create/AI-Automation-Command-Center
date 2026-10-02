@@ -39,7 +39,17 @@ from auth import (
     require_role,
 )
 from database import db
+from entitlements import (
+    PlanEntitlements,
+    QuotaService,
+    check_ai_provider_entitlement,
+    check_feature_entitlement,
+    check_resource_quota,
+    get_org_entitlements,
+    require_feature,
+)
 from limiter import limiter, rate_limit
+from plans import PLAN_DEFINITIONS, PLAN_FREE, get_plan, list_plans
 from models import (
     ApiKey,
     AuditLog,
@@ -99,13 +109,19 @@ def auth_register():
         return jsonify({"error": "An account with this email already exists.", "code": "CONFLICT"}), 409
 
     try:
-        # Create organization
+        # Create organization defaulting to Free plan
         slug = f"{email.split('@')[0]}-{generate_uuid()[:6]}".lower()
+        requested_plan = (data.get("plan_tier") or data.get("plan") or PLAN_FREE).strip().lower()
+        if requested_plan not in PLAN_DEFINITIONS:
+            requested_plan = PLAN_FREE
+        plan_spec = get_plan(requested_plan)
         org = Organization(
             id=generate_uuid("org"),
             name=org_name,
             slug=slug,
-            plan_tier="enterprise",
+            plan_tier=requested_plan,
+            max_rules=plan_spec["quotas"]["max_rules"],
+            max_monthly_events=plan_spec["quotas"]["max_monthly_events"],
             is_active=True
         )
         db.session.add(org)
@@ -216,6 +232,10 @@ def auth_logout():
         log_audit_event("auth.logout", "user", user.id)
     session.clear()
     session["logged_out"] = True
+    g.current_user = None
+    g.current_org = None
+    g.api_key = None
+    g.is_api_key_auth = False
     return jsonify({"success": True, "message": "Successfully logged out."})
 
 
@@ -307,6 +327,14 @@ def create_api_key():
     name = data.get("name", "").strip() or "Programmatic Key"
     permissions = data.get("permissions", "*")
     org = g.current_org
+    allowed, violation = check_resource_quota(org, "api_keys", delta=1)
+    if not allowed:
+        return jsonify({
+            "error": f"API key limit reached ({violation['limit']} maximum on {violation['plan_tier'].upper()} plan). Please revoke an existing key or upgrade.",
+            "code": "QUOTA_EXCEEDED",
+            "quota": violation
+        }), 403
+
     user = g.current_user
     storage = get_storage()
 
@@ -397,6 +425,14 @@ def create_rule():
         return jsonify({"error": "Rule name is required.", "code": "VALIDATION_ERROR"}), 400
 
     org = g.current_org
+    allowed, violation = check_resource_quota(org, "rules", delta=1)
+    if not allowed:
+        return jsonify({
+            "error": f"Workflow rule limit reached. Current usage {violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan. Please upgrade to create more workflows.",
+            "code": "PLAN_LIMIT_EXCEEDED",
+            "quota": violation
+        }), 403
+
     storage = get_storage()
 
     rule_id = storage.save_rule(data, organization_id=org.id)
@@ -467,6 +503,14 @@ def toggle_rule(rule_id: str):
 @require_role(["owner", "admin", "operator"])
 def duplicate_rule(rule_id: str):
     org = g.current_org
+    allowed, violation = check_resource_quota(org, "rules", delta=1)
+    if not allowed:
+        return jsonify({
+            "error": f"Workflow rule limit reached. Current usage {violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan. Please upgrade to duplicate workflows.",
+            "code": "PLAN_LIMIT_EXCEEDED",
+            "quota": violation
+        }), 403
+
     storage = get_storage()
     duplicated = storage.duplicate_rule(rule_id, organization_id=org.id)
     if not duplicated:
@@ -503,6 +547,22 @@ def run_rule(rule_id: str):
     return jsonify(result)
 
 
+@api_v1.route("/rules/export", methods=["GET"])
+@api_v1.route("/workflows/export", methods=["GET"])
+@require_auth
+@require_feature("export_rules")
+def export_rules():
+    org = g.current_org
+    storage = get_storage()
+    rules = storage.get_rules(organization_id=org.id)
+    return jsonify({
+        "success": True,
+        "rules": rules,
+        "count": len(rules),
+        "exported_at": datetime.datetime.utcnow().isoformat()
+    })
+
+
 # ==========================================
 # Inbound Webhooks Gateway
 # ==========================================
@@ -527,6 +587,14 @@ def create_webhook():
     target_rule_id = data.get("target_rule_id")
     secret_token = data.get("secret_token")
     org = g.current_org
+    allowed, violation = check_resource_quota(org, "webhooks", delta=1)
+    if not allowed:
+        return jsonify({
+            "error": f"Webhook endpoint limit reached ({violation['limit']} maximum on {violation['plan_tier'].upper()} plan). Please delete an existing webhook or upgrade.",
+            "code": "QUOTA_EXCEEDED",
+            "quota": violation
+        }), 403
+
     storage = get_storage()
 
     endpoint = storage.create_webhook_endpoint(
@@ -603,6 +671,17 @@ def incoming_webhook_receiver(endpoint_token: str):
         if not hmac.compare_digest(signature, expected_sig):
             return jsonify({"error": "HMAC signature mismatch.", "code": "UNAUTHORIZED"}), 401
 
+    # 3. Monthly Event Quota Check
+    webhook_org = db.session.get(Organization, endpoint.organization_id)
+    if webhook_org:
+        quota_ok, violation = check_resource_quota(webhook_org, "monthly_events", delta=1)
+        if not quota_ok:
+            return jsonify({
+                "error": f"Monthly event quota exceeded for organization ({violation['limit']} events on {violation['plan_tier'].upper()} plan).",
+                "code": "QUOTA_EXCEEDED",
+                "quota": violation
+            }), 429
+
     payload = request.get_json(silent=True) or {}
     endpoint.request_count += 1
     endpoint.last_received_at = datetime.datetime.utcnow()
@@ -622,6 +701,9 @@ def incoming_webhook_receiver(endpoint_token: str):
         dry_run=False,
         organization_id=endpoint.organization_id
     )
+
+    if webhook_org:
+        QuotaService.record_event(webhook_org, event_name, payload, source=f"webhook_{endpoint.name}")
 
     return jsonify({
         "received": True,
@@ -650,6 +732,15 @@ def dispatch_event():
     source = data.get("source", "api_dispatch")
     dry_run = bool(data.get("dry_run", False))
     org = g.current_org
+
+    if not dry_run and org:
+        quota_ok, violation = check_resource_quota(org, "monthly_events", delta=1)
+        if not quota_ok:
+            return jsonify({
+                "error": f"Monthly event quota exceeded ({violation['limit']:,} events on {violation['plan_tier'].upper()} plan). Ingestion paused until next billing cycle or upgrade.",
+                "code": "QUOTA_EXCEEDED",
+                "quota": violation
+            }), 429
 
     # If this is a lead ingestion event, automatically qualify and persist the CRM Lead
     if (event_name == "lead.created" or "lead" in event_name) and not dry_run:
@@ -693,6 +784,9 @@ def dispatch_event():
         dry_run=dry_run,
         organization_id=org.id
     )
+
+    if not dry_run and org:
+        QuotaService.record_event(org, event_name, payload, source=source)
 
     log_audit_event("event.dispatch", "event", event_name, {"event": event_name, "dry_run": dry_run})
 
@@ -936,6 +1030,14 @@ def list_templates():
 @require_role(["owner", "admin", "operator"])
 def install_template(template_id: str):
     org = g.current_org
+    allowed, violation = check_resource_quota(org, "rules", delta=1)
+    if not allowed:
+        return jsonify({
+            "error": f"Workflow rule limit reached. Current usage {violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan. Please upgrade to install new templates.",
+            "code": "PLAN_LIMIT_EXCEEDED",
+            "quota": violation
+        }), 403
+
     storage = get_storage()
 
     selected = next((p for p in PRESET_BLUEPRINTS if p["id"] == template_id), None)
@@ -1011,6 +1113,7 @@ def resolve_alert(alert_id: int):
 
 @api_v1.route("/audit-trail", methods=["GET"])
 @require_role(["owner", "admin"])
+@require_feature("audit_trail")
 def get_audit_trail():
     org = g.current_org
     limit = int(request.args.get("limit", 50))
@@ -1089,12 +1192,24 @@ def list_ai_providers():
     return jsonify({"providers": manager.list_providers()})
 
 
+@api_v1.route("/ai/provider", methods=["POST"])
 @api_v1.route("/ai/providers/switch", methods=["POST"])
 @require_role(["owner", "admin"])
 def switch_ai_provider():
     data = request.get_json(silent=True) or {}
     provider_name = data.get("provider", "local_deterministic")
     api_key = data.get("api_key")
+
+    org = g.current_org
+    allowed, required_tier = check_ai_provider_entitlement(org, provider_name)
+    if not allowed:
+        return jsonify({
+            "error": f"The '{provider_name}' AI model requires a {required_tier.capitalize()} or Enterprise plan. Your current plan is {org.plan_tier.upper()}.",
+            "code": "FEATURE_NOT_ENTITLED",
+            "provider": provider_name,
+            "current_plan": org.plan_tier,
+            "required_plan": required_tier
+        }), 403
 
     manager = AIProviderManager.get_instance()
     success = manager.set_active_provider(provider_name, api_key=api_key)
@@ -1107,4 +1222,59 @@ def switch_ai_provider():
         "success": True,
         "message": f"Active AI Provider updated to '{provider_name}'.",
         "providers": manager.list_providers()
+    })
+
+
+# ==========================================
+# Plan Entitlement & Quotas Endpoints
+# ==========================================
+
+@api_v1.route("/plans", methods=["GET"])
+def get_available_plans():
+    """Lists all available plan specifications."""
+    return jsonify({"plans": list_plans(), "count": len(list_plans())})
+
+
+@api_v1.route("/plan", methods=["GET"])
+@api_v1.route("/quotas", methods=["GET"])
+@require_auth
+def get_current_plan_and_quotas():
+    """Returns live quota usage, remaining capacity, and plan entitlements for the organization."""
+    org = g.current_org
+    return jsonify({
+        "success": True,
+        "entitlements": get_org_entitlements(org)
+    })
+
+
+@api_v1.route("/plan/upgrade", methods=["POST"])
+@api_v1.route("/organizations/plan", methods=["POST"])
+@require_role(["owner", "admin"])
+def upgrade_plan():
+    """Upgrades or updates the workspace plan tier and syncs quota capacity."""
+    data = request.get_json(silent=True) or {}
+    target_tier = (data.get("plan_tier") or data.get("tier") or "").strip().lower()
+
+    if target_tier not in PLAN_DEFINITIONS:
+        return jsonify({
+            "error": f"Invalid plan tier '{target_tier}'. Valid tiers: {list(PLAN_DEFINITIONS.keys())}",
+            "code": "VALIDATION_ERROR"
+        }), 400
+
+    org = g.current_org
+    old_tier = org.plan_tier
+    plan_spec = get_plan(target_tier)
+
+    org.plan_tier = target_tier
+    org.max_rules = plan_spec["quotas"]["max_rules"]
+    org.max_monthly_events = plan_spec["quotas"]["max_monthly_events"]
+    db.session.commit()
+
+    log_audit_event("plan.upgrade", "organization", org.id, {"from_tier": old_tier, "to_tier": target_tier})
+
+    return jsonify({
+        "success": True,
+        "message": f"Successfully updated workspace plan to '{plan_spec['name']}'.",
+        "organization": org.to_dict(),
+        "entitlements": get_org_entitlements(org)
     })

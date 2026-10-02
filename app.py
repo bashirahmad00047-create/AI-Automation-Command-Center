@@ -16,13 +16,14 @@ import datetime
 import json
 import os
 from typing import Any, Dict, Optional
-from flask import Flask, Response, jsonify, render_template, request, session
+from flask import Flask, Response, g, jsonify, render_template, request, session
 
 from api_v1 import api_v1
 from auth import require_auth
 from automation_engine import AutomationEngine
 from config import config_by_name
 from database import db
+from entitlements import QuotaService, check_feature_entitlement, check_resource_quota
 from models import Membership, Organization, User
 from presets import PRESET_BLUEPRINTS
 from storage import Storage
@@ -191,7 +192,17 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         if not name or not name.strip():
             return jsonify({"error": "Rule name is required."}), 400
 
-        rule_id = st.save_rule(rule_data)
+        org = getattr(g, "current_org", None)
+        if org:
+            allowed, violation = check_resource_quota(org, "rules", delta=1)
+            if not allowed:
+                return jsonify({
+                    "error": f"Workflow rule limit reached. Current usage {violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan. Please upgrade to create more workflows.",
+                    "code": "PLAN_LIMIT_EXCEEDED",
+                    "quota": violation
+                }), 403
+
+        rule_id = st.save_rule(rule_data, organization_id=org.id if org else None)
         saved_rule = st.get_rule(rule_id)
         return jsonify({
             "success": True,
@@ -265,12 +276,26 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         source = data.get("source", "api_dispatch")
         dry_run = bool(data.get("dry_run", False))
 
+        org = getattr(g, "current_org", None)
+        if not dry_run and org:
+            quota_ok, violation = check_resource_quota(org, "monthly_events", delta=1)
+            if not quota_ok:
+                return jsonify({
+                    "error": f"Monthly event quota exceeded ({violation['limit']:,} events on {violation['plan_tier'].upper()} plan). Ingestion paused until next billing cycle or upgrade.",
+                    "code": "QUOTA_EXCEEDED",
+                    "quota": violation
+                }), 429
+
         result = eng.ingest_event(
             event_name=event_name,
             payload=payload,
             source=source,
             dry_run=dry_run
         )
+
+        if not dry_run and org:
+            QuotaService.record_event(org, event_name, payload, source=source)
+
         return jsonify(result)
 
     @application.route("/api/nlp/analyze", methods=["POST"])
@@ -392,12 +417,22 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         if not selected:
             return jsonify({"error": f"Preset '{preset_id}' not found."}), 404
 
+        org = getattr(g, "current_org", None)
+        if org:
+            allowed, violation = check_resource_quota(org, "rules", delta=1)
+            if not allowed:
+                return jsonify({
+                    "error": f"Workflow rule limit reached. Current usage {violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan. Please upgrade to install new templates.",
+                    "code": "PLAN_LIMIT_EXCEEDED",
+                    "quota": violation
+                }), 403
+
         new_rule = dict(selected)
         new_rule["id"] = f"rule-{int(os.times()[4] * 1000)}" if hasattr(os, "times") else f"rule-{os.urandom(4).hex()}"
         new_rule["enabled"] = 1
         new_rule["name"] = f"{selected['name']}"
 
-        rule_id = st.save_rule(new_rule)
+        rule_id = st.save_rule(new_rule, organization_id=org.id if org else None)
         return jsonify({
             "success": True,
             "message": f"Blueprint '{selected['name']}' installed successfully.",
@@ -423,6 +458,18 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/api/export", methods=["GET"])
     @require_auth
     def legacy_export_rules():
+        org = getattr(g, "current_org", None)
+        if org:
+            allowed, required_tier = check_feature_entitlement(org, "export_rules")
+            if not allowed:
+                return jsonify({
+                    "error": f"The 'export_rules' feature is not included in your current plan ({org.plan_tier.upper()}). Please upgrade to {required_tier.capitalize()} to access this capability.",
+                    "code": "FEATURE_NOT_ENTITLED",
+                    "feature": "export_rules",
+                    "current_plan": org.plan_tier,
+                    "required_plan": required_tier
+                }), 403
+
         st = application.config.get("STORAGE_ENGINE")
         rules = st.get_rules() if st else []
         export_payload = {
@@ -444,10 +491,20 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         if not data or "rules" not in data or not isinstance(data["rules"], list):
             return jsonify({"error": "Invalid format. Expected JSON with 'rules' array."}), 400
 
+        org = getattr(g, "current_org", None)
+        if org:
+            allowed, violation = check_resource_quota(org, "rules", delta=len(data["rules"]))
+            if not allowed:
+                return jsonify({
+                    "error": f"Importing {len(data['rules'])} rules exceeds your quota limit ({violation['current']}/{violation['limit']} on {violation['plan_tier'].upper()} plan).",
+                    "code": "PLAN_LIMIT_EXCEEDED",
+                    "quota": violation
+                }), 403
+
         imported_count = 0
         for r in data["rules"]:
             if isinstance(r, dict) and "name" in r:
-                st.save_rule(r)
+                st.save_rule(r, organization_id=org.id if org else None)
                 imported_count += 1
 
         return jsonify({

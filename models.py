@@ -39,7 +39,7 @@ class Organization(db.Model):
     id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("org"))
     name = db.Column(db.String(128), nullable=False)
     slug = db.Column(db.String(128), unique=True, nullable=False, index=True)
-    plan_tier = db.Column(db.String(32), nullable=False, default="enterprise")  # starter, pro, enterprise
+    plan_tier = db.Column(db.String(32), nullable=False, default="free")  # free, starter, pro, enterprise
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     max_rules = db.Column(db.Integer, nullable=False, default=100)
     max_monthly_events = db.Column(db.Integer, nullable=False, default=500000)

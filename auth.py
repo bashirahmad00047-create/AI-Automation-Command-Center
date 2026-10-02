@@ -46,9 +46,14 @@ def verify_api_key(token: str) -> Optional[Tuple[ApiKey, Organization, Optional[
 
 def get_current_user() -> Optional[User]:
     """Retrieves current authenticated user from session or request context."""
-    if hasattr(g, "current_user") and g.current_user is not None:
-        return g.current_user
     user_id = session.get("user_id")
+    if hasattr(g, "current_user") and g.current_user is not None:
+        if user_id and g.current_user.id == user_id:
+            return g.current_user
+        elif not user_id and getattr(g, "is_api_key_auth", False):
+            return g.current_user
+        g.current_user = None
+
     if user_id:
         user = db.session.get(User, user_id)
         if user and user.is_active:
@@ -59,9 +64,6 @@ def get_current_user() -> Optional[User]:
 
 def get_current_org() -> Optional[Organization]:
     """Retrieves current active organization for the request."""
-    if hasattr(g, "current_org") and g.current_org is not None:
-        return g.current_org
-
     # 1. If set by API Key auth
     if hasattr(g, "api_key") and g.api_key:
         org = db.session.get(Organization, g.api_key.organization_id)
@@ -71,6 +73,13 @@ def get_current_org() -> Optional[Organization]:
 
     # 2. From session
     org_id = session.get("active_org_id") or session.get("org_id")
+    if hasattr(g, "current_org") and g.current_org is not None:
+        if org_id and g.current_org.id == org_id:
+            return g.current_org
+        elif not org_id and getattr(g, "is_api_key_auth", False):
+            return g.current_org
+        g.current_org = None
+
     if org_id:
         org = db.session.get(Organization, org_id)
         if org and org.is_active:

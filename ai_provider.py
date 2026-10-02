@@ -199,15 +199,16 @@ class AIProviderManager:
         return self._providers.get(provider_name, self._providers["local_deterministic"])
 
     def set_active_provider(self, name: str, api_key: Optional[str] = None) -> bool:
-        if name == "gemini":
+        norm_name = "gemini" if name in ("gemini", "google_gemini") else name
+        if norm_name == "gemini":
             self._providers["gemini"] = GeminiAIProvider(api_key=api_key)
             self._active_provider_name = "gemini"
             return True
-        elif name == "openai":
+        elif norm_name == "openai":
             self._providers["openai"] = OpenAIAIProvider(api_key=api_key)
             self._active_provider_name = "openai"
             return True
-        elif name == "local_deterministic":
+        elif norm_name == "local_deterministic":
             self._active_provider_name = "local_deterministic"
             return True
         return False
