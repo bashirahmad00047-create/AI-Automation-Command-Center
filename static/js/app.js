@@ -1529,6 +1529,8 @@ async function revokeApiKey(keyId) {
 
 async function loadTeamAndAudits() {
     try {
+        loadBillingStatus();
+
         const memRes = await fetch('/api/v1/organizations/members');
         if (memRes.ok) {
             const data = await memRes.json();
@@ -1623,6 +1625,127 @@ async function submitAddMember(e) {
         }
     } catch (err) {
         showToast(`Add member error: ${err.message}`, 'error');
+    }
+}
+
+// ==========================================
+// STRIPE BILLING & SUBSCRIPTIONS (Phase 4)
+// ==========================================
+
+let currentBillingInterval = 'month';
+
+async function loadBillingStatus() {
+    try {
+        const res = await fetch('/api/v1/billing/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const planBadge = document.getElementById('orgPlanTier');
+        const billingBadge = document.getElementById('billingBadge');
+        const maxRules = document.getElementById('orgMaxRules');
+        const maxEvents = document.getElementById('orgMaxEvents');
+        const slug = document.getElementById('orgSlug');
+        const billingPlanName = document.getElementById('billingPlanName');
+        const billingPeriodInfo = document.getElementById('billingPeriodInfo');
+        const billingStatusBadge = document.getElementById('billingStatusBadge');
+
+        const tierName = (data.plan_tier || 'free').toUpperCase();
+        if (planBadge) planBadge.textContent = `${tierName} TIER`;
+        if (slug && data.organization_slug) slug.textContent = `slug: ${data.organization_slug}`;
+        if (maxRules && data.quotas) maxRules.textContent = `${data.quotas.max_rules} Rules`;
+        if (maxEvents && data.quotas) maxEvents.textContent = Number(data.quotas.max_monthly_events).toLocaleString();
+
+        const sub = data.subscription || {};
+        const subStatus = (sub.status || 'active').toUpperCase();
+        if (billingBadge) billingBadge.textContent = subStatus;
+        if (billingStatusBadge) {
+            billingStatusBadge.textContent = `${subStatus} SUBSCRIPTION`;
+            billingStatusBadge.className = `status-badge ${sub.status === 'active' ? 'active' : 'warn'}`;
+        }
+        if (billingPlanName) {
+            billingPlanName.textContent = `Current Plan: ${tierName} Tier`;
+        }
+        if (billingPeriodInfo) {
+            const interval = sub.billing_interval || 'monthly';
+            const gateway = data.is_stripe_configured ? 'Stripe Gateway Connected' : 'Local / Free Tier Mode';
+            billingPeriodInfo.textContent = `Billing Cycle: ${interval.toUpperCase()} | ${gateway}`;
+        }
+    } catch (e) {
+        console.error('Failed to load billing status:', e);
+    }
+}
+
+function openUpgradePlanModal() {
+    const modal = document.getElementById('upgradePlanModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeUpgradePlanModal() {
+    const modal = document.getElementById('upgradePlanModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function setBillingInterval(interval) {
+    currentBillingInterval = interval;
+    const btnMonth = document.getElementById('btnIntervalMonth');
+    const btnYear = document.getElementById('btnIntervalYear');
+    const priceStarter = document.getElementById('priceStarter');
+    const pricePro = document.getElementById('pricePro');
+    const priceEnterprise = document.getElementById('priceEnterprise');
+
+    if (interval === 'year') {
+        if (btnYear) { btnYear.className = 'hud-btn primary'; }
+        if (btnMonth) { btnMonth.className = 'hud-btn outline'; }
+        if (priceStarter) priceStarter.innerHTML = '$290<span style="font-size: 13px; color: var(--text-dim, #888);">/yr</span>';
+        if (pricePro) pricePro.innerHTML = '$990<span style="font-size: 13px; color: var(--text-dim, #888);">/yr</span>';
+        if (priceEnterprise) priceEnterprise.innerHTML = '$4,990<span style="font-size: 13px; color: var(--text-dim, #888);">/yr</span>';
+    } else {
+        if (btnMonth) { btnMonth.className = 'hud-btn primary'; }
+        if (btnYear) { btnYear.className = 'hud-btn outline'; }
+        if (priceStarter) priceStarter.innerHTML = '$29<span style="font-size: 13px; color: var(--text-dim, #888);">/mo</span>';
+        if (pricePro) pricePro.innerHTML = '$99<span style="font-size: 13px; color: var(--text-dim, #888);">/mo</span>';
+        if (priceEnterprise) priceEnterprise.innerHTML = '$499<span style="font-size: 13px; color: var(--text-dim, #888);">/mo</span>';
+    }
+}
+
+async function selectPlanForCheckout(planTier) {
+    try {
+        showToast(`Starting Stripe Checkout for ${planTier.toUpperCase()} plan...`, 'info');
+        const res = await fetch('/api/v1/billing/checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plan_tier: planTier,
+                interval: currentBillingInterval
+            })
+        });
+        const data = await res.json();
+        if (res.ok && data.checkout_url) {
+            window.location.href = data.checkout_url;
+        } else {
+            showToast(data.error || 'Failed to start Stripe checkout.', 'error');
+        }
+    } catch (err) {
+        showToast(`Checkout error: ${err.message}`, 'error');
+    }
+}
+
+async function openCustomerPortal() {
+    try {
+        showToast('Accessing Stripe Customer Portal...', 'info');
+        const res = await fetch('/api/v1/billing/portal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (res.ok && data.portal_url) {
+            window.location.href = data.portal_url;
+        } else {
+            showToast(data.error || 'Could not open billing portal.', 'error');
+        }
+    } catch (err) {
+        showToast(`Billing portal error: ${err.message}`, 'error');
     }
 }
 

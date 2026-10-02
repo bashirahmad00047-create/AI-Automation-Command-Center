@@ -22,7 +22,10 @@ import datetime
 import hashlib
 import hmac
 import json
+import logging
 import os
+import re
+import secrets
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from flask import Blueprint, current_app, g, jsonify, request, session
@@ -59,6 +62,9 @@ from models import (
     Lead,
     Membership,
     Organization,
+    OrganizationUsage,
+    StripeWebhookEvent,
+    Subscription,
     SystemEvent,
     User,
     WebhookEndpoint,
@@ -68,8 +74,21 @@ from models import (
     generate_uuid,
 )
 from presets import PRESET_BLUEPRINTS
+from billing_service import (
+    BillingError,
+    InvalidPlanError,
+    StripeNotConfiguredError,
+    create_checkout_session,
+    create_customer_portal_session,
+    get_billing_status,
+    is_stripe_configured,
+    process_webhook_event,
+    sync_organization_subscription,
+    verify_webhook_signature,
+)
 
 api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
+logger = logging.getLogger("opsflow.api")
 
 
 def get_engine():
@@ -84,9 +103,57 @@ def get_storage():
     return current_app.config.get("STORAGE_ENGINE")
 
 
-# ==========================================
-# Authentication & Identity Endpoints
-# ==========================================
+def normalize_slug(text: str) -> str:
+    """Converts organization or project name into a clean, URL-safe slug."""
+    text = (text or "").lower().strip()
+    text = re.sub(r'[^a-z0-9\-]+', '-', text)
+    text = re.sub(r'\-+', '-', text)
+    return text.strip('-')
+
+
+@api_v1.route("/auth/check-slug", methods=["GET"])
+def check_slug_availability():
+    """Checks if a workspace slug is available for self-service tenant registration."""
+    raw_slug = request.args.get("slug", "").strip().lower()
+    raw_name = request.args.get("name", "").strip()
+
+    if not raw_slug and raw_name:
+        raw_slug = normalize_slug(raw_name)
+
+    if not raw_slug:
+        return jsonify({"available": False, "error": "Slug or name parameter is required.", "code": "VALIDATION_ERROR"}), 400
+
+    normalized = normalize_slug(raw_slug)
+    if len(normalized) < 3 or len(normalized) > 64:
+        return jsonify({
+            "available": False,
+            "slug": normalized,
+            "error": "Slug must be between 3 and 64 characters.",
+            "code": "VALIDATION_ERROR"
+        }), 200
+
+    if not re.match(r'^[a-z0-9][a-z0-9\-]*[a-z0-9]$', normalized):
+        return jsonify({
+            "available": False,
+            "slug": normalized,
+            "error": "Slug may only contain lowercase letters, numbers, and hyphens.",
+            "code": "VALIDATION_ERROR"
+        }), 200
+
+    existing = Organization.query.filter_by(slug=normalized).first()
+    if existing:
+        return jsonify({
+            "available": False,
+            "slug": normalized,
+            "reason": "Already in use"
+        }), 200
+
+    return jsonify({
+        "available": True,
+        "slug": normalized,
+        "reason": "Available"
+    }), 200
+
 
 @api_v1.route("/auth/register", methods=["POST"])
 @rate_limit(limit=5, window=60, config_key="REGISTER_RATE_LIMIT", message="Too many registration attempts. Please try again later.")
@@ -95,7 +162,9 @@ def auth_register():
     email = data.get("email", "").strip().lower()
     password = data.get("password", "").strip()
     full_name = data.get("full_name", "").strip()
-    org_name = data.get("org_name", "").strip() or f"{full_name}'s Workspace"
+    org_name = data.get("org_name", "").strip() or data.get("workspace_name", "").strip() or f"{full_name}'s Workspace"
+    raw_slug = (data.get("slug") or data.get("workspace_slug") or "").strip().lower()
+    install_starter_blueprints = data.get("install_starter_blueprints", True)
 
     if not email or "@" not in email:
         return jsonify({"error": "A valid email address is required.", "code": "VALIDATION_ERROR"}), 400
@@ -108,9 +177,27 @@ def auth_register():
     if existing_user:
         return jsonify({"error": "An account with this email already exists.", "code": "CONFLICT"}), 409
 
+    # Determine and validate workspace slug
+    if raw_slug:
+        slug = normalize_slug(raw_slug)
+        if len(slug) < 3 or len(slug) > 64:
+            return jsonify({"error": "Workspace slug must be between 3 and 64 characters.", "code": "VALIDATION_ERROR"}), 400
+        if not re.match(r'^[a-z0-9][a-z0-9\-]*[a-z0-9]$', slug):
+            return jsonify({"error": "Workspace slug may only contain lowercase letters, numbers, and hyphens.", "code": "VALIDATION_ERROR"}), 400
+        existing_org = Organization.query.filter_by(slug=slug).first()
+        if existing_org:
+            return jsonify({"error": "This workspace URL slug is already taken.", "code": "SLUG_ALREADY_EXISTS"}), 409
+    else:
+        base_slug = normalize_slug(org_name) if org_name else normalize_slug(email.split('@')[0])
+        if len(base_slug) < 3:
+            base_slug = f"org-{base_slug}"
+        candidate = base_slug[:48]
+        if Organization.query.filter_by(slug=candidate).first():
+            candidate = f"{candidate[:40]}-{generate_uuid()[:6]}".lower()
+        slug = candidate
+
     try:
         # Create organization defaulting to Free plan
-        slug = f"{email.split('@')[0]}-{generate_uuid()[:6]}".lower()
         requested_plan = (data.get("plan_tier") or data.get("plan") or PLAN_FREE).strip().lower()
         if requested_plan not in PLAN_DEFINITIONS:
             requested_plan = PLAN_FREE
@@ -160,22 +247,59 @@ def auth_register():
         )
         db.session.add(api_key)
 
+        # Initialize OrganizationUsage for the current billing period
+        current_period = datetime.datetime.utcnow().strftime("%Y-%m")
+        initial_usage = OrganizationUsage(
+            id=generate_uuid("usg"),
+            organization_id=org.id,
+            period=current_period,
+            event_count=0
+        )
+        db.session.add(initial_usage)
+
         db.session.commit()
 
-        # Log audit trail
-        log_audit_event("auth.register", "user", user.id, {"email": email, "organization": org.name})
+        # Optional turnkey onboarding starter blueprints installation
+        starter_blueprints = []
+        if install_starter_blueprints:
+            try:
+                storage = get_storage()
+                # Select 2 foundational templates (CPU sentinel & Lead qualification)
+                starter_defs = [
+                    bp for bp in PRESET_BLUEPRINTS
+                    if bp.get("id") in ("template-ai-lead-qualification", "template-critical-incident")
+                ][:2]
+                for bp in starter_defs:
+                    new_rule = dict(bp)
+                    new_rule["id"] = f"wf-{int(time.time() * 1000)}-{generate_uuid()[:4]}"
+                    new_rule["organization_id"] = org.id
+                    new_rule["enabled"] = 1
+                    rule_id = storage.save_rule(new_rule, organization_id=org.id)
+                    starter_blueprints.append({"id": rule_id, "name": bp["name"], "category": bp.get("category")})
+            except Exception as _bp_err:
+                current_app.logger.warning(f"Onboarding starter blueprints installation note: {_bp_err}")
 
-        # Set session
+        # Log audit trail
+        log_audit_event("auth.register", "user", user.id, {
+            "email": email,
+            "organization_id": org.id,
+            "organization_name": org.name,
+            "slug": org.slug,
+            "plan_tier": org.plan_tier
+        })
+
+        # Set authenticated session
         session["user_id"] = user.id
         session["active_org_id"] = org.id
 
         return jsonify({
             "success": True,
-            "message": "User and enterprise organization created successfully.",
+            "message": "User account and tenant workspace registered successfully.",
             "user": user.to_dict(),
             "organization": org.to_dict(),
             "role": "owner",
-            "initial_api_key": full_key
+            "initial_api_key": full_key,
+            "starter_blueprints": starter_blueprints
         }), 201
 
     except Exception as exc:
@@ -303,6 +427,231 @@ def switch_organization():
         "message": f"Switched to workspace: {target_org.name}",
         "organization": target_org.to_dict()
     })
+
+
+# ==========================================
+# Team & Workspace Access Management
+# ==========================================
+
+@api_v1.route("/organizations/current", methods=["GET"])
+@require_auth
+def get_current_organization():
+    org = g.current_org
+    if not org:
+        return jsonify({"error": "No active organization.", "code": "NOT_FOUND"}), 404
+    entitlements = get_org_entitlements(org)
+    return jsonify({
+        "organization": org.to_dict(),
+        "entitlements": entitlements
+    }), 200
+
+
+@api_v1.route("/organizations/current", methods=["PUT", "PATCH"])
+@require_role(["owner", "admin"])
+def update_current_organization():
+    org = g.current_org
+    if not org:
+        return jsonify({"error": "No active organization.", "code": "NOT_FOUND"}), 404
+    data = request.get_json(silent=True) or {}
+    new_name = data.get("name")
+    if new_name and new_name.strip():
+        org.name = new_name.strip()
+        db.session.commit()
+        log_audit_event("organization.update", "organization", org.id, {"name": org.name})
+    return jsonify({"success": True, "organization": org.to_dict()}), 200
+
+
+@api_v1.route("/team/members", methods=["GET"])
+@api_v1.route("/organizations/members", methods=["GET"])
+@require_auth
+def list_team_members():
+    org = g.current_org
+    if not org:
+        return jsonify({"error": "No active organization.", "code": "NOT_FOUND"}), 404
+    plan_def = QuotaService.get_plan(org)
+    max_seats = plan_def["quotas"]["max_team_members"]
+
+    memberships = Membership.query.filter_by(organization_id=org.id).all()
+    member_list = []
+    for m in memberships:
+        u = m.user
+        member_list.append({
+            "membership_id": m.id,
+            "user_id": u.id if u else None,
+            "email": u.email if u else "unknown",
+            "full_name": u.full_name if u else "Invited Member",
+            "role": m.role,
+            "joined_at": m.created_at.strftime("%Y-%m-%d %H:%M:%S") if m.created_at else None,
+            "is_active": u.is_active if u else True
+        })
+
+    current_count = len(memberships)
+    return jsonify({
+        "organization_id": org.id,
+        "organization_name": org.name,
+        "plan_tier": org.plan_tier,
+        "members": member_list,
+        "seats": {
+            "current": current_count,
+            "limit": max_seats,
+            "remaining": max(0, max_seats - current_count),
+            "is_exceeded": current_count >= max_seats
+        },
+        "count": current_count
+    }), 200
+
+
+@api_v1.route("/team/invite", methods=["POST"])
+@api_v1.route("/organizations/members", methods=["POST"])
+@require_role(["owner", "admin"])
+def invite_team_member():
+    org = g.current_org
+    data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
+    email = data.get("email", "").strip().lower()
+    role = data.get("role", "operator").strip().lower()
+    full_name = data.get("full_name", "").strip() or email.split("@")[0].title()
+
+    if not email or "@" not in email:
+        return jsonify({"error": "A valid email address is required.", "code": "VALIDATION_ERROR"}), 400
+
+    if role not in ("admin", "operator", "viewer"):
+        return jsonify({"error": "Role must be 'admin', 'operator', or 'viewer'.", "code": "VALIDATION_ERROR"}), 400
+
+    # Enforce team seats quota
+    allowed, violation = check_resource_quota(org, "team_members", delta=1)
+    if not allowed:
+        return jsonify({
+            "error": f"Team member seat limit reached ({violation.get('limit')} maximum on {violation.get('plan_tier', 'FREE').upper()} plan). Please upgrade your plan.",
+            "code": "QUOTA_EXCEEDED",
+            "resource": "team_members",
+            "quota": violation
+        }), 403
+
+    # Check if user already exists
+    user = User.query.filter_by(email=email).first()
+    if user:
+        existing_mem = Membership.query.filter_by(user_id=user.id, organization_id=org.id).first()
+        if existing_mem:
+            return jsonify({
+                "error": f"User '{email}' is already a member of this workspace (role: {existing_mem.role}).",
+                "code": "CONFLICT"
+            }), 409
+    else:
+        user = User(
+            id=generate_uuid("usr"),
+            email=email,
+            full_name=full_name,
+            is_active=True,
+            is_superuser=False
+        )
+        temp_password = secrets.token_urlsafe(16)
+        user.set_password(temp_password)
+        db.session.add(user)
+        db.session.flush()
+
+    membership = Membership(
+        id=generate_uuid("mem"),
+        user_id=user.id,
+        organization_id=org.id,
+        role=role
+    )
+    db.session.add(membership)
+    db.session.commit()
+
+    log_audit_event("team.member_invite", "membership", membership.id, {
+        "email": email,
+        "role": role,
+        "organization_id": org.id
+    })
+
+    return jsonify({
+        "success": True,
+        "message": f"Team member '{email}' invited successfully as '{role}'.",
+        "member": {
+            "membership_id": membership.id,
+            "user_id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": role,
+            "created_at": membership.created_at.strftime("%Y-%m-%d %H:%M:%S") if membership.created_at else None
+        }
+    }), 201
+
+
+@api_v1.route("/team/members/<target_id>", methods=["DELETE"])
+@require_role(["owner", "admin"])
+def remove_team_member(target_id: str):
+    org = g.current_org
+    membership = Membership.query.filter(
+        Membership.organization_id == org.id,
+        (Membership.id == target_id) | (Membership.user_id == target_id)
+    ).first()
+
+    if not membership:
+        return jsonify({"error": "Member not found in this organization.", "code": "NOT_FOUND"}), 404
+
+    # Prevent removing the last owner
+    if membership.role == "owner":
+        owner_count = Membership.query.filter_by(organization_id=org.id, role="owner").count()
+        if owner_count <= 1:
+            return jsonify({
+                "error": "Cannot remove the only owner of the workspace.",
+                "code": "FORBIDDEN"
+            }), 403
+
+    user_email = membership.user.email if membership.user else target_id
+    db.session.delete(membership)
+    db.session.commit()
+
+    log_audit_event("team.member_remove", "membership", target_id, {
+        "email": user_email,
+        "organization_id": org.id
+    })
+
+    return jsonify({
+        "success": True,
+        "message": f"Team member '{user_email}' removed from workspace."
+    }), 200
+
+
+@api_v1.route("/team/members/<target_id>", methods=["PUT", "PATCH"])
+@require_role(["owner", "admin"])
+def update_team_member_role(target_id: str):
+    org = g.current_org
+    membership = Membership.query.filter(
+        Membership.organization_id == org.id,
+        (Membership.id == target_id) | (Membership.user_id == target_id)
+    ).first()
+
+    if not membership:
+        return jsonify({"error": "Member not found in this organization.", "code": "NOT_FOUND"}), 404
+
+    data = request.get_json(silent=True) or {}
+    new_role = data.get("role", "").strip().lower()
+    if new_role not in ("owner", "admin", "operator", "viewer"):
+        return jsonify({"error": "Role must be 'owner', 'admin', 'operator', or 'viewer'.", "code": "VALIDATION_ERROR"}), 400
+
+    current_user_role = get_user_role(g.current_user.id, org.id)
+    if (new_role == "owner" or membership.role == "owner") and current_user_role != "owner":
+        return jsonify({"error": "Only workspace owners can promote or modify owner roles.", "code": "FORBIDDEN"}), 403
+
+    membership.role = new_role
+    db.session.commit()
+
+    log_audit_event("team.role_change", "membership", membership.id, {
+        "email": membership.user.email if membership.user else target_id,
+        "new_role": new_role
+    })
+
+    return jsonify({
+        "success": True,
+        "message": f"Updated member role to '{new_role}'.",
+        "member": {
+            "membership_id": membership.id,
+            "user_id": membership.user_id,
+            "role": new_role
+        }
+    }), 200
 
 
 # ==========================================
@@ -1331,3 +1680,160 @@ def upgrade_plan():
         "organization": org.to_dict(),
         "entitlements": get_org_entitlements(org)
     })
+
+
+# ==========================================
+# Stripe Billing & Subscriptions (Phase 4)
+# ==========================================
+
+@api_v1.route("/billing/status", methods=["GET"])
+@require_auth
+def get_workspace_billing_status():
+    """Returns safe billing and subscription status for the current workspace."""
+    org = g.current_org
+    status = get_billing_status(org)
+    status["quotas"] = {
+        "max_rules": QuotaService.get_max_rules(org),
+        "current_rules": QuotaService.get_rules_count(org),
+        "max_monthly_events": QuotaService.get_max_monthly_events(org),
+        "current_monthly_events": QuotaService.get_monthly_events_count(org),
+    }
+    status["entitlements"] = get_org_entitlements(org)
+    return jsonify(status), 200
+
+
+@api_v1.route("/billing/plans", methods=["GET"])
+def get_billing_plans():
+    """Returns all available plan specifications and pricing tiers."""
+    plans = list_plans()
+    return jsonify({
+        "success": True,
+        "plans": plans,
+        "is_stripe_configured": is_stripe_configured(),
+        "count": len(plans)
+    }), 200
+
+
+@api_v1.route("/billing/checkout", methods=["POST"])
+@require_role(["owner", "admin"])
+@rate_limit(limit=10, window=60, message="Too many checkout session requests.")
+def create_billing_checkout():
+    """Creates a Stripe Checkout Session to upgrade or subscribe the workspace."""
+    org = g.current_org
+    user = g.current_user
+    data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
+
+    target_tier = (data.get("plan_tier") or data.get("tier") or "").strip().lower()
+    interval = (data.get("interval") or "month").strip().lower()
+    success_url = data.get("success_url")
+    cancel_url = data.get("cancel_url")
+
+    try:
+        session_info = create_checkout_session(
+            org=org,
+            user=user,
+            plan_tier=target_tier,
+            interval=interval,
+            success_url=success_url,
+            cancel_url=cancel_url
+        )
+        return jsonify({
+            "success": True,
+            "session_id": session_info["session_id"],
+            "checkout_url": session_info["checkout_url"],
+            "plan_tier": session_info["plan_tier"],
+            "interval": session_info["interval"],
+        }), 200
+    except BillingError as be:
+        return jsonify({"error": be.message, "code": be.code}), be.status_code
+    except Exception as e:
+        logger.error(f"Unexpected error creating checkout session: {e}")
+        return jsonify({"error": "Unable to initiate checkout session.", "code": "CHECKOUT_FAILED"}), 500
+
+
+@api_v1.route("/billing/portal", methods=["POST"])
+@require_role(["owner", "admin"])
+@rate_limit(limit=10, window=60, message="Too many billing portal requests.")
+def create_billing_portal():
+    """Creates a Stripe Customer Portal session for the current workspace."""
+    org = g.current_org
+    data = request.get_json(silent=True) or {}
+    return_url = data.get("return_url")
+
+    try:
+        portal_info = create_customer_portal_session(org, return_url=return_url)
+        return jsonify({
+            "success": True,
+            "portal_url": portal_info["portal_url"]
+        }), 200
+    except BillingError as be:
+        return jsonify({"error": be.message, "code": be.code}), be.status_code
+    except Exception as e:
+        logger.error(f"Unexpected error creating customer portal: {e}")
+        return jsonify({"error": "Unable to open billing portal.", "code": "PORTAL_FAILED"}), 500
+
+
+@api_v1.route("/billing/cancel", methods=["POST"])
+@require_role(["owner", "admin"])
+def cancel_subscription():
+    """Downgrades workspace to Free tier or requests cancellation."""
+    org = g.current_org
+    old_tier = org.plan_tier
+
+    if org.plan_tier == PLAN_FREE:
+        return jsonify({
+            "success": True,
+            "message": "Workspace is already on the Free tier.",
+            "plan_tier": PLAN_FREE
+        }), 200
+
+    sync_organization_subscription(
+        org=org,
+        plan_tier=PLAN_FREE,
+        status="canceled",
+        cancel_at_period_end=False,
+        canceled_at=datetime.datetime.utcnow()
+    )
+
+    log_audit_event("billing.subscription_cancelled", "organization", org.id, {
+        "previous_tier": old_tier,
+        "new_tier": PLAN_FREE
+    })
+
+    return jsonify({
+        "success": True,
+        "message": "Subscription cancelled. Workspace reverted to Free tier.",
+        "plan_tier": PLAN_FREE,
+        "organization": org.to_dict(),
+        "entitlements": get_org_entitlements(org)
+    }), 200
+
+
+@api_v1.route("/billing/webhook", methods=["POST"])
+@api_v1.route("/webhooks/stripe", methods=["POST"])
+@rate_limit(limit=100, window=60, message="Too many webhook requests.")
+def stripe_webhook():
+    """Public webhook receiver for Stripe billing events.
+    
+    Verifies Stripe HMAC signature and processes events idempotently.
+    """
+    payload = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature", "")
+
+    try:
+        event = verify_webhook_signature(payload, sig_header)
+    except Exception as sig_err:
+        logger.warning(f"Rejected unauthorized Stripe webhook: {sig_err}")
+        return jsonify({"error": "Invalid webhook signature or payload.", "code": "INVALID_SIGNATURE"}), 400
+
+    try:
+        result = process_webhook_event(event)
+        return jsonify({
+            "received": True,
+            "status": result.get("status"),
+            "event_id": result.get("event_id"),
+            "action": result.get("action")
+        }), 200
+    except Exception as proc_err:
+        logger.error(f"Error processing Stripe webhook: {proc_err}")
+        return jsonify({"error": "Webhook processing failed.", "code": "PROCESSING_ERROR"}), 500

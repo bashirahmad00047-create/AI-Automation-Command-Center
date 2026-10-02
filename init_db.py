@@ -31,6 +31,8 @@ from models import (
     Lead,
     Membership,
     Organization,
+    StripeWebhookEvent,
+    Subscription,
     SystemEvent,
     User,
     WebhookEndpoint,

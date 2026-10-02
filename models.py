@@ -43,6 +43,8 @@ class Organization(db.Model):
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     max_rules = db.Column(db.Integer, nullable=False, default=100)
     max_monthly_events = db.Column(db.Integer, nullable=False, default=500000)
+    stripe_customer_id = db.Column(db.String(128), nullable=True, index=True)
+    stripe_subscription_id = db.Column(db.String(128), nullable=True, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
     updated_at = db.Column(
         db.DateTime,
@@ -62,6 +64,22 @@ class Organization(db.Model):
     leads = db.relationship("Lead", backref="organization", cascade="all, delete-orphan", lazy="select")
     events = db.relationship("SystemEvent", backref="organization", cascade="all, delete-orphan", lazy="select")
     usages = db.relationship("OrganizationUsage", backref="organization", cascade="all, delete-orphan", lazy="select")
+    subscription = db.relationship("Subscription", backref="organization", uselist=False, cascade="all, delete-orphan", lazy="select")
+
+    def get_subscription(self) -> "Subscription":
+        """Get or lazily initialize the tenant subscription record."""
+        if self.subscription:
+            return self.subscription
+        sub = Subscription(
+            organization_id=self.id,
+            plan_tier=self.plan_tier or "free",
+            status="active",
+            stripe_customer_id=self.stripe_customer_id,
+            stripe_subscription_id=self.stripe_subscription_id,
+        )
+        db.session.add(sub)
+        db.session.flush()
+        return sub
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -72,6 +90,9 @@ class Organization(db.Model):
             "is_active": self.is_active,
             "max_rules": self.max_rules,
             "max_monthly_events": self.max_monthly_events,
+            "stripe_customer_id": self.stripe_customer_id,
+            "stripe_subscription_id": self.stripe_subscription_id,
+            "subscription": self.subscription.to_dict() if self.subscription else None,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
         }
 
@@ -625,4 +646,74 @@ class OrganizationUsage(db.Model):
             "event_count": self.event_count,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
+
+
+class Subscription(db.Model):
+    """SaaS Tenant Subscription record tracking Stripe billing state."""
+    __tablename__ = "subscriptions"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("sub"))
+    organization_id = db.Column(
+        db.String(64),
+        db.ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+    stripe_customer_id = db.Column(db.String(128), nullable=True, index=True)
+    stripe_subscription_id = db.Column(db.String(128), nullable=True, index=True)
+    stripe_price_id = db.Column(db.String(128), nullable=True)
+    plan_tier = db.Column(db.String(32), nullable=False, default="free")
+    status = db.Column(db.String(64), nullable=False, default="active")  # active, trialing, past_due, canceled, unpaid
+    billing_interval = db.Column(db.String(32), nullable=False, default="month")  # month, year
+    current_period_start = db.Column(db.DateTime, nullable=True)
+    current_period_end = db.Column(db.DateTime, nullable=True)
+    cancel_at_period_end = db.Column(db.Boolean, nullable=False, default=False)
+    canceled_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "stripe_customer_id": self.stripe_customer_id,
+            "stripe_subscription_id": self.stripe_subscription_id,
+            "stripe_price_id": self.stripe_price_id,
+            "plan_tier": self.plan_tier,
+            "status": self.status,
+            "billing_interval": self.billing_interval,
+            "current_period_start": self.current_period_start.strftime("%Y-%m-%d %H:%M:%S") if self.current_period_start else None,
+            "current_period_end": self.current_period_end.strftime("%Y-%m-%d %H:%M:%S") if self.current_period_end else None,
+            "cancel_at_period_end": self.cancel_at_period_end,
+            "canceled_at": self.canceled_at.strftime("%Y-%m-%d %H:%M:%S") if self.canceled_at else None,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
+
+
+class StripeWebhookEvent(db.Model):
+    """Tracks processed Stripe webhook event IDs for guaranteed idempotency."""
+    __tablename__ = "stripe_webhook_events"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("swe"))
+    event_id = db.Column(db.String(128), unique=True, nullable=False, index=True)
+    event_type = db.Column(db.String(128), nullable=False)
+    payload_summary = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(32), nullable=False, default="processed")
+    processed_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "event_id": self.event_id,
+            "event_type": self.event_type,
+            "status": self.status,
+            "processed_at": self.processed_at.strftime("%Y-%m-%d %H:%M:%S") if self.processed_at else None,
         }
