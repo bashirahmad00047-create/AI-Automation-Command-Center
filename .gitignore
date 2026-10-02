@@ -30,6 +30,7 @@ venv.bak/
 # Ephemeral runtime logs & automation storage outputs
 automation_storage/logs/*.log
 automation_storage/logs/*.jsonl
+automation_storage/*.json
 automation_storage/output/*
 !automation_storage/output/.gitkeep
 !automation_storage/logs/.gitkeep

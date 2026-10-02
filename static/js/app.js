@@ -366,7 +366,7 @@ function renderRulesTable() {
                 <td style="font-size: 0.75rem; color: var(--text-muted);">${rule.last_triggered || 'Never'}</td>
                 <td>
                     <div class="action-btn-row">
-                        <button class="action-btn cyan-btn" onclick="runRuleTest('${rule.id}')" title="Live Execute">▶</button>
+                        <button class="action-btn cyan-btn" onclick="openExecutionConsole('${rule.id}')" title="Execution Console (Live / Dry Run / Async)">⚡</button>
                         <button class="action-btn purple-btn" onclick="runDryRunTest('${rule.id}')" title="Dry Run / Simulation (Zero Side Effects)">🧪</button>
                         <button class="action-btn" style="background:rgba(255,255,255,0.08); color:#e2e8f0;" onclick="duplicateRule('${rule.id}')" title="Duplicate Workflow" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>📋</button>
                         <button class="action-btn amber-btn" onclick="editRule('${rule.id}')" title="Edit Rule" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>✏️</button>
@@ -2992,5 +2992,371 @@ function finishOnboarding() {
     switchTab('dashboard');
     refreshAllData();
     showToast('Workspace onboarding complete! Welcome aboard.', 'success');
+}
+
+// ==========================================
+// Phase 6: Production Automation Console & DLQ / Jobs
+// ==========================================
+
+let activeConsoleRuleId = null;
+
+function openExecutionConsole(ruleId) {
+    activeConsoleRuleId = ruleId;
+    const rule = state.rules.find(r => String(r.id) === String(ruleId)) || {};
+
+    const titleElem = document.getElementById('execConsoleTitle');
+    const subtitleElem = document.getElementById('execConsoleSubtitle');
+    const resultArea = document.getElementById('execConsoleResultArea');
+
+    if (titleElem) titleElem.textContent = `Workflow Console: ${rule.name || ruleId}`;
+    if (subtitleElem) subtitleElem.textContent = `Rule ID: ${ruleId} • Category: ${rule.category || 'System'}`;
+    if (resultArea) resultArea.style.display = 'none';
+
+    // Populate initial sample payload
+    loadSamplePayloadForCurrentRule();
+
+    const modal = document.getElementById('executionConsoleModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeExecutionConsole() {
+    const modal = document.getElementById('executionConsoleModal');
+    if (modal) modal.style.display = 'none';
+    activeConsoleRuleId = null;
+}
+
+function loadSamplePayloadForCurrentRule() {
+    const payloadBox = document.getElementById('execConsolePayload');
+    if (!payloadBox) return;
+
+    const rule = state.rules.find(r => String(r.id) === String(activeConsoleRuleId)) || {};
+    const trigger = rule.trigger || {};
+    const evName = (trigger.event_name || 'system.metrics').toLowerCase();
+
+    let sample = {
+        test_source: "execution_console",
+        timestamp: new Date().toISOString()
+    };
+
+    if (evName.includes('metric') || evName.includes('cpu')) {
+        sample.cpu_percent = 92.5;
+        sample.ram_percent = 84.0;
+        sample.disk_percent = 71.0;
+        sample.host = "prod-k8s-node-01";
+    } else if (evName.includes('lead')) {
+        sample.name = "Alexander Wright";
+        sample.email = "awright@fintech-global.corp";
+        sample.company = "Fintech Global Corp";
+        sample.message = "We need an enterprise contract for 500 seats with dedicated HIPAA SLA.";
+    } else if (evName.includes('incident') || evName.includes('alert')) {
+        sample.severity = "critical";
+        sample.service = "postgres-primary";
+        sample.message = "FATAL: Connection pool exhausted. Worker threads unresponsive.";
+    } else if (evName.includes('auth')) {
+        sample.ip = "192.168.1.100";
+        sample.attempts = 15;
+        sample.user = "root";
+    }
+
+    payloadBox.value = JSON.stringify(sample, null, 2);
+}
+
+async function executeWorkflowFromConsole() {
+    if (!activeConsoleRuleId) return;
+
+    const payloadBox = document.getElementById('execConsolePayload');
+    let payload = {};
+    try {
+        payload = JSON.parse(payloadBox.value);
+    } catch (err) {
+        showToast('Invalid JSON in payload editor. Please fix formatting.', 'error');
+        return;
+    }
+
+    const modeInputs = document.querySelectorAll('input[name="execMode"]');
+    let mode = 'live';
+    modeInputs.forEach(inp => { if (inp.checked) mode = inp.value; });
+
+    const btn = document.getElementById('btnExecuteWorkflowNow');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Executing...';
+    }
+
+    try {
+        let endpoint = `/api/v1/rules/${activeConsoleRuleId}/run`;
+        let requestBody = { payload: payload };
+
+        if (mode === 'dry_run') {
+            requestBody.dry_run = true;
+        } else if (mode === 'async') {
+            endpoint = `/api/v1/workflows/${activeConsoleRuleId}/dispatch-async`;
+        }
+
+        const startTs = performance.now();
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        const elapsedMs = Math.round((performance.now() - startTs) * 10) / 10;
+        const data = await res.json();
+
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Execute Workflow';
+        }
+
+        if (!res.ok && res.status !== 202) {
+            showToast(data.error || 'Execution failed', 'error');
+            return;
+        }
+
+        renderExecutionConsoleResult(data, mode, elapsedMs);
+        showToast(mode === 'async' ? 'Job dispatched to background worker pool' : `Executed: ${data.status ? data.status.toUpperCase() : 'OK'}`, 'success');
+
+        loadExecutionLogs();
+        loadRules();
+    } catch (e) {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Execute Workflow';
+        }
+        showToast(`Execution request error: ${e.message}`, 'error');
+    }
+}
+
+function renderExecutionConsoleResult(data, mode, elapsedMs) {
+    const resultArea = document.getElementById('execConsoleResultArea');
+    const badge = document.getElementById('execConsoleResultBadge');
+    const durElem = document.getElementById('execConsoleResultDuration');
+    const execIdElem = document.getElementById('execConsoleExecId');
+    const stepsContainer = document.getElementById('execConsoleWaterfallSteps');
+    const rawJson = document.getElementById('execConsoleRawJson');
+
+    if (!resultArea) return;
+    resultArea.style.display = 'block';
+
+    const status = (data.status || (mode === 'async' ? 'QUEUED' : 'SUCCESS')).toUpperCase();
+    badge.textContent = status;
+    badge.className = `status-badge ${status === 'SUCCESS' || status === 'COMPLETED' ? 'active' : (status === 'QUEUED' || status === 'RUNNING' ? 'amber' : 'failed')}`;
+
+    durElem.textContent = `${data.duration_ms || elapsedMs}ms`;
+    execIdElem.textContent = data.execution_id || data.job_id || 'exec-simulated';
+
+    // Steps trace waterfall
+    stepsContainer.innerHTML = '';
+    const steps = data.steps_trace || [];
+    const conditionTrace = data.trace || [];
+
+    // First render condition evaluation step
+    if (conditionTrace.length > 0) {
+        const condDiv = document.createElement('div');
+        condDiv.className = 'hud-panel';
+        condDiv.style.padding = '8px 12px';
+        condDiv.style.borderRadius = '6px';
+        condDiv.style.borderLeft = `3px solid ${data.matched !== false ? '#10b981' : '#f59e0b'}`;
+        condDiv.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <strong style="font-size: 12px;">Condition Evaluation</strong>
+                <span class="status-badge ${data.matched !== false ? 'active' : 'amber'}" style="font-size: 10px;">${data.matched !== false ? 'MATCHED' : 'NOT MATCHED'}</span>
+            </div>
+            <div style="font-size: 11px; color: var(--text-dim, #888); margin-top: 4px;">
+                ${conditionTrace.map(t => `<code>${escapeHtml(t.field)} ${escapeHtml(t.operator)} ${escapeHtml(String(t.target_value))}</code> (Actual: <code>${escapeHtml(String(t.actual_value))}</code> &rarr; ${t.passed ? '✓' : '✗'})`).join('<br>')}
+            </div>
+        `;
+        stepsContainer.appendChild(condDiv);
+    }
+
+    if (steps.length === 0 && (!data.action_results || data.action_results.length === 0)) {
+        const emptyDiv = document.createElement('div');
+        emptyDiv.style.fontSize = '12px';
+        emptyDiv.style.color = 'var(--text-dim, #888)';
+        emptyDiv.textContent = mode === 'async' ? 'Job queued in background. Inspect Background Async Jobs tab for live progress.' : 'No pipeline steps executed (conditions evaluated).';
+        stepsContainer.appendChild(emptyDiv);
+    } else {
+        steps.forEach((st, idx) => {
+            const stepDiv = document.createElement('div');
+            stepDiv.className = 'hud-panel';
+            stepDiv.style.padding = '8px 12px';
+            stepDiv.style.borderRadius = '6px';
+            const isSuccess = st.status === 'SUCCESS' || st.status === 'success';
+            stepDiv.style.borderLeft = `3px solid ${isSuccess ? '#10b981' : '#ef4444'}`;
+            stepDiv.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--text-dim, #888);">#${idx + 1}</span>
+                        <strong style="font-size: 12px; color: var(--cyan-glow, #00f0ff);">${escapeHtml(st.name || st.type)}</strong>
+                        <span style="font-size: 10px; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono);">${escapeHtml(st.type)}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 11px; color: var(--text-dim, #888); font-family: var(--font-mono);">${st.duration_ms || 0}ms</span>
+                        <span class="status-badge ${isSuccess ? 'active' : 'failed'}" style="font-size: 10px;">${(st.status || 'OK').toUpperCase()}</span>
+                    </div>
+                </div>
+                ${st.error ? `<div style="font-size: 11px; color: #ef4444; margin-top: 4px;">Error: ${escapeHtml(st.error)}</div>` : ''}
+                ${st.output ? `<div style="font-size: 11px; color: var(--text-dim, #888); margin-top: 4px; font-family: var(--font-mono); overflow-x: auto;">Output: ${escapeHtml(JSON.stringify(st.output))}</div>` : ''}
+            `;
+            stepsContainer.appendChild(stepDiv);
+        });
+    }
+
+    if (rawJson) {
+        rawJson.textContent = JSON.stringify(data, null, 2);
+    }
+}
+
+// Sub-Tab Navigation for Forensics / DLQ / Background Jobs
+function switchLogsSubTab(subTabName) {
+    const vForensics = document.getElementById('logsSubViewForensics');
+    const vDlq = document.getElementById('logsSubViewDlq');
+    const vJobs = document.getElementById('logsSubViewJobs');
+
+    const btnForensics = document.getElementById('subtabForensicsBtn');
+    const btnDlq = document.getElementById('subtabDlqBtn');
+    const btnJobs = document.getElementById('subtabJobsBtn');
+
+    [btnForensics, btnDlq, btnJobs].forEach(b => { if (b) b.classList.remove('active'); });
+    if (vForensics) vForensics.style.display = 'none';
+    if (vDlq) vDlq.style.display = 'none';
+    if (vJobs) vJobs.style.display = 'none';
+
+    if (subTabName === 'dlq') {
+        if (btnDlq) btnDlq.classList.add('active');
+        if (vDlq) vDlq.style.display = 'block';
+        loadDlqItems();
+    } else if (subTabName === 'jobs') {
+        if (btnJobs) btnJobs.classList.add('active');
+        if (vJobs) vJobs.style.display = 'block';
+        loadAsyncJobs();
+    } else {
+        if (btnForensics) btnForensics.classList.add('active');
+        if (vForensics) vForensics.style.display = 'block';
+        loadExecutionLogs();
+    }
+}
+
+async function loadDlqItems() {
+    const tbody = document.getElementById('dlqTableBody');
+    const badge = document.getElementById('countDlqBadge');
+    try {
+        const res = await fetch('/api/v1/dlq');
+        if (!res.ok) return;
+        const data = await res.json();
+        const items = data.dlq || [];
+
+        if (badge) badge.textContent = items.length;
+
+        if (!tbody) return;
+        if (items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">No quarantined payloads in Dead-Letter Queue.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = items.map(item => `
+            <tr>
+                <td><code style="font-size: 11px; color: #ef4444;">${escapeHtml(item.id || item.dlq_id)}</code></td>
+                <td><strong style="color: var(--text-primary); font-size: 12px;">${escapeHtml(item.rule_name || item.rule_id)}</strong></td>
+                <td><span class="category-chip system" style="font-size: 11px;">${escapeHtml(item.event_name || 'event')}</span></td>
+                <td><div style="font-size: 11px; color: #ef4444; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(item.error || '')}">${escapeHtml(item.error || 'Execution failed')}</div></td>
+                <td><span style="font-family: var(--font-mono); font-size: 12px;">${item.retry_count || 0}</span></td>
+                <td style="font-size: 11px; color: var(--text-dim, #888);">${item.timestamp ? item.timestamp.split('T')[0] : 'Just now'}</td>
+                <td>
+                    <div style="display: flex; gap: 6px;">
+                        <button class="action-btn cyan-btn" onclick="replayDlqItem('${item.id || item.dlq_id}')" title="Replay from DLQ">🔄 Replay</button>
+                        <button class="action-btn red-btn" onclick="purgeDlqItem('${item.id || item.dlq_id}')" title="Purge DLQ item">🗑️</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        console.error('Failed to load DLQ:', e);
+    }
+}
+
+async function replayDlqItem(dlqId) {
+    try {
+        const res = await fetch(`/api/v1/dlq/${dlqId}/replay`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`DLQ item replayed: ${data.status ? data.status.toUpperCase() : 'OK'}`, 'success');
+            loadDlqItems();
+            loadExecutionLogs();
+        } else {
+            showToast(data.error || 'DLQ replay failed', 'error');
+        }
+    } catch (e) {
+        showToast(`Replay error: ${e.message}`, 'error');
+    }
+}
+
+async function purgeDlqItem(dlqId) {
+    if (!confirm(`Purge DLQ item '${dlqId}'?`)) return;
+    try {
+        const res = await fetch(`/api/v1/dlq/${dlqId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('DLQ item purged.', 'info');
+            loadDlqItems();
+        } else {
+            showToast(data.error || 'Failed to purge item', 'error');
+        }
+    } catch (e) {
+        showToast(`Purge error: ${e.message}`, 'error');
+    }
+}
+
+async function loadAsyncJobs() {
+    const tbody = document.getElementById('jobsTableBody');
+    const badge = document.getElementById('countJobsBadge');
+    try {
+        const res = await fetch('/api/v1/jobs');
+        if (!res.ok) return;
+        const data = await res.json();
+        const jobs = data.jobs || [];
+
+        if (badge) badge.textContent = jobs.length;
+
+        if (!tbody) return;
+        if (jobs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">No background async jobs recorded.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = jobs.map(job => {
+            const st = (job.status || 'QUEUED').toUpperCase();
+            const badgeClass = st === 'COMPLETED' ? 'active' : (st === 'RUNNING' || st === 'QUEUED' ? 'amber' : (st === 'CANCELLED' ? 'dim' : 'failed'));
+            return `
+                <tr>
+                    <td><code style="font-size: 11px; color: var(--cyan-glow, #00f0ff);">${escapeHtml(job.job_id || job.id)}</code></td>
+                    <td><strong style="color: var(--text-primary); font-size: 12px;">${escapeHtml(job.rule_name || job.workflow_name || job.rule_id)}</strong></td>
+                    <td><span class="status-badge ${badgeClass}" style="font-size: 11px;">${st}</span></td>
+                    <td><div style="font-size: 11px; color: var(--text-dim, #888);">${escapeHtml(job.current_step_name || 'Executing')} (${job.current_step_index || 0}/${job.total_steps || 1})</div></td>
+                    <td style="font-size: 11px; color: var(--text-dim, #888);">${job.started_at ? job.started_at.split('T')[1].split('.')[0] : 'Pending'}</td>
+                    <td style="font-size: 11px; color: var(--text-dim, #888);">${job.completed_at ? job.completed_at.split('T')[1].split('.')[0] : (st === 'RUNNING' ? 'Running...' : '-')}</td>
+                    <td>
+                        ${st === 'RUNNING' || st === 'QUEUED' ? `<button class="action-btn red-btn" onclick="cancelAsyncJob('${job.job_id || job.id}')" title="Cancel Job">✕ Cancel</button>` : `<span style="font-size: 11px; color: var(--text-dim, #888);">Finished</span>`}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    } catch (e) {
+        console.error('Failed to load async jobs:', e);
+    }
+}
+
+async function cancelAsyncJob(jobId) {
+    try {
+        const res = await fetch(`/api/v1/jobs/${jobId}/cancel`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Job cancelled.', 'info');
+            loadAsyncJobs();
+        } else {
+            showToast(data.error || 'Failed to cancel job', 'error');
+        }
+    } catch (e) {
+        showToast(`Cancel error: ${e.message}`, 'error');
+    }
 }
 

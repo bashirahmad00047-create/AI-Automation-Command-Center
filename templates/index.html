@@ -548,36 +548,114 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
 
         <!-- TAB 6: FORENSICS & AUDITS -->
         <section id="tab-logs" class="tab-panel">
-            <div class="panel-toolbar">
-                <div class="filter-group">
-                    <span class="filter-label">Filter Status:</span>
-                    <button class="filter-chip active" onclick="filterLogsStatus('all', this)">All</button>
-                    <button class="filter-chip" onclick="filterLogsStatus('success', this)">Success</button>
-                    <button class="filter-chip" onclick="filterLogsStatus('skipped', this)">Skipped</button>
-                    <button class="filter-chip" onclick="filterLogsStatus('failed', this)">Failed</button>
+            <!-- Forensics Hub Sub-Navigation -->
+            <div style="display: flex; gap: 10px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color, #2a2e3d); padding-bottom: 12px; flex-wrap: wrap;">
+                <button class="hud-tab active" id="subtabForensicsBtn" onclick="switchLogsSubTab('forensics')" style="padding: 8px 16px; border-radius: 6px;">
+                    📜 Execution Forensics
+                </button>
+                <button class="hud-tab" id="subtabDlqBtn" onclick="switchLogsSubTab('dlq')" style="padding: 8px 16px; border-radius: 6px;">
+                    💀 Dead-Letter Queue (<span id="countDlqBadge">0</span>)
+                </button>
+                <button class="hud-tab" id="subtabJobsBtn" onclick="switchLogsSubTab('jobs')" style="padding: 8px 16px; border-radius: 6px;">
+                    ⚡ Background Async Jobs (<span id="countJobsBadge">0</span>)
+                </button>
+            </div>
+
+            <!-- SUB-VIEW 1: Execution Forensics -->
+            <div id="logsSubViewForensics">
+                <div class="panel-toolbar">
+                    <div class="filter-group">
+                        <span class="filter-label">Filter Status:</span>
+                        <button class="filter-chip active" onclick="filterLogsStatus('all', this)">All</button>
+                        <button class="filter-chip" onclick="filterLogsStatus('success', this)">Success</button>
+                        <button class="filter-chip" onclick="filterLogsStatus('skipped', this)">Skipped</button>
+                        <button class="filter-chip" onclick="filterLogsStatus('failed', this)">Failed</button>
+                    </div>
+                    <div class="action-group">
+                        <button class="action-btn red-btn" onclick="clearAllLogs()">Purge Logs</button>
+                    </div>
                 </div>
-                <div class="action-group">
-                    <button class="action-btn red-btn" onclick="clearAllLogs()">Purge Logs</button>
+
+                <div class="table-container">
+                    <table class="hud-table">
+                        <thead>
+                            <tr>
+                                <th>Execution ID</th>
+                                <th>Workflow Rule</th>
+                                <th>Trigger Event</th>
+                                <th>Status</th>
+                                <th>Execution Latency</th>
+                                <th>Timestamp</th>
+                                <th>Inspect</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logsTableBody">
+                            <tr><td colspan="7" class="empty-cell">Loading forensic audit logs...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
-            <div class="table-container">
-                <table class="hud-table">
-                    <thead>
-                        <tr>
-                            <th>Execution ID</th>
-                            <th>Workflow Rule</th>
-                            <th>Trigger Event</th>
-                            <th>Status</th>
-                            <th>Execution Latency</th>
-                            <th>Timestamp</th>
-                            <th>Inspect</th>
-                        </tr>
-                    </thead>
-                    <tbody id="logsTableBody">
-                        <tr><td colspan="7" class="empty-cell">Loading forensic audit logs...</td></tr>
-                    </tbody>
-                </table>
+            <!-- SUB-VIEW 2: Dead-Letter Queue (DLQ) -->
+            <div id="logsSubViewDlq" style="display: none;">
+                <div class="panel-toolbar">
+                    <div style="font-size: 13px; color: var(--text-dim, #888);">
+                        Failed workflow executions quarantined in DLQ for diagnostic inspection and one-click replay.
+                    </div>
+                    <div class="action-group">
+                        <button class="hud-btn outline small" onclick="loadDlqItems()">Refresh DLQ</button>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table class="hud-table">
+                        <thead>
+                            <tr>
+                                <th>DLQ ID</th>
+                                <th>Workflow Name</th>
+                                <th>Trigger Event</th>
+                                <th>Error Diagnostics</th>
+                                <th>Retries</th>
+                                <th>Quarantined At</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dlqTableBody">
+                            <tr><td colspan="7" class="empty-cell">No quarantined payloads in Dead-Letter Queue.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- SUB-VIEW 3: Background Async Jobs -->
+            <div id="logsSubViewJobs" style="display: none;">
+                <div class="panel-toolbar">
+                    <div style="font-size: 13px; color: var(--text-dim, #888);">
+                        Non-blocking workflow worker jobs executing in background threads.
+                    </div>
+                    <div class="action-group">
+                        <button class="hud-btn outline small" onclick="loadAsyncJobs()">Refresh Jobs</button>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table class="hud-table">
+                        <thead>
+                            <tr>
+                                <th>Job ID</th>
+                                <th>Workflow Rule</th>
+                                <th>Status</th>
+                                <th>Step Progress</th>
+                                <th>Started At</th>
+                                <th>Completed At</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="jobsTableBody">
+                            <tr><td colspan="7" class="empty-cell">No background async jobs recorded.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </section>
 
@@ -1723,6 +1801,91 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 <button type="button" class="hud-btn outline" id="wizPrevBtn" onclick="prevWizardStep()" style="visibility: hidden;">&larr; Back</button>
                 <div style="font-size: 12px; color: var(--text-dim, #888);" id="wizStepCounter">Step 1 of 5</div>
                 <button type="button" class="hud-btn primary" id="wizNextBtn" onclick="nextWizardStep()">Next Step &rarr;</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WORKFLOW EXECUTION CONSOLE MODAL -->
+    <div class="hud-modal-overlay" id="executionConsoleModal" style="display:none;">
+        <div class="hud-modal" style="max-width: 760px;">
+            <div class="modal-header">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 20px;">⚡</span>
+                    <div>
+                        <h3 id="execConsoleTitle" style="margin: 0;">Workflow Execution Console</h3>
+                        <div id="execConsoleSubtitle" style="font-size: 11px; color: var(--text-dim, #888); font-family: var(--font-mono);">Rule: wf-1234</div>
+                    </div>
+                </div>
+                <button class="close-btn" onclick="closeExecutionConsole()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px; max-height: 75vh; overflow-y: auto;">
+                <!-- Execution Mode Selector -->
+                <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                    <label style="flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.2); cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+                        <input type="radio" name="execMode" value="live" checked style="margin-top: 3px;">
+                        <div>
+                            <strong style="color: #10b981; font-size: 13px;">⚡ Live Execution</strong>
+                            <div style="font-size: 11px; color: var(--text-dim, #888); margin-top: 2px;">Evaluate conditions and execute real actions with audit logging.</div>
+                        </div>
+                    </label>
+                    <label style="flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.2); cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+                        <input type="radio" name="execMode" value="dry_run" style="margin-top: 3px;">
+                        <div>
+                            <strong style="color: #00f0ff; font-size: 13px;">🧪 Dry Run Simulation</strong>
+                            <div style="font-size: 11px; color: var(--text-dim, #888); margin-top: 2px;">Test condition matching and trace step inputs without side effects.</div>
+                        </div>
+                    </label>
+                    <label style="flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.2); cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+                        <input type="radio" name="execMode" value="async" style="margin-top: 3px;">
+                        <div>
+                            <strong style="color: #a78bfa; font-size: 13px;">🚀 Async Background Job</strong>
+                            <div style="font-size: 11px; color: var(--text-dim, #888); margin-top: 2px;">Dispatch to worker thread pool with live status polling.</div>
+                        </div>
+                    </label>
+                </div>
+
+                <!-- Input Payload Editor -->
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <label style="font-size: 12px; font-weight: 600;">Event Payload (JSON)</label>
+                        <button type="button" class="hud-btn outline small" onclick="loadSamplePayloadForCurrentRule()" style="font-size: 11px; padding: 2px 8px;">Load Sample Payload</button>
+                    </div>
+                    <textarea id="execConsolePayload" class="hud-input" rows="5" style="font-family: var(--font-mono); font-size: 12px; width: 100%;">{
+  "test_source": "execution_console",
+  "timestamp": "2026-10-02T12:00:00Z"
+}</textarea>
+                </div>
+
+                <!-- Run Action Button -->
+                <button type="button" class="hud-btn primary" id="btnExecuteWorkflowNow" onclick="executeWorkflowFromConsole()" style="width: 100%; padding: 10px; font-weight: 600;">
+                    Execute Workflow
+                </button>
+
+                <!-- Execution Output & Waterfall Step Breakdown -->
+                <div id="execConsoleResultArea" style="display: none; margin-top: 20px;">
+                    <hr style="border: none; border-top: 1px solid var(--border-color, #2a2e3d); margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span id="execConsoleResultBadge" class="status-badge" style="font-size: 12px;">SUCCESS</span>
+                            <span id="execConsoleResultDuration" style="font-size: 12px; color: var(--text-dim, #888); font-family: var(--font-mono);">0.0ms</span>
+                        </div>
+                        <span id="execConsoleExecId" style="font-size: 11px; color: var(--cyan-glow, #00f0ff); font-family: var(--font-mono);">exec-1234</span>
+                    </div>
+
+                    <!-- Waterfall Steps Breakdown -->
+                    <div style="margin-bottom: 14px;">
+                        <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">Execution Trace & Waterfall Steps</div>
+                        <div id="execConsoleWaterfallSteps" style="display: flex; flex-direction: column; gap: 8px;">
+                            <!-- Dynamically generated step rows -->
+                        </div>
+                    </div>
+
+                    <!-- Collapsible Raw JSON Response -->
+                    <details style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 8px 12px; border: 1px solid var(--border-color, #2a2e3d);">
+                        <summary style="cursor: pointer; font-size: 12px; color: var(--text-dim, #888);">Raw Execution JSON</summary>
+                        <pre id="execConsoleRawJson" style="font-family: var(--font-mono); font-size: 11px; color: #00f0ff; overflow-x: auto; margin-top: 8px;"></pre>
+                    </details>
+                </div>
             </div>
         </div>
     </div>

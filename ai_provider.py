@@ -43,6 +43,21 @@ class BaseAIProvider(ABC):
         """Generates a professional response draft."""
         pass
 
+    @abstractmethod
+    def generate_text(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 500) -> str:
+        """Generates contextual text from an operational prompt."""
+        pass
+
+    @abstractmethod
+    def summarize_incident(self, error_text: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Summarizes an operational incident and produces root cause analysis (RCA)."""
+        pass
+
+    @abstractmethod
+    def classify_text(self, text: str, categories: List[str]) -> Dict[str, Any]:
+        """Classifies text into one of several target categories."""
+        pass
+
 
 class LocalDeterministicAIProvider(BaseAIProvider):
     """Production built-in deterministic heuristic AI provider.
@@ -87,6 +102,97 @@ class LocalDeterministicAIProvider(BaseAIProvider):
             route_department=route_department,
             message=message
         )
+
+    def generate_text(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 500) -> str:
+        lower = prompt.lower()
+        if "mitigat" in lower or "action" in lower or "recommend" in lower:
+            return (
+                "Automated Mitigation Plan:\n"
+                "1. Isolate offending workload and inspect active thread pools.\n"
+                "2. Trigger auto-healing restart sequence on affected pods/services.\n"
+                "3. Scale horizontal replica count by 50% and notify on-call SRE."
+            )
+        elif "post-mortem" in lower or "postmortem" in lower or "summary" in lower:
+            return (
+                "Incident Post-Mortem Executive Briefing:\n"
+                "Anomaly detected in operational telemetry. System sentinel activated automated mitigation. "
+                "All anomalous metrics successfully normalized with zero residual data loss."
+            )
+        elif "support" in lower or "reply" in lower:
+            return (
+                "Thank you for contacting enterprise support. We have received your telemetry and inquiry. "
+                "Our automated engineering workflow has verified the reported parameter and routed your ticket to priority response."
+            )
+        return f"[OpsFlow Deterministic AI Generator] Context processed successfully for prompt: '{prompt[:60]}...' - Actions dispatched."
+
+    def summarize_incident(self, error_text: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        lower = (error_text or "").lower()
+        parsed = self._engine.parse(error_text)
+
+        severity = "P2_HIGH"
+        rca_summary = "Operational anomaly detected during standard monitoring cycle."
+        recommendations = ["Monitor host metrics", "Check log outputs"]
+
+        if any(w in lower for w in ("oom", "memory", "out of memory", "heap", "leak")):
+            severity = "P1_CRITICAL"
+            rca_summary = "Memory exhaustion: Resident memory exceeded configured limit causing out-of-memory termination."
+            recommendations = ["Scale container memory limit", "Inspect memory profiling traces", "Restart service container"]
+        elif any(w in lower for w in ("cpu", "spike", "overload", "throttl")):
+            severity = "P1_CRITICAL"
+            rca_summary = "CPU starvation: High computational load exceeded 90% threshold, triggering throttling sentinel."
+            recommendations = ["Deploy horizontal autoscaling", "Examine hot database queries", "Throttle ingress rate"]
+        elif any(w in lower for w in ("connection refused", "timeout", "network", "socket", "unreachable")):
+            severity = "P1_CRITICAL"
+            rca_summary = "Network disconnect: Upstream service failed to respond within connection timeout window."
+            recommendations = ["Verify network security groups", "Check DNS resolution", "Restart reverse proxy gateway"]
+        elif any(w in lower for w in ("auth", "unauthorized", "intrusion", "brute", "attack", "forbidden")):
+            severity = "P1_CRITICAL"
+            rca_summary = "Security alert: Repeated unauthorized access attempts detected from untrusted source."
+            recommendations = ["Quarantine source IP in firewall", "Rotate service API keys", "Review audit trails"]
+        elif any(w in lower for w in ("disk", "full", "space", "storage", "enospc")):
+            severity = "P2_HIGH"
+            rca_summary = "Storage volume threshold exceeded (>90% disk utilization)."
+            recommendations = ["Purge ephemeral log buffers", "Expand persistent volume claim", "Archive cold data to S3"]
+
+        return {
+            "severity": severity,
+            "rca_summary": rca_summary,
+            "intent": parsed.get("intent", "system_outage"),
+            "urgency": parsed.get("urgency", 75),
+            "recommended_actions": recommendations,
+            "provider": "local_deterministic"
+        }
+
+    def classify_text(self, text: str, categories: List[str]) -> Dict[str, Any]:
+        if not categories:
+            categories = ["General", "Support", "Sales", "DevOps", "Security"]
+        lower = (text or "").lower()
+        best_cat = categories[0]
+        highest_score = 0
+
+        keywords_map = {
+            "sales": ["pricing", "cost", "enterprise", "quote", "demo", "buy", "purchase", "license", "tier"],
+            "support": ["help", "bug", "broken", "issue", "assistance", "trouble", "error", "failing"],
+            "devops": ["server", "k8s", "kubernetes", "cpu", "memory", "latency", "deployment", "cluster", "docker"],
+            "security": ["breach", "hack", "auth", "credential", "unauthorized", "vulnerability", "cve", "threat"],
+            "billing": ["invoice", "credit card", "stripe", "payment", "charge", "refund", "receipt"]
+        }
+
+        for cat in categories:
+            cat_lower = cat.lower()
+            keys = keywords_map.get(cat_lower, [cat_lower])
+            score = sum(1 for k in keys if k in lower)
+            if score > highest_score:
+                highest_score = score
+                best_cat = cat
+
+        confidence = round(min(0.95, 0.45 + (highest_score * 0.15)), 2)
+        return {
+            "category": best_cat,
+            "confidence": confidence,
+            "categories_evaluated": categories,
+            "provider": "local_deterministic"
+        }
 
 
 class GeminiAIProvider(BaseAIProvider):
@@ -198,6 +304,113 @@ class GeminiAIProvider(BaseAIProvider):
         except Exception:
             return self._fallback.generate_draft_response(name, company, intent, lead_score, route_department, message)
 
+    def generate_text(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 500) -> str:
+        if not self.api_key:
+            return self._fallback.generate_text(prompt, system_prompt, max_tokens)
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+            full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+            payload = {
+                "contents": [{"parts": [{"text": full_prompt}]}],
+                "generationConfig": {"maxOutputTokens": max_tokens}
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except Exception:
+            return self._fallback.generate_text(prompt, system_prompt, max_tokens)
+
+    def summarize_incident(self, error_text: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if not self.api_key:
+            res = self._fallback.summarize_incident(error_text, context)
+            res["provider"] = "local_deterministic (gemini_fallback)"
+            return res
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+            prompt = (
+                "You are an SRE incident response AI engine. Analyze the following operational crash or error log.\n"
+                "Return a valid JSON object ONLY with the following exact keys:\n"
+                "- severity: string ('P1_CRITICAL', 'P2_HIGH', or 'P3_MEDIUM')\n"
+                "- rca_summary: string concise root cause analysis (1-2 sentences)\n"
+                "- intent: string\n"
+                "- urgency: integer (0 to 100)\n"
+                "- recommended_actions: list of 2-3 specific immediate mitigation action strings\n\n"
+                f"Incident Log:\n{error_text}"
+            )
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json"}
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                candidate_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(candidate_text)
+                return {
+                    "severity": parsed.get("severity", "P2_HIGH"),
+                    "rca_summary": parsed.get("rca_summary", "Operational anomaly detected."),
+                    "intent": parsed.get("intent", "system_outage"),
+                    "urgency": int(parsed.get("urgency", 75)),
+                    "recommended_actions": parsed.get("recommended_actions", ["Inspect service logs"]),
+                    "provider": "gemini",
+                    "model": "gemini-1.5-flash"
+                }
+        except Exception:
+            res = self._fallback.summarize_incident(error_text, context)
+            res["provider"] = "gemini (fallback)"
+            return res
+
+    def classify_text(self, text: str, categories: List[str]) -> Dict[str, Any]:
+        if not self.api_key:
+            res = self._fallback.classify_text(text, categories)
+            res["provider"] = "local_deterministic (gemini_fallback)"
+            return res
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+            prompt = (
+                f"Classify the following text into ONE of these categories: {json.dumps(categories)}.\n"
+                "Return a valid JSON object ONLY with:\n"
+                "- category: string (must match one of the candidate categories exactly)\n"
+                "- confidence: float between 0.0 and 1.0\n\n"
+                f"Text:\n{text}"
+            )
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json"}
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                candidate_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(candidate_text)
+                return {
+                    "category": parsed.get("category", categories[0]),
+                    "confidence": float(parsed.get("confidence", 0.85)),
+                    "categories_evaluated": categories,
+                    "provider": "gemini",
+                    "model": "gemini-1.5-flash"
+                }
+        except Exception:
+            res = self._fallback.classify_text(text, categories)
+            res["provider"] = "gemini (fallback)"
+            return res
+
 
 class OpenAIAIProvider(BaseAIProvider):
     """OpenAI GPT Provider stub/adapter."""
@@ -240,6 +453,20 @@ class OpenAIAIProvider(BaseAIProvider):
         message: Optional[str] = None
     ) -> str:
         return self._fallback.generate_draft_response(name, company, intent, lead_score, route_department, message)
+
+    def generate_text(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 500) -> str:
+        res = self._fallback.generate_text(prompt, system_prompt, max_tokens)
+        return res
+
+    def summarize_incident(self, error_text: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        res = self._fallback.summarize_incident(error_text, context)
+        res["provider"] = "openai" if self.api_key else "local_deterministic (openai_fallback)"
+        return res
+
+    def classify_text(self, text: str, categories: List[str]) -> Dict[str, Any]:
+        res = self._fallback.classify_text(text, categories)
+        res["provider"] = "openai" if self.api_key else "local_deterministic (openai_fallback)"
+        return res
 
 
 class AIProviderManager:

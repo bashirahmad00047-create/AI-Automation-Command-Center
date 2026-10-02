@@ -84,6 +84,23 @@ class QuotaService:
             return org.max_monthly_events
         return plan_max
 
+    @classmethod
+    def get_quotas(cls, org: Optional[Organization]) -> Dict[str, Any]:
+        """Returns standard quota dictionary for an organization."""
+        plan = cls.get_plan(org)
+        quotas = plan.get("quotas", {})
+        return {
+            "rules": cls.get_max_rules(org),
+            "max_rules": cls.get_max_rules(org),
+            "monthly_events": cls.get_max_monthly_events(org),
+            "max_monthly_events": cls.get_max_monthly_events(org),
+            "api_keys": quotas.get("max_api_keys", 5),
+            "max_api_keys": quotas.get("max_api_keys", 5),
+            "webhooks": quotas.get("max_webhooks", 5),
+            "max_webhooks": quotas.get("max_webhooks", 5),
+        }
+
+
     @staticmethod
     def get_monthly_events_count(org: Optional[Organization], period: Optional[str] = None) -> int:
         """How many monthly events has this organization consumed in the specified period?"""

@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import re
 import threading
 import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from actions import ActionRunner
@@ -40,11 +42,24 @@ class AutomationEngine:
         self.is_running = True
         self._lock = threading.Lock()
         self._cooldown_tracker: Dict[str, float] = {}
+        self._schedule_tracker: Dict[str, float] = {}
 
         # In-memory circular buffer for real-time frontend streaming (last 50 events)
         self.event_stream: List[Dict[str, Any]] = []
 
-        # Background worker thread for periodic automated health/sentinel evaluations
+        # Production Execution Job Manager State
+        self._jobs: Dict[str, Dict[str, Any]] = {}
+        self._active_workers: Dict[str, int] = {}
+        self._max_concurrent_per_tenant = 5
+
+        # Dead-Letter Queue (DLQ) State
+        self._dlq: List[Dict[str, Any]] = []
+        self._dlq_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "automation_storage", "dlq.json"
+        )
+        self._load_dlq_from_disk()
+
+        # Background worker thread for periodic automated health/sentinel evaluations & schedules
         self._worker_thread = threading.Thread(target=self._background_loop, daemon=True)
         self._worker_thread.start()
 
@@ -169,6 +184,13 @@ class AutomationEngine:
         executed_rules = []
 
         matching_events = {event_name, "*"}
+        if event_name in ("incident.created", "incident.reported"):
+            matching_events.add("incident.created")
+            matching_events.add("incident.reported")
+        if event_name in ("lead.created", "lead.ingested"):
+            matching_events.add("lead.created")
+            matching_events.add("lead.ingested")
+
         if nlp_data and is_nlp_source:
             matching_events.add("user.prompt")
             intent = nlp_data.get("intent")
@@ -367,6 +389,84 @@ class AutomationEngine:
                             step_status = "FAILED"
                             step_error = wh_res.get("error")
 
+                    elif st_type in ("ai_generate", "ai_prompt"):
+                        ai_provider = get_ai_provider(st_config.get("provider"))
+                        prompt_tmpl = st_config.get("prompt_template") or st_config.get("prompt") or "Operational inquiry"
+                        rendered_prompt = self.action_runner._interpolate_string(prompt_tmpl, context)
+                        gen_text = ai_provider.generate_text(rendered_prompt, system_prompt=st_config.get("system_prompt"))
+                        step_output = {
+                            "prompt": rendered_prompt,
+                            "generated_text": gen_text,
+                            "provider": ai_provider.get_info().get("id"),
+                            "model": ai_provider.get_info().get("model")
+                        }
+                        context.setdefault("steps_output", {})[st_name] = step_output
+                        context["ai_generated"] = gen_text
+
+                    elif st_type in ("ai_summarize", "ai_incident_rca"):
+                        ai_provider = get_ai_provider(st_config.get("provider"))
+                        src_field = st_config.get("source_field")
+                        error_val = ""
+                        if src_field:
+                            error_val = self.action_runner._interpolate_string(f"{{{{ {src_field} }}}}", context)
+                        if not error_val:
+                            error_val = context.get("payload", {}).get("error") or context.get("payload", {}).get("message") or "System crash detected"
+                        rca_res = ai_provider.summarize_incident(str(error_val), context)
+                        step_output = rca_res
+                        context.setdefault("steps_output", {})[st_name] = step_output
+                        context["rca"] = rca_res
+
+                    elif st_type in ("ai_classify", "ai_smart_router"):
+                        ai_provider = get_ai_provider(st_config.get("provider"))
+                        categories = st_config.get("categories") or ["Support", "DevOps", "Billing", "Security", "Sales"]
+                        text_val = context.get("payload", {}).get("message") or context.get("payload", {}).get("text") or ""
+                        classify_res = ai_provider.classify_text(str(text_val), categories)
+                        step_output = classify_res
+                        context.setdefault("steps_output", {})[st_name] = step_output
+                        context["classification"] = classify_res
+                        context.setdefault("route", {})["department"] = classify_res.get("category", "Support")
+
+                    elif st_type in ("ai_extract_entities", "ai_extraction"):
+                        text_val = context.get("payload", {}).get("message") or context.get("payload", {}).get("text") or context.get("payload", {}).get("error") or ""
+                        parsed = self.nlp.parse(str(text_val))
+                        entities = parsed.get("entities", {})
+                        step_output = {"extracted_entities": entities}
+                        context.setdefault("steps_output", {})[st_name] = step_output
+                        context["extracted_entities"] = entities
+
+                    elif st_type == "ai_sentiment_guard":
+                        text_val = context.get("payload", {}).get("message") or ""
+                        parsed = self.nlp.parse(str(text_val))
+                        urgency = parsed.get("urgency", 50)
+                        sentiment = parsed.get("sentiment_label", "neutral")
+                        min_urgency = int(st_config.get("min_urgency", 0))
+                        passed = urgency >= min_urgency
+                        step_output = {"urgency": urgency, "sentiment": sentiment, "guard_passed": passed}
+                        context.setdefault("steps_output", {})[st_name] = step_output
+
+                    elif st_type in ("http_request", "api_call"):
+                        wh_res = self.action_runner.execute_action(
+                            {"type": "webhook_call", "params": st_config},
+                            context,
+                            self.storage,
+                            dry_run=dry_run
+                        )
+                        step_output = wh_res.get("output", {})
+                        action_results.append(wh_res)
+                        if wh_res.get("status") == "failed":
+                            step_status = "FAILED"
+                            step_error = wh_res.get("error")
+
+                    elif st_type == "log_entry":
+                        log_res = self.action_runner.execute_action(
+                            {"type": "log_entry", "params": st_config},
+                            context,
+                            self.storage,
+                            dry_run=dry_run
+                        )
+                        step_output = log_res.get("output", {})
+                        action_results.append(log_res)
+
                     elif st_type == "delay":
                         step_output = {"delayed_seconds": min(float(st_config.get("seconds", 1)), 5.0), "simulated": True}
 
@@ -440,6 +540,19 @@ class AutomationEngine:
                 "organization_id": context.get("organization_id")
             })
 
+            # Dead-Letter Queue recording on failure
+            if overall_status == "failed":
+                self.add_to_dlq({
+                    "rule_id": rule_id,
+                    "rule_name": rule_name,
+                    "organization_id": context.get("organization_id"),
+                    "event_name": event_name,
+                    "payload": context.get("payload", {}),
+                    "error": error_message or "Step execution failed",
+                    "execution_id": f"exec-{exec_id}",
+                    "steps_trace": steps_trace
+                })
+
         return {
             "execution_id": f"exec-simulated" if dry_run else f"exec-{exec_id}",
             "rule_id": rule_id,
@@ -501,6 +614,262 @@ class AutomationEngine:
     # Alias for modern workflow nomenclature
     execute_workflow = execute_rule_manually
 
+    # ==========================================
+    # Dead-Letter Queue (DLQ) Management
+    # ==========================================
+
+    def _load_dlq_from_disk(self):
+        try:
+            if os.path.exists(self._dlq_file):
+                with open(self._dlq_file, "r", encoding="utf-8") as f:
+                    self._dlq = json.load(f)
+        except Exception:
+            self._dlq = []
+
+    def _save_dlq_to_disk(self):
+        try:
+            os.makedirs(os.path.dirname(self._dlq_file), exist_ok=True)
+            with open(self._dlq_file, "w", encoding="utf-8") as f:
+                json.dump(self._dlq, f, indent=2, default=str)
+        except Exception:
+            pass
+
+    def add_to_dlq(self, item: Dict[str, Any]) -> str:
+        """Stores a failed execution payload in the Dead-Letter Queue."""
+        dlq_id = f"dlq-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
+        record = {
+            "id": dlq_id,
+            "dlq_id": dlq_id,
+            "rule_id": item.get("rule_id"),
+            "workflow_id": item.get("rule_id"),
+            "rule_name": item.get("rule_name", "Unknown Workflow"),
+            "organization_id": item.get("organization_id"),
+            "event_name": item.get("event_name", "unknown.event"),
+            "payload": item.get("payload", {}),
+            "error": item.get("error", "Execution failed"),
+            "status": "pending",
+            "execution_id": item.get("execution_id"),
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "retry_count": 0
+        }
+        with self._lock:
+            self._dlq.insert(0, record)
+            if len(self._dlq) > 100:
+                self._dlq.pop()
+            self._save_dlq_to_disk()
+        return dlq_id
+
+    def get_dlq(
+        self,
+        organization_id: Optional[str] = None,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Returns filtered Dead-Letter Queue items."""
+        with self._lock:
+            items = list(self._dlq)
+        if organization_id:
+            items = [i for i in items if i.get("organization_id") == organization_id or not i.get("organization_id")]
+        if status:
+            items = [i for i in items if i.get("status") == status]
+        return items
+
+    def replay_dlq(self, dlq_id: str, organization_id: Optional[str] = None) -> Dict[str, Any]:
+        """Re-dispatches a dead-lettered item through its target workflow."""
+        target_item = None
+        with self._lock:
+            for item in self._dlq:
+                if item.get("id") == dlq_id or item.get("dlq_id") == dlq_id:
+                    if organization_id and item.get("organization_id") and item.get("organization_id") != organization_id:
+                        return {"success": False, "error": "Access denied.", "code": "FORBIDDEN"}
+                    target_item = item
+                    break
+
+        if not target_item:
+            return {"success": False, "error": f"DLQ item '{dlq_id}' not found.", "code": "NOT_FOUND"}
+
+        rule_id = target_item.get("rule_id")
+        payload = target_item.get("payload", {})
+        org_id = target_item.get("organization_id") or organization_id
+
+        # Re-execute rule
+        result = self.execute_rule_manually(rule_id, payload, dry_run=False, organization_id=org_id)
+
+        with self._lock:
+            target_item["status"] = "replayed" if result.get("status") == "success" else "retry_failed"
+            target_item["replayed_at"] = datetime.datetime.utcnow().isoformat()
+            target_item["retry_count"] = target_item.get("retry_count", 0) + 1
+            target_item["last_replay_result"] = result.get("status")
+            self._save_dlq_to_disk()
+
+        return {
+            "success": True,
+            "dlq_id": dlq_id,
+            "status": target_item["status"],
+            "execution_result": result
+        }
+
+    def delete_dlq(self, dlq_id: str, organization_id: Optional[str] = None) -> bool:
+        """Purges an item from the Dead-Letter Queue."""
+        with self._lock:
+            for idx, item in enumerate(self._dlq):
+                if item.get("id") == dlq_id or item.get("dlq_id") == dlq_id:
+                    if organization_id and item.get("organization_id") and item.get("organization_id") != organization_id:
+                        return False
+                    self._dlq.pop(idx)
+                    self._save_dlq_to_disk()
+                    return True
+        return False
+
+    # ==========================================
+    # Asynchronous Execution Job Manager
+    # ==========================================
+
+    def dispatch_job_async(
+        self,
+        rule_id: str,
+        custom_payload: Optional[Dict[str, Any]] = None,
+        dry_run: bool = False,
+        organization_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Queues a workflow for background asynchronous execution."""
+        rule = self.storage.get_rule(rule_id, organization_id=organization_id)
+        if not rule:
+            return {"success": False, "error": f"Workflow '{rule_id}' not found.", "code": "NOT_FOUND"}
+
+        org_id = organization_id or rule.get("organization_id", "org-enterprise-default")
+        current_active = self._active_workers.get(org_id, 0)
+        if current_active >= self._max_concurrent_per_tenant:
+            return {
+                "success": False,
+                "error": f"Maximum concurrent job execution limit reached ({self._max_concurrent_per_tenant} active jobs). Please wait for active jobs to complete.",
+                "code": "CONCURRENCY_LIMIT"
+            }
+
+        job_id = f"job-{uuid.uuid4().hex[:12]}"
+        steps = rule.get("steps") or rule.get("actions") or []
+        job_record = {
+            "id": job_id,
+            "job_id": job_id,
+            "rule_id": rule_id,
+            "workflow_id": rule_id,
+            "rule_name": rule.get("name", "Workflow"),
+            "workflow_name": rule.get("name", "Workflow"),
+            "organization_id": org_id,
+            "status": "QUEUED",
+            "created_at": datetime.datetime.utcnow().isoformat(),
+            "started_at": None,
+            "completed_at": None,
+            "current_step_index": 0,
+            "total_steps": len(steps),
+            "current_step_name": "Queued in runner",
+            "steps_trace": [],
+            "result": None,
+            "error": None,
+            "dry_run": dry_run,
+            "payload": custom_payload or {}
+        }
+
+        with self._lock:
+            self._jobs[job_id] = job_record
+
+        # Spawn asynchronous execution worker thread
+        worker = threading.Thread(
+            target=self._run_job_worker,
+            args=(job_id, rule, custom_payload, dry_run, org_id),
+            daemon=True
+        )
+        worker.start()
+
+        return {
+            "success": True,
+            "job_id": job_id,
+            "status": "QUEUED",
+            "workflow_id": rule_id,
+            "workflow_name": rule.get("name"),
+            "message": "Workflow queued for background asynchronous execution."
+        }
+
+    def _run_job_worker(
+        self,
+        job_id: str,
+        rule: Dict[str, Any],
+        payload: Optional[Dict[str, Any]],
+        dry_run: bool,
+        organization_id: Optional[str]
+    ):
+        org_id = organization_id or rule.get("organization_id", "org-enterprise-default")
+        with self._lock:
+            self._active_workers[org_id] = self._active_workers.get(org_id, 0) + 1
+            if job_id in self._jobs:
+                self._jobs[job_id]["status"] = "RUNNING"
+                self._jobs[job_id]["started_at"] = datetime.datetime.utcnow().isoformat()
+                self._jobs[job_id]["current_step_name"] = "Executing steps"
+
+        try:
+            result = self.execute_rule_manually(rule["id"], payload, dry_run=dry_run, organization_id=org_id)
+            with self._lock:
+                if job_id in self._jobs:
+                    # If job was cancelled while running, retain CANCELLED state
+                    if self._jobs[job_id]["status"] != "CANCELLED":
+                        self._jobs[job_id]["status"] = "COMPLETED" if result.get("status") in ("success", "skipped") else "FAILED"
+                    self._jobs[job_id]["completed_at"] = datetime.datetime.utcnow().isoformat()
+                    self._jobs[job_id]["result"] = result
+                    self._jobs[job_id]["steps_trace"] = result.get("steps_trace", [])
+                    self._jobs[job_id]["current_step_name"] = "Completed"
+                    self._jobs[job_id]["current_step_index"] = self._jobs[job_id]["total_steps"]
+                    if result.get("error_message"):
+                        self._jobs[job_id]["error"] = result.get("error_message")
+        except Exception as exc:
+            with self._lock:
+                if job_id in self._jobs:
+                    self._jobs[job_id]["status"] = "FAILED"
+                    self._jobs[job_id]["error"] = str(exc)
+                    self._jobs[job_id]["completed_at"] = datetime.datetime.utcnow().isoformat()
+        finally:
+            with self._lock:
+                self._active_workers[org_id] = max(0, self._active_workers.get(org_id, 1) - 1)
+
+    def get_job(self, job_id: str, organization_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Retrieves a background job with tenant isolation scoping."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return None
+            if organization_id and job.get("organization_id") and job.get("organization_id") != organization_id:
+                return None
+            return dict(job)
+
+    def list_jobs(
+        self,
+        organization_id: Optional[str] = None,
+        limit: int = 50,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Lists background execution jobs for a given tenant."""
+        with self._lock:
+            jobs = list(self._jobs.values())
+        if organization_id:
+            jobs = [j for j in jobs if j.get("organization_id") == organization_id or not j.get("organization_id")]
+        if status:
+            jobs = [j for j in jobs if j.get("status") == status.upper()]
+        jobs.sort(key=lambda j: j.get("created_at", ""), reverse=True)
+        return jobs[:limit]
+
+    def cancel_job(self, job_id: str, organization_id: Optional[str] = None) -> bool:
+        """Cancels a queued or currently executing background job."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return False
+            if organization_id and job.get("organization_id") and job.get("organization_id") != organization_id:
+                return False
+            if job["status"] in ("QUEUED", "RUNNING"):
+                job["status"] = "CANCELLED"
+                job["completed_at"] = datetime.datetime.utcnow().isoformat()
+                job["error"] = "Job cancelled by operator request."
+                return True
+        return False
+
     def _push_event_stream(self, evt: Dict[str, Any]):
         with self._lock:
             self.event_stream.append(evt)
@@ -510,6 +879,36 @@ class AutomationEngine:
     def get_event_stream(self) -> List[Dict[str, Any]]:
         with self._lock:
             return list(self.event_stream)
+
+    def evaluate_scheduled_workflows(self, organization_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Evaluates scheduled/interval triggers for workflows and executes due workflows."""
+        now_ts = time.time()
+        executed = []
+        try:
+            rules = self.storage.get_rules(enabled_only=True, organization_id=organization_id)
+            for rule in rules:
+                trigger = rule.get("trigger", {})
+                t_type = trigger.get("type", "")
+                interval_min = trigger.get("interval_minutes") or trigger.get("interval")
+                if t_type in ("schedule", "cron", "interval") or bool(interval_min):
+                    interval_sec = max(30, float(interval_min or 60) * 60)
+                    last_exec = self._schedule_tracker.get(rule["id"], 0.0)
+                    if (now_ts - last_exec) >= interval_sec:
+                        self._schedule_tracker[rule["id"]] = now_ts
+                        res = self.execute_rule_manually(
+                            rule["id"],
+                            custom_payload={
+                                "scheduled": True,
+                                "interval_minutes": interval_min or 60,
+                                "triggered_at": datetime.datetime.utcnow().isoformat()
+                            },
+                            dry_run=False,
+                            organization_id=rule.get("organization_id")
+                        )
+                        executed.append({"rule_id": rule["id"], "result": res})
+        except Exception:
+            pass
+        return executed
 
     def _background_loop(self):
         """Background thread executing periodic health monitoring events."""
@@ -533,3 +932,5 @@ class AutomationEngine:
                     )
             except Exception:
                 pass
+
+

@@ -91,6 +91,12 @@ class ActionRunner:
                 output, status, retry_count, error_msg = self._action_webhook_call(rendered_params, context)
             elif action_type == "generate_report":
                 output = self._action_generate_report(rendered_params, context)
+            elif action_type in ("ai_generate", "ai_prompt"):
+                output = self._action_ai_generate(rendered_params, context)
+            elif action_type in ("ai_summarize", "ai_incident_rca"):
+                output = self._action_ai_summarize(rendered_params, context)
+            elif action_type == "ai_classify":
+                output = self._action_ai_classify(rendered_params, context)
             elif action_type in ("file_write", "file_append"):
                 output = self._action_file_io(action_type, rendered_params, context)
             elif action_type == "data_transform":
@@ -203,7 +209,14 @@ class ActionRunner:
         nlp = context.get("nlp", {})
 
         lead_id = None
-        if entity == "lead" and storage_engine and hasattr(storage_engine, "save_lead"):
+        existing_id = payload.get("id") or payload.get("lead_id") or params.get("lead_id") or context.get("lead_id")
+        if entity == "lead" and existing_id and storage_engine and hasattr(storage_engine, "update_lead_status"):
+            try:
+                storage_engine.update_lead_status(existing_id, params.get("status", "qualified"), organization_id=context.get("organization_id"))
+                lead_id = existing_id
+            except Exception:
+                pass
+        elif entity == "lead" and storage_engine and hasattr(storage_engine, "save_lead"):
             try:
                 lead_data = {
                     "name": payload.get("name") or payload.get("contact_name") or "Website Visitor",
@@ -305,11 +318,11 @@ class ActionRunner:
         storage_engine: Any = None
     ) -> Dict[str, Any]:
         new_status = params.get("status", "contacted")
-        lead_id = params.get("lead_id") or context.get("lead_id")
+        lead_id = params.get("lead_id") or context.get("lead_id") or context.get("payload", {}).get("id") or context.get("payload", {}).get("lead_id")
         
         if storage_engine and hasattr(storage_engine, "update_lead_status") and lead_id:
             try:
-                storage_engine.update_lead_status(lead_id, new_status)
+                storage_engine.update_lead_status(lead_id, new_status, organization_id=context.get("organization_id"))
             except Exception:
                 pass
 
@@ -432,3 +445,33 @@ class ActionRunner:
             "exit_code": 0,
             "status": "simulated_safe"
         }
+
+    def _action_ai_generate(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        from ai_provider import get_ai_provider
+        prompt = params.get("prompt") or params.get("prompt_template") or "Operational status check."
+        system_prompt = params.get("system_prompt")
+        provider_name = params.get("provider")
+        provider = get_ai_provider(provider_name)
+        generated = provider.generate_text(prompt, system_prompt=system_prompt)
+        return {
+            "prompt": prompt,
+            "generated_text": generated,
+            "provider": provider.get_info().get("id"),
+            "model": provider.get_info().get("model")
+        }
+
+    def _action_ai_summarize(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        from ai_provider import get_ai_provider
+        error_text = params.get("error_text") or params.get("source") or context.get("payload", {}).get("error") or context.get("payload", {}).get("message") or "Operational event"
+        provider = get_ai_provider(params.get("provider"))
+        summary_result = provider.summarize_incident(str(error_text), context)
+        return summary_result
+
+    def _action_ai_classify(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        from ai_provider import get_ai_provider
+        text = params.get("text") or context.get("payload", {}).get("message") or ""
+        categories = params.get("categories") or ["Support", "DevOps", "Billing", "Security", "Sales"]
+        provider = get_ai_provider(params.get("provider"))
+        res = provider.classify_text(str(text), categories)
+        return res
+

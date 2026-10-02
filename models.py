@@ -574,6 +574,7 @@ class AuditLog(db.Model):
             "user_email": self.user_email,
             "user": self.user_email or self.user_id or "System",
             "action": self.action,
+            "event": self.action,
             "resource_type": self.resource_type,
             "resource_id": self.resource_id,
             "details": details,

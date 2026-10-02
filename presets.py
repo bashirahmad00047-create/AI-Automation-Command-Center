@@ -497,5 +497,179 @@ PRESET_BLUEPRINTS: List[Dict[str, Any]] = [
                 }
             }
         ]
+    },
+    # 9. Autonomous Incident RCA & Multi-Channel Mitigation
+    {
+        "id": "template-autonomous-incident-rca",
+        "name": "Autonomous Incident RCA & Multi-Channel Mitigation",
+        "description": "Ingests server crashes or error logs, executes instant AI Root Cause Analysis (RCA), generates SRE post-mortems, and dispatches multi-channel alerts.",
+        "category": "Incident",
+        "priority": 100,
+        "cooldown_seconds": 10,
+        "trigger": {
+            "type": "event",
+            "event_name": "system.crash"
+        },
+        "condition": {
+            "logic": "OR",
+            "conditions": [
+                {"field": "payload.error", "operator": "exists", "value": True},
+                {"field": "payload.message", "operator": "exists", "value": True}
+            ]
+        },
+        "actions": [
+            {
+                "type": "notification",
+                "params": {
+                    "title": "[SEV-1] Autonomous Incident RCA Ready",
+                    "message": "AI RCA completed for {{ payload.host }}: {{ nlp.intent }}.",
+                    "severity": "critical"
+                }
+            },
+            {
+                "type": "log_entry",
+                "params": {
+                    "level": "CRITICAL",
+                    "message": "Autonomous Incident RCA triggered for host {{ payload.host }}."
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Event: system.crash", "config": {"event_name": "system.crash"}},
+            {"type": "ai_analysis", "name": "Triage Incident Urgency", "config": {}},
+            {"type": "ai_summarize", "name": "Generate Automated RCA & Mitigation", "config": {"source_field": "payload.error"}},
+            {"type": "notification", "name": "Dispatch SEV-1 Alert", "config": {"severity": "critical", "title": "[SEV-1] Incident RCA Ready"}},
+            {"type": "webhook_call", "name": "Broadcast to SRE Webhook", "config": {"url": "https://api.opsflow.internal/hooks/sre-incident"}},
+            {"type": "ai_generate", "name": "Draft Executive Post-Mortem", "config": {"prompt_template": "Draft incident postmortem for {{ payload.error }} on {{ payload.host }}."}},
+            {"type": "end", "name": "Mitigation Pipeline Complete", "config": {}}
+        ]
+    },
+    # 10. Intelligent Multi-Category Support Triage
+    {
+        "id": "template-intelligent-support-triage",
+        "name": "Intelligent Multi-Category Support Triage",
+        "description": "Multi-category customer ticket routing using AI classification, sentiment guardrails, and automated contextual reply drafting.",
+        "category": "Support",
+        "priority": 85,
+        "cooldown_seconds": 5,
+        "trigger": {
+            "type": "event",
+            "event_name": "support.ticket_created"
+        },
+        "condition": {
+            "logic": "AND",
+            "conditions": [
+                {"field": "payload.message", "operator": "exists", "value": True}
+            ]
+        },
+        "actions": [
+            {
+                "type": "database_record",
+                "params": {
+                    "entity": "lead",
+                    "status": "new"
+                }
+            },
+            {
+                "type": "notification",
+                "params": {
+                    "title": "Customer Ticket Triaged (AI Route: {{ route.department }})",
+                    "message": "Assigned ticket from {{ payload.name }} to {{ route.department }}.",
+                    "severity": "info"
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Event: support.ticket_created", "config": {"event_name": "support.ticket_created"}},
+            {"type": "ai_classify", "name": "Classify Ticket Category", "config": {"categories": ["DevOps", "Billing", "Security", "Support", "Sales"]}},
+            {"type": "ai_sentiment_guard", "name": "Sentiment & Urgency Guard", "config": {"min_urgency": 40}},
+            {"type": "ai_generate", "name": "Draft Contextual AI Reply", "config": {"prompt_template": "Draft courteous response to {{ payload.message }}."}},
+            {"type": "database_record", "name": "Store Ticket in CRM", "config": {"entity": "lead"}},
+            {"type": "notification", "name": "Notify Department Lead", "config": {"title": "New Support Ticket Assigned", "severity": "info"}},
+            {"type": "end", "name": "Triage Complete", "config": {}}
+        ]
+    },
+    # 11. Autonomous Threat Intelligence & IP Quarantine
+    {
+        "id": "template-threat-intel-sentinel",
+        "name": "Autonomous Threat Intelligence & IP Quarantine",
+        "description": "Scans security audit events, extracts attack indicators and malicious IPs via AI, and initiates automated isolation protocols.",
+        "category": "Security",
+        "priority": 95,
+        "cooldown_seconds": 15,
+        "trigger": {
+            "type": "event",
+            "event_name": "security.audit_alert"
+        },
+        "condition": {
+            "logic": "OR",
+            "conditions": [
+                {"field": "payload.threat_level", "operator": "equals", "value": "high"},
+                {"field": "nlp.intent", "operator": "equals", "value": "security_threat"}
+            ]
+        },
+        "actions": [
+            {
+                "type": "notification",
+                "params": {
+                    "title": "[SECURITY] Threat Isolated: {{ payload.ip }}",
+                    "message": "Automated security quarantine active for host {{ payload.ip }}.",
+                    "severity": "critical"
+                }
+            },
+            {
+                "type": "log_entry",
+                "params": {
+                    "level": "CRITICAL",
+                    "message": "Threat quarantined for IP {{ payload.ip }}."
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Event: security.audit_alert", "config": {"event_name": "security.audit_alert"}},
+            {"type": "ai_extract_entities", "name": "Extract Threat Entities", "config": {"fields": ["ipv4", "hostnames"]}},
+            {"type": "ai_analysis", "name": "Assess Threat Severity", "config": {}},
+            {"type": "notification", "name": "Trigger Firewall Isolation Alert", "config": {"severity": "critical", "title": "IP Quarantined"}},
+            {"type": "log_entry", "name": "Record Forensic Audit Entry", "config": {"level": "CRITICAL"}},
+            {"type": "end", "name": "Quarantine Complete", "config": {}}
+        ]
+    },
+    # 12. Scheduled Operations Health & Performance Digest
+    {
+        "id": "template-scheduled-ops-digest",
+        "name": "Scheduled Operations Health & Performance Digest",
+        "description": "Periodically synthesizes system health metrics, computes operational trend summaries, and publishes scheduled executive briefings.",
+        "category": "System",
+        "priority": 70,
+        "cooldown_seconds": 30,
+        "trigger": {
+            "type": "schedule",
+            "event_name": "schedule.digest",
+            "interval_minutes": 60
+        },
+        "condition": {
+            "logic": "AND",
+            "conditions": [
+                {"field": "system.cpu_percent", "operator": ">=", "value": 0}
+            ]
+        },
+        "actions": [
+            {
+                "type": "notification",
+                "params": {
+                    "title": "Scheduled Operations Digest",
+                    "message": "System operational briefing compiled successfully.",
+                    "severity": "info"
+                }
+            }
+        ],
+        "steps": [
+            {"type": "trigger", "name": "Schedule: Operations Digest", "config": {"event_name": "schedule.digest", "interval_minutes": 60}},
+            {"type": "ai_summarize", "name": "Synthesize Health Trends", "config": {"source_field": "payload.metrics_summary"}},
+            {"type": "ai_generate", "name": "Generate Executive Briefing", "config": {"prompt_template": "Generate executive briefing for system health."}},
+            {"type": "notification", "name": "Publish Operations Digest", "config": {"title": "Operations Digest Published", "severity": "info"}},
+            {"type": "end", "name": "Digest Dispatched", "config": {}}
+        ]
     }
 ]
+

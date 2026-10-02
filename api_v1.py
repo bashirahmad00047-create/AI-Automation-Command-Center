@@ -776,6 +776,7 @@ def create_rule():
     org = g.current_org
     allowed, violation = check_resource_quota(org, "rules", delta=1)
     if not allowed:
+        log_audit_event("quota.exceeded", "quota", "rules", {"plan": org.plan_tier if org else "free", "violation": violation})
         return jsonify({
             "error": "Rule limit exceeded for your current plan.",
             "code": "PLAN_LIMIT_EXCEEDED",
@@ -855,6 +856,7 @@ def duplicate_rule(rule_id: str):
     org = g.current_org
     allowed, violation = check_resource_quota(org, "rules", delta=1)
     if not allowed:
+        log_audit_event("quota.exceeded", "quota", "rules", {"plan": org.plan_tier if org else "free", "violation": violation})
         return jsonify({
             "error": "Rule limit exceeded for your current plan.",
             "code": "PLAN_LIMIT_EXCEEDED",
@@ -896,6 +898,172 @@ def run_rule(rule_id: str):
         {"dry_run": dry_run, "status": result.get("status")}
     )
     return jsonify(result)
+
+
+@api_v1.route("/rules/<rule_id>/dispatch-async", methods=["POST"])
+@api_v1.route("/workflows/<rule_id>/dispatch-async", methods=["POST"])
+@require_role(["owner", "admin", "operator"])
+def dispatch_workflow_async(rule_id: str):
+    data = request.get_json(silent=True) or {}
+    org = g.current_org
+    engine = get_engine()
+    custom_payload = data.get("payload", {})
+    dry_run = bool(data.get("dry_run", False))
+
+    if not dry_run and org:
+        quota_ok, violation = check_resource_quota(org, "monthly_events", delta=1)
+        if not quota_ok:
+            return jsonify({
+                "error": "Monthly event quota exceeded.",
+                "code": "QUOTA_EXCEEDED",
+                "plan": org.plan_tier.upper() if org else "FREE",
+                "quota": violation
+            }), 429
+
+    result = engine.dispatch_job_async(rule_id, custom_payload, dry_run=dry_run, organization_id=org.id)
+    if not result.get("success"):
+        status_code = 404 if result.get("code") == "NOT_FOUND" else 429
+        return jsonify(result), status_code
+
+    log_audit_event(
+        "workflow.dispatch_async",
+        "automation_rule",
+        rule_id,
+        {"job_id": result.get("job_id"), "dry_run": dry_run}
+    )
+    return jsonify(result), 202
+
+
+@api_v1.route("/jobs", methods=["GET"])
+@api_v1.route("/workflows/jobs", methods=["GET"])
+@require_auth
+def list_execution_jobs():
+    org = g.current_org
+    engine = get_engine()
+    limit = int(request.args.get("limit", 50))
+    status = request.args.get("status")
+    jobs = engine.list_jobs(organization_id=org.id, limit=limit, status=status)
+    return jsonify({"jobs": jobs, "count": len(jobs)})
+
+
+@api_v1.route("/jobs/<job_id>", methods=["GET"])
+@api_v1.route("/workflows/jobs/<job_id>", methods=["GET"])
+@require_auth
+def get_execution_job(job_id: str):
+    org = g.current_org
+    engine = get_engine()
+    job = engine.get_job(job_id, organization_id=org.id)
+    if not job:
+        return jsonify({"error": f"Execution job '{job_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"job": job})
+
+
+@api_v1.route("/jobs/<job_id>/cancel", methods=["POST"])
+@api_v1.route("/workflows/jobs/<job_id>/cancel", methods=["POST"])
+@require_role(["owner", "admin", "operator"])
+def cancel_execution_job(job_id: str):
+    org = g.current_org
+    engine = get_engine()
+    cancelled = engine.cancel_job(job_id, organization_id=org.id)
+    if not cancelled:
+        return jsonify({"error": f"Job '{job_id}' not found or already completed/cancelled.", "code": "NOT_FOUND"}), 404
+
+    log_audit_event("workflow.job_cancel", "workflow_job", job_id)
+    return jsonify({"success": True, "message": f"Job '{job_id}' successfully cancelled.", "job_id": job_id})
+
+
+@api_v1.route("/rules/<rule_id>/schedule", methods=["POST", "PUT"])
+@api_v1.route("/workflows/<rule_id>/schedule", methods=["POST", "PUT"])
+@require_role(["owner", "admin", "operator"])
+def configure_workflow_schedule(rule_id: str):
+    data = request.get_json(silent=True) or {}
+    org = g.current_org
+    storage = get_storage()
+    rule = storage.get_rule(rule_id, organization_id=org.id)
+    if not rule:
+        return jsonify({"error": f"Workflow '{rule_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    interval_minutes = int(data.get("interval_minutes", data.get("interval", 60)))
+    enabled = bool(data.get("enabled", True))
+
+    trigger = rule.get("trigger", {})
+    trigger["type"] = "schedule"
+    trigger["interval_minutes"] = interval_minutes
+    trigger["schedule_enabled"] = enabled
+
+    rule["trigger"] = trigger
+    rule["enabled"] = 1 if enabled else rule.get("enabled", 1)
+    storage.save_rule(rule, organization_id=org.id)
+
+    log_audit_event("workflow.schedule", "automation_rule", rule_id, {"interval_minutes": interval_minutes, "enabled": enabled})
+    return jsonify({
+        "success": True,
+        "message": f"Workflow '{rule['name']}' schedule set to every {interval_minutes} minutes.",
+        "workflow_id": rule_id,
+        "interval_minutes": interval_minutes,
+        "enabled": enabled
+    })
+
+
+@api_v1.route("/workflows/schedules", methods=["GET"])
+@require_auth
+def list_scheduled_workflows():
+    org = g.current_org
+    storage = get_storage()
+    rules = storage.get_rules(organization_id=org.id)
+    scheduled = []
+    for r in rules:
+        t = r.get("trigger", {})
+        if t.get("type") in ("schedule", "cron", "interval") or t.get("interval_minutes"):
+            scheduled.append({
+                "workflow_id": r["id"],
+                "name": r["name"],
+                "interval_minutes": t.get("interval_minutes", 60),
+                "enabled": bool(r.get("enabled")),
+                "last_triggered": r.get("last_triggered")
+            })
+    return jsonify({"scheduled_workflows": scheduled, "count": len(scheduled)})
+
+
+@api_v1.route("/dlq", methods=["GET"])
+@api_v1.route("/workflows/dlq", methods=["GET"])
+@require_role(["owner", "admin", "operator"])
+def list_dlq_items():
+    org = g.current_org
+    engine = get_engine()
+    status = request.args.get("status")
+    items = engine.get_dlq(organization_id=org.id, status=status)
+    return jsonify({"dlq": items, "count": len(items)})
+
+
+@api_v1.route("/dlq/<dlq_id>/replay", methods=["POST"])
+@api_v1.route("/workflows/dlq/<dlq_id>/replay", methods=["POST"])
+@require_role(["owner", "admin", "operator"])
+def replay_dlq_item(dlq_id: str):
+    org = g.current_org
+    engine = get_engine()
+    res = engine.replay_dlq(dlq_id, organization_id=org.id)
+    if not res.get("success"):
+        code = 404 if res.get("code") == "NOT_FOUND" else 403
+        return jsonify(res), code
+
+    log_audit_event("dlq.replay", "dead_letter_queue", dlq_id, {"status": res.get("status")})
+    return jsonify(res)
+
+
+@api_v1.route("/dlq/<dlq_id>", methods=["DELETE"])
+@api_v1.route("/workflows/dlq/<dlq_id>", methods=["DELETE"])
+@require_role(["owner", "admin"])
+def delete_dlq_item(dlq_id: str):
+    org = g.current_org
+    engine = get_engine()
+    deleted = engine.delete_dlq(dlq_id, organization_id=org.id)
+    if not deleted:
+        return jsonify({"error": f"DLQ item '{dlq_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    log_audit_event("dlq.delete", "dead_letter_queue", dlq_id)
+    return jsonify({"success": True, "message": f"DLQ item '{dlq_id}' purged.", "dlq_id": dlq_id})
+
 
 
 @api_v1.route("/rules/export", methods=["GET"])
@@ -940,6 +1108,7 @@ def create_webhook():
     org = g.current_org
     allowed, violation = check_resource_quota(org, "webhooks", delta=1)
     if not allowed:
+        log_audit_event("quota.exceeded", "quota", "webhooks", {"plan": org.plan_tier if org else "free", "violation": violation})
         return jsonify({
             "error": f"Webhook endpoint limit reached ({violation['limit']} maximum on {violation['plan_tier'].upper()} plan). Please delete an existing webhook or upgrade.",
             "code": "QUOTA_EXCEEDED",
@@ -1088,6 +1257,7 @@ def dispatch_event():
     if not dry_run and org:
         quota_ok, violation = check_resource_quota(org, "monthly_events", delta=1)
         if not quota_ok:
+            log_audit_event("quota.exceeded", "quota", "monthly_events", {"plan": org.plan_tier.upper() if org else "FREE", "violation": violation})
             return jsonify({
                 "error": "Monthly event quota exceeded.",
                 "code": "QUOTA_EXCEEDED",
@@ -1200,6 +1370,60 @@ def nlp_analyze():
         "event_inferred": event_name,
         "simulation": simulation
     })
+
+
+@api_v1.route("/ai/generate", methods=["POST"])
+@api_v1.route("/nlp/generate", methods=["POST"])
+@require_auth
+def ai_generate_text():
+    data = request.get_json(silent=True) or {}
+    prompt = data.get("prompt") or data.get("text", "").strip()
+    if not prompt:
+        return jsonify({"error": "Prompt is required for AI text generation.", "code": "VALIDATION_ERROR"}), 400
+
+    system_prompt = data.get("system_prompt")
+    provider_name = data.get("provider")
+    ai_provider = get_ai_provider(provider_name)
+    max_tokens = int(data.get("max_tokens", 500))
+
+    start = time.time()
+    generated = ai_provider.generate_text(prompt, system_prompt=system_prompt, max_tokens=max_tokens)
+    latency_ms = round((time.time() - start) * 1000, 2)
+
+    return jsonify({
+        "success": True,
+        "prompt": prompt,
+        "generated_text": generated,
+        "provider": ai_provider.get_info().get("id"),
+        "model": ai_provider.get_info().get("model"),
+        "latency_ms": latency_ms
+    })
+
+
+@api_v1.route("/ai/triage", methods=["POST"])
+@api_v1.route("/nlp/triage", methods=["POST"])
+@require_auth
+def ai_triage_text():
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "Text is required for AI triage.", "code": "VALIDATION_ERROR"}), 400
+
+    categories = data.get("categories") or ["Support", "DevOps", "Billing", "Security", "Sales"]
+    provider_name = data.get("provider")
+    ai_provider = get_ai_provider(provider_name)
+
+    classification = ai_provider.classify_text(text, categories)
+    rca = ai_provider.summarize_incident(text)
+
+    return jsonify({
+        "success": True,
+        "text": text,
+        "classification": classification,
+        "rca": rca,
+        "provider": ai_provider.get_info().get("id")
+    })
+
 
 
 # ==========================================
@@ -1385,6 +1609,7 @@ def install_template(template_id: str):
     org = g.current_org
     allowed, violation = check_resource_quota(org, "rules", delta=1)
     if not allowed:
+        log_audit_event("quota.exceeded", "quota", "rules", {"plan": org.plan_tier.upper() if org else "FREE", "violation": violation})
         return jsonify({
             "error": "Rule limit exceeded for your current plan.",
             "code": "PLAN_LIMIT_EXCEEDED",
@@ -1466,6 +1691,7 @@ def resolve_alert(alert_id: int):
 # ==========================================
 
 @api_v1.route("/audit-trail", methods=["GET"])
+@api_v1.route("/audit", methods=["GET"])
 @require_role(["owner", "admin"])
 @require_feature("audit_trail")
 def get_audit_trail():

@@ -20,6 +20,13 @@ class Config:
     if SQLALCHEMY_DATABASE_URI.startswith("postgres://"):
         SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_URI.replace("postgres://", "postgresql://", 1)
 
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,
+    }
+    if "sqlite" in SQLALCHEMY_DATABASE_URI:
+        from sqlalchemy.pool import NullPool
+        SQLALCHEMY_ENGINE_OPTIONS["poolclass"] = NullPool
+
     # Session security
     PERMANENT_SESSION_LIFETIME = timedelta(days=7)
     SESSION_COOKIE_NAME = "opsflow_session"
