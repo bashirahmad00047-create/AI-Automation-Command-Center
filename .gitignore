@@ -43,3 +43,6 @@ automation_storage/output/*
 Thumbs.db
 Desktop.ini
 backups/
+*.phase*-backup
+*.backup
+

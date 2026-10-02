@@ -8,7 +8,9 @@ Enables seamless switching between:
 
 from __future__ import annotations
 
+import json
 import os
+import urllib.request
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -114,11 +116,50 @@ class GeminiAIProvider(BaseAIProvider):
             res["provider"] = "local_deterministic (gemini_fallback)"
             return res
 
-        # When key is present, simulated or connected dispatch
-        res = self._fallback.analyze_text(text, context)
-        res["provider"] = "gemini"
-        res["model"] = "gemini-1.5-flash"
-        return res
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+            prompt = (
+                "You are an IT operations and automation intelligence engine. Analyze the following operational message.\n"
+                "Return a valid JSON object ONLY with the following exact keys:\n"
+                "- intent: string (e.g. system_outage, lead_inquiry, support_request, security_incident)\n"
+                "- urgency: integer (0 to 100)\n"
+                "- lead_score: integer (0 to 100)\n"
+                "- route_department: string ('Sales', 'Support', 'DevOps', or 'Security')\n"
+                "- sentiment: string ('positive', 'neutral', 'negative')\n"
+                "- summary: string concise summary\n\n"
+                f"Operational Message:\n{text}"
+            )
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json"}
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                candidate_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(candidate_text)
+                return {
+                    "intent": parsed.get("intent", "general_inquiry"),
+                    "urgency": int(parsed.get("urgency", 50)),
+                    "lead_score": int(parsed.get("lead_score", 50)),
+                    "route_department": parsed.get("route_department", "Sales"),
+                    "sentiment": parsed.get("sentiment", "neutral"),
+                    "summary": parsed.get("summary", text[:80]),
+                    "entities": [],
+                    "provider": "gemini",
+                    "model": "gemini-1.5-flash"
+                }
+        except Exception:
+            # Fall back to deterministic engine gracefully
+            res = self._fallback.analyze_text(text, context)
+            res["provider"] = "gemini"
+            res["model"] = "gemini-1.5-flash"
+            return res
 
     def generate_draft_response(
         self,
@@ -129,7 +170,33 @@ class GeminiAIProvider(BaseAIProvider):
         route_department: str = "Sales",
         message: Optional[str] = None
     ) -> str:
-        return self._fallback.generate_draft_response(name, company, intent, lead_score, route_department, message)
+        if not self.api_key:
+            return self._fallback.generate_draft_response(name, company, intent, lead_score, route_department, message)
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+            prompt = (
+                f"You are OpsFlow Cloud AI assistant. Draft a concise professional email reply to a customer inquiry.\n"
+                f"Customer Name: {name or 'Valued Customer'}\n"
+                f"Company: {company or 'Company'}\n"
+                f"Message: {message or ''}\n"
+                f"Department: {route_department}\n"
+                f"Intent: {intent}\n"
+                "Draft a short, helpful, courteous response (under 120 words)."
+            )
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}]
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except Exception:
+            return self._fallback.generate_draft_response(name, company, intent, lead_score, route_department, message)
 
 
 class OpenAIAIProvider(BaseAIProvider):
