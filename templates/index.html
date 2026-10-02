@@ -107,6 +107,9 @@
         <button class="hud-tab" onclick="switchTab('team')">
             <span class="tab-icon">👥</span> Team & RBAC
         </button>
+        <button class="hud-tab" onclick="switchTab('billing')">
+            <span class="tab-icon">💳</span> Plans & Billing
+        </button>
         <button class="hud-tab" onclick="switchTab('apidocs')">
             <span class="tab-icon">📖</span> API Docs
         </button>
@@ -679,6 +682,203 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                             <tr><td colspan="5" class="empty-cell">Loading compliance audit logs...</td></tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB: PLANS & BILLING -->
+        <section id="tab-billing" class="tab-panel">
+            <div class="panel-header">
+                <div>
+                    <h2>PLANS, BILLING & SUBSCRIPTIONS</h2>
+                    <p style="color: var(--text-dim); font-size: 13px; margin: 4px 0 0 0;">
+                        Manage your workspace plan tier, view real-time resource quotas, and access Stripe billing.
+                    </p>
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <span id="tabBillingHeaderBadge" class="status-badge active" style="font-size: 0.85rem; padding: 6px 14px;">ENTERPRISE TIER</span>
+                    <button class="hud-btn secondary" id="btnStripePortalTop" onclick="openCustomerPortal()">
+                        <i class="fab fa-stripe-s"></i> Stripe Customer Portal
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stripe Dev Mode Notice Banner -->
+            <div id="stripeDevNotice" class="hud-panel" style="display: none; margin-bottom: 24px; border-left: 4px solid #f59e0b; background: rgba(245, 158, 11, 0.05);">
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 14px 18px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 22px;">⚡</span>
+                        <div>
+                            <strong>Local / Development Mode Gateway</strong>
+                            <p style="font-size: 12px; color: var(--text-dim); margin: 2px 0 0 0;">
+                                Stripe credentials are not configured in your environment. The Free plan is fully functional. To test live Stripe Checkout and Customer Portal, configure <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_WEBHOOK_SECRET</code> in <code>.env</code>.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workspace Plan Overview & Quota Capacity Cards -->
+            <div class="metrics-grid" style="margin-bottom: 24px;">
+                <div class="metric-card purple">
+                    <div class="metric-header">
+                        <span class="metric-title">CURRENT SUBSCRIPTION</span>
+                        <span class="metric-badge" id="tabBillingOverviewBadge">ACTIVE</span>
+                    </div>
+                    <div class="metric-val" id="tabBillingOverviewPlan">Enterprise</div>
+                    <div class="metric-sub" id="tabBillingOverviewCycle">Billed Monthly • Auto-renewing</div>
+                </div>
+
+                <div class="metric-card cyan">
+                    <div class="metric-header">
+                        <span class="metric-title">WORKFLOW RULES QUOTA</span>
+                        <span class="metric-badge" id="tabBillingRulesUsageBadge">0 / 250</span>
+                    </div>
+                    <div class="metric-val" id="tabBillingRulesLimit">250 Max</div>
+                    <div style="margin-top: 10px; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                        <div id="tabBillingRulesProgress" style="height: 100%; width: 5%; background: var(--cyan-glow, #00f0ff); transition: width 0.4s ease;"></div>
+                    </div>
+                </div>
+
+                <div class="metric-card emerald">
+                    <div class="metric-header">
+                        <span class="metric-title">MONTHLY EVENT USAGE</span>
+                        <span class="metric-badge" id="tabBillingEventsUsageBadge">0 / 1,000,000</span>
+                    </div>
+                    <div class="metric-val" id="tabBillingEventsLimit">1,000,000</div>
+                    <div style="margin-top: 10px; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                        <div id="tabBillingEventsProgress" style="height: 100%; width: 2%; background: #10b981; transition: width 0.4s ease;"></div>
+                    </div>
+                </div>
+
+                <div class="metric-card gold">
+                    <div class="metric-header">
+                        <span class="metric-title">TEAM SEATS CAPACITY</span>
+                        <span class="metric-badge" id="tabBillingSeatsUsageBadge">1 / 100</span>
+                    </div>
+                    <div class="metric-val" id="tabBillingSeatsLimit">100 Seats</div>
+                    <div style="margin-top: 10px; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                        <div id="tabBillingSeatsProgress" style="height: 100%; width: 1%; background: #f59e0b; transition: width 0.4s ease;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interactive Tier Comparison & Pricing Matrix -->
+            <div class="hud-panel" style="margin-bottom: 24px;">
+                <div class="panel-header" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                    <h3>SUBSCRIPTION TIERS & UPGRADE MATRIX</h3>
+                    <div style="display: flex; gap: 8px;">
+                        <button type="button" class="hud-btn primary" id="tabBillingIntervalMonth" onclick="setTabBillingInterval('month')">Monthly Billing</button>
+                        <button type="button" class="hud-btn outline" id="tabBillingIntervalYear" onclick="setTabBillingInterval('year')">Annual (2 Months Free)</button>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px; padding: 20px 0;">
+                    <!-- FREE CARD -->
+                    <div class="hud-panel" id="planCardFree" style="border: 1px solid var(--border-color, #2a2e3d); padding: 24px; border-radius: 8px; text-align: center; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <h4 style="font-size: 18px; margin: 0 0 8px 0;">Free</h4>
+                            <div style="font-size: 32px; font-weight: 700; margin-bottom: 8px;">$0<span style="font-size: 13px; color: var(--text-dim);">/mo</span></div>
+                            <p style="font-size: 12px; color: var(--text-dim); min-height: 36px;">Core exploration & individual workflows</p>
+                            <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 16px 0;">
+                            <ul style="text-align: left; font-size: 13px; list-style: none; padding: 0; line-height: 2;">
+                                <li>✓ <strong>3</strong> Workflow Rules</li>
+                                <li>✓ <strong>1,000</strong> Monthly Events</li>
+                                <li>✓ <strong>1</strong> Team Member Seat</li>
+                                <li>✓ <strong>1</strong> API Key & Webhook</li>
+                                <li>✓ Local Deterministic AI</li>
+                                <li><span style="color:var(--text-dim);">✕ No Gemini / OpenAI</span></li>
+                                <li><span style="color:var(--text-dim);">✕ No Compliance Audits</span></li>
+                            </ul>
+                        </div>
+                        <div style="margin-top: 24px;" id="planActionFree">
+                            <span class="status-badge" style="width: 100%; display: block; text-align: center;">Current Plan</span>
+                        </div>
+                    </div>
+
+                    <!-- STARTER CARD -->
+                    <div class="hud-panel" id="planCardStarter" style="border: 1px solid var(--cyan-glow, #00f0ff); padding: 24px; border-radius: 8px; text-align: center; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <h4 style="font-size: 18px; color: var(--cyan-glow, #00f0ff); margin: 0 0 8px 0;">Starter</h4>
+                            <div style="font-size: 32px; font-weight: 700; margin-bottom: 8px;" id="tabPriceStarter">$29<span style="font-size: 13px; color: var(--text-dim);">/mo</span></div>
+                            <p style="font-size: 12px; color: var(--text-dim); min-height: 36px;">Essential automation for growing teams</p>
+                            <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 16px 0;">
+                            <ul style="text-align: left; font-size: 13px; list-style: none; padding: 0; line-height: 2;">
+                                <li>✓ <strong>10</strong> Workflow Rules</li>
+                                <li>✓ <strong>5,000</strong> Monthly Events</li>
+                                <li>✓ <strong>2</strong> Team Member Seats</li>
+                                <li>✓ <strong>2</strong> API Keys & Webhooks</li>
+                                <li>✓ Local Deterministic AI</li>
+                                <li>✓ Custom Webhook Ingestion</li>
+                                <li><span style="color:var(--text-dim);">✕ No Gemini / OpenAI</span></li>
+                            </ul>
+                        </div>
+                        <div style="margin-top: 24px;" id="planActionStarter">
+                            <button class="hud-btn outline" style="width: 100%;" onclick="selectPlanForCheckout('starter')">Upgrade to Starter</button>
+                        </div>
+                    </div>
+
+                    <!-- PRO CARD -->
+                    <div class="hud-panel" id="planCardPro" style="border: 2px solid #8b5cf6; padding: 24px; border-radius: 8px; text-align: center; position: relative; display: flex; flex-direction: column; justify-content: space-between;">
+                        <span style="position: absolute; top: -11px; right: 20px; background: #8b5cf6; color: white; font-size: 10px; padding: 3px 10px; border-radius: 12px; font-weight: 700; letter-spacing: 0.5px;">RECOMMENDED</span>
+                        <div>
+                            <h4 style="font-size: 18px; color: #a78bfa; margin: 0 0 8px 0;">Professional</h4>
+                            <div style="font-size: 32px; font-weight: 700; margin-bottom: 8px;" id="tabPricePro">$99<span style="font-size: 13px; color: var(--text-dim);">/mo</span></div>
+                            <p style="font-size: 12px; color: var(--text-dim); min-height: 36px;">Google Gemini AI & high event volume</p>
+                            <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 16px 0;">
+                            <ul style="text-align: left; font-size: 13px; list-style: none; padding: 0; line-height: 2;">
+                                <li>✓ <strong>50</strong> Workflow Rules</li>
+                                <li>✓ <strong>200,000</strong> Monthly Events</li>
+                                <li>✓ <strong>10</strong> Team Member Seats</li>
+                                <li>✓ <strong>10</strong> API Keys & Webhooks</li>
+                                <li>✓ <strong>Google Gemini AI Integration</strong></li>
+                                <li>✓ Advanced Analytics & Metrics</li>
+                                <li>✓ Full Compliance Forensics</li>
+                            </ul>
+                        </div>
+                        <div style="margin-top: 24px;" id="planActionPro">
+                            <button class="hud-btn primary" style="width: 100%;" onclick="selectPlanForCheckout('pro')">Upgrade to Pro</button>
+                        </div>
+                    </div>
+
+                    <!-- ENTERPRISE CARD -->
+                    <div class="hud-panel" id="planCardEnterprise" style="border: 1px solid #10b981; padding: 24px; border-radius: 8px; text-align: center; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <h4 style="font-size: 18px; color: #34d399; margin: 0 0 8px 0;">Enterprise</h4>
+                            <div style="font-size: 32px; font-weight: 700; margin-bottom: 8px;" id="tabPriceEnterprise">$499<span style="font-size: 13px; color: var(--text-dim);">/mo</span></div>
+                            <p style="font-size: 12px; color: var(--text-dim); min-height: 36px;">Full intelligence scale & dedicated SLA</p>
+                            <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 16px 0;">
+                            <ul style="text-align: left; font-size: 13px; list-style: none; padding: 0; line-height: 2;">
+                                <li>✓ <strong>250</strong> Workflow Rules</li>
+                                <li>✓ <strong>1,000,000</strong> Monthly Events</li>
+                                <li>✓ <strong>100</strong> Team Member Seats</li>
+                                <li>✓ <strong>50</strong> API Keys & Webhooks</li>
+                                <li>✓ <strong>OpenAI & Gemini Multimodal</strong></li>
+                                <li>✓ Dedicated SLA & Priority Queue</li>
+                                <li>✓ Forensic Audit Trail Export</li>
+                            </ul>
+                        </div>
+                        <div style="margin-top: 24px;" id="planActionEnterprise">
+                            <button class="hud-btn emerald" style="width: 100%;" onclick="selectPlanForCheckout('enterprise')">Upgrade to Enterprise</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Self-Service Customer Management & Actions -->
+            <div class="hud-panel">
+                <div class="panel-header">
+                    <h3>PAYMENT GATEWAY & SUBSCRIPTION ACTIONS</h3>
+                </div>
+                <div style="padding: 16px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+                    <div>
+                        <div style="font-size: 14px; font-weight: 600;" id="tabBillingDetailsSubId">Stripe Subscription: Active</div>
+                        <div style="font-size: 12px; color: var(--text-dim); margin-top: 4px;" id="tabBillingDetailsCustId">Billing Profile: Managed securely through Stripe Customer Portal</div>
+                    </div>
+                    <div style="display: flex; gap: 12px;">
+                        <button class="hud-btn outline" onclick="openCustomerPortal()"><i class="fab fa-stripe-s"></i> Stripe Customer Portal</button>
+                        <button class="hud-btn danger" onclick="confirmCancelSubscription()"><i class="fas fa-times-circle"></i> Cancel Subscription</button>
+                    </div>
                 </div>
             </div>
         </section>

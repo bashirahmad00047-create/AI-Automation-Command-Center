@@ -34,6 +34,7 @@ const state = {
 document.addEventListener('DOMContentLoaded', () => {
     initClock();
     initAuthAndTenancy();
+    checkBillingUrlParams();
     refreshAllData();
 
     // Telemetry and status poll (every 2.5 seconds)
@@ -183,6 +184,7 @@ function switchTab(tabId) {
     if (tabId === 'incidents') loadIncidents();
     if (tabId === 'apikeys') loadApiKeys();
     if (tabId === 'team') loadTeamAndAudits();
+    if (tabId === 'billing') loadBillingDashboard();
 }
 
 // ==========================================
@@ -1686,25 +1688,48 @@ function closeUpgradePlanModal() {
 }
 
 function setBillingInterval(interval) {
+    setTabBillingInterval(interval);
+}
+
+function setTabBillingInterval(interval) {
     currentBillingInterval = interval;
-    const btnMonth = document.getElementById('btnIntervalMonth');
-    const btnYear = document.getElementById('btnIntervalYear');
-    const priceStarter = document.getElementById('priceStarter');
-    const pricePro = document.getElementById('pricePro');
-    const priceEnterprise = document.getElementById('priceEnterprise');
+
+    const tabBtnMonth = document.getElementById('tabBillingIntervalMonth');
+    const tabBtnYear = document.getElementById('tabBillingIntervalYear');
+    const tabPriceStarter = document.getElementById('tabPriceStarter');
+    const tabPricePro = document.getElementById('tabPricePro');
+    const tabPriceEnterprise = document.getElementById('tabPriceEnterprise');
+
+    const modalBtnMonth = document.getElementById('btnIntervalMonth');
+    const modalBtnYear = document.getElementById('btnIntervalYear');
+    const modalPriceStarter = document.getElementById('priceStarter');
+    const modalPricePro = document.getElementById('pricePro');
+    const modalPriceEnterprise = document.getElementById('priceEnterprise');
 
     if (interval === 'year') {
-        if (btnYear) { btnYear.className = 'hud-btn primary'; }
-        if (btnMonth) { btnMonth.className = 'hud-btn outline'; }
-        if (priceStarter) priceStarter.innerHTML = '$290<span style="font-size: 13px; color: var(--text-dim, #888);">/yr</span>';
-        if (pricePro) pricePro.innerHTML = '$990<span style="font-size: 13px; color: var(--text-dim, #888);">/yr</span>';
-        if (priceEnterprise) priceEnterprise.innerHTML = '$4,990<span style="font-size: 13px; color: var(--text-dim, #888);">/yr</span>';
+        if (tabBtnYear) tabBtnYear.className = 'hud-btn primary';
+        if (tabBtnMonth) tabBtnMonth.className = 'hud-btn outline';
+        if (tabPriceStarter) tabPriceStarter.innerHTML = '$290<span style="font-size: 13px; color: var(--text-dim);">/yr</span>';
+        if (tabPricePro) tabPricePro.innerHTML = '$990<span style="font-size: 13px; color: var(--text-dim);">/yr</span>';
+        if (tabPriceEnterprise) tabPriceEnterprise.innerHTML = '$4,990<span style="font-size: 13px; color: var(--text-dim);">/yr</span>';
+
+        if (modalBtnYear) modalBtnYear.className = 'hud-btn primary';
+        if (modalBtnMonth) modalBtnMonth.className = 'hud-btn outline';
+        if (modalPriceStarter) modalPriceStarter.innerHTML = '$290<span style="font-size: 13px; color: var(--text-dim, #888);">/yr</span>';
+        if (modalPricePro) modalPricePro.innerHTML = '$990<span style="font-size: 13px; color: var(--text-dim, #888);">/yr</span>';
+        if (modalPriceEnterprise) modalPriceEnterprise.innerHTML = '$4,990<span style="font-size: 13px; color: var(--text-dim, #888);">/yr</span>';
     } else {
-        if (btnMonth) { btnMonth.className = 'hud-btn primary'; }
-        if (btnYear) { btnYear.className = 'hud-btn outline'; }
-        if (priceStarter) priceStarter.innerHTML = '$29<span style="font-size: 13px; color: var(--text-dim, #888);">/mo</span>';
-        if (pricePro) pricePro.innerHTML = '$99<span style="font-size: 13px; color: var(--text-dim, #888);">/mo</span>';
-        if (priceEnterprise) priceEnterprise.innerHTML = '$499<span style="font-size: 13px; color: var(--text-dim, #888);">/mo</span>';
+        if (tabBtnMonth) tabBtnMonth.className = 'hud-btn primary';
+        if (tabBtnYear) tabBtnYear.className = 'hud-btn outline';
+        if (tabPriceStarter) tabPriceStarter.innerHTML = '$29<span style="font-size: 13px; color: var(--text-dim);">/mo</span>';
+        if (tabPricePro) tabPricePro.innerHTML = '$99<span style="font-size: 13px; color: var(--text-dim);">/mo</span>';
+        if (tabPriceEnterprise) tabPriceEnterprise.innerHTML = '$499<span style="font-size: 13px; color: var(--text-dim);">/mo</span>';
+
+        if (modalBtnMonth) modalBtnMonth.className = 'hud-btn primary';
+        if (modalBtnYear) modalBtnYear.className = 'hud-btn outline';
+        if (modalPriceStarter) modalPriceStarter.innerHTML = '$29<span style="font-size: 13px; color: var(--text-dim, #888);">/mo</span>';
+        if (modalPricePro) modalPricePro.innerHTML = '$99<span style="font-size: 13px; color: var(--text-dim, #888);">/mo</span>';
+        if (modalPriceEnterprise) modalPriceEnterprise.innerHTML = '$499<span style="font-size: 13px; color: var(--text-dim, #888);">/mo</span>';
     }
 }
 
@@ -1748,6 +1773,230 @@ async function openCustomerPortal() {
         showToast(`Billing portal error: ${err.message}`, 'error');
     }
 }
+
+async function confirmCancelSubscription() {
+    if (!confirm('Are you sure you want to cancel your paid subscription? Your workspace will downgrade to the Free tier.')) {
+        return;
+    }
+    try {
+        showToast('Processing subscription cancellation...', 'info');
+        const res = await fetch('/api/v1/billing/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message || 'Subscription cancelled successfully.', 'success');
+            loadBillingDashboard();
+            loadBillingStatus();
+            pollTelemetry();
+        } else {
+            showToast(data.error || 'Failed to cancel subscription.', 'error');
+        }
+    } catch (err) {
+        showToast(`Cancellation error: ${err.message}`, 'error');
+    }
+}
+
+function updatePlanCardsUI(currentTier) {
+    const tiers = ['free', 'starter', 'pro', 'enterprise'];
+    const rank = { 'free': 0, 'starter': 1, 'pro': 2, 'enterprise': 3 };
+    const curRank = rank[currentTier] !== undefined ? rank[currentTier] : 0;
+
+    tiers.forEach(t => {
+        const titleCase = t.charAt(0).toUpperCase() + t.slice(1);
+        const card = document.getElementById(`planCard${titleCase}`);
+        const action = document.getElementById(`planAction${titleCase}`);
+        if (!action) return;
+
+        if (t === currentTier) {
+            action.innerHTML = '<span class="status-badge active" style="width: 100%; display: block; text-align: center; padding: 8px 0; font-weight: 600;">✓ Current Plan</span>';
+            if (card) card.style.borderColor = 'var(--cyan-glow, #00f0ff)';
+        } else if (t === 'free') {
+            action.innerHTML = '<button class="hud-btn outline" style="width: 100%;" onclick="confirmCancelSubscription()">Downgrade to Free</button>';
+            if (card) card.style.borderColor = 'var(--border-color, #2a2e3d)';
+        } else {
+            const isUpgrade = rank[t] > curRank;
+            const btnClass = t === 'pro' ? 'hud-btn primary' : (t === 'enterprise' ? 'hud-btn emerald' : 'hud-btn outline');
+            const label = isUpgrade ? `Upgrade to ${titleCase}` : `Switch to ${titleCase}`;
+            action.innerHTML = `<button class="${btnClass}" style="width: 100%;" onclick="selectPlanForCheckout('${t}')">${label}</button>`;
+            if (card && t !== 'pro') {
+                card.style.borderColor = t === 'enterprise' ? '#10b981' : (t === 'starter' ? 'var(--cyan-glow, #00f0ff)' : 'var(--border-color, #2a2e3d)');
+            }
+        }
+    });
+}
+
+async function loadBillingDashboard() {
+    try {
+        const [billingRes, membersRes] = await Promise.all([
+            fetch('/api/v1/billing/status'),
+            fetch('/api/v1/organizations/members')
+        ]);
+
+        if (!billingRes.ok) {
+            console.error('Failed to load billing status for dashboard');
+            return;
+        }
+
+        const data = await billingRes.json();
+        let teamMembersCount = 1;
+        if (membersRes.ok) {
+            const memData = await membersRes.json();
+            if (memData.members && Array.isArray(memData.members)) {
+                teamMembersCount = memData.members.length;
+                state.teamMembers = memData.members;
+            }
+        }
+
+        const tier = (data.plan_tier || 'free').toLowerCase();
+        const tierName = tier.charAt(0).toUpperCase() + tier.slice(1);
+        const sub = data.subscription || {};
+        const subStatus = (sub.status || (tier === 'free' ? 'active' : 'unmanaged')).toUpperCase();
+
+        // 1. Header & Gateway Notices
+        const headerBadge = document.getElementById('tabBillingHeaderBadge');
+        if (headerBadge) {
+            headerBadge.textContent = `${tier.toUpperCase()} TIER`;
+            headerBadge.className = `status-badge ${tier === 'free' ? '' : 'active'}`;
+        }
+
+        const devNotice = document.getElementById('stripeDevNotice');
+        if (devNotice) {
+            devNotice.style.display = data.is_stripe_configured ? 'none' : 'block';
+        }
+
+        // 2. Overview Card
+        const overviewBadge = document.getElementById('tabBillingOverviewBadge');
+        if (overviewBadge) {
+            overviewBadge.textContent = subStatus;
+            overviewBadge.className = `metric-badge ${['ACTIVE', 'TRIALING'].includes(subStatus) ? 'active' : 'warn'}`;
+        }
+
+        const overviewPlan = document.getElementById('tabBillingOverviewPlan');
+        if (overviewPlan) {
+            overviewPlan.textContent = `${tierName} Plan`;
+        }
+
+        const overviewCycle = document.getElementById('tabBillingOverviewCycle');
+        if (overviewCycle) {
+            if (tier === 'free') {
+                overviewCycle.textContent = 'Free Community Tier • Unlimited Duration';
+            } else {
+                const interval = (sub.billing_interval || 'month') === 'year' ? 'Annually' : 'Monthly';
+                const renewText = sub.cancel_at_period_end ? 'Cancels at period end' : 'Auto-renewing';
+                overviewCycle.textContent = `Billed ${interval} • ${renewText}`;
+            }
+        }
+
+        // 3. Quota Capacity Meters
+        const quotas = data.quotas || {};
+        const entitlements = data.entitlements || {};
+
+        // Rules Quota
+        const curRules = quotas.current_rules || 0;
+        const maxRules = quotas.max_rules || (entitlements.max_rules || 3);
+        const rulesPct = maxRules > 0 ? Math.min(100, Math.round((curRules / maxRules) * 100)) : 0;
+
+        const rulesBadge = document.getElementById('tabBillingRulesUsageBadge');
+        if (rulesBadge) rulesBadge.textContent = `${curRules} / ${maxRules}`;
+
+        const rulesLimit = document.getElementById('tabBillingRulesLimit');
+        if (rulesLimit) rulesLimit.textContent = `${maxRules} Max`;
+
+        const rulesProg = document.getElementById('tabBillingRulesProgress');
+        if (rulesProg) {
+            rulesProg.style.width = `${rulesPct}%`;
+            rulesProg.style.background = rulesPct >= 90 ? '#ef4444' : (rulesPct >= 75 ? '#f59e0b' : 'var(--cyan-glow, #00f0ff)');
+        }
+
+        // Monthly Events Quota
+        const curEvents = quotas.current_monthly_events || 0;
+        const maxEvents = quotas.max_monthly_events || (entitlements.max_monthly_events || 1000);
+        const eventsPct = maxEvents > 0 ? Math.min(100, Math.round((curEvents / maxEvents) * 100)) : 0;
+
+        const eventsBadge = document.getElementById('tabBillingEventsUsageBadge');
+        if (eventsBadge) eventsBadge.textContent = `${curEvents.toLocaleString()} / ${maxEvents.toLocaleString()}`;
+
+        const eventsLimit = document.getElementById('tabBillingEventsLimit');
+        if (eventsLimit) eventsLimit.textContent = Number(maxEvents).toLocaleString();
+
+        const eventsProg = document.getElementById('tabBillingEventsProgress');
+        if (eventsProg) {
+            eventsProg.style.width = `${eventsPct}%`;
+            eventsProg.style.background = eventsPct >= 90 ? '#ef4444' : (eventsPct >= 75 ? '#f59e0b' : '#10b981');
+        }
+
+        // Team Seats Capacity
+        const maxSeats = (entitlements.quotas && entitlements.quotas.team_members && entitlements.quotas.team_members.limit) || entitlements.max_team_members || (tier === 'free' ? 1 : (tier === 'starter' ? 2 : (tier === 'pro' ? 10 : 100)));
+        const curSeats = teamMembersCount;
+        const seatsPct = maxSeats > 0 ? Math.min(100, Math.round((curSeats / maxSeats) * 100)) : 0;
+
+        const seatsBadge = document.getElementById('tabBillingSeatsUsageBadge');
+        if (seatsBadge) seatsBadge.textContent = `${curSeats} / ${maxSeats}`;
+
+        const seatsLimit = document.getElementById('tabBillingSeatsLimit');
+        if (seatsLimit) seatsLimit.textContent = `${maxSeats} Seats`;
+
+        const seatsProg = document.getElementById('tabBillingSeatsProgress');
+        if (seatsProg) {
+            seatsProg.style.width = `${seatsPct}%`;
+            seatsProg.style.background = seatsPct >= 90 ? '#ef4444' : '#f59e0b';
+        }
+
+        // 4. Update Plan Matrix Action Buttons
+        updatePlanCardsUI(tier);
+
+        // 5. Subscription & Gateway Details Section
+        const subIdEl = document.getElementById('tabBillingDetailsSubId');
+        if (subIdEl) {
+            if (sub.stripe_subscription_id) {
+                subIdEl.textContent = `Stripe Subscription ID: ${sub.stripe_subscription_id} (${subStatus})`;
+            } else if (tier === 'free') {
+                subIdEl.textContent = 'Stripe Subscription: Active Free Community Tier';
+            } else {
+                subIdEl.textContent = `Stripe Subscription: Direct ${tierName} Allocation`;
+            }
+        }
+
+        const custIdEl = document.getElementById('tabBillingDetailsCustId');
+        if (custIdEl) {
+            if (data.stripe_customer_id) {
+                custIdEl.textContent = `Stripe Customer ID: ${data.stripe_customer_id} | Portal: Fully Enabled`;
+            } else {
+                custIdEl.textContent = 'Billing Profile: Not yet provisioned on Stripe (Created automatically upon checkout)';
+            }
+        }
+
+        // Also synchronize the Team tab billing summary card
+        loadBillingStatus();
+    } catch (err) {
+        console.error('Failed to load billing dashboard:', err);
+    }
+}
+
+function checkBillingUrlParams() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const billingStatus = urlParams.get('billing_status') || urlParams.get('status');
+    const sessionId = urlParams.get('billing_session') || urlParams.get('session_id');
+
+    if (sessionId && billingStatus === 'success') {
+        showToast('Payment successful! Your Stripe subscription is active.', 'success');
+        const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+        window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
+        setTimeout(() => {
+            if (typeof switchTab === 'function') {
+                switchTab('billing');
+            }
+        }, 300);
+    } else if (billingStatus === 'cancelled') {
+        showToast('Stripe checkout was cancelled. No charges were made.', 'info');
+        const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+        window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
+    }
+}
+
 
 // ==========================================
 // DEMO PERSONA SWITCHER

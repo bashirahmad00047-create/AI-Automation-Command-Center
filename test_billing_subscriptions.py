@@ -549,6 +549,85 @@ class TestBillingSubscriptions(unittest.TestCase):
         org_b_check = db.session.get(Organization, self.org_b.id)
         self.assertIsNotNone(org_b_check)
 
+    # =========================================================================
+    # 12. User-Facing Billing UI & Dashboard Integration
+    # =========================================================================
+    def test_billing_ui_navigation_and_tab_rendering(self):
+        """Verifies that the Plans & Billing tab, meters, and plan cards render in the dashboard."""
+        self._login_as(self.user_owner.id, self.org_a.id)
+        res = self.client.get("/")
+        self.assertEqual(res.status_code, 200)
+        html = res.data.decode("utf-8")
+
+        # Verify billing navigation tab exists
+        self.assertIn("switchTab('billing')", html)
+        self.assertIn("Plans & Billing", html)
+
+        # Verify tab-billing section and key elements exist
+        self.assertIn('id="tab-billing"', html)
+        self.assertIn('id="tabBillingHeaderBadge"', html)
+        self.assertIn('id="stripeDevNotice"', html)
+        self.assertIn('id="tabBillingRulesProgress"', html)
+        self.assertIn('id="tabBillingEventsProgress"', html)
+        self.assertIn('id="tabBillingSeatsProgress"', html)
+
+        # Verify 4 tier cards exist
+        self.assertIn('id="planCardFree"', html)
+        self.assertIn('id="planCardStarter"', html)
+        self.assertIn('id="planCardPro"', html)
+        self.assertIn('id="planCardEnterprise"', html)
+
+        # Verify billing interval toggles and portal actions exist
+        self.assertIn('id="tabBillingIntervalMonth"', html)
+        self.assertIn('id="tabBillingIntervalYear"', html)
+        self.assertIn("openCustomerPortal()", html)
+        self.assertIn("confirmCancelSubscription()", html)
+
+    def test_billing_ui_static_controller_functions(self):
+        """Verifies that static app.js defines essential billing dashboard functions."""
+        res = self.client.get("/static/js/app.js")
+        self.assertEqual(res.status_code, 200)
+        js = res.data.decode("utf-8")
+
+        self.assertIn("function loadBillingDashboard()", js)
+        self.assertIn("function setTabBillingInterval(", js)
+        self.assertIn("function confirmCancelSubscription()", js)
+        self.assertIn("function checkBillingUrlParams()", js)
+        self.assertIn("function selectPlanForCheckout(", js)
+        self.assertIn("function openCustomerPortal()", js)
+
+    def test_billing_dashboard_endpoint_payload_structure(self):
+        """Verifies that GET /api/v1/billing/status provides all fields required by the frontend dashboard."""
+        self._login_as(self.user_owner.id, self.org_a.id)
+        res = self.client.get("/api/v1/billing/status")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+
+        # Core flags
+        self.assertIn("is_stripe_configured", data)
+        self.assertIn("plan_tier", data)
+        self.assertIn("organization_slug", data)
+        self.assertIn("has_active_subscription", data)
+
+        # Quotas for real-time progress meters
+        self.assertIn("quotas", data)
+        quotas = data["quotas"]
+        self.assertIn("max_rules", quotas)
+        self.assertIn("current_rules", quotas)
+        self.assertIn("max_monthly_events", quotas)
+        self.assertIn("current_monthly_events", quotas)
+
+        # Entitlements for seats and feature flags
+        self.assertIn("entitlements", data)
+        self.assertIn("quotas", data["entitlements"])
+        self.assertIn("team_members", data["entitlements"]["quotas"])
+        self.assertIn("limit", data["entitlements"]["quotas"]["team_members"])
+
+        # Plan catalog
+        self.assertIn("available_plans", data)
+        self.assertGreaterEqual(len(data["available_plans"]), 4)
+
 
 if __name__ == "__main__":
     unittest.main()
+
