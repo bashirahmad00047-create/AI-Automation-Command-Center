@@ -3947,6 +3947,7 @@ async function loadWhatsAppDashboard() {
                     connStatus.innerHTML = '<span class="status-pill blue" style="font-size:0.75rem;">🧪 Simulation (Local Sandbox)</span>';
                 }
             }
+            const bannerAction = document.getElementById('whatsappBannerAction');
             if (banner && bannerTitle && bannerDesc) {
                 if (isConfigured) {
                     banner.style.background = 'rgba(16, 185, 129, 0.08)';
@@ -3954,12 +3955,18 @@ async function loadWhatsAppDashboard() {
                     bannerTitle.style.color = '#10b981';
                     bannerTitle.textContent = 'Production WhatsApp Business Cloud API Connected';
                     bannerDesc.textContent = 'Verified webhook ingress and live Meta Cloud API delivery active. Outbound notifications will be delivered to live user devices.';
+                    if (bannerAction) {
+                        bannerAction.innerHTML = '<button type="button" class="hud-btn danger small" onclick="disconnectWhatsApp()">Disconnect</button>';
+                    }
                 } else {
                     banner.style.background = 'rgba(0, 240, 255, 0.06)';
                     banner.style.border = '1px solid rgba(0, 240, 255, 0.2)';
                     bannerTitle.style.color = '#00f0ff';
                     bannerTitle.textContent = 'Simulation Mode Active';
                     bannerDesc.textContent = 'Operating in local sandbox mode. Outbound dispatches are simulated and persisted to local logs. Webhooks verify locally without external Meta API calls.';
+                    if (bannerAction) {
+                        bannerAction.innerHTML = '<button type="button" class="hud-btn primary small" onclick="openWhatsAppConnectGuide()">Connect WhatsApp</button>';
+                    }
                 }
             }
         }
@@ -3995,6 +4002,7 @@ async function loadWhatsAppDashboard() {
                                     <div style="font-size: 2.8rem; margin-bottom: 12px;">📱</div>
                                     <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">Connect WhatsApp Business to start receiving messages.</div>
                                     <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Configure your Meta Business Phone Number ID and Access Token in environment variables or test outbound dispatch using the simulation form on the left.</p>
+                                    <button type="button" class="hud-btn primary small" onclick="openWhatsAppConnectGuide()">Connect WhatsApp</button>
                                 </td>
                             </tr>
                         `;
@@ -4118,6 +4126,32 @@ function copyWhatsAppVerifyToken() {
         document.execCommand('copy');
         showToast('Verify token copied.', 'info');
     });
+}
+
+function openWhatsAppConnectGuide() {
+    const modal = document.getElementById('whatsappConnectModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeWhatsAppConnectModal() {
+    const modal = document.getElementById('whatsappConnectModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function copyWhatsAppEnvSnippet() {
+    const snippet = `META_PHONE_NUMBER_ID=\nMETA_ACCESS_TOKEN=\nMETA_WABA_ID=\nWHATSAPP_VERIFY_TOKEN=opsflow_whatsapp_verify_2026`;
+    navigator.clipboard.writeText(snippet).then(() => {
+        showToast('WhatsApp environment variable template copied to clipboard!', 'success');
+    }).catch(() => {
+        showToast('Environment template copied.', 'info');
+    });
+}
+
+function disconnectWhatsApp() {
+    if (!confirm('Are you sure you want to disconnect WhatsApp Business Cloud API? The gateway will revert to local sandbox simulation mode.')) {
+        return;
+    }
+    showToast('To disconnect permanently, clear META_ACCESS_TOKEN and META_PHONE_NUMBER_ID from your environment (.env) and reload.', 'info');
 }
 
 // ==========================================

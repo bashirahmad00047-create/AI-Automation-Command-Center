@@ -649,7 +649,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
             </div>
 
             <!-- Mode Notification Banner -->
-            <div id="whatsappModeBanner" style="margin-bottom: 20px; padding: 14px 18px; border-radius: 8px; font-size: 0.88rem; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.2);">
+            <div id="whatsappModeBanner" style="margin-bottom: 20px; padding: 14px 18px; border-radius: 8px; font-size: 0.88rem; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.2); flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <span style="font-size: 1.4rem;">🧪</span>
                     <div>
@@ -658,6 +658,9 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                             Operating in local sandbox mode. Outbound dispatches are simulated and persisted to local logs. Webhooks verify locally without external Meta API calls.
                         </div>
                     </div>
+                </div>
+                <div id="whatsappBannerAction">
+                    <button type="button" class="hud-btn primary small" onclick="openWhatsAppConnectGuide()">Connect WhatsApp</button>
                 </div>
             </div>
 
@@ -1957,6 +1960,35 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                         <button type="submit" class="hud-btn primary">Create &amp; Activate Endpoint</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- WHATSAPP CONNECT GUIDE MODAL -->
+    <div class="hud-modal-overlay" id="whatsappConnectModal" style="display:none;">
+        <div class="hud-modal" style="max-width: 520px;">
+            <div class="modal-header">
+                <h3>Connect Meta WhatsApp Business Cloud API</h3>
+                <button class="close-btn" onclick="closeWhatsAppConnectModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 0.88rem; color: #cbd5e1; margin-bottom: 16px;">
+                    To transition from Sandbox Simulation to Live Production Meta Cloud API, provide your Meta Developer credentials in your environment configuration:
+                </p>
+                <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 14px; font-family: monospace; font-size: 0.82rem; margin-bottom: 16px;">
+                    <div style="color: #94a3b8;"># In your .env or production environment:</div>
+                    <div style="color: #00f0ff;">META_PHONE_NUMBER_ID=1092837465...</div>
+                    <div style="color: #00f0ff;">META_ACCESS_TOKEN=EAAG...</div>
+                    <div style="color: #00f0ff;">META_WABA_ID=987654321...</div>
+                    <div style="color: #10b981;">WHATSAPP_VERIFY_TOKEN=opsflow_whatsapp_verify_2026</div>
+                </div>
+                <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 0;">
+                    Once set, reload the gateway. Inbound webhooks will be verified cryptographically and outbound messages will route directly via Meta Cloud API.
+                </p>
+                <div class="modal-footer" style="margin-top: 20px;">
+                    <button type="button" class="hud-btn outline" onclick="closeWhatsAppConnectModal()">Close</button>
+                    <button type="button" class="hud-btn primary" onclick="copyWhatsAppEnvSnippet()">Copy Env Variables</button>
+                </div>
             </div>
         </div>
     </div>
