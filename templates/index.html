@@ -33,7 +33,7 @@
                 <div class="workspace-avatar">🏢</div>
                 <div class="workspace-details">
                     <select id="workspaceSelect" class="workspace-select" onchange="handleWorkspaceChange(this.value)" title="Switch Active Workspace">
-                        <option value="org-enterprise-default">Acme Global</option>
+                        <option value="org-enterprise-default">Acme Enterprise Global</option>
                         <option value="org-apex-health-tenant">Apex HealthTech</option>
                     </select>
                     <div class="workspace-plan-row">
@@ -158,9 +158,9 @@
                 <button class="mobile-toggle-btn" onclick="toggleSidebarCollapse()" title="Toggle Navigation Menu">
                     <span>☰</span>
                 </button>
-                <div class="breadcrumb-nav">
-                    <span class="breadcrumb-corp">OpsFlow Cloud</span>
-                    <span class="breadcrumb-sep">/</span>
+                <div class="topbar-brand-area">
+                    <span class="topbar-brand-title">OpsFlow Cloud</span>
+                    <span class="topbar-brand-divider">/</span>
                     <span class="breadcrumb-current" id="activeBreadcrumbText">Executive Overview</span>
                 </div>
             </div>
@@ -172,61 +172,27 @@
                 <kbd class="search-kbd">Ctrl K</kbd>
             </div>
 
-            <div class="hud-controls">
-                <!-- Header Plan Button (Secondary Indicator) -->
-                <button type="button" class="hud-btn small purple" id="headerPlanBtn" onclick="switchTab('billing')" title="Click to view Plans &amp; Billing" style="padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
-                    <span>💳</span> <span id="headerPlanTextSecondary">ENTERPRISE</span>
-                </button>
-
-                <!-- Active User & RBAC Persona Switcher -->
-                <div class="user-profile-widget">
-                    <span class="user-avatar-pill">👤</span>
-                    <span class="user-name" id="currentUserName">Sarah Lin</span>
-                    <span class="role-badge admin" id="currentUserRoleBadge">ADMIN</span>
-                    <button class="hud-btn small outline" onclick="openPersonaModal()" title="Switch User / Role Persona">Switch</button>
-                </div>
-
-                <!-- Session Auth Controls -->
-                <div class="auth-controls" id="headerAuthControls" style="display: flex; align-items: center; gap: 6px;">
-                    <button type="button" class="hud-btn small outline" id="headerSignInBtn" onclick="openAuthModal('login')" style="display:none;" title="Sign In to Existing Workspace">
-                        <span class="icon">🔑</span> Sign In
-                    </button>
-                    <button type="button" class="hud-btn small cyan" id="headerRegisterBtn" onclick="openAuthModal('register')" style="display:none;" title="Create New Workspace">
-                        <span class="icon">✨</span> Sign Up
-                    </button>
-                    <button type="button" class="hud-btn small red" id="headerSignOutBtn" onclick="handleLogout()" title="Sign Out of OpsFlow Cloud">
-                        <span class="icon">🚪</span> Sign Out
-                    </button>
-                </div>
-
-                <!-- Engine Status Indicator -->
-                <div class="status-indicator" id="engineStatusBadge">
-                    <span class="status-dot green"></span>
-                    <span class="status-text" id="engineStatusText">ENGINE ONLINE</span>
-                </div>
-
-                <!-- System Readiness Probe -->
-                <div class="status-indicator" id="systemReadyBadge" style="cursor: pointer;" onclick="checkSystemReadiness(true)" title="Click to verify Subsystem Health (DB, Engine, Storage)">
+            <!-- Right Header Controls -->
+            <div class="hud-controls topbar-right-controls">
+                <!-- Subtle Professional System Status -->
+                <div class="subtle-status-pill" id="systemReadyBadge" onclick="checkSystemReadiness(true)" title="Subsystem Health: Database, Storage, Engine. Click to run readiness probe.">
                     <span class="status-dot green" id="readyDot"></span>
-                    <span class="status-text" id="readyStatusText">SYSTEM READY</span>
+                    <span class="status-text" id="readyStatusText">System Operational</span>
+                    <!-- Hidden elements for test compatibility & background telemetry polling -->
+                    <span id="engineStatusBadge" style="display:none;"><span class="status-dot green"></span><span id="engineStatusText">ENGINE ONLINE</span></span>
+                    <button type="button" id="toggleEngineBtn" onclick="toggleEngineState()" style="display:none;"><span id="toggleEngineLabel">Pause</span></button>
+                    <div id="hudClock" style="display:none;">00:00:00</div>
                 </div>
-
-                <!-- Toggle Engine State Button -->
-                <button class="hud-btn engine-toggle-btn" id="toggleEngineBtn" onclick="toggleEngineState()">
-                    <span class="icon">⏸</span> <span id="toggleEngineLabel">Pause</span>
-                </button>
-
-                <div class="clock-display" id="hudClock">00:00:00</div>
 
                 <!-- Notifications Bell & Drawer -->
                 <div class="notif-wrapper">
-                    <button class="hud-icon-btn" id="notifBellBtn" onclick="toggleNotificationsDrawer()">
+                    <button class="hud-icon-btn topbar-icon-btn" id="notifBellBtn" onclick="toggleNotificationsDrawer()" title="Active Incidents &amp; Alerts">
                         🔔
                         <span class="notif-badge" id="notifCountBadge" style="display:none;">0</span>
                     </button>
                     <div class="notif-drawer" id="notifDrawer">
                         <div class="notif-header">
-                            <h3>Active Incidents & Alerts</h3>
+                            <h3>Active Incidents &amp; Alerts</h3>
                             <div class="notif-actions">
                                 <button onclick="markNotificationsRead()">Acknowledge All</button>
                                 <button onclick="clearNotifications()">Clear</button>
@@ -236,6 +202,70 @@
                             <div class="notif-empty">No active incidents</div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Divider -->
+                <div class="topbar-divider"></div>
+
+                <!-- Professional User Account Dropdown -->
+                <div class="account-menu-wrapper" id="accountMenuWrapper">
+                    <button type="button" class="account-menu-trigger" onclick="toggleAccountMenu(event)" title="Account, Workspace &amp; Role Settings">
+                        <div class="user-avatar-circle" id="userAvatarCircle">SL</div>
+                        <div class="user-trigger-info">
+                            <span class="user-name" id="currentUserName">Sarah Lin</span>
+                            <span class="role-badge admin" id="currentUserRoleBadge">ADMIN</span>
+                        </div>
+                        <span class="menu-chevron">▾</span>
+                    </button>
+
+                    <!-- Floating Account Dropdown Menu -->
+                    <div class="account-dropdown-menu" id="accountDropdownMenu" style="display: none;">
+                        <div class="account-menu-header">
+                            <div class="user-info-full">
+                                <strong id="accountMenuName">Sarah Lin</strong>
+                                <span class="user-email-sub" id="accountMenuEmail">admin@opsflow.io</span>
+                                <span class="user-org-sub" id="accountMenuOrg">Acme Enterprise Global</span>
+                            </div>
+                        </div>
+                        <div class="account-menu-body">
+                            <button type="button" class="account-menu-item" onclick="openPersonaModal(); closeAccountMenu();">
+                                <span class="menu-item-icon">🎭</span>
+                                <span>Switch Persona / Role</span>
+                            </button>
+                            <button type="button" class="account-menu-item" onclick="switchTab('billing'); closeAccountMenu();">
+                                <span class="menu-item-icon">💳</span>
+                                <span>Plans &amp; Quotas</span>
+                            </button>
+                            <button type="button" class="account-menu-item" onclick="switchTab('team'); closeAccountMenu();">
+                                <span class="menu-item-icon">👥</span>
+                                <span>Team Members &amp; RBAC</span>
+                            </button>
+                            <button type="button" class="account-menu-item" onclick="switchTab('settings'); closeAccountMenu();">
+                                <span class="menu-item-icon">⚙️</span>
+                                <span>Workspace Settings</span>
+                            </button>
+                            <button type="button" class="account-menu-item" onclick="toggleEngineState(); closeAccountMenu();">
+                                <span class="menu-item-icon">⏸</span>
+                                <span id="accountMenuEngineLabel">Pause Workflow Engine</span>
+                            </button>
+                        </div>
+                        <div class="account-menu-footer">
+                            <button type="button" class="account-menu-item signout-item" id="headerSignOutBtn" onclick="handleLogout()">
+                                <span class="menu-item-icon">🚪</span>
+                                <span>Sign Out</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Session Auth Controls (For Unauthenticated State) -->
+                <div class="auth-controls" id="headerAuthControls" style="display:none; align-items: center; gap: 6px;">
+                    <button type="button" class="hud-btn small outline" id="headerSignInBtn" onclick="openAuthModal('login')" title="Sign In to Existing Workspace">
+                        <span class="icon">🔑</span> Sign In
+                    </button>
+                    <button type="button" class="hud-btn small primary" id="headerRegisterBtn" onclick="openAuthModal('register')" title="Create New Workspace">
+                        <span class="icon">✨</span> Sign Up
+                    </button>
                 </div>
             </div>
         </header>

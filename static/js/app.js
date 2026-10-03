@@ -97,25 +97,46 @@ function updateAuthHeaderUI(isLoggedIn) {
     const registerBtn = document.getElementById('headerRegisterBtn');
     const nameEl = document.getElementById('currentUserName');
     const badgeEl = document.getElementById('currentUserRoleBadge');
+    const authControls = document.getElementById('headerAuthControls');
+    const accountWrapper = document.getElementById('accountMenuWrapper');
+    const avatarEl = document.getElementById('userAvatarCircle');
+    const menuNameEl = document.getElementById('accountMenuName');
+    const menuEmailEl = document.getElementById('accountMenuEmail');
+    const menuOrgEl = document.getElementById('accountMenuOrg');
 
     if (isLoggedIn) {
+        if (authControls) authControls.style.display = 'none';
+        if (accountWrapper) accountWrapper.style.display = 'flex';
         if (signOutBtn) signOutBtn.style.display = 'inline-flex';
         if (signInBtn) signInBtn.style.display = 'none';
         if (registerBtn) registerBtn.style.display = 'none';
-        if (state.currentUser && nameEl) {
-            nameEl.textContent = state.currentUser.full_name || state.currentUser.email;
-        }
+
+        const fullName = (state.currentUser && (state.currentUser.full_name || state.currentUser.email)) || 'Sarah Lin';
+        const email = (state.currentUser && state.currentUser.email) || 'admin@opsflow.io';
+        const orgName = (state.currentOrg && state.currentOrg.name) || 'Acme Enterprise Global';
+
+        if (nameEl) nameEl.textContent = fullName;
         if (badgeEl) {
-            badgeEl.textContent = (state.userRole || 'admin').toUpperCase();
-            badgeEl.className = `role-badge ${(state.userRole || 'admin').toLowerCase()}`;
+            const role = (state.userRole || 'admin').toUpperCase();
+            badgeEl.textContent = role;
+            badgeEl.className = `role-badge ${role.toLowerCase()}`;
         }
+        if (avatarEl) {
+            const initials = fullName.split(' ').map(p => p[0]).join('').substring(0, 2).toUpperCase() || 'SL';
+            avatarEl.textContent = initials;
+        }
+        if (menuNameEl) menuNameEl.textContent = fullName;
+        if (menuEmailEl) menuEmailEl.textContent = email;
+        if (menuOrgEl) menuOrgEl.textContent = orgName;
     } else {
+        if (authControls) authControls.style.display = 'flex';
+        if (accountWrapper) accountWrapper.style.display = 'none';
         if (signOutBtn) signOutBtn.style.display = 'none';
         if (signInBtn) signInBtn.style.display = 'inline-flex';
         if (registerBtn) registerBtn.style.display = 'inline-flex';
         if (nameEl) nameEl.textContent = 'Guest / Unauthenticated';
         if (badgeEl) {
-            badgeEl.textContent = 'LOGGED OUT';
+            badgeEl.textContent = 'GUEST';
             badgeEl.className = 'role-badge viewer';
         }
     }
@@ -134,7 +155,7 @@ async function loadOrganizationsList() {
             state.organizations.forEach(org => {
                 const opt = document.createElement('option');
                 opt.value = org.id;
-                opt.textContent = `${org.name} (${org.plan_tier.toUpperCase()})`;
+                opt.textContent = org.name;
                 if (state.currentOrg && org.id === state.currentOrg.id) {
                     opt.selected = true;
                 }
@@ -3696,7 +3717,7 @@ async function checkSystemReadiness(notify = false) {
                 readyDot.className = 'status-dot green';
             }
             if (readyStatusText) {
-                readyStatusText.textContent = 'SYSTEM READY';
+                readyStatusText.textContent = 'System Operational';
             }
             if (notify) {
                 showToast(`Readiness Probe 200 OK — DB: Online, Engine: Online, Storage: Online`, 'success');
@@ -3959,3 +3980,31 @@ function executeCommandItem(index) {
         entry.action();
     }
 }
+
+
+// ==========================================================================
+// ENTERPRISE USER ACCOUNT DROPDOWN CONTROLLER
+// ==========================================================================
+
+function toggleAccountMenu(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const menu = document.getElementById('accountDropdownMenu');
+    if (!menu) return;
+    const isShown = menu.style.display === 'block';
+    menu.style.display = isShown ? 'none' : 'block';
+}
+
+function closeAccountMenu() {
+    const menu = document.getElementById('accountDropdownMenu');
+    if (menu) menu.style.display = 'none';
+}
+
+document.addEventListener('click', (e) => {
+    const wrapper = document.getElementById('accountMenuWrapper');
+    if (wrapper && !wrapper.contains(e.target)) {
+        closeAccountMenu();
+    }
+});

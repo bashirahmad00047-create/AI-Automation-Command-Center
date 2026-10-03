@@ -2572,3 +2572,298 @@ body.command-center-body.enterprise-layout {
         display: none;
     }
 }
+
+
+/* ==========================================================================
+   ENTERPRISE TOPBAR REFINED COMPONENTS & ACCOUNT MENU
+   ========================================================================== */
+
+.topbar-brand-area {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+}
+
+.topbar-brand-title {
+    font-weight: 700;
+    font-size: 15px;
+    color: #ffffff;
+    letter-spacing: -0.2px;
+}
+
+.topbar-brand-divider {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.topbar-right-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.subtle-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(16, 185, 129, 0.08);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #34d399;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.subtle-status-pill:hover {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: rgba(16, 185, 129, 0.4);
+}
+
+.topbar-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--border-color);
+}
+
+.topbar-icon-btn {
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    width: 34px;
+    height: 34px;
+    font-size: 15px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.topbar-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--border-color);
+}
+
+/* User Account Menu */
+.account-menu-wrapper {
+    position: relative;
+}
+
+.account-menu-trigger {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-subtle);
+    padding: 4px 10px 4px 6px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: var(--transition);
+    color: var(--text-primary);
+}
+
+.account-menu-trigger:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: var(--border-color);
+}
+
+.user-avatar-circle {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.user-trigger-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.user-trigger-info .user-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #f8fafc;
+}
+
+.menu-chevron {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+/* Account Dropdown Menu */
+.account-dropdown-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    width: 240px;
+    background: #0f172a;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    overflow: hidden;
+    animation: fadeIn 0.15s ease-out;
+}
+
+.account-menu-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.user-info-full {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.user-info-full strong {
+    font-size: 13px;
+    color: #ffffff;
+}
+
+.user-email-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+.user-org-sub {
+    font-size: 10px;
+    color: var(--cyan-glow);
+    font-weight: 600;
+    margin-top: 2px;
+}
+
+.account-menu-body {
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.account-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    text-align: left;
+    transition: var(--transition);
+}
+
+.account-menu-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #ffffff;
+}
+
+.menu-item-icon {
+    font-size: 14px;
+    width: 18px;
+    text-align: center;
+}
+
+.account-menu-footer {
+    padding: 6px;
+    border-top: 1px solid var(--border-subtle);
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.account-menu-item.signout-item {
+    color: #f87171;
+}
+
+.account-menu-item.signout-item:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ffffff;
+}
+
+/* Restrained Enterprise Components */
+.hud-panel {
+    background: #0d1527;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.panel-header {
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 14px 20px;
+}
+
+.panel-title {
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.1px;
+}
+
+.metric-card {
+    background: #0d1527;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.metric-card:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
+}
+
+.metric-val {
+    color: #ffffff;
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+
+.hud-table th {
+    background: #0b1120;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hud-table td {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    font-size: 13px;
+    color: #cbd5e1;
+}
+
+.hud-table tr:hover td {
+    background: rgba(255, 255, 255, 0.025);
+}
+
+/* Primary and secondary button standardization */
+.hud-btn.primary {
+    background: #3b82f6;
+    color: #ffffff;
+    border: 1px solid #2563eb;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.hud-btn.primary:hover {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
+}
