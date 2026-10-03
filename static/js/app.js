@@ -457,9 +457,12 @@ function renderRulesTable() {
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <button type="button" class="toggle-switch ${isEnabled ? 'on' : 'off'}" 
                                 onclick="toggleRuleEnabled('${rule.id}')"
-                                title="Toggle Rule State" ${isViewer ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>
+                                title="Toggle Rule State: ${isEnabled ? 'Active' : 'Paused'}" ${isViewer ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>
                             <span class="toggle-slider"></span>
                         </button>
+                        <span class="status-pill ${isEnabled ? 'active' : 'paused'}" style="font-size: 10px; padding: 2px 7px;">
+                            ${isEnabled ? '● Active' : '⏸ Paused'}
+                        </span>
                     </div>
                 </td>
                 <td>
@@ -1477,14 +1480,15 @@ function renderLogsTable() {
     tbody.innerHTML = state.logs.map(log => {
         const isSuccess = log.status === 'success';
         const isSkipped = log.status === 'skipped';
-        const badgeClass = isSuccess ? 'status-badge resolved' : (isSkipped ? 'status-badge' : 'status-badge open');
+        const badgeClass = isSuccess ? 'status-badge resolved' : (isSkipped ? 'status-badge paused' : 'status-badge open');
+        const statusIcon = isSuccess ? '✓' : (isSkipped ? '○' : '✕');
 
         return `
             <tr>
                 <td><code style="font-size:0.8rem; color:var(--text-muted);">${log.id}</code></td>
                 <td><strong>${escapeHtml(log.rule_name || 'System Dispatcher')}</strong></td>
                 <td><code style="color:var(--cyan-glow);">${escapeHtml(log.trigger_event || log.event_name)}</code></td>
-                <td><span class="${badgeClass}">${log.status.toUpperCase()}</span></td>
+                <td><span class="${badgeClass}">${statusIcon} ${log.status.toUpperCase()}</span></td>
                 <td><span style="font-family:var(--font-mono);">${log.duration_ms || log.execution_time_ms || 0} ms</span></td>
                 <td style="font-size:0.75rem; color:var(--text-muted);">${log.timestamp || log.executed_at}</td>
                 <td>
@@ -1517,10 +1521,11 @@ function renderDashboardMiniLogs() {
     tbody.innerHTML = recent.map(log => {
         const isSuccess = log.status === 'success';
         const isSkipped = log.status === 'skipped';
-        const badgeClass = isSuccess ? 'status-badge resolved' : (isSkipped ? 'status-badge' : 'status-badge open');
+        const badgeClass = isSuccess ? 'status-badge resolved' : (isSkipped ? 'status-badge paused' : 'status-badge open');
+        const statusIcon = isSuccess ? '✓' : (isSkipped ? '○' : '✕');
         return `
             <tr>
-                <td><span class="${badgeClass}">${log.status.toUpperCase()}</span></td>
+                <td><span class="${badgeClass}">${statusIcon} ${log.status.toUpperCase()}</span></td>
                 <td><strong>${escapeHtml(log.rule_name || 'Dispatcher')}</strong></td>
                 <td><code style="color:var(--cyan-glow);">${escapeHtml(log.trigger_event || log.event_name)}</code></td>
                 <td>${log.duration_ms || log.execution_time_ms || 0} ms</td>
@@ -1672,6 +1677,7 @@ function renderIncidentsQueue() {
     container.innerHTML = state.incidents.map(inc => {
         const sevClass = `severity-pill ${inc.severity ? inc.severity.toLowerCase() : 'info'}`;
         const statusClass = `status-badge ${inc.status.toLowerCase()}`;
+        const statusIcon = inc.status === 'open' ? '⚠' : (inc.status === 'acknowledged' ? '👁' : '✓');
 
         return `
             <div class="incident-card">
@@ -1679,7 +1685,7 @@ function renderIncidentsQueue() {
                     <div class="incident-title-row">
                         <span class="${sevClass}">${inc.severity.toUpperCase()}</span>
                         <span class="incident-title">${escapeHtml(inc.title)}</span>
-                        <span class="${statusClass}">${inc.status.toUpperCase()}</span>
+                        <span class="${statusClass}">${statusIcon} ${inc.status.toUpperCase()}</span>
                     </div>
                     <div class="incident-message">${escapeHtml(inc.message)}</div>
                     <div class="incident-meta">
@@ -3871,12 +3877,13 @@ async function loadAsyncJobs() {
 
         tbody.innerHTML = jobs.map(job => {
             const st = (job.status || 'QUEUED').toUpperCase();
-            const badgeClass = st === 'COMPLETED' ? 'active' : (st === 'RUNNING' || st === 'QUEUED' ? 'amber' : (st === 'CANCELLED' ? 'dim' : 'failed'));
+            const badgeClass = st === 'COMPLETED' ? 'active' : (st === 'RUNNING' ? 'running' : (st === 'QUEUED' ? 'amber' : (st === 'CANCELLED' ? 'dim' : 'failed')));
+            const stIcon = st === 'COMPLETED' ? '✓' : (st === 'RUNNING' ? '⚡' : (st === 'QUEUED' ? '⏱' : (st === 'CANCELLED' ? '⊘' : '✕')));
             return `
                 <tr>
                     <td><code style="font-size: 11px; color: var(--cyan-glow, #00f0ff);">${escapeHtml(job.job_id || job.id)}</code></td>
                     <td><strong style="color: var(--text-primary); font-size: 12px;">${escapeHtml(job.rule_name || job.workflow_name || job.rule_id)}</strong></td>
-                    <td><span class="status-badge ${badgeClass}" style="font-size: 11px;">${st}</span></td>
+                    <td><span class="status-badge ${badgeClass}" style="font-size: 11px;">${stIcon} ${st}</span></td>
                     <td><div style="font-size: 11px; color: var(--text-dim, #888);">${escapeHtml(job.current_step_name || 'Executing')} (${job.current_step_index || 0}/${job.total_steps || 1})</div></td>
                     <td style="font-size: 11px; color: var(--text-dim, #888);">${job.started_at ? job.started_at.split('T')[1].split('.')[0] : 'Pending'}</td>
                     <td style="font-size: 11px; color: var(--text-dim, #888);">${job.completed_at ? job.completed_at.split('T')[1].split('.')[0] : (st === 'RUNNING' ? 'Running...' : '-')}</td>
@@ -4014,10 +4021,19 @@ async function loadWhatsAppDashboard() {
                             ? '<span class="status-pill blue">📥 INBOUND</span>'
                             : '<span class="status-pill green">📤 OUTBOUND</span>';
 
-                        let statusColor = '#888';
-                        if (m.status === 'sent' || m.status === 'received') statusColor = '#10b981';
-                        if (m.status === 'mock_sent') statusColor = '#00f0ff';
-                        if (m.status === 'failed') statusColor = '#ef4444';
+                        const st = (m.status || '').toLowerCase();
+                        let statusPillClass = 'paused';
+                        let statusIcon = '●';
+                        if (st === 'sent' || st === 'received') {
+                            statusPillClass = 'active';
+                            statusIcon = '✓';
+                        } else if (st === 'mock_sent') {
+                            statusPillClass = 'simulation';
+                            statusIcon = '🧪';
+                        } else if (st === 'failed') {
+                            statusPillClass = 'failed';
+                            statusIcon = '✕';
+                        }
 
                         return `
                             <tr>
@@ -4032,7 +4048,7 @@ async function loadWhatsAppDashboard() {
                                     </div>
                                     ${m.error_message ? `<div style="font-size: 11px; color: #ef4444;">${escapeHtml(m.error_message)}</div>` : ''}
                                 </td>
-                                <td><span style="color: ${statusColor}; font-weight: 600; font-size: 11px; text-transform: uppercase;">${escapeHtml(m.status)}</span></td>
+                                <td><span class="status-pill ${statusPillClass}" style="font-size: 10px; padding: 2px 7px;">${statusIcon} ${escapeHtml((m.status || '').toUpperCase())}</span></td>
                                 <td style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim, #888);">${escapeHtml(m.whatsapp_message_id || '—')}</td>
                                 <td style="font-size: 11px; color: var(--text-dim, #888);">${escapeHtml(m.created_at || '—')}</td>
                             </tr>
