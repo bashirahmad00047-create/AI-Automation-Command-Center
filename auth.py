@@ -71,6 +71,8 @@ def get_current_org() -> Optional[Organization]:
             g.current_org = org
             return org
 
+    user = get_current_user()
+
     # 2. From session
     org_id = session.get("active_org_id") or session.get("org_id")
     if hasattr(g, "current_org") and g.current_org is not None:
@@ -83,18 +85,29 @@ def get_current_org() -> Optional[Organization]:
     if org_id:
         org = db.session.get(Organization, org_id)
         if org and org.is_active:
-            g.current_org = org
-            return org
+            # If user context exists, ensure user is superuser or active member of this organization
+            if user:
+                if user.is_superuser:
+                    g.current_org = org
+                    return org
+                membership = Membership.query.filter_by(user_id=user.id, organization_id=org.id).first()
+                if membership:
+                    g.current_org = org
+                    return org
+            else:
+                g.current_org = org
+                return org
 
     # 3. User's primary organization membership
-    user = get_current_user()
     if user:
         mem = Membership.query.filter_by(user_id=user.id).first()
         if mem and mem.organization and mem.organization.is_active:
             g.current_org = mem.organization
             return mem.organization
+        # Authenticated user without valid membership must not inherit random active tenants
+        return None
 
-    # 4. Default fallback to first active org
+    # 4. Default fallback to first active org for unauthenticated system/CLI tasks
     default_org = Organization.query.filter_by(is_active=True).first()
     if default_org:
         g.current_org = default_org

@@ -792,7 +792,7 @@ class Storage:
         session = self._get_session()
         org_id = organization_id or lead_data.get("organization_id") or self.get_default_org_id()
         lead_id = lead_data.get("id") or generate_uuid("lead")
-        lead = session.query(Lead).filter_by(id=lead_id).first()
+        lead = session.query(Lead).filter_by(id=lead_id, organization_id=org_id).first()
 
         try:
             if lead:

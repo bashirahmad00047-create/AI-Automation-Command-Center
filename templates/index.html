@@ -61,6 +61,11 @@
                 <span class="status-text" id="engineStatusText">ENGINE ONLINE</span>
             </div>
 
+            <div class="status-indicator" id="systemReadyBadge" style="cursor: pointer;" onclick="checkSystemReadiness(true)" title="Click to verify Subsystem Health (DB, Engine, Storage)">
+                <span class="status-dot green" id="readyDot"></span>
+                <span class="status-text" id="readyStatusText">SYSTEM READY</span>
+            </div>
+
             <button class="hud-btn engine-toggle-btn" id="toggleEngineBtn" onclick="toggleEngineState()">
                 <span class="icon">⏸</span> <span id="toggleEngineLabel">Pause Engine</span>
             </button>
@@ -107,6 +112,9 @@
         </button>
         <button class="hud-tab" onclick="switchTab('webhooks')">
             <span class="tab-icon">🔌</span> Inbound Webhooks
+        </button>
+        <button class="hud-tab" onclick="switchTab('whatsapp')">
+            <span class="tab-icon">💬</span> WhatsApp Cloud (<span id="tabWhatsAppCount">0</span>)
         </button>
         <button class="hud-tab" onclick="switchTab('nlp')">
             <span class="tab-icon">🧠</span> AI Engine Sandbox
@@ -438,6 +446,101 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                     <div id="manualEventOutput" style="margin-top: 15px; display: none;">
                         <h4 style="color: var(--cyan-glow); font-size: 0.85rem; margin-bottom: 6px;">Dispatch Result:</h4>
                         <pre class="curl-snippet" id="manualEventOutputJson" style="max-height: 180px;"></pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB: WHATSAPP BUSINESS & META CLOUD API -->
+        <section id="tab-whatsapp" class="tab-panel">
+            <div class="panel-header">
+                <h2>WHATSAPP BUSINESS / META CLOUD API GATEWAY</h2>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <span class="panel-badge" id="whatsappModeBadge" style="background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid #10b981;">OFFICIAL META CLOUD API</span>
+                    <button class="hud-btn outline small" onclick="loadWhatsAppDashboard()">🔄 Refresh</button>
+                </div>
+            </div>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                Production-grade WhatsApp Business Cloud API integration. Receives real-time customer and alert events via verified HMAC-SHA256 webhooks, guarantees message idempotency, executes dynamic workflow rules, and dispatches outbound alerts.
+            </p>
+
+            <div class="dashboard-columns">
+                <!-- Left: Configuration & Outbound Dispatcher -->
+                <div class="hud-panel flex-1">
+                    <div class="panel-header">
+                        <h3>📱 GATEWAY CONFIGURATION</h3>
+                    </div>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+                        <div>
+                            <label style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600;">Webhook Callback URL</label>
+                            <div style="display: flex; gap: 6px; margin-top: 4px;">
+                                <input type="text" id="waWebhookUrlInput" class="hud-input" readonly value="/api/v1/webhooks/whatsapp" style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px;">
+                                <button type="button" class="hud-btn small outline" onclick="copyWhatsAppWebhookUrl()">Copy</button>
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600;">Verify Token</label>
+                                <input type="text" id="waVerifyTokenInput" class="hud-input" readonly value="opsflow_whatsapp_verify_2026" style="margin-top: 4px; font-family: 'JetBrains Mono', monospace; font-size: 12px; width: 100%;">
+                            </div>
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600;">Phone Number ID</label>
+                                <input type="text" id="waPhoneNumberIdInput" class="hud-input" readonly value="Loading..." style="margin-top: 4px; font-family: 'JetBrains Mono', monospace; font-size: 12px; width: 100%;">
+                            </div>
+                        </div>
+
+                        <div>
+                            <span style="font-size: 12px; color: #10b981; display: inline-flex; align-items: center; gap: 6px;">
+                                <span>🔒</span> HMAC-SHA256 &amp; Idempotency (wamid deduplication) Active
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="panel-header" style="border-top: 1px solid var(--border-color, #2a2e3d); padding-top: 16px; margin-top: 10px;">
+                        <h3>⚡ DISPATCH OUTBOUND MESSAGE</h3>
+                    </div>
+                    <form onsubmit="handleSendWhatsAppMessage(event)">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="font-size: 12px; margin-bottom: 4px; display: block;">Recipient Phone Number *</label>
+                            <input type="text" id="waRecipientPhone" class="hud-input" required placeholder="+14155552671" style="width: 100%;">
+                            <span style="font-size: 11px; color: var(--text-dim, #888);">Must include country code and digits (e.g. +14155552671 or +447700900077)</span>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 14px;">
+                            <label style="font-size: 12px; margin-bottom: 4px; display: block;">Message Body *</label>
+                            <textarea id="waMessageBody" class="hud-textarea" rows="4" required placeholder="Hello from OpsFlow Cloud automation engine! Your incident #104 has been triaged."></textarea>
+                        </div>
+                        <button type="submit" class="hud-btn primary" id="waSendBtn" style="width: 100%;">Send WhatsApp Message</button>
+                    </form>
+                    <div id="waSendOutput" style="margin-top: 14px; display: none;">
+                        <h4 style="color: var(--cyan-glow); font-size: 0.85rem; margin-bottom: 6px;">Dispatch Result:</h4>
+                        <pre class="curl-snippet" id="waSendOutputJson" style="max-height: 140px;"></pre>
+                    </div>
+                </div>
+
+                <!-- Right: Message Activity Log -->
+                <div class="hud-panel flex-2">
+                    <div class="panel-header">
+                        <h3>💬 WHATSAPP CONVERSATION &amp; AUDIT LOG</h3>
+                        <span id="waMessageCountBadge" style="font-size: 12px; color: var(--text-dim, #888);">0 messages</span>
+                    </div>
+                    <div class="table-container">
+                        <table class="hud-table">
+                            <thead>
+                                <tr>
+                                    <th>Direction</th>
+                                    <th>From / To</th>
+                                    <th>Message Preview</th>
+                                    <th>Status</th>
+                                    <th>Meta ID</th>
+                                    <th>Timestamp</th>
+                                </tr>
+                            </thead>
+                            <tbody id="waMessagesTableBody">
+                                <tr><td colspan="6" class="empty-cell">No WhatsApp messages recorded in this workspace.</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -1599,6 +1702,9 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 <button type="button" class="hud-tab" id="authTabRegister" onclick="switchAuthTab('register')" style="flex: 1; padding: 12px; border: none; background: transparent; color: var(--text-muted, #888); cursor: pointer; font-weight: 600; text-align: center;">
                     🏢 Create Workspace
                 </button>
+                <button type="button" class="hud-tab" id="authTabForgot" onclick="switchAuthTab('forgot')" style="flex: 1; padding: 12px; border: none; background: transparent; color: var(--text-muted, #888); cursor: pointer; font-weight: 600; text-align: center;">
+                    🔄 Reset Password
+                </button>
             </div>
 
             <div class="modal-body" style="padding: 24px; overflow-y: auto;">
@@ -1613,7 +1719,10 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                         <input type="password" id="loginPassword" class="hud-input" required placeholder="••••••••••••" style="width: 100%;">
                     </div>
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                        <a href="javascript:void(0)" onclick="fillDemoCredentials()" style="color: var(--cyan-glow, #00f0ff); font-size: 12px; text-decoration: underline;">Use Demo Credentials</a>
+                        <a href="javascript:void(0)" onclick="switchAuthTab('forgot')" style="color: var(--cyan-glow, #00f0ff); font-size: 12px; font-weight: 500;">Forgot password?</a>
+                        <a href="javascript:void(0)" onclick="fillDemoCredentials()" style="color: var(--text-dim, #888); font-size: 12px; text-decoration: underline;">Use Demo Credentials</a>
+                    </div>
+                    <div style="text-align: right; margin-bottom: 16px;">
                         <a href="javascript:void(0)" onclick="switchAuthTab('register')" style="color: var(--text-dim, #888); font-size: 12px;">New here? Create Workspace &rarr;</a>
                     </div>
                     <div id="loginErrorMessage" style="display:none; color: #ef4444; font-size: 13px; margin-bottom: 14px; padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 6px; border-left: 3px solid #ef4444;"></div>
@@ -1667,6 +1776,52 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                     <button type="submit" class="hud-btn primary" id="registerSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600;">Launch Workspace &amp; Begin Tour</button>
                     <div style="text-align: center; margin-top: 14px;">
                         <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color: var(--text-dim, #888); font-size: 12px;">Already have an account? Sign In &rarr;</a>
+                </form>
+
+                <!-- FORGOT PASSWORD FORM -->
+                <form id="forgotPasswordForm" onsubmit="handleForgotPassword(event)" style="display:none;">
+                    <p style="font-size: 13px; color: var(--text-secondary, #aaa); margin-bottom: 16px;">
+                        Enter your work email address. We will generate a secure, single-use password reset token with a 1-hour expiration window.
+                    </p>
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Work Email *</label>
+                        <input type="email" id="forgotEmail" class="hud-input" required placeholder="admin@opsflow.io" style="width: 100%;">
+                    </div>
+                    <div id="forgotErrorMessage" style="display:none; color: #ef4444; font-size: 13px; margin-bottom: 14px; padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 6px; border-left: 3px solid #ef4444;"></div>
+                    <div id="forgotSuccessMessage" style="display:none; color: #10b981; font-size: 13px; margin-bottom: 14px; padding: 10px 12px; background: rgba(16,185,129,0.1); border-radius: 6px; border-left: 3px solid #10b981;"></div>
+                    <div id="forgotDevHelper" style="display:none; margin-bottom: 14px; padding: 10px; background: rgba(0,240,255,0.08); border-radius: 6px; border: 1px dashed var(--cyan-glow, #00f0ff);">
+                        <div style="font-size: 12px; color: var(--cyan-glow, #00f0ff); margin-bottom: 6px;">🛠️ Development Mode Reset Link:</div>
+                        <button type="button" class="hud-btn small cyan" id="forgotDevResetBtn" onclick="applyDevResetToken()" style="width: 100%;">Open Reset Form with Generated Token &rarr;</button>
+                    </div>
+                    <button type="submit" class="hud-btn primary" id="forgotSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600;">Request Password Reset Link</button>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px;">
+                        <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color: var(--text-dim, #888); font-size: 12px;">&larr; Return to Sign In</a>
+                        <a href="javascript:void(0)" onclick="switchAuthTab('reset')" style="color: var(--cyan-glow, #00f0ff); font-size: 12px;">Already have a token? &rarr;</a>
+                    </div>
+                </form>
+
+                <!-- RESET PASSWORD FORM -->
+                <form id="resetPasswordForm" onsubmit="handleResetPassword(event)" style="display:none;">
+                    <p style="font-size: 13px; color: var(--text-secondary, #aaa); margin-bottom: 16px;">
+                        Provide your verified reset token and configure a new password.
+                    </p>
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Reset Token *</label>
+                        <input type="text" id="resetTokenInput" class="hud-input" required placeholder="Paste reset token here" style="width: 100%; font-family: 'JetBrains Mono', monospace;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">New Secure Password * (min 8 chars)</label>
+                        <input type="password" id="resetNewPassword" class="hud-input" required minlength="8" placeholder="••••••••••••" style="width: 100%;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Confirm New Password *</label>
+                        <input type="password" id="resetConfirmPassword" class="hud-input" required minlength="8" placeholder="••••••••••••" style="width: 100%;">
+                    </div>
+                    <div id="resetErrorMessage" style="display:none; color: #ef4444; font-size: 13px; margin-bottom: 14px; padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 6px; border-left: 3px solid #ef4444;"></div>
+                    <div id="resetSuccessMessage" style="display:none; color: #10b981; font-size: 13px; margin-bottom: 14px; padding: 10px 12px; background: rgba(16,185,129,0.1); border-radius: 6px; border-left: 3px solid #10b981;"></div>
+                    <button type="submit" class="hud-btn primary" id="resetSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600;">Update Password &amp; Sign In</button>
+                    <div style="text-align: center; margin-top: 14px;">
+                        <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color: var(--text-dim, #888); font-size: 12px;">&larr; Back to Sign In</a>
                     </div>
                 </form>
             </div>

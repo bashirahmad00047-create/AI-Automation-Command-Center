@@ -65,6 +65,7 @@ class Organization(db.Model):
     events = db.relationship("SystemEvent", backref="organization", cascade="all, delete-orphan", lazy="select")
     usages = db.relationship("OrganizationUsage", backref="organization", cascade="all, delete-orphan", lazy="select")
     subscription = db.relationship("Subscription", backref="organization", uselist=False, cascade="all, delete-orphan", lazy="select")
+    whatsapp_messages = db.relationship("WhatsAppMessage", backref="organization", cascade="all, delete-orphan", lazy="select")
 
     def get_subscription(self) -> "Subscription":
         """Get or lazily initialize the tenant subscription record."""
@@ -113,6 +114,7 @@ class User(db.Model):
     # Relationships
     memberships = db.relationship("Membership", backref="user", cascade="all, delete-orphan", lazy="select")
     api_keys = db.relationship("ApiKey", backref="user", lazy="select")
+    reset_tokens = db.relationship("PasswordResetToken", backref="user", cascade="all, delete-orphan", lazy="select")
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -717,4 +719,63 @@ class StripeWebhookEvent(db.Model):
             "event_type": self.event_type,
             "status": self.status,
             "processed_at": self.processed_at.strftime("%Y-%m-%d %H:%M:%S") if self.processed_at else None,
+        }
+
+
+class PasswordResetToken(db.Model):
+    """Secure, single-use, time-limited password reset tokens."""
+    __tablename__ = "password_reset_tokens"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("rst"))
+    user_id = db.Column(db.String(64), db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = db.Column(db.String(64), nullable=False, index=True)  # SHA-256 hash of the plaintext token
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    is_used = db.Column(db.Boolean, nullable=False, default=False)
+    used_at = db.Column(db.DateTime, nullable=True)
+    ip_address = db.Column(db.String(64), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "expires_at": self.expires_at.strftime("%Y-%m-%d %H:%M:%S") if self.expires_at else None,
+            "is_used": self.is_used,
+            "used_at": self.used_at.strftime("%Y-%m-%d %H:%M:%S") if self.used_at else None,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+        }
+
+
+class WhatsAppMessage(db.Model):
+    """Multi-tenant WhatsApp Business Cloud API incoming & outgoing message log."""
+    __tablename__ = "whatsapp_messages"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("wam"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    whatsapp_message_id = db.Column(db.String(128), nullable=True, index=True)  # Meta wamid...
+    direction = db.Column(db.String(16), nullable=False, default="inbound")  # inbound, outbound
+    sender = db.Column(db.String(64), nullable=False)  # Phone number or System
+    recipient = db.Column(db.String(64), nullable=False)  # Phone number or System
+    message_type = db.Column(db.String(32), nullable=False, default="text")  # text, template, interactive
+    body = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(32), nullable=False, default="received")  # received, sent, mock_sent, failed
+    execution_id = db.Column(db.Integer, db.ForeignKey("workflow_executions.id", ondelete="SET NULL"), nullable=True, index=True)
+    raw_payload_json = db.Column(db.Text, nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "whatsapp_message_id": self.whatsapp_message_id,
+            "direction": self.direction,
+            "sender": self.sender,
+            "recipient": self.recipient,
+            "message_type": self.message_type,
+            "body": self.body,
+            "status": self.status,
+            "execution_id": self.execution_id,
+            "error_message": self.error_message,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
         }

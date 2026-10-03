@@ -190,6 +190,9 @@ class AutomationEngine:
         if event_name in ("lead.created", "lead.ingested"):
             matching_events.add("lead.created")
             matching_events.add("lead.ingested")
+        if event_name in ("whatsapp.message", "whatsapp.incoming", "whatsapp"):
+            matching_events.add("whatsapp.message")
+            matching_events.add("whatsapp.incoming")
 
         if nlp_data and is_nlp_source:
             matching_events.add("user.prompt")
@@ -466,6 +469,19 @@ class AutomationEngine:
                         )
                         step_output = log_res.get("output", {})
                         action_results.append(log_res)
+
+                    elif st_type in ("whatsapp_message", "whatsapp_send", "send_whatsapp", "whatsapp"):
+                        wa_res = self.action_runner.execute_action(
+                            {"type": "whatsapp_message", "params": st_config},
+                            context,
+                            self.storage,
+                            dry_run=dry_run
+                        )
+                        step_output = wa_res.get("output", {})
+                        action_results.append(wa_res)
+                        if wa_res.get("status") == "failed":
+                            step_status = "FAILED"
+                            step_error = wa_res.get("error")
 
                     elif st_type == "delay":
                         step_output = {"delayed_seconds": min(float(st_config.get("seconds", 1)), 5.0), "simulated": True}

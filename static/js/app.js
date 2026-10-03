@@ -35,6 +35,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initClock();
     initAuthAndTenancy();
     checkBillingUrlParams();
+    checkAuthUrlParams();
+    checkSystemReadiness();
     refreshAllData();
 
     // Telemetry and status poll (every 2.5 seconds)
@@ -215,6 +217,7 @@ function switchTab(tabId) {
     if (tabId === 'rules') loadRules();
     if (tabId === 'leads') loadLeads();
     if (tabId === 'webhooks') loadWebhooks();
+    if (tabId === 'whatsapp') loadWhatsAppDashboard();
     if (tabId === 'logs') loadExecutionLogs();
     if (tabId === 'incidents') loadIncidents();
     if (tabId === 'apikeys') loadApiKeys();
@@ -2167,6 +2170,21 @@ function checkBillingUrlParams() {
     }
 }
 
+function checkAuthUrlParams() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token') || urlParams.get('reset_token');
+    const isResetPage = window.location.pathname.includes('reset-password');
+
+    if (token || isResetPage) {
+        openAuthModal('reset', false);
+        if (token) {
+            const tokenInput = document.getElementById('resetTokenInput');
+            if (tokenInput) tokenInput.value = token;
+        }
+    }
+}
+
+
 
 // ==========================================
 // DEMO PERSONA SWITCHER
@@ -2190,11 +2208,12 @@ async function quickLoginPersona(email, password) {
         const data = await res.json();
         if (res.ok) {
             state.currentUser = data.user;
-            state.currentOrg = data.organization;
+            state.currentOrg = data.organization || (data.active_org_id ? { id: data.active_org_id } : null);
             state.userRole = data.role;
             updateUserBadgeUI();
             closePersonaModal();
             showToast(`Logged in as ${data.user.full_name} (${data.role.toUpperCase()})`, 'success');
+            await initAuthAndTenancy();
             refreshAllData();
         } else {
             showToast(data.error || 'Login failed', 'error');
@@ -2625,41 +2644,194 @@ function closeAuthModal(force = false) {
 function switchAuthTab(tab) {
     const loginForm = document.getElementById('loginForm');
     const registerForm = document.getElementById('registerForm');
+    const forgotForm = document.getElementById('forgotPasswordForm');
+    const resetForm = document.getElementById('resetPasswordForm');
     const tabLogin = document.getElementById('authTabLogin');
     const tabRegister = document.getElementById('authTabRegister');
+    const tabForgot = document.getElementById('authTabForgot');
     const title = document.getElementById('authModalTitle');
-    const loginErr = document.getElementById('loginErrorMessage');
-    const regErr = document.getElementById('registerErrorMessage');
 
-    if (loginErr) loginErr.style.display = 'none';
-    if (regErr) regErr.style.display = 'none';
+    // Hide error and success banners
+    ['loginErrorMessage', 'registerErrorMessage', 'forgotErrorMessage', 'forgotSuccessMessage', 'forgotDevHelper', 'resetErrorMessage', 'resetSuccessMessage'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    });
+
+    // Reset tab active styles
+    [tabLogin, tabRegister, tabForgot].forEach(t => {
+        if (t) {
+            t.classList.remove('active');
+            t.style.color = 'var(--text-muted, #888)';
+        }
+    });
+
+    // Hide all form panels
+    [loginForm, registerForm, forgotForm, resetForm].forEach(f => {
+        if (f) f.style.display = 'none';
+    });
 
     if (tab === 'register') {
-        if (loginForm) loginForm.style.display = 'none';
         if (registerForm) registerForm.style.display = 'block';
-        if (tabLogin) {
-            tabLogin.classList.remove('active');
-            tabLogin.style.color = 'var(--text-muted, #888)';
-        }
         if (tabRegister) {
             tabRegister.classList.add('active');
             tabRegister.style.color = 'var(--cyan-glow, #00f0ff)';
         }
         if (title) title.textContent = 'Create New Workspace';
+    } else if (tab === 'forgot') {
+        if (forgotForm) forgotForm.style.display = 'block';
+        if (tabForgot) {
+            tabForgot.classList.add('active');
+            tabForgot.style.color = 'var(--cyan-glow, #00f0ff)';
+        }
+        if (title) title.textContent = 'Forgot Password Recovery';
+    } else if (tab === 'reset') {
+        if (resetForm) resetForm.style.display = 'block';
+        if (tabForgot) {
+            tabForgot.classList.add('active');
+            tabForgot.style.color = 'var(--cyan-glow, #00f0ff)';
+        }
+        if (title) title.textContent = 'Configure New Password';
     } else {
         if (loginForm) loginForm.style.display = 'block';
-        if (registerForm) registerForm.style.display = 'none';
         if (tabLogin) {
             tabLogin.classList.add('active');
             tabLogin.style.color = 'var(--cyan-glow, #00f0ff)';
         }
-        if (tabRegister) {
-            tabRegister.classList.remove('active');
-            tabRegister.style.color = 'var(--text-muted, #888)';
-        }
         if (title) title.textContent = 'OpsFlow Cloud Authentication';
     }
 }
+
+let devResetTokenCache = null;
+
+async function handleForgotPassword(e) {
+    if (e) e.preventDefault();
+    const email = document.getElementById('forgotEmail').value.trim();
+    const errBox = document.getElementById('forgotErrorMessage');
+    const succBox = document.getElementById('forgotSuccessMessage');
+    const devHelper = document.getElementById('forgotDevHelper');
+    const submitBtn = document.getElementById('forgotSubmitBtn');
+
+    if (errBox) errBox.style.display = 'none';
+    if (succBox) succBox.style.display = 'none';
+    if (devHelper) devHelper.style.display = 'none';
+
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Processing request...';
+    }
+
+    try {
+        const res = await fetch('/api/v1/auth/forgot-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            if (succBox) {
+                succBox.textContent = data.message || 'If an account exists with that email, a password reset link has been dispatched.';
+                succBox.style.display = 'block';
+            }
+            if (data.dev_reset_token) {
+                devResetTokenCache = data.dev_reset_token;
+                if (devHelper) devHelper.style.display = 'block';
+            }
+        } else {
+            if (errBox) {
+                errBox.textContent = data.error || 'Failed to request password reset.';
+                errBox.style.display = 'block';
+            }
+        }
+    } catch (err) {
+        if (errBox) {
+            errBox.textContent = 'Network error: ' + err.message;
+            errBox.style.display = 'block';
+        }
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Request Password Reset Link';
+        }
+    }
+}
+
+function applyDevResetToken() {
+    if (!devResetTokenCache) return;
+    switchAuthTab('reset');
+    const tokenInput = document.getElementById('resetTokenInput');
+    if (tokenInput) tokenInput.value = devResetTokenCache;
+}
+
+async function handleResetPassword(e) {
+    if (e) e.preventDefault();
+    const token = document.getElementById('resetTokenInput').value.trim();
+    const newPassword = document.getElementById('resetNewPassword').value;
+    const confirmPassword = document.getElementById('resetConfirmPassword').value;
+    const errBox = document.getElementById('resetErrorMessage');
+    const succBox = document.getElementById('resetSuccessMessage');
+    const submitBtn = document.getElementById('resetSubmitBtn');
+
+    if (errBox) errBox.style.display = 'none';
+    if (succBox) succBox.style.display = 'none';
+
+    if (newPassword.length < 8) {
+        if (errBox) {
+            errBox.textContent = 'New password must be at least 8 characters.';
+            errBox.style.display = 'block';
+        }
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        if (errBox) {
+            errBox.textContent = 'Passwords do not match.';
+            errBox.style.display = 'block';
+        }
+        return;
+    }
+
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Updating Password...';
+    }
+
+    try {
+        const res = await fetch('/api/v1/auth/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, new_password: newPassword })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            if (succBox) {
+                succBox.textContent = data.message || 'Password reset successfully! Please sign in with your new password.';
+                succBox.style.display = 'block';
+            }
+            showToast('Password updated successfully. Please sign in.', 'success');
+            setTimeout(() => {
+                switchAuthTab('login');
+                const loginPassword = document.getElementById('loginPassword');
+                if (loginPassword) loginPassword.value = '';
+            }, 1800);
+        } else {
+            if (errBox) {
+                errBox.textContent = data.error || 'Password reset failed.';
+                errBox.style.display = 'block';
+            }
+        }
+    } catch (err) {
+        if (errBox) {
+            errBox.textContent = 'Network error: ' + err.message;
+            errBox.style.display = 'block';
+        }
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Update Password & Sign In';
+        }
+    }
+}
+
 
 function fillDemoCredentials() {
     const email = document.getElementById('loginEmail');
@@ -3359,4 +3531,187 @@ async function cancelAsyncJob(jobId) {
         showToast(`Cancel error: ${e.message}`, 'error');
     }
 }
+
+// ==========================================
+// WHATSAPP BUSINESS / META CLOUD API
+// ==========================================
+
+async function loadWhatsAppDashboard() {
+    try {
+        // 1. Load config
+        const confRes = await fetch('/api/v1/whatsapp/config');
+        if (confRes.ok) {
+            const conf = await confRes.json();
+            const urlInput = document.getElementById('waWebhookUrlInput');
+            const tokenInput = document.getElementById('waVerifyTokenInput');
+            const phoneIdInput = document.getElementById('waPhoneNumberIdInput');
+            const modeBadge = document.getElementById('whatsappModeBadge');
+
+            if (urlInput) urlInput.value = conf.webhook_url;
+            if (tokenInput) tokenInput.value = conf.verify_token;
+            if (phoneIdInput) phoneIdInput.value = conf.phone_number_id || 'Not configured';
+            if (modeBadge) {
+                if (conf.is_configured) {
+                    modeBadge.textContent = 'LIVE META CLOUD API';
+                    modeBadge.style.background = 'rgba(16,185,129,0.15)';
+                    modeBadge.style.color = '#10b981';
+                    modeBadge.style.borderColor = '#10b981';
+                } else {
+                    modeBadge.textContent = 'DEV SIMULATION MOCK MODE';
+                    modeBadge.style.background = 'rgba(0,240,255,0.15)';
+                    modeBadge.style.color = '#00f0ff';
+                    modeBadge.style.borderColor = '#00f0ff';
+                }
+            }
+        }
+
+        // 2. Load messages
+        const msgRes = await fetch('/api/v1/whatsapp/messages?limit=100');
+        if (msgRes.ok) {
+            const msgData = await msgRes.json();
+            const messages = msgData.messages || [];
+            const countBadge = document.getElementById('waMessageCountBadge');
+            const tabCount = document.getElementById('tabWhatsAppCount');
+            const tbody = document.getElementById('waMessagesTableBody');
+
+            if (countBadge) countBadge.textContent = `${messages.length} messages`;
+            if (tabCount) tabCount.textContent = messages.length;
+
+            if (tbody) {
+                if (messages.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No WhatsApp messages recorded in this workspace.</td></tr>';
+                } else {
+                    tbody.innerHTML = messages.map(m => {
+                        const isInbound = m.direction === 'inbound';
+                        const dirBadge = isInbound
+                            ? '<span class="status-pill blue">📥 INBOUND</span>'
+                            : '<span class="status-pill green">📤 OUTBOUND</span>';
+
+                        let statusColor = '#888';
+                        if (m.status === 'sent' || m.status === 'received') statusColor = '#10b981';
+                        if (m.status === 'mock_sent') statusColor = '#00f0ff';
+                        if (m.status === 'failed') statusColor = '#ef4444';
+
+                        return `
+                            <tr>
+                                <td>${dirBadge}</td>
+                                <td>
+                                    <div style="font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 12px;">${isInbound ? escapeHtml(m.sender) : escapeHtml(m.recipient)}</div>
+                                    <div style="font-size: 11px; color: var(--text-dim, #888);">${isInbound ? 'To: ' + escapeHtml(m.recipient) : 'From: ' + escapeHtml(m.sender)}</div>
+                                </td>
+                                <td>
+                                    <div style="max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px;" title="${escapeHtml(m.body || '')}">
+                                        ${escapeHtml(m.body || '(no text body)')}
+                                    </div>
+                                    ${m.error_message ? `<div style="font-size: 11px; color: #ef4444;">${escapeHtml(m.error_message)}</div>` : ''}
+                                </td>
+                                <td><span style="color: ${statusColor}; font-weight: 600; font-size: 11px; text-transform: uppercase;">${escapeHtml(m.status)}</span></td>
+                                <td style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim, #888);">${escapeHtml(m.whatsapp_message_id || '—')}</td>
+                                <td style="font-size: 11px; color: var(--text-dim, #888);">${escapeHtml(m.created_at || '—')}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            }
+        }
+    } catch (err) {
+        console.error('Failed to load WhatsApp dashboard:', err);
+    }
+}
+
+async function handleSendWhatsAppMessage(e) {
+    if (e) e.preventDefault();
+    const recipient = document.getElementById('waRecipientPhone').value.trim();
+    const message = document.getElementById('waMessageBody').value.trim();
+    const sendBtn = document.getElementById('waSendBtn');
+    const outputDiv = document.getElementById('waSendOutput');
+    const outputJson = document.getElementById('waSendOutputJson');
+
+    if (!recipient || !message) return;
+
+    if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.textContent = 'Transmitting Message...';
+    }
+
+    try {
+        const res = await fetch('/api/v1/whatsapp/messages/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ to: recipient, message })
+        });
+        const data = await res.json();
+
+        if (outputDiv && outputJson) {
+            outputDiv.style.display = 'block';
+            outputJson.textContent = JSON.stringify(data, null, 2);
+        }
+
+        if (res.ok) {
+            showToast(`WhatsApp message dispatched to ${recipient}`, 'success');
+            document.getElementById('waMessageBody').value = '';
+            loadWhatsAppDashboard();
+        } else {
+            showToast(`Failed to send WhatsApp message: ${data.error || 'Server error'}`, 'error');
+        }
+    } catch (err) {
+        showToast(`Network error sending WhatsApp: ${err.message}`, 'error');
+    } finally {
+        if (sendBtn) {
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Send WhatsApp Message';
+        }
+    }
+}
+
+function copyWhatsAppWebhookUrl() {
+    const input = document.getElementById('waWebhookUrlInput');
+    if (!input) return;
+    navigator.clipboard.writeText(input.value).then(() => {
+        showToast('WhatsApp webhook callback URL copied to clipboard!', 'success');
+    }).catch(() => {
+        input.select();
+        document.execCommand('copy');
+        showToast('Webhook URL copied!', 'success');
+    });
+}
+
+// ==========================================
+// SYSTEM READINESS PROBE TELEMETRY
+// ==========================================
+
+async function checkSystemReadiness(notify = false) {
+    const readyDot = document.getElementById('readyDot');
+    const readyStatusText = document.getElementById('readyStatusText');
+    try {
+        const res = await fetch('/api/v1/ready');
+        const data = await res.json();
+        if (res.ok && data.status === 'ready') {
+            if (readyDot) {
+                readyDot.className = 'status-dot green';
+            }
+            if (readyStatusText) {
+                readyStatusText.textContent = 'SYSTEM READY';
+            }
+            if (notify) {
+                showToast(`Readiness Probe 200 OK — DB: Online, Engine: Online, Storage: Online`, 'success');
+            }
+        } else {
+            if (readyDot) {
+                readyDot.className = 'status-dot red';
+            }
+            if (readyStatusText) {
+                readyStatusText.textContent = 'SYSTEM DEGRADED';
+            }
+            if (notify) {
+                showToast(`Readiness Probe Degraded (${res.status}): Subsystems: ${JSON.stringify(data.subsystems)}`, 'error');
+            }
+        }
+    } catch (e) {
+        if (readyDot) readyDot.className = 'status-dot red';
+        if (readyStatusText) readyStatusText.textContent = 'PROBE OFFLINE';
+        if (notify) showToast(`Readiness probe network failed: ${e.message}`, 'error');
+    }
+}
+
 

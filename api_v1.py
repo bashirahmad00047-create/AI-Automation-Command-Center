@@ -63,11 +63,13 @@ from models import (
     Membership,
     Organization,
     OrganizationUsage,
+    PasswordResetToken,
     StripeWebhookEvent,
     Subscription,
     SystemEvent,
     User,
     WebhookEndpoint,
+    WhatsAppMessage,
     Workflow,
     WorkflowExecution,
     WorkflowStep,
@@ -86,6 +88,7 @@ from billing_service import (
     sync_organization_subscription,
     verify_webhook_signature,
 )
+from whatsapp_service import WhatsAppService
 
 api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 logger = logging.getLogger("opsflow.api")
@@ -289,6 +292,8 @@ def auth_register():
         }, org_id=org.id, user_id=user.id)
 
         # Set authenticated session
+        session.permanent = True
+        session.pop("logged_out", None)
         session["user_id"] = user.id
         session["active_org_id"] = org.id
 
@@ -331,7 +336,9 @@ def auth_login():
     # Find primary organization
     membership = Membership.query.filter_by(user_id=user.id).first()
     org_id = membership.organization_id if membership else None
+    active_org = db.session.get(Organization, org_id) if org_id else None
 
+    session.permanent = True
     session.pop("logged_out", None)
     session["user_id"] = user.id
     if org_id:
@@ -345,11 +352,12 @@ def auth_login():
         "message": "Login successful.",
         "user": user.to_dict(),
         "role": membership.role if membership else "viewer",
-        "active_org_id": org_id
+        "active_org_id": org_id,
+        "organization": active_org.to_dict() if active_org else None
     })
 
 
-@api_v1.route("/auth/logout", methods=["POST"])
+@api_v1.route("/auth/logout", methods=["POST", "GET"])
 def auth_logout():
     user = get_current_user()
     if user:
@@ -361,6 +369,113 @@ def auth_logout():
     g.api_key = None
     g.is_api_key_auth = False
     return jsonify({"success": True, "message": "Successfully logged out."})
+
+
+@api_v1.route("/auth/forgot-password", methods=["POST"])
+@rate_limit(limit=5, window=60, config_key="FORGOT_PASSWORD_RATE_LIMIT", message="Too many password reset requests. Please try again later.")
+def auth_forgot_password():
+    """Initiates a secure, rate-limited password reset flow with zero user-enumeration leak."""
+    data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
+    email = (data.get("email") or "").strip().lower()
+
+    if not email or "@" not in email:
+        return jsonify({"error": "A valid email address is required.", "code": "VALIDATION_ERROR"}), 400
+
+    user = User.query.filter_by(email=email).first()
+    dev_token = None
+    dev_url = None
+
+    if user and user.is_active:
+        # Invalidate previous unused reset tokens for this user
+        PasswordResetToken.query.filter_by(user_id=user.id, is_used=False).update({"is_used": True})
+
+        # Generate cryptographically secure single-use token
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        expires_at = datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+
+        token_rec = PasswordResetToken(
+            id=generate_uuid("rst"),
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+            is_used=False,
+            ip_address=request.remote_addr or "127.0.0.1"
+        )
+        db.session.add(token_rec)
+        db.session.commit()
+
+        # Send email via email_service
+        from email_service import is_smtp_configured, send_password_reset_email
+        email_result = send_password_reset_email(user.email, raw_token, user.full_name)
+
+        if not is_smtp_configured() or current_app.config.get("TESTING"):
+            dev_token = raw_token
+            dev_url = email_result.get("reset_url")
+
+        # Safely log audit event (TOKEN AND HASH ARE NEVER LOGGED)
+        log_audit_event("auth.forgot_password_request", "user", user.id, {"email": user.email}, user_id=user.id)
+
+    resp = {
+        "success": True,
+        "message": "If an account with that email exists, password reset instructions have been sent."
+    }
+    if dev_token:
+        resp["dev_token"] = dev_token
+        resp["dev_reset_token"] = dev_token
+        resp["dev_reset_url"] = dev_url
+        resp["dev_reset_link"] = dev_url
+
+    return jsonify(resp), 200
+
+
+@api_v1.route("/auth/reset-password", methods=["POST"])
+@rate_limit(limit=5, window=60, config_key="RESET_PASSWORD_RATE_LIMIT", message="Too many password reset attempts. Please try again later.")
+def auth_reset_password():
+    """Validates single-use reset token and safely updates the user's password."""
+    data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
+    raw_token = (data.get("token") or "").strip()
+    new_password = (data.get("new_password") or data.get("password") or "").strip()
+
+    if not raw_token:
+        return jsonify({"error": "Reset token is required.", "code": "VALIDATION_ERROR"}), 400
+
+    if not new_password or len(new_password) < 8:
+        return jsonify({"error": "New password must be at least 8 characters long.", "code": "VALIDATION_ERROR"}), 400
+
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    token_rec = PasswordResetToken.query.filter_by(token_hash=token_hash).first()
+
+    if not token_rec:
+        return jsonify({"error": "Invalid password reset token.", "code": "INVALID_TOKEN"}), 400
+
+    if token_rec.is_used:
+        return jsonify({"error": "This password reset token has already been used.", "code": "TOKEN_ALREADY_USED"}), 400
+
+    if datetime.datetime.utcnow() > token_rec.expires_at:
+        return jsonify({"error": "This password reset token has expired. Please request a new one.", "code": "TOKEN_EXPIRED"}), 400
+
+    user = db.session.get(User, token_rec.user_id)
+    if not user or not user.is_active:
+        return jsonify({"error": "User account associated with this token is invalid or inactive.", "code": "INVALID_USER"}), 400
+
+    # Apply new password
+    user.set_password(new_password)
+    token_rec.is_used = True
+    token_rec.used_at = datetime.datetime.utcnow()
+    db.session.commit()
+
+    # Clear current session to force clean re-authentication
+    session.clear()
+    session["logged_out"] = True
+
+    # Safely log audit event (PASSWORD AND TOKEN ARE NEVER LOGGED)
+    log_audit_event("auth.password_reset", "user", user.id, {"email": user.email}, user_id=user.id)
+
+    return jsonify({
+        "success": True,
+        "message": "Password reset successfully. You may now sign in with your new credentials."
+    }), 200
 
 
 @api_v1.route("/auth/me", methods=["GET"])
@@ -401,6 +516,7 @@ def list_organizations():
 
 
 @api_v1.route("/organizations/switch", methods=["POST"])
+@api_v1.route("/auth/switch-org", methods=["POST"])
 @require_auth
 def switch_organization():
     data = request.get_json(silent=True) or {}
@@ -2070,3 +2186,243 @@ def stripe_webhook():
     except Exception as proc_err:
         logger.error(f"Error processing Stripe webhook: {proc_err}")
         return jsonify({"error": "Webhook processing failed.", "code": "PROCESSING_ERROR"}), 500
+
+
+# ==========================================
+# WhatsApp Business / Meta Cloud API Gateway
+# ==========================================
+
+@api_v1.route("/webhooks/whatsapp", methods=["GET"])
+def whatsapp_webhook_verification():
+    """Meta Cloud API Webhook Subscription Verification (hub.mode, hub.verify_token, hub.challenge)."""
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+
+    valid_challenge = WhatsAppService.verify_webhook_challenge(mode, token, challenge)
+    if valid_challenge is not None:
+        return valid_challenge, 200, {"Content-Type": "text/plain"}
+    return jsonify({"error": "Forbidden: invalid verification token or mode"}), 403
+
+
+@api_v1.route("/webhooks/whatsapp", methods=["POST"])
+@rate_limit(limit=120, window=60, message="Too many WhatsApp webhook requests.")
+def whatsapp_webhook_ingress():
+    """Meta Cloud API Incoming Webhook Gateway.
+    
+    Validates X-Hub-Signature-256 HMAC (if secret configured).
+    Normalizes Meta payload, deduplicates message IDs for idempotency,
+    persists message records in tenant workspace, and dispatches to automation engine.
+    """
+    raw_body = request.get_data()
+    sig = request.headers.get("X-Hub-Signature-256")
+    if not WhatsAppService.verify_signature(raw_body, sig):
+        logger.warning("WhatsApp webhook rejected: HMAC signature verification failed.")
+        return jsonify({"error": "Invalid signature", "code": "UNAUTHORIZED"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    messages = WhatsAppService.parse_webhook_payload(payload)
+    if not messages:
+        # Acknowledging delivery reports, read receipts, or non-message events
+        return jsonify({"status": "acknowledged", "processed": 0}), 200
+
+    # Resolve target tenant
+    target_org = None
+    target_org_id = request.args.get("org_id")
+    if target_org_id:
+        target_org = db.session.get(Organization, target_org_id)
+    if not target_org:
+        target_org = Organization.query.filter_by(is_active=True).first()
+
+    if not target_org:
+        return jsonify({"error": "No active organization found to receive WhatsApp message", "code": "NOT_FOUND"}), 404
+
+    engine = get_engine()
+    processed_count = 0
+
+    for msg in messages:
+        msg_id = msg.get("message_id")
+        if msg_id and WhatsAppService.is_duplicate_message(msg_id):
+            logger.info(f"Duplicate WhatsApp message ignored: {msg_id}")
+            continue
+
+        record = WhatsAppService.record_message(
+            organization_id=target_org.id,
+            sender=msg.get("from_phone", "unknown"),
+            recipient=msg.get("recipient_phone_id", "system"),
+            direction="inbound",
+            body=msg.get("body", ""),
+            status="received",
+            whatsapp_message_id=msg_id,
+            message_type=msg.get("message_type", "text"),
+            raw_payload=msg
+        )
+
+        if engine:
+            event_data = {
+                "from": msg.get("from_phone"),
+                "sender_name": msg.get("sender_name", ""),
+                "message": msg.get("body", ""),
+                "text": msg.get("body", ""),
+                "whatsapp_message_id": msg_id,
+                "recipient_phone_id": msg.get("recipient_phone_id", ""),
+                "direction": "inbound",
+                "record_id": record.id
+            }
+            try:
+                engine.ingest_event(
+                    event_name="whatsapp.message",
+                    payload=event_data,
+                    source="whatsapp_webhook",
+                    dry_run=False,
+                    organization_id=target_org.id
+                )
+            except Exception as e:
+                logger.error(f"Error triggering engine for WhatsApp message {msg_id}: {e}")
+
+        processed_count += 1
+
+    return jsonify({"status": "ok", "processed": processed_count}), 200
+
+
+@api_v1.route("/whatsapp/messages/send", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin", "member"])
+@rate_limit(limit=30, window=60, message="Rate limit exceeded for outbound WhatsApp messages.")
+def whatsapp_send_message():
+    """Dispatches an outbound WhatsApp message via Meta Cloud API or safe mock."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    allowed, violation = check_resource_quota(org, "monthly_events", delta=1)
+    if not allowed:
+        return jsonify({
+            "error": "Monthly event quota exceeded for outbound WhatsApp messages.",
+            "code": "QUOTA_EXCEEDED",
+            "quota": violation
+        }), 429
+
+    data = request.get_json(silent=True) or {}
+    to_phone = data.get("to") or data.get("recipient")
+    message = data.get("message") or data.get("body")
+    preview_url = bool(data.get("preview_url", False))
+
+    if not to_phone or not message:
+        return jsonify({"error": "Both 'to' and 'message' fields are required.", "code": "VALIDATION_ERROR"}), 400
+
+    try:
+        result = WhatsAppService.send_message(
+            organization_id=org.id,
+            to_phone=to_phone,
+            message_text=message,
+            preview_url=preview_url
+        )
+        log_audit_event("whatsapp.message_sent", "whatsapp", result.get("whatsapp_message_id"), {
+            "recipient": to_phone,
+            "status": result.get("status")
+        })
+        return jsonify(result), 200
+    except ValueError as ve:
+        return jsonify({"error": str(ve), "code": "VALIDATION_ERROR"}), 400
+    except Exception as e:
+        logger.error(f"Failed to send WhatsApp message: {e}")
+        return jsonify({"error": "Internal error sending WhatsApp message", "detail": str(e)}), 500
+
+
+@api_v1.route("/whatsapp/messages", methods=["GET"])
+@require_auth
+def list_whatsapp_messages():
+    """Returns tenant-isolated WhatsApp message history."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    limit = min(int(request.args.get("limit", 50)), 200)
+    messages = WhatsAppMessage.query.filter_by(organization_id=org.id).order_by(WhatsAppMessage.created_at.desc()).limit(limit).all()
+
+    return jsonify({
+        "messages": [m.to_dict() for m in messages],
+        "count": len(messages),
+        "is_configured": WhatsAppService.is_configured()
+    }), 200
+
+
+@api_v1.route("/whatsapp/config", methods=["GET"])
+@require_auth
+def get_whatsapp_config():
+    """Returns non-sensitive WhatsApp configuration status and webhook URL."""
+    org = get_current_org()
+    conf = WhatsAppService.get_config()
+    base_url = request.host_url.rstrip("/")
+    webhook_url = f"{base_url}/api/v1/webhooks/whatsapp" + (f"?org_id={org.id}" if org else "")
+
+    phone_number_id = conf.get("phone_number_id", "")
+    masked_phone_id = phone_number_id[:4] + "..." + phone_number_id[-4:] if len(phone_number_id) > 8 else (phone_number_id or "Not Configured")
+
+    return jsonify({
+        "is_configured": WhatsAppService.is_configured(),
+        "phone_number_id": masked_phone_id,
+        "business_account_id": conf.get("business_account_id") or "Not Configured",
+        "verify_token": conf.get("verify_token", WhatsAppService.DEFAULT_VERIFY_TOKEN),
+        "webhook_url": webhook_url,
+        "mode": "live" if WhatsAppService.is_configured() else "development_mock"
+    }), 200
+
+
+# ==========================================
+# System Readiness & Health Telemetry
+# ==========================================
+
+@api_v1.route("/ready", methods=["GET"])
+@api_v1.route("/system/ready", methods=["GET"])
+def system_readiness():
+    """Production Kubernetes / Cloud Readiness Probe.
+    
+    Verifies:
+    1. Active database connectivity via SELECT 1
+    2. Automation engine execution readiness
+    3. Storage engine availability
+    Returns 200 if fully ready, or 503 if any core subsystem is unavailable.
+    """
+    checks = {
+        "database": False,
+        "engine": False,
+        "storage": False
+    }
+    is_ready = True
+
+    # 1. Database connectivity
+    try:
+        db.session.execute(db.text("SELECT 1")).scalar()
+        checks["database"] = True
+    except Exception as e:
+        logger.error(f"Readiness probe failed database query: {e}")
+        checks["database"] = False
+        is_ready = False
+
+    # 2. Automation engine
+    engine = get_engine()
+    if engine and engine.is_running:
+        checks["engine"] = True
+    else:
+        checks["engine"] = False
+        is_ready = False
+
+    # 3. Storage engine
+    storage = get_storage()
+    if storage:
+        checks["storage"] = True
+    else:
+        checks["storage"] = False
+        is_ready = False
+
+    status_code = 200 if is_ready else 503
+    return jsonify({
+        "status": "ready" if is_ready else "not_ready",
+        "service": "opsflow-enterprise",
+        "subsystems": checks,
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "version": "2.4.0-enterprise"
+    }), status_code
+

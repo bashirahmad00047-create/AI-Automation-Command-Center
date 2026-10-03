@@ -95,8 +95,10 @@ class ActionRunner:
                 output = self._action_ai_generate(rendered_params, context)
             elif action_type in ("ai_summarize", "ai_incident_rca"):
                 output = self._action_ai_summarize(rendered_params, context)
-            elif action_type == "ai_classify":
+            elif action_type in ("ai_classify",):
                 output = self._action_ai_classify(rendered_params, context)
+            elif action_type in ("whatsapp_message", "whatsapp_send", "send_whatsapp", "whatsapp"):
+                output = self._action_whatsapp(rendered_params, context)
             elif action_type in ("file_write", "file_append"):
                 output = self._action_file_io(action_type, rendered_params, context)
             elif action_type == "data_transform":
@@ -474,4 +476,33 @@ class ActionRunner:
         provider = get_ai_provider(params.get("provider"))
         res = provider.classify_text(str(text), categories)
         return res
+
+    def _action_whatsapp(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatches an automated WhatsApp Business Cloud message."""
+        from whatsapp_service import WhatsAppService
+
+        to_phone = (
+            params.get("to")
+            or params.get("phone")
+            or params.get("recipient")
+            or context.get("payload", {}).get("from")
+            or context.get("payload", {}).get("from_phone")
+            or context.get("payload", {}).get("phone")
+            or "+15551234567"
+        )
+        message_text = (
+            params.get("message")
+            or params.get("text")
+            or params.get("body")
+            or "Automated notification from OpsFlow."
+        )
+        org_id = context.get("organization_id", "org-enterprise-default")
+        execution_id = context.get("execution_id")
+
+        return WhatsAppService.send_message(
+            organization_id=org_id,
+            to_phone=to_phone,
+            message_text=message_text,
+            execution_id=execution_id
+        )
 

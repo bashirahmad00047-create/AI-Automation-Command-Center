@@ -356,3 +356,62 @@ gunicorn --config gunicorn.conf.py app:app
    - Modify `--cyan-glow`, `--purple-glow`, and brand headers in `static/css/style.css` and `templates/index.html`.
 3. **Outbound Notification Integrations**:
    - Add Slack Webhook, PagerDuty, or Twilio SMS dispatches via the outbound webhook action (`webhook_call`) in `actions.py`.
+
+---
+
+## 🔐 Phase 7: Enterprise Production Hardening & Cloud Integrations
+
+### 1. Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `SECRET_KEY` | Recommended | Random Secure | Cryptographic secret for signing session cookies and tokens. |
+| `DATABASE_URL` | Optional | SQLite WAL | PostgreSQL connection URI (`postgresql://...`) or default SQLite. |
+| `APP_BASE_URL` | Optional | `http://localhost:5000` | Fully qualified base URL used to generate reset links. |
+| `SMTP_HOST` | Optional | `""` | Outbound mail server hostname (e.g. `smtp.sendgrid.net`). |
+| `SMTP_PORT` | Optional | `587` | Outbound mail server port (usually 587 for STARTTLS). |
+| `SMTP_USER` | Optional | `""` | SMTP authentication username / API key identifier. |
+| `SMTP_PASSWORD` | Optional | `""` | SMTP authentication secret / API token. |
+| `SMTP_FROM` | Optional | `no-reply@opsflow.io` | Verified sender address for operational emails. |
+| `WHATSAPP_PHONE_NUMBER_ID` | Optional | `""` | Meta Cloud API Phone Number ID for outbound WhatsApp alerts. |
+| `WHATSAPP_ACCESS_TOKEN` | Optional | `""` | Meta System User Bearer token with WhatsApp Business permissions. |
+| `WHATSAPP_VERIFY_TOKEN` | Optional | `opsflow_whatsapp_verify_2026` | Webhook verification token configured in Meta App Dashboard. |
+| `WHATSAPP_BUSINESS_ACCOUNT_ID` | Optional | `""` | Meta WhatsApp Business Account (WABA) ID. |
+| `WHATSAPP_APP_SECRET` | Optional | `""` | App Secret used for `X-Hub-Signature-256` HMAC webhook verification. |
+
+### 2. Authentication & Forgot Password / Password Reset Flow
+
+- **Rate-Limited Request**: `POST /api/v1/auth/forgot-password` accepts `{ "email": "..." }`.
+- **Anti-Enumeration Protection**: Returns a generic success response regardless of email existence to prevent user enumeration attacks.
+- **Cryptographic Token Hash**: Generates 32-byte URL-safe tokens, storing only their SHA-256 hashes in `PasswordResetToken`.
+- **1-Hour Expiration & Single-Use**: Tokens expire in 60 minutes and are immediately marked `is_used = True` upon reset.
+- **Safe Reset Processing**: `POST /api/v1/auth/reset-password` accepts `{ "token": "...", "new_password": "..." }`, updates the Argon2/PBKDF2 hash, invalidates all existing user sessions, and logs an audit trail event without exposing passwords or tokens.
+- **Development Fallback**: In non-SMTP development environments, returns safe mock reset URLs directly for testing convenience.
+
+### 3. Official WhatsApp Business / Meta Cloud API Architecture
+
+- **Webhook Verification**: `GET /api/v1/webhooks/whatsapp` responds with `hub.challenge` when `hub.verify_token` matches configured credentials.
+- **HMAC-SHA256 Signature Validation**: Verifies incoming `X-Hub-Signature-256` against `WHATSAPP_APP_SECRET`.
+- **Idempotency Deduplication**: Inspects Meta `wamid.<id>` to reject duplicate incoming message webhooks.
+- **Multi-Tenant Message Log**: Incoming and outgoing WhatsApp messages are recorded in `WhatsAppMessage` scoped strictly to each tenant workspace.
+- **Outbound Messaging**: `POST /api/v1/whatsapp/messages/send` dispatches messages through Meta Graph API v19.0 or provides a deterministic mock simulation when credentials are unconfigured.
+- **Workflow Trigger Integration**: Ingests `whatsapp.message` events into the OpsFlow Automation Engine to trigger alerts and automated incident workflows.
+
+### 4. Health & Cloud Readiness Probes
+
+- `GET /health` and `GET /api/v1/health`: Liveness probe for Render, Kubernetes, and load balancers.
+- `GET /ready` and `GET /api/v1/ready`: Comprehensive readiness probe verifying:
+  - Active database connection (`SELECT 1`)
+  - Workflow automation engine responsiveness
+  - Persistent storage availability
+
+### 5. Running the Test Suite
+
+```bash
+# Run all 127 platform unit, integration, and security tests
+pytest -v
+
+# Run Phase 7 specific upgrade tests
+pytest test_phase7_production_upgrade.py -v
+```
+

@@ -122,6 +122,26 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             return auth_register()
         return render_template("index.html")
 
+    @application.route("/logout", methods=["GET", "POST"])
+    def top_level_logout():
+        from api_v1 import auth_logout
+        auth_logout()
+        if request.headers.get("Accept", "").startswith("application/json"):
+            return jsonify({"success": True, "message": "Successfully logged out."})
+        return render_template("index.html")
+
+    # Global Readiness Check (Render, K8s, Cloud Load Balancers)
+    @application.route("/ready", methods=["GET"])
+    def root_readiness_check():
+        from api_v1 import system_readiness
+        return system_readiness()
+
+    @application.route("/reset-password", methods=["GET"])
+    def top_level_reset_password():
+        token = request.args.get("token", "")
+        return render_template("index.html", reset_token=token)
+
+
     # ==========================================
     # Backward-Compatible Legacy Endpoints
     # ==========================================
@@ -166,7 +186,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         st = application.config.get("STORAGE_ENGINE")
         category = request.args.get("category")
         enabled_only = request.args.get("enabled", "").lower() == "true"
-        rules = st.get_rules(category=category, enabled_only=enabled_only) if st else []
+        org = getattr(g, "current_org", None)
+        rules = st.get_rules(category=category, enabled_only=enabled_only, organization_id=org.id if org else None) if st else []
         return jsonify({"rules": rules, "workflows": rules, "count": len(rules)})
 
     @application.route("/api/rules/<rule_id>", methods=["GET"])
@@ -174,7 +195,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @require_auth
     def legacy_get_rule(rule_id: str):
         st = application.config.get("STORAGE_ENGINE")
-        rule = st.get_rule(rule_id) if st else None
+        org = getattr(g, "current_org", None)
+        rule = st.get_rule(rule_id, organization_id=org.id if org else None) if st else None
         if not rule:
             return jsonify({"error": f"Rule '{rule_id}' not found."}), 404
         return jsonify({"rule": rule, "workflow": rule})
@@ -204,7 +226,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 }), 403
 
         rule_id = st.save_rule(rule_data, organization_id=org.id if org else None)
-        saved_rule = st.get_rule(rule_id)
+        saved_rule = st.get_rule(rule_id, organization_id=org.id if org else None)
         return jsonify({
             "success": True,
             "message": "Rule saved successfully.",
@@ -222,9 +244,10 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         if not rule_data or not isinstance(rule_data, dict):
             return jsonify({"error": "Invalid JSON payload."}), 400
 
+        org = getattr(g, "current_org", None)
         rule_data["id"] = rule_id
-        st.save_rule(rule_data)
-        updated = st.get_rule(rule_id)
+        st.save_rule(rule_data, organization_id=org.id if org else None)
+        updated = st.get_rule(rule_id, organization_id=org.id if org else None)
         return jsonify({"success": True, "rule": updated, "workflow": updated})
 
     @application.route("/api/rules/<rule_id>", methods=["DELETE"])
@@ -232,7 +255,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @require_auth
     def legacy_delete_rule(rule_id: str):
         st = application.config.get("STORAGE_ENGINE")
-        success = st.delete_rule(rule_id)
+        org = getattr(g, "current_org", None)
+        success = st.delete_rule(rule_id, organization_id=org.id if org else None)
         if not success:
             return jsonify({"error": f"Rule '{rule_id}' not found."}), 404
         return jsonify({"success": True, "message": f"Rule '{rule_id}' deleted."})
@@ -242,8 +266,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @require_auth
     def legacy_toggle_rule(rule_id: str):
         st = application.config.get("STORAGE_ENGINE")
+        org = getattr(g, "current_org", None)
         data = request.get_json(silent=True) or {}
-        new_state = st.toggle_rule(rule_id, data.get("enabled"))
+        new_state = st.toggle_rule(rule_id, data.get("enabled"), organization_id=org.id if org else None)
         if new_state is None:
             return jsonify({"error": f"Rule '{rule_id}' not found."}), 404
         return jsonify({"success": True, "enabled": new_state})
@@ -364,8 +389,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         offset = int(request.args.get("offset", 0))
         status_val = request.args.get("status")
         rule_id = request.args.get("rule_id")
+        org = getattr(g, "current_org", None)
 
-        logs = st.get_logs(limit=limit, offset=offset, status=status_val, rule_id=rule_id) if st else []
+        logs = st.get_logs(limit=limit, offset=offset, status=status_val, rule_id=rule_id, organization_id=org.id if org else None) if st else []
         return jsonify({"logs": logs, "executions": logs, "count": len(logs)})
 
     @application.route("/api/logs", methods=["DELETE"])
@@ -373,8 +399,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @require_auth
     def legacy_clear_logs():
         st = application.config.get("STORAGE_ENGINE")
+        org = getattr(g, "current_org", None)
         if st:
-            st.clear_logs()
+            st.clear_logs(organization_id=org.id if org else None)
         return jsonify({"success": True, "message": "Execution logs cleared."})
 
     @application.route("/api/notifications", methods=["GET"])
@@ -383,23 +410,26 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         st = application.config.get("STORAGE_ENGINE")
         unread_only = request.args.get("unread", "").lower() == "true"
         limit = int(request.args.get("limit", 30))
-        notifications = st.get_notifications(limit=limit, unread_only=unread_only) if st else []
+        org = getattr(g, "current_org", None)
+        notifications = st.get_notifications(limit=limit, unread_only=unread_only, organization_id=org.id if org else None) if st else []
         return jsonify({"notifications": notifications, "count": len(notifications)})
 
     @application.route("/api/notifications/read", methods=["POST"])
     @require_auth
     def legacy_mark_notifications_read():
         st = application.config.get("STORAGE_ENGINE")
+        org = getattr(g, "current_org", None)
         if st:
-            st.mark_notifications_read()
+            st.mark_notifications_read(organization_id=org.id if org else None)
         return jsonify({"success": True})
 
     @application.route("/api/notifications", methods=["DELETE"])
     @require_auth
     def legacy_clear_notifications():
         st = application.config.get("STORAGE_ENGINE")
+        org = getattr(g, "current_org", None)
         if st:
-            st.clear_notifications()
+            st.clear_notifications(organization_id=org.id if org else None)
         return jsonify({"success": True})
 
     @application.route("/api/presets", methods=["GET"])
@@ -448,14 +478,16 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         st = application.config.get("STORAGE_ENGINE")
         status_val = request.args.get("status")
         search_val = request.args.get("search")
-        leads = st.get_leads(status=status_val, search=search_val) if st else []
+        org = getattr(g, "current_org", None)
+        leads = st.get_leads(status=status_val, search=search_val, organization_id=org.id if org else None) if st else []
         return jsonify({"leads": leads, "count": len(leads)})
 
     @application.route("/api/analytics", methods=["GET"])
     @require_auth
     def legacy_get_analytics():
         st = application.config.get("STORAGE_ENGINE")
-        analytics = st.get_analytics_summary() if st else {}
+        org = getattr(g, "current_org", None)
+        analytics = st.get_analytics_summary(organization_id=org.id if org else None) if st else {}
         return jsonify({"analytics": analytics})
 
     @application.route("/api/export", methods=["GET"])
@@ -474,7 +506,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 }), 403
 
         st = application.config.get("STORAGE_ENGINE")
-        rules = st.get_rules() if st else []
+        rules = st.get_rules(organization_id=org.id if org else None) if st else []
         export_payload = {
             "version": "2.4",
             "exported_at": str(os.environ.get("CURRENT_TIME", "")),
