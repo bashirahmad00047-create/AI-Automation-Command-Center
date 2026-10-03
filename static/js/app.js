@@ -1795,16 +1795,13 @@ function renderApiKeysTable() {
     if (!tbody) return;
 
     if (!state.apiKeys || state.apiKeys.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="6" class="text-center" style="padding: 56px 20px; text-align: center;">
-                    <div style="font-size: 2.8rem; margin-bottom: 12px;">🔑</div>
-                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No API keys yet</div>
-                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Generate programmatic API tokens to integrate OpsFlow Cloud into your CI/CD pipelines, backend services, or monitoring scripts.</p>
-                    <button type="button" class="hud-btn primary small" onclick="openNewApiKeyModal()"><span>+</span> Generate API Key</button>
-                </td>
-            </tr>
-        `;
+        tbody.innerHTML = renderEmptyStateRow({
+            colspan: 6,
+            icon: '🔑',
+            title: 'No API keys yet',
+            description: 'Generate programmatic API tokens to integrate OpsFlow Cloud into your CI/CD pipelines, backend services, or monitoring scripts.',
+            actionHtml: '<button type="button" class="hud-btn primary small" onclick="openNewApiKeyModal()"><span>+</span> Generate API Key</button>'
+        });
         return;
     }
 
@@ -1930,16 +1927,13 @@ function renderTeamMembers() {
     if (!tbody) return;
 
     if (!state.teamMembers || state.teamMembers.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="5" class="text-center" style="padding: 56px 20px; text-align: center;">
-                    <div style="font-size: 2.8rem; margin-bottom: 12px;">👥</div>
-                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No team members found</div>
-                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Collaborate with engineers and operators by inviting members with role-based access control.</p>
-                    <button type="button" class="hud-btn primary small" onclick="openAddMemberModal()"><span>+</span> Invite Member</button>
-                </td>
-            </tr>
-        `;
+        tbody.innerHTML = renderEmptyStateRow({
+            colspan: 5,
+            icon: '👥',
+            title: 'No team members found',
+            description: 'Collaborate with engineers and operators by inviting members with role-based access control.',
+            actionHtml: '<button type="button" class="hud-btn primary small" onclick="openAddMemberModal()"><span>+</span> Invite Member</button>'
+        });
         return;
     }
 

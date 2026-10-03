@@ -774,8 +774,8 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
         <!-- TAB 4: NLP INCIDENT TRIAGE -->
         <section id="tab-nlp" class="tab-panel">
             <div class="panel-header">
-                <h2>LOCAL HEURISTIC NLP INCIDENT TRIAGE CONSOLE</h2>
-                <span class="panel-badge">100% OFFLINE • ZERO CLOUD API • SUB-MILLISECOND LATENCY</span>
+                <h2>AI Incident Triage Console</h2>
+                <span class="panel-badge">Heuristic NLP Core • Sub-Millisecond Latency</span>
             </div>
             <p style="color: var(--text-secondary); margin-bottom: 20px;">
                 Enter raw operational incident reports or natural language prompts. The heuristic NLP engine extracts intents,
@@ -815,8 +815,8 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
         <!-- TAB 5: METRICS SIMULATOR -->
         <section id="tab-simulator" class="tab-panel">
             <div class="panel-header">
-                <h2>INTERACTIVE HARDWARE & METRICS SIMULATOR</h2>
-                <span class="panel-badge">SAFE TEST HARNESS • DRY-RUN COMPATIBLE</span>
+                <h2>Interactive Telemetry &amp; Metrics Simulator</h2>
+                <span class="panel-badge">Safe Test Harness • Dry-Run Supported</span>
             </div>
             <p style="color: var(--text-secondary); margin-bottom: 20px;">
                 Slide threshold variables to simulate resource spikes without impacting real hardware. Test trigger conditions in real time.
@@ -1010,7 +1010,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
         <!-- TAB 8: API KEYS & SECURITY -->
         <section id="tab-apikeys" class="tab-panel">
             <div class="panel-header">
-                <h2>PROGRAMMATIC API KEYS & INTEGRATIONS</h2>
+                <h2>Programmatic API Keys &amp; Integrations</h2>
                 <button class="hud-btn primary" onclick="openNewApiKeyModal()">+ Generate New API Key</button>
             </div>
             <p style="color: var(--text-secondary); margin-bottom: 20px;">
@@ -1393,7 +1393,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
         <section id="tab-settings" class="tab-panel">
             <div class="settings-grid">
                 <div class="settings-card">
-                    <h3>DATA MANAGEMENT</h3>
+                    <h3>Data &amp; Rule Management</h3>
                     <p>Export your configured automation rules or import rule sets from another instance:</p>
                     <div class="settings-btn-row">
                         <a href="/api/export" class="hud-btn primary" download="opsflow_rules.json">
@@ -1407,7 +1407,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 </div>
 
                 <div class="settings-card">
-                    <h3>DATABASE & LOGS MAINTENANCE</h3>
+                    <h3>Database &amp; Logs Maintenance</h3>
                     <p>Reset audit trail logs or purge historical event archives:</p>
                     <div class="settings-btn-row">
                         <button class="action-btn red-btn" onclick="clearAllLogs()">Purge Execution Logs</button>
@@ -1416,7 +1416,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 </div>
 
                 <div class="settings-card">
-                    <h3>ENGINE ARCHITECTURE & SPECS</h3>
+                    <h3>Engine Architecture &amp; Runtime Specs</h3>
                     <div class="specs-list">
                         <div class="spec-row"><span>Engine Runtime:</span><span>Python Flask 3.1 / SQLAlchemy 2.0</span></div>
                         <div class="spec-row"><span>Persistence Engine:</span><span>SQLite WAL (Local) / PostgreSQL Ready</span></div>
@@ -1529,7 +1529,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
         <!-- TAB 13: API DOCUMENTATION -->
         <section id="tab-apidocs" class="tab-panel">
             <div class="blueprints-intro" style="margin-bottom: 24px;">
-                <h2>PROGRAMMATIC REST API DOCUMENTATION</h2>
+                <h2>REST API Reference &amp; Developer Hub</h2>
                 <p>Integrate OpsFlow Cloud directly into your external microservices, webhooks, or third-party CRM platforms. All requests support Bearer API Key authentication or Session cookies.</p>
                 <div style="margin-top: 10px; display: flex; gap: 15px; align-items: center;">
                     <span class="role-badge admin">Base URL: <code style="color:#00ffff;">/api/v1</code></span>
