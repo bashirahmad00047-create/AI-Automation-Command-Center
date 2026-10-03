@@ -46,6 +46,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Event stream & notifications poll (every 5 seconds)
     setInterval(pollNotifications, 5000);
+
+    // Section 22 Performance: Immediate poll when user switches back to active tab
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            pollTelemetry(true);
+            pollNotifications(true);
+        }
+    });
 });
 
 function initClock() {
@@ -220,6 +228,7 @@ function refreshAllData() {
 // ==========================================
 
 function switchTab(tabId) {
+    if (tabId === 'studio') tabId = 'rules';
     state.currentTab = tabId;
     updateBreadcrumb(tabId);
 
@@ -261,7 +270,8 @@ function updateNavBadge(id, count) {
     el.style.display = num > 0 ? 'inline-flex' : 'none';
 }
 
-async function pollTelemetry() {
+async function pollTelemetry(force = false) {
+    if (!force && typeof document !== 'undefined' && document.hidden) return;
     try {
         const res = await fetch('/api/v1/system/telemetry');
         if (!res.ok) return;
@@ -307,7 +317,7 @@ async function pollTelemetry() {
         if (statSuccessRateEl) {
             if (totalExecs === 0) {
                 statSuccessRateEl.textContent = '—';
-                if (statSuccessRateSubEl) statSuccessRateSubEl.textContent = 'Awaiting first execution';
+                if (statSuccessRateSubEl) statSuccessRateSubEl.textContent = 'No executions yet';
             } else {
                 const rate = stats.success_rate !== undefined ? stats.success_rate : Math.round((successExecs / totalExecs) * 100);
                 statSuccessRateEl.textContent = `${rate}%`;
@@ -1470,7 +1480,7 @@ function renderLogsTable() {
                     <div style="font-size: 2.8rem; margin-bottom: 12px;">📊</div>
                     <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No execution records yet</div>
                     <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">When automated workflows or incident responders trigger, complete telemetry and step traces will appear here.</p>
-                    <button type="button" class="hud-btn primary small" onclick="switchTab('studio')"><span>⚡</span> View Workflows</button>
+                    <button type="button" class="hud-btn primary small" onclick="switchTab('rules')"><span>⚡</span> View Workflows</button>
                 </td>
             </tr>
         `;
@@ -1509,9 +1519,9 @@ function renderDashboardMiniLogs() {
             <tr>
                 <td colspan="5" class="text-center" style="padding: 36px 16px; text-align: center;">
                     <div style="font-size: 1.8rem; margin-bottom: 8px;">⚡</div>
-                    <div style="font-weight: 600; color: #f8fafc; font-size: 0.95rem; margin-bottom: 4px;">No executions yet</div>
-                    <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 12px;">Run a workflow to see execution activity here.</div>
-                    <button type="button" class="hud-btn primary small" onclick="switchTab('studio')">Run Workflow</button>
+                    <div style="font-weight: 600; color: #f8fafc; font-size: 0.95rem; margin-bottom: 4px;">No workflow executions yet</div>
+                    <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 14px;">Create or run a workflow to start tracking operational activity.</div>
+                    <button type="button" class="hud-btn primary small" onclick="switchTab('rules')">⚡ View Workflows</button>
                 </td>
             </tr>
         `;
@@ -2123,8 +2133,8 @@ async function loadBillingStatus() {
 
         const tierName = (data.plan_tier || 'free').toUpperCase();
         const tierTitle = (data.plan_tier || 'free').charAt(0).toUpperCase() + (data.plan_tier || 'free').slice(1);
-        const sub = data.subscription || {};
-        const subStatus = (sub.status || (data.plan_tier === 'free' ? 'active' : 'unmanaged')).toUpperCase();
+        const rawSubStatus = (sub.status || (data.plan_tier === 'free' ? 'active' : 'unmanaged')).toUpperCase();
+        const subStatus = ['UNMANAGED'].includes(rawSubStatus) ? 'ACTIVE' : rawSubStatus;
 
         // Top Header Plan Indicator
         const headerPlanText = document.getElementById('headerPlanText');
@@ -2648,7 +2658,8 @@ function toggleNotificationsDrawer() {
     }
 }
 
-async function pollNotifications() {
+async function pollNotifications(force = false) {
+    if (!force && typeof document !== 'undefined' && document.hidden) return;
     try {
         const res = await fetch('/api/notifications?unread=true');
         if (!res.ok) return;
@@ -2806,9 +2817,9 @@ function renderLeads(leads) {
                 <tr>
                     <td colspan="8" class="text-center" style="padding: 56px 20px; text-align: center;">
                         <div style="font-size: 2.8rem; margin-bottom: 12px;">📭</div>
-                        <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No leads yet</div>
-                        <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Customer inquiries will appear here once they are ingested via webhook, website contact forms, or email intake.</p>
-                        <button type="button" class="hud-btn primary small" onclick="openNewLeadModal()"><span>+</span> Add your first lead</button>
+                        <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No customer inquiries yet</div>
+                        <p style="font-size: 0.88rem; color: #94a3b8; max-width: 460px; margin: 0 auto 18px;">New leads will appear here when received via webhook, website contact forms, or manual intake.</p>
+                        <button type="button" class="hud-btn primary small" onclick="openNewLeadModal()"><span>+</span> Ingest New Lead</button>
                     </td>
                 </tr>
             `;

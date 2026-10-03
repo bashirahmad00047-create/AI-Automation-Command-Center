@@ -3451,3 +3451,33 @@ summary:focus-visible {
         scroll-behavior: auto !important;
     }
 }
+
+/* ==========================================================================
+   GLOBAL APPLICATION FOOTER & CREATOR MARK (SECTION 23)
+   ========================================================================== */
+.app-global-footer {
+    padding: 24px 32px 28px;
+    margin-top: auto;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    background: transparent;
+    text-align: center;
+    width: 100%;
+}
+
+.app-global-footer .footer-inner {
+    max-width: 1600px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.app-global-footer .creator-mark {
+    font-size: 0.8rem;
+    color: var(--text-dim, #64748b);
+    letter-spacing: 0.02em;
+    font-weight: 400;
+    user-select: none;
+    white-space: pre-wrap;
+}
+
