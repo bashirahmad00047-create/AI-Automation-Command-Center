@@ -9,141 +9,239 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body class="command-center-body">
-    <!-- Top HUD Navigation Header -->
-    <header class="hud-header">
-        <div class="hud-brand">
+<body class="command-center-body enterprise-layout">
+    <!-- ==========================================================================
+         ENTERPRISE COLLAPSIBLE SIDEBAR NAVIGATION
+         ========================================================================== -->
+    <aside class="enterprise-sidebar" id="enterpriseSidebar">
+        <!-- Sidebar Brand -->
+        <div class="sidebar-brand">
             <div class="brand-hexagon">
                 <span class="pulse-ring"></span>
                 <span class="brand-symbol">⚡</span>
             </div>
-            <div>
-                <h1 class="brand-title">OPSFLOW CLOUD</h1>
-                <p class="brand-subtitle">AI AUTOMATION COMMAND CENTER • ENTERPRISE MULTI-TENANT WORKFLOW ENGINE</p>
+            <div class="brand-meta">
+                <div class="brand-title">OPSFLOW CLOUD</div>
+                <span class="brand-badge-cloud">AI AUTOMATION COMMAND CENTER</span>
             </div>
+
         </div>
 
-        <div class="hud-controls">
-            <!-- Workspace / Organization Switcher -->
-            <div class="workspace-selector" style="display: flex; align-items: center; gap: 8px;">
-                <span>🏢 Workspace:</span>
-                <select id="workspaceSelect" class="workspace-select" onchange="handleWorkspaceChange(this.value)">
-                    <option value="org-enterprise-default">Acme Global Enterprise</option>
-                    <option value="org-apex-health-tenant">Apex HealthTech Systems</option>
-                </select>
-                <button type="button" class="hud-btn small purple" id="headerPlanBtn" onclick="switchTab('billing')" title="Click to view Plans &amp; Billing" style="padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
-                    <span>💳</span> <span id="headerPlanText">ENTERPRISE</span>
-                </button>
-            </div>
-
-            <!-- Active User & RBAC Persona Switcher -->
-            <div class="user-profile-widget">
-                <span class="user-name" id="currentUserName">Sarah Lin</span>
-                <span class="role-badge admin" id="currentUserRoleBadge">ADMIN</span>
-                <button class="hud-btn small" onclick="openPersonaModal()" title="Switch User / Role Persona">Switch Persona</button>
-            </div>
-
-            <!-- Session Auth Controls -->
-            <div class="auth-controls" id="headerAuthControls" style="display: flex; align-items: center; gap: 6px;">
-                <button type="button" class="hud-btn small outline" id="headerSignInBtn" onclick="openAuthModal('login')" style="display:none;" title="Sign In to Existing Workspace">
-                    <span class="icon">🔑</span> Sign In
-                </button>
-                <button type="button" class="hud-btn small cyan" id="headerRegisterBtn" onclick="openAuthModal('register')" style="display:none;" title="Create New Workspace">
-                    <span class="icon">✨</span> Sign Up
-                </button>
-                <button type="button" class="hud-btn small red" id="headerSignOutBtn" onclick="handleLogout()" title="Sign Out of OpsFlow Cloud">
-                    <span class="icon">🚪</span> Sign Out
-                </button>
-            </div>
-
-            <div class="status-indicator" id="engineStatusBadge">
-                <span class="status-dot green"></span>
-                <span class="status-text" id="engineStatusText">ENGINE ONLINE</span>
-            </div>
-
-            <div class="status-indicator" id="systemReadyBadge" style="cursor: pointer;" onclick="checkSystemReadiness(true)" title="Click to verify Subsystem Health (DB, Engine, Storage)">
-                <span class="status-dot green" id="readyDot"></span>
-                <span class="status-text" id="readyStatusText">SYSTEM READY</span>
-            </div>
-
-            <button class="hud-btn engine-toggle-btn" id="toggleEngineBtn" onclick="toggleEngineState()">
-                <span class="icon">⏸</span> <span id="toggleEngineLabel">Pause Engine</span>
-            </button>
-
-            <div class="clock-display" id="hudClock">00:00:00</div>
-
-            <div class="notif-wrapper">
-                <button class="hud-icon-btn" id="notifBellBtn" onclick="toggleNotificationsDrawer()">
-                    🔔
-                    <span class="notif-badge" id="notifCountBadge" style="display:none;">0</span>
-                </button>
-                <div class="notif-drawer" id="notifDrawer">
-                    <div class="notif-header">
-                        <h3>Active Incidents & Alerts</h3>
-                        <div class="notif-actions">
-                            <button onclick="markNotificationsRead()">Acknowledge All</button>
-                            <button onclick="clearNotifications()">Clear</button>
-                        </div>
-                    </div>
-                    <div class="notif-list" id="notifList">
-                        <div class="notif-empty">No active incidents</div>
+        <!-- Workspace & Organization Selector Card -->
+        <div class="sidebar-workspace-card">
+            <div class="workspace-card-inner">
+                <div class="workspace-avatar">🏢</div>
+                <div class="workspace-details">
+                    <select id="workspaceSelect" class="workspace-select" onchange="handleWorkspaceChange(this.value)" title="Switch Active Workspace">
+                        <option value="org-enterprise-default">Acme Global</option>
+                        <option value="org-apex-health-tenant">Apex HealthTech</option>
+                    </select>
+                    <div class="workspace-plan-row">
+                        <button type="button" class="plan-pill-btn" onclick="switchTab('billing')" title="Click to view Plans &amp; Billing">
+                            <span class="plan-indicator-dot"></span>
+                            <span id="headerPlanText">ENTERPRISE</span>
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
-    </header>
 
-    <!-- Navigation Tabs Bar -->
-    <nav class="hud-tabs">
-        <button class="hud-tab active" onclick="switchTab('dashboard')">
-            <span class="tab-icon">📊</span> Executive Overview
-        </button>
-        <button class="hud-tab" onclick="switchTab('rules')">
-            <span class="tab-icon">⚡</span> Workflow Studio
-        </button>
-        <button class="hud-tab" onclick="switchTab('billing')">
-            <span class="tab-icon">💳</span> Plans & Billing
-        </button>
-        <button class="hud-tab" onclick="switchTab('team')">
-            <span class="tab-icon">👥</span> Team & RBAC
-        </button>
-        <button class="hud-tab" onclick="switchTab('leads')">
-            <span class="tab-icon">🎯</span> CRM Leads (<span id="tabLeadCount">0</span>)
-        </button>
-        <button class="hud-tab" onclick="switchTab('webhooks')">
-            <span class="tab-icon">🔌</span> Inbound Webhooks
-        </button>
-        <button class="hud-tab" onclick="switchTab('whatsapp')">
-            <span class="tab-icon">💬</span> WhatsApp Cloud (<span id="tabWhatsAppCount">0</span>)
-        </button>
-        <button class="hud-tab" onclick="switchTab('nlp')">
-            <span class="tab-icon">🧠</span> AI Engine Sandbox
-        </button>
-        <button class="hud-tab" onclick="switchTab('simulator')">
-            <span class="tab-icon">🧪</span> Metrics Simulator
-        </button>
-        <button class="hud-tab" onclick="switchTab('logs')">
-            <span class="tab-icon">📜</span> Forensics & Audits
-        </button>
-        <button class="hud-tab" onclick="switchTab('incidents')">
-            <span class="tab-icon">🚨</span> Incidents (<span id="tabIncidentCount">0</span>)
-        </button>
-        <button class="hud-tab" onclick="switchTab('apikeys')">
-            <span class="tab-icon">🔑</span> API Keys
-        </button>
-        <button class="hud-tab" onclick="switchTab('blueprints')">
-            <span class="tab-icon">📦</span> Templates
-        </button>
-        <button class="hud-tab" onclick="switchTab('apidocs')">
-            <span class="tab-icon">📖</span> API Docs
-        </button>
-        <button class="hud-tab" onclick="switchTab('settings')">
-            <span class="tab-icon">⚙️</span> Settings
-        </button>
-    </nav>
+        <!-- Quick Search / Command Palette Trigger Button in Sidebar -->
+        <div class="sidebar-search-btn" onclick="openCommandPalette()" title="Press Ctrl+K to search">
+            <span class="search-icon">🔍</span>
+            <span class="search-text">Quick Search...</span>
+            <kbd class="search-kbd">Ctrl K</kbd>
+        </div>
 
-    <!-- Main Workspace Container -->
-    <main class="main-content">
+        <!-- Categorized Navigation Menu -->
+        <nav class="sidebar-nav hud-tabs">
+            <!-- GROUP 1: CORE OPERATIONS -->
+            <div class="nav-category-header">
+                <span>CORE OPERATIONS</span>
+            </div>
+            <button class="hud-tab active" onclick="switchTab('dashboard')" title="Executive Overview">
+                <span class="tab-icon">📊</span>
+                <span class="tab-label">Executive Overview</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('rules')" title="Workflow Studio">
+                <span class="tab-icon">⚡</span>
+                <span class="tab-label">Workflow Studio</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('leads')" title="CRM Leads">
+                <span class="tab-icon">🎯</span>
+                <span class="tab-label">CRM Leads</span>
+                <span class="nav-counter-pill" id="tabLeadCount">0</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('incidents')" title="Incidents">
+                <span class="tab-icon">🚨</span>
+                <span class="tab-label">Incidents</span>
+                <span class="nav-counter-pill danger" id="tabIncidentCount">0</span>
+            </button>
+
+            <!-- GROUP 2: INTEGRATIONS & CHANNELS -->
+            <div class="nav-category-header">
+                <span>INTEGRATIONS & CHANNELS</span>
+            </div>
+            <button class="hud-tab" onclick="switchTab('webhooks')" title="Inbound Webhooks">
+                <span class="tab-icon">🔌</span>
+                <span class="tab-label">Inbound Webhooks</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('whatsapp')" title="WhatsApp Cloud API">
+                <span class="tab-icon">💬</span>
+                <span class="tab-label">WhatsApp Cloud</span>
+                <span class="nav-counter-pill success" id="tabWhatsAppCount">0</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('nlp')" title="AI Engine Sandbox">
+                <span class="tab-icon">🧠</span>
+                <span class="tab-label">AI Engine Sandbox</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('blueprints')" title="Templates">
+                <span class="tab-icon">📦</span>
+                <span class="tab-label">Templates</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('simulator')" title="Metrics Simulator">
+                <span class="tab-icon">🧪</span>
+                <span class="tab-label">Metrics Simulator</span>
+            </button>
+
+            <!-- GROUP 3: OBSERVABILITY & GOVERNANCE -->
+            <div class="nav-category-header">
+                <span>OBSERVABILITY & DOCS</span>
+            </div>
+            <button class="hud-tab" onclick="switchTab('logs')" title="Forensics & Audits">
+                <span class="tab-icon">📜</span>
+                <span class="tab-label">Forensics & Audits</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('apikeys')" title="API Keys">
+                <span class="tab-icon">🔑</span>
+                <span class="tab-label">API Keys</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('apidocs')" title="API Docs">
+                <span class="tab-icon">📖</span>
+                <span class="tab-label">API Docs</span>
+            </button>
+
+            <!-- GROUP 4: ENTERPRISE ADMINISTRATION -->
+            <div class="nav-category-header">
+                <span>ADMINISTRATION</span>
+            </div>
+            <button class="hud-tab" onclick="switchTab('team')" title="Team & RBAC">
+                <span class="tab-icon">👥</span>
+                <span class="tab-label">Team & RBAC</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('billing')" title="Plans & Billing">
+                <span class="tab-icon">💳</span>
+                <span class="tab-label">Plans & Billing</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('settings')" title="Settings">
+                <span class="tab-icon">⚙️</span>
+                <span class="tab-label">Settings</span>
+            </button>
+        </nav>
+
+        <!-- Sidebar Collapse / Expand Footer -->
+        <div class="sidebar-footer">
+            <button class="sidebar-toggle-btn" id="sidebarToggleBtn" onclick="toggleSidebarCollapse()" title="Toggle Sidebar (Ctrl+[)">
+                <span class="toggle-icon">◀</span>
+                <span class="toggle-label">Collapse Menu</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- ==========================================================================
+         ENTERPRISE MAIN APPLICATION SHELL
+         ========================================================================== -->
+    <div class="enterprise-app-main">
+        <!-- Top App Bar -->
+        <header class="hud-header enterprise-topbar">
+            <div class="topbar-left">
+                <button class="mobile-toggle-btn" onclick="toggleSidebarCollapse()" title="Toggle Navigation Menu">
+                    <span>☰</span>
+                </button>
+                <div class="breadcrumb-nav">
+                    <span class="breadcrumb-corp">OpsFlow Cloud</span>
+                    <span class="breadcrumb-sep">/</span>
+                    <span class="breadcrumb-current" id="activeBreadcrumbText">Executive Overview</span>
+                </div>
+            </div>
+
+            <!-- Center Search Bar Trigger for Command Palette -->
+            <div class="topbar-search-bar" onclick="openCommandPalette()" title="Press Ctrl+K or click to search">
+                <span class="search-icon">🔍</span>
+                <span class="search-placeholder">Search workflows, actions, docs, leads...</span>
+                <kbd class="search-kbd">Ctrl K</kbd>
+            </div>
+
+            <div class="hud-controls">
+                <!-- Header Plan Button (Secondary Indicator) -->
+                <button type="button" class="hud-btn small purple" id="headerPlanBtn" onclick="switchTab('billing')" title="Click to view Plans &amp; Billing" style="padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
+                    <span>💳</span> <span id="headerPlanTextSecondary">ENTERPRISE</span>
+                </button>
+
+                <!-- Active User & RBAC Persona Switcher -->
+                <div class="user-profile-widget">
+                    <span class="user-avatar-pill">👤</span>
+                    <span class="user-name" id="currentUserName">Sarah Lin</span>
+                    <span class="role-badge admin" id="currentUserRoleBadge">ADMIN</span>
+                    <button class="hud-btn small outline" onclick="openPersonaModal()" title="Switch User / Role Persona">Switch</button>
+                </div>
+
+                <!-- Session Auth Controls -->
+                <div class="auth-controls" id="headerAuthControls" style="display: flex; align-items: center; gap: 6px;">
+                    <button type="button" class="hud-btn small outline" id="headerSignInBtn" onclick="openAuthModal('login')" style="display:none;" title="Sign In to Existing Workspace">
+                        <span class="icon">🔑</span> Sign In
+                    </button>
+                    <button type="button" class="hud-btn small cyan" id="headerRegisterBtn" onclick="openAuthModal('register')" style="display:none;" title="Create New Workspace">
+                        <span class="icon">✨</span> Sign Up
+                    </button>
+                    <button type="button" class="hud-btn small red" id="headerSignOutBtn" onclick="handleLogout()" title="Sign Out of OpsFlow Cloud">
+                        <span class="icon">🚪</span> Sign Out
+                    </button>
+                </div>
+
+                <!-- Engine Status Indicator -->
+                <div class="status-indicator" id="engineStatusBadge">
+                    <span class="status-dot green"></span>
+                    <span class="status-text" id="engineStatusText">ENGINE ONLINE</span>
+                </div>
+
+                <!-- System Readiness Probe -->
+                <div class="status-indicator" id="systemReadyBadge" style="cursor: pointer;" onclick="checkSystemReadiness(true)" title="Click to verify Subsystem Health (DB, Engine, Storage)">
+                    <span class="status-dot green" id="readyDot"></span>
+                    <span class="status-text" id="readyStatusText">SYSTEM READY</span>
+                </div>
+
+                <!-- Toggle Engine State Button -->
+                <button class="hud-btn engine-toggle-btn" id="toggleEngineBtn" onclick="toggleEngineState()">
+                    <span class="icon">⏸</span> <span id="toggleEngineLabel">Pause</span>
+                </button>
+
+                <div class="clock-display" id="hudClock">00:00:00</div>
+
+                <!-- Notifications Bell & Drawer -->
+                <div class="notif-wrapper">
+                    <button class="hud-icon-btn" id="notifBellBtn" onclick="toggleNotificationsDrawer()">
+                        🔔
+                        <span class="notif-badge" id="notifCountBadge" style="display:none;">0</span>
+                    </button>
+                    <div class="notif-drawer" id="notifDrawer">
+                        <div class="notif-header">
+                            <h3>Active Incidents & Alerts</h3>
+                            <div class="notif-actions">
+                                <button onclick="markNotificationsRead()">Acknowledge All</button>
+                                <button onclick="clearNotifications()">Clear</button>
+                            </div>
+                        </div>
+                        <div class="notif-list" id="notifList">
+                            <div class="notif-empty">No active incidents</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace Container -->
+        <main class="main-content">
 
         <!-- TAB 1: EXECUTIVE OVERVIEW -->
         <section id="tab-dashboard" class="tab-panel active">
@@ -1355,6 +1453,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
         </section>
 
     </main>
+    </div><!-- end .enterprise-app-main -->
 
     <!-- RULE BUILDER / EDIT MODAL -->
     <div class="hud-modal-overlay" id="ruleModal" style="display:none;">
@@ -2050,6 +2149,31 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
     </div>
 
     <!-- Toast Notification Container -->
+    <!-- ==========================================================================
+         GLOBAL ENTERPRISE COMMAND PALETTE (CTRL+K / CMD+K)
+         ========================================================================== -->
+    <div class="command-palette-overlay" id="commandPaletteModal" style="display:none;" onclick="handleCommandPaletteOverlayClick(event)">
+        <div class="command-palette-card">
+            <div class="command-palette-input-wrapper">
+                <span class="palette-search-icon">🔍</span>
+                <input type="text" id="commandPaletteInput" class="command-palette-input" placeholder="Type a command or search workspaces, workflows, docs..." autocomplete="off" oninput="filterCommandPalette(this.value)" onkeydown="handleCommandPaletteKeydown(event)">
+                <kbd class="palette-esc-badge" onclick="closeCommandPalette()">ESC</kbd>
+            </div>
+            <div class="command-palette-results" id="commandPaletteResults">
+                <!-- Dynamically populated by app.js -->
+            </div>
+            <div class="command-palette-footer">
+                <div class="palette-hint">
+                    <span><kbd class="mini-kbd">↑</kbd> <kbd class="mini-kbd">↓</kbd> Navigate</span>
+                    <span><kbd class="mini-kbd">↵</kbd> Select</span>
+                    <span><kbd class="mini-kbd">esc</kbd> Close</span>
+                </div>
+                <div class="palette-tag">OpsFlow Quick Actions</div>
+            </div>
+        </div>
+    </div>
+
+
     <div id="toastContainer" class="toast-container"></div>
 
     <script src="/static/js/app.js?v=2.5.0"></script>

@@ -33,6 +33,8 @@ const state = {
 
 document.addEventListener('DOMContentLoaded', () => {
     initClock();
+    initEnterpriseSidebar();
+    initCommandPalette();
     initAuthAndTenancy();
     checkBillingUrlParams();
     checkAuthUrlParams();
@@ -198,6 +200,7 @@ function refreshAllData() {
 
 function switchTab(tabId) {
     state.currentTab = tabId;
+    updateBreadcrumb(tabId);
 
     document.querySelectorAll('.hud-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -1782,6 +1785,8 @@ async function loadBillingStatus() {
         // Top Header Plan Indicator
         const headerPlanText = document.getElementById('headerPlanText');
         if (headerPlanText) headerPlanText.textContent = tierName;
+        const headerPlanTextSecondary = document.getElementById('headerPlanTextSecondary');
+        if (headerPlanTextSecondary) headerPlanTextSecondary.textContent = tierName;
 
         // Executive Overview Dashboard (tab-dashboard) Cards & Strip
         const dashPlanTier = document.getElementById('dashPlanTier');
@@ -3715,3 +3720,242 @@ async function checkSystemReadiness(notify = false) {
 }
 
 
+
+
+// ==========================================================================
+// ENTERPRISE SIDEBAR & NAVIGATION CONTROLLER
+// ==========================================================================
+
+const TAB_TITLES = {
+    dashboard: 'Executive Overview',
+    rules: 'Workflow Studio',
+    leads: 'CRM Leads',
+    incidents: 'Incidents',
+    webhooks: 'Inbound Webhooks',
+    whatsapp: 'WhatsApp Cloud API',
+    nlp: 'AI Engine Sandbox',
+    blueprints: 'Templates',
+    simulator: 'Metrics Simulator',
+    logs: 'Forensics & Audits',
+    apikeys: 'API Keys',
+    apidocs: 'API Docs',
+    team: 'Team & RBAC',
+    billing: 'Plans & Billing',
+    settings: 'Settings'
+};
+
+function initEnterpriseSidebar() {
+    const isCollapsed = localStorage.getItem('opsflow_sidebar_collapsed') === 'true';
+    const sidebar = document.getElementById('enterpriseSidebar');
+    if (sidebar && isCollapsed) {
+        sidebar.classList.add('collapsed');
+        updateSidebarToggleLabel(true);
+    }
+
+    // Keyboard shortcut Ctrl+[ or Cmd+[ to toggle sidebar
+    document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === '[') {
+            e.preventDefault();
+            toggleSidebarCollapse();
+        }
+    });
+}
+
+function toggleSidebarCollapse() {
+    const sidebar = document.getElementById('enterpriseSidebar');
+    if (!sidebar) return;
+    const isCollapsed = sidebar.classList.toggle('collapsed');
+    localStorage.setItem('opsflow_sidebar_collapsed', isCollapsed);
+    updateSidebarToggleLabel(isCollapsed);
+}
+
+function updateSidebarToggleLabel(isCollapsed) {
+    const btn = document.getElementById('sidebarToggleBtn');
+    if (!btn) return;
+    const icon = btn.querySelector('.toggle-icon');
+    const label = btn.querySelector('.toggle-label');
+    if (icon) icon.textContent = isCollapsed ? '▶' : '◀';
+    if (label) label.textContent = isCollapsed ? 'Expand' : 'Collapse Menu';
+}
+
+function updateBreadcrumb(tabId) {
+    const breadcrumb = document.getElementById('activeBreadcrumbText');
+    if (breadcrumb && TAB_TITLES[tabId]) {
+        breadcrumb.textContent = TAB_TITLES[tabId];
+    }
+}
+
+// ==========================================================================
+// GLOBAL ENTERPRISE COMMAND PALETTE (CTRL+K / CMD+K)
+// ==========================================================================
+
+const COMMAND_PALETTE_ITEMS = [
+    // Navigation
+    { id: 'nav-dashboard', category: 'Navigation', icon: '📊', title: 'Executive Overview', shortcut: 'G D', action: () => switchTab('dashboard') },
+    { id: 'nav-rules', category: 'Navigation', icon: '⚡', title: 'Workflow Studio', shortcut: 'G W', action: () => switchTab('rules') },
+    { id: 'nav-leads', category: 'Navigation', icon: '🎯', title: 'CRM Leads', shortcut: 'G L', action: () => switchTab('leads') },
+    { id: 'nav-incidents', category: 'Navigation', icon: '🚨', title: 'Incident Response', shortcut: 'G I', action: () => switchTab('incidents') },
+    { id: 'nav-webhooks', category: 'Navigation', icon: '🔌', title: 'Inbound Webhooks', shortcut: 'G H', action: () => switchTab('webhooks') },
+    { id: 'nav-whatsapp', category: 'Navigation', icon: '💬', title: 'WhatsApp Cloud API', shortcut: 'G C', action: () => switchTab('whatsapp') },
+    { id: 'nav-nlp', category: 'Navigation', icon: '🧠', title: 'AI Engine Sandbox', shortcut: 'G A', action: () => switchTab('nlp') },
+    { id: 'nav-blueprints', category: 'Navigation', icon: '📦', title: 'Templates & Blueprints', shortcut: 'G T', action: () => switchTab('blueprints') },
+    { id: 'nav-simulator', category: 'Navigation', icon: '🧪', title: 'Metrics Simulator', shortcut: 'G M', action: () => switchTab('simulator') },
+    { id: 'nav-logs', category: 'Navigation', icon: '📜', title: 'Forensics & Execution Logs', shortcut: 'G F', action: () => switchTab('logs') },
+    { id: 'nav-apikeys', category: 'Navigation', icon: '🔑', title: 'API Keys Management', shortcut: 'G K', action: () => switchTab('apikeys') },
+    { id: 'nav-apidocs', category: 'Navigation', icon: '📖', title: 'REST API Documentation', shortcut: 'G R', action: () => switchTab('apidocs') },
+    { id: 'nav-team', category: 'Navigation', icon: '👥', title: 'Team & RBAC Management', shortcut: 'G U', action: () => switchTab('team') },
+    { id: 'nav-billing', category: 'Navigation', icon: '💳', title: 'Plans, Quotas & Billing', shortcut: 'G B', action: () => switchTab('billing') },
+    { id: 'nav-settings', category: 'Navigation', icon: '⚙️', title: 'Workspace Settings', shortcut: 'G S', action: () => switchTab('settings') },
+
+    // Quick Actions
+    { id: 'act-new-rule', category: 'Quick Actions', icon: '➕', title: 'Create New Workflow Rule', shortcut: 'N W', action: () => { switchTab('rules'); openRuleModal(); } },
+    { id: 'act-new-webhook', category: 'Quick Actions', icon: '🔌', title: 'Register Inbound Webhook', shortcut: 'N H', action: () => { switchTab('webhooks'); openWebhookModal(); } },
+    { id: 'act-new-apikey', category: 'Quick Actions', icon: '🔑', title: 'Generate Scoped API Key', shortcut: 'N K', action: () => { switchTab('apikeys'); openApiKeyModal(); } },
+    { id: 'act-export-csv', category: 'Quick Actions', icon: '📥', title: 'Export Compliance Audit Trail (CSV)', shortcut: 'E C', action: () => { window.location.href = '/api/v1/audit-trail/export?format=csv'; } },
+    { id: 'act-export-json', category: 'Quick Actions', icon: '📥', title: 'Export Compliance Audit Trail (JSON)', shortcut: 'E J', action: () => { window.location.href = '/api/v1/audit-trail/export?format=json'; } },
+    { id: 'act-readiness', category: 'Quick Actions', icon: '🩺', title: 'Run System Health & Readiness Probe', shortcut: 'S H', action: () => checkSystemReadiness(true) },
+    { id: 'act-toggle-engine', category: 'Quick Actions', icon: '⏸', title: 'Toggle Automation Engine State', shortcut: 'T E', action: () => toggleEngineState() },
+    { id: 'act-onboarding', category: 'Quick Actions', icon: '🚀', title: 'Launch Customer Onboarding Wizard', shortcut: 'W Z', action: () => openOnboardingWizard() },
+    { id: 'act-switch-persona', category: 'Quick Actions', icon: '🎭', title: 'Switch RBAC Persona', shortcut: 'P S', action: () => openPersonaModal() }
+];
+
+let selectedCommandIndex = 0;
+let filteredCommandItems = [...COMMAND_PALETTE_ITEMS];
+
+function initCommandPalette() {
+    document.addEventListener('keydown', (e) => {
+        // Ctrl+K or Cmd+K
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+            e.preventDefault();
+            const modal = document.getElementById('commandPaletteModal');
+            if (modal && modal.style.display !== 'none') {
+                closeCommandPalette();
+            } else {
+                openCommandPalette();
+            }
+        }
+        // Escape to close
+        if (e.key === 'Escape') {
+            const modal = document.getElementById('commandPaletteModal');
+            if (modal && modal.style.display !== 'none') {
+                closeCommandPalette();
+            }
+        }
+    });
+}
+
+function openCommandPalette() {
+    const modal = document.getElementById('commandPaletteModal');
+    const input = document.getElementById('commandPaletteInput');
+    if (!modal || !input) return;
+    modal.style.display = 'flex';
+    input.value = '';
+    selectedCommandIndex = 0;
+    filterCommandPalette('');
+    setTimeout(() => input.focus(), 50);
+}
+
+function closeCommandPalette() {
+    const modal = document.getElementById('commandPaletteModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function handleCommandPaletteOverlayClick(event) {
+    if (event.target.id === 'commandPaletteModal') {
+        closeCommandPalette();
+    }
+}
+
+function filterCommandPalette(query) {
+    const q = (query || '').toLowerCase().trim();
+    if (!q) {
+        filteredCommandItems = [...COMMAND_PALETTE_ITEMS];
+    } else {
+        filteredCommandItems = COMMAND_PALETTE_ITEMS.filter(item => 
+            item.title.toLowerCase().includes(q) || 
+            item.category.toLowerCase().includes(q) ||
+            (item.shortcut && item.shortcut.toLowerCase().includes(q))
+        );
+    }
+    selectedCommandIndex = 0;
+    renderCommandPaletteResults();
+}
+
+function renderCommandPaletteResults() {
+    const container = document.getElementById('commandPaletteResults');
+    if (!container) return;
+
+    if (filteredCommandItems.length === 0) {
+        container.innerHTML = '<div class="palette-empty">No matching commands or destinations found.</div>';
+        return;
+    }
+
+    const categories = {};
+    filteredCommandItems.forEach((item, index) => {
+        if (!categories[item.category]) categories[item.category] = [];
+        categories[item.category].push({ item, globalIndex: index });
+    });
+
+    let html = '';
+    for (const [catName, entries] of Object.entries(categories)) {
+        html += `<div class="palette-group-title">${catName}</div>`;
+        entries.forEach(({ item, globalIndex }) => {
+            const isSelected = globalIndex === selectedCommandIndex;
+            html += `
+                <div class="palette-item ${isSelected ? 'selected' : ''}" 
+                     onclick="executeCommandItem(${globalIndex})" 
+                     onmouseenter="selectCommandIndex(${globalIndex})"
+                     id="palette-item-${globalIndex}">
+                    <span class="palette-item-icon">${item.icon}</span>
+                    <span class="palette-item-title">${item.title}</span>
+                    ${item.shortcut ? `<kbd class="palette-item-kbd">${item.shortcut}</kbd>` : ''}
+                </div>
+            `;
+        });
+    }
+
+    container.innerHTML = html;
+
+    const selectedEl = document.getElementById(`palette-item-${selectedCommandIndex}`);
+    if (selectedEl) {
+        selectedEl.scrollIntoView({ block: 'nearest' });
+    }
+}
+
+function selectCommandIndex(index) {
+    selectedCommandIndex = index;
+    const items = document.querySelectorAll('.palette-item');
+    items.forEach((el, idx) => {
+        if (idx === index) el.classList.add('selected');
+        else el.classList.remove('selected');
+    });
+}
+
+function handleCommandPaletteKeydown(e) {
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (filteredCommandItems.length > 0) {
+            selectedCommandIndex = (selectedCommandIndex + 1) % filteredCommandItems.length;
+            renderCommandPaletteResults();
+        }
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (filteredCommandItems.length > 0) {
+            selectedCommandIndex = (selectedCommandIndex - 1 + filteredCommandItems.length) % filteredCommandItems.length;
+            renderCommandPaletteResults();
+        }
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (filteredCommandItems.length > 0 && filteredCommandItems[selectedCommandIndex]) {
+            executeCommandItem(selectedCommandIndex);
+        }
+    }
+}
+
+function executeCommandItem(index) {
+    const entry = filteredCommandItems[index];
+    if (entry && typeof entry.action === 'function') {
+        closeCommandPalette();
+        entry.action();
+    }
+}

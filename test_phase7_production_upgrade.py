@@ -547,7 +547,35 @@ class TestPhase7ProductionUpgrade(unittest.TestCase):
         self.assertEqual(res.headers.get("Referrer-Policy"), "strict-origin-when-cross-origin")
         self.assertIn("geolocation=()", res.headers.get("Permissions-Policy", ""))
 
+    def test_enterprise_ui_ux_redesign_components(self):
+        """Verifies Enterprise Collapsible Sidebar, Topbar, and Global Command Palette components in index.html."""
+        res = self.client.get("/")
+        self.assertEqual(res.status_code, 200)
+        html = res.data.decode("utf-8")
+
+        # 1. Enterprise Sidebar & Layout
+        self.assertIn('class="command-center-body enterprise-layout"', html)
+        self.assertIn('id="enterpriseSidebar"', html)
+        self.assertIn('class="sidebar-nav hud-tabs"', html)
+        self.assertIn('id="sidebarToggleBtn"', html)
+        self.assertIn("CORE OPERATIONS", html)
+        self.assertIn("INTEGRATIONS & CHANNELS", html)
+        self.assertIn("OBSERVABILITY & DOCS", html)
+        self.assertIn("ADMINISTRATION", html)
+
+        # 2. Enterprise Topbar & Breadcrumbs
+        self.assertIn('class="hud-header enterprise-topbar"', html)
+        self.assertIn('id="activeBreadcrumbText"', html)
+        self.assertIn("topbar-search-bar", html)
+        self.assertIn("Ctrl K", html)
+
+        # 3. Global Command Palette Modal
+        self.assertIn('id="commandPaletteModal"', html)
+        self.assertIn('id="commandPaletteInput"', html)
+        self.assertIn('id="commandPaletteResults"', html)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
