@@ -253,6 +253,14 @@ function switchTab(tabId) {
 // TELEMETRY & SYSTEM HEALTH
 // ==========================================
 
+function updateNavBadge(id, count) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const num = parseInt(count, 10) || 0;
+    el.textContent = num;
+    el.style.display = num > 0 ? 'inline-flex' : 'none';
+}
+
 async function pollTelemetry() {
     try {
         const res = await fetch('/api/v1/system/telemetry');
@@ -272,21 +280,56 @@ async function pollTelemetry() {
         }
 
         const stats = data.stats || {};
-        document.getElementById('statActiveRules').textContent = `${stats.active_rules || 0} / ${stats.total_rules || 0}`;
-        document.getElementById('statTotalRules').textContent = `${stats.total_rules || 0} Total Configured`;
-        document.getElementById('statTotalExecutions').textContent = stats.total_executions || 0;
-        document.getElementById('statSuccessExecutions').textContent = `${stats.successful_executions || 0} Successful Dispatches`;
-        document.getElementById('statSuccessRate').textContent = `${stats.success_rate || 100}%`;
-        document.getElementById('statOpenIncidents').textContent = stats.open_alerts || 0;
-        document.getElementById('statAckIncidents').textContent = `${stats.acknowledged_alerts || 0} Acknowledged`;
-        document.getElementById('statActiveWebhooks').textContent = stats.active_webhooks || 0;
+        const totalExecs = stats.total_executions || 0;
+        const successExecs = stats.successful_executions || 0;
+        const failedExecs = stats.failed_executions !== undefined ? stats.failed_executions : Math.max(0, totalExecs - successExecs);
+
+        const totalRules = stats.total_rules || 0;
+        const activeRules = stats.active_rules || 0;
+
+        const statActiveRulesEl = document.getElementById('statActiveRules');
+        if (statActiveRulesEl) statActiveRulesEl.textContent = `${activeRules} / ${totalRules}`;
+        const statTotalRulesEl = document.getElementById('statTotalRules');
+        if (statTotalRulesEl) statTotalRulesEl.textContent = `${totalRules} Total Configured`;
+
+        const statTotalExecsEl = document.getElementById('statTotalExecutions');
+        if (statTotalExecsEl) statTotalExecsEl.textContent = totalExecs.toLocaleString();
+        const statSuccessExecsEl = document.getElementById('statSuccessExecutions');
+        if (statSuccessExecsEl) statSuccessExecsEl.textContent = `${successExecs.toLocaleString()} Successful Dispatches`;
+
+        const statFailedExecsEl = document.getElementById('statFailedExecutions');
+        if (statFailedExecsEl) statFailedExecsEl.textContent = failedExecs.toLocaleString();
+        const statFailedExecsSubEl = document.getElementById('statFailedExecutionsSub');
+        if (statFailedExecsSubEl) statFailedExecsSubEl.textContent = `${failedExecs.toLocaleString()} Unresolved Failures`;
+
+        const statSuccessRateEl = document.getElementById('statSuccessRate');
+        const statSuccessRateSubEl = document.getElementById('statSuccessRateSub');
+        if (statSuccessRateEl) {
+            if (totalExecs === 0) {
+                statSuccessRateEl.textContent = '—';
+                if (statSuccessRateSubEl) statSuccessRateSubEl.textContent = 'Awaiting first execution';
+            } else {
+                const rate = stats.success_rate !== undefined ? stats.success_rate : Math.round((successExecs / totalExecs) * 100);
+                statSuccessRateEl.textContent = `${rate}%`;
+                if (statSuccessRateSubEl) statSuccessRateSubEl.textContent = `${successExecs} / ${totalExecs} succeeded`;
+            }
+        }
+
+        const statOpenIncidentsEl = document.getElementById('statOpenIncidents');
+        if (statOpenIncidentsEl) statOpenIncidentsEl.textContent = stats.open_alerts || 0;
+        const statAckIncidentsEl = document.getElementById('statAckIncidents');
+        if (statAckIncidentsEl) statAckIncidentsEl.textContent = `${stats.acknowledged_alerts || 0} Acknowledged`;
+
+        const statActiveWebhooksEl = document.getElementById('statActiveWebhooks');
+        if (statActiveWebhooksEl) statActiveWebhooksEl.textContent = stats.active_webhooks || 0;
 
         const highLeadsEl = document.getElementById('statHighPriorityLeads');
         if (highLeadsEl) highLeadsEl.textContent = stats.high_priority_leads || 0;
         const totalLeadsEl = document.getElementById('statTotalLeads');
         if (totalLeadsEl) totalLeadsEl.textContent = `${stats.total_leads || 0} Total Inquiries`;
-        const tabLeadEl = document.getElementById('tabLeadCount');
-        if (tabLeadEl) tabLeadEl.textContent = stats.total_leads || 0;
+
+        updateNavBadge('tabLeadCount', stats.total_leads || 0);
+        updateNavBadge('tabIncidentCount', stats.open_alerts || 0);
 
         const telem = data.telemetry || {};
         document.getElementById('statUptime').textContent = telem.uptime_formatted || '0s';
@@ -361,43 +404,102 @@ function renderRulesTable() {
     const tbody = document.getElementById('rulesTableBody');
     if (!tbody) return;
 
+    // Update summary pills
+    const activeCount = state.rules.filter(r => r.enabled === 1 || r.enabled === true).length;
+    const totalRuns = state.rules.reduce((acc, r) => acc + (r.execution_count || 0), 0);
+    const activePill = document.getElementById('wfStudioActiveCount');
+    if (activePill) activePill.textContent = activeCount;
+    const totalPill = document.getElementById('wfStudioTotalCount');
+    if (totalPill) totalPill.textContent = state.rules.length;
+    const runsPill = document.getElementById('wfStudioRunsCount');
+    if (runsPill) runsPill.textContent = totalRuns.toLocaleString();
+
     if (state.rules.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="empty-cell">No automation rules configured in this workspace.</td></tr>';
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="empty-cell" style="padding: 48px 20px; text-align: center;">
+                    <div style="font-size: 2.5rem; margin-bottom: 10px;">⚡</div>
+                    <div style="font-size: 1.1rem; font-weight: 600; color: #f1f5f9; margin-bottom: 6px;">No workflows found in this category</div>
+                    <div style="font-size: 0.85rem; color: #94a3b8; max-width: 420px; margin: 0 auto 16px;">Automate incident remediation, lead routing, webhook processing, and alert escalation with custom workflows.</div>
+                    <button type="button" class="hud-btn primary small" onclick="openNewRuleModal()" style="display: inline-flex; align-items: center; gap: 6px;">
+                        <span>+</span> Create New Workflow
+                    </button>
+                </td>
+            </tr>
+        `;
         return;
     }
 
     tbody.innerHTML = state.rules.map(rule => {
         const isEnabled = rule.enabled === 1 || rule.enabled === true;
         const trigger = rule.trigger || {};
-        const triggerDesc = trigger.event_name ? `${trigger.type || 'event'}:${trigger.event_name}` : (trigger.type || 'event');
+        let triggerDisplay = '';
+        const trigType = (trigger.type || 'event').toLowerCase();
+        if (trigType === 'webhook') {
+            triggerDisplay = `🔌 Webhook: ${escapeHtml(trigger.event_name || '*')}`;
+        } else if (trigType === 'cron' || trigType === 'schedule') {
+            triggerDisplay = `⏱️ Cron: ${escapeHtml(trigger.schedule || '*')}`;
+        } else if (trigType === 'natural_text' || trigType === 'nlp') {
+            triggerDisplay = `🧠 NLP Intent`;
+        } else {
+            triggerDisplay = `⚡ Event: ${escapeHtml(trigger.event_name || 'custom')}`;
+        }
+
         const isViewer = state.userRole === 'viewer';
+        const runsCount = rule.execution_count || 0;
+        const lastRunText = runsCount === 0 || !rule.last_triggered || rule.last_triggered === 'Never'
+            ? '<span class="never-run-badge">Never run</span>'
+            : `<span style="font-size: 0.78rem; color: #cbd5e1;">${escapeHtml(rule.last_triggered)}</span>`;
 
         return `
-            <tr class="workflow-row" style="cursor: pointer;" onclick="handleRuleRowClick(event, '${rule.id}')" title="Click anywhere to inspect or edit workflow">
+            <tr class="workflow-row" style="cursor: pointer;" onclick="handleRuleRowClick(event, '${rule.id}')" title="Click row to inspect full workflow details">
                 <td>
-                    <button class="toggle-switch ${isEnabled ? 'on' : 'off'}" 
-                            onclick="toggleRuleEnabled('${rule.id}')"
-                            title="Toggle Rule State" ${isViewer ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>
-                        <span class="toggle-slider"></span>
-                    </button>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <button type="button" class="toggle-switch ${isEnabled ? 'on' : 'off'}" 
+                                onclick="toggleRuleEnabled('${rule.id}')"
+                                title="Toggle Rule State" ${isViewer ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>
+                            <span class="toggle-slider"></span>
+                        </button>
+                    </div>
                 </td>
                 <td>
-                    <div style="font-weight: 600; color: var(--cyan-glow);">${escapeHtml(rule.name)}</div>
-                    <div style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(rule.description || '')}</div>
+                    <div class="wf-title-cell">
+                        <strong class="wf-name-text">${escapeHtml(rule.name)}</strong>
+                        <div class="wf-desc-sub" title="${escapeHtml(rule.description || '')}">${escapeHtml(rule.description || 'No description provided')}</div>
+                    </div>
                 </td>
                 <td><span class="category-chip ${rule.category ? rule.category.toLowerCase() : 'system'}">${rule.category || 'System'}</span></td>
-                <td><code style="font-size: 0.75rem; color: var(--cyan-glow);">${escapeHtml(triggerDesc)}</code></td>
-                <td><span style="font-family: var(--font-mono); font-size: 0.8rem;">${rule.priority || 10}</span></td>
-                <td><span style="font-family: var(--font-mono); font-size: 0.8rem;">${rule.cooldown_seconds || 0}s</span></td>
-                <td><span style="font-family: var(--font-mono); font-size: 0.85rem; font-weight:700;">${rule.execution_count || 0}</span></td>
-                <td style="font-size: 0.75rem; color: var(--text-muted);">${rule.last_triggered || 'Never'}</td>
-                <td>
-                    <div class="action-btn-row">
-                        <button class="action-btn cyan-btn" onclick="openExecutionConsole('${rule.id}')" title="Execution Console (Live / Dry Run / Async)">⚡</button>
-                        <button class="action-btn purple-btn" onclick="runDryRunTest('${rule.id}')" title="Dry Run / Simulation (Zero Side Effects)">🧪</button>
-                        <button class="action-btn" style="background:rgba(255,255,255,0.08); color:#e2e8f0;" onclick="duplicateRule('${rule.id}')" title="Duplicate Workflow" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>📋</button>
-                        <button class="action-btn amber-btn" onclick="editRule('${rule.id}')" title="Edit Rule" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>✏️</button>
-                        <button class="action-btn red-btn" onclick="deleteRule('${rule.id}')" title="Delete Rule" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>🗑️</button>
+                <td><code class="trigger-code-pill">${triggerDisplay}</code></td>
+                <td style="text-align: center;"><span style="font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700; color: #f1f5f9;">${runsCount.toLocaleString()}</span></td>
+                <td>${lastRunText}</td>
+                <td style="text-align: right;" onclick="event.stopPropagation()">
+                    <div class="action-btn-row" style="justify-content: flex-end; align-items: center; gap: 6px;">
+                        <button type="button" class="hud-btn primary small run-primary-btn" onclick="openExecutionConsole('${rule.id}')" title="Execute Workflow Now">
+                            <span>⚡</span> Run
+                        </button>
+                        <div class="action-overflow-wrapper" style="position: relative; display: inline-block;">
+                            <button type="button" class="action-overflow-btn" onclick="toggleActionOverflow(event, '${rule.id}')" title="More Actions">
+                                &bull;&bull;&bull;
+                            </button>
+                            <div class="action-overflow-menu" id="overflow-menu-${rule.id}" style="display: none;">
+                                <button type="button" class="overflow-item" onclick="openRuleDetailsDrawer('${rule.id}')">
+                                    <span class="overflow-icon">ℹ️</span> View Details
+                                </button>
+                                <button type="button" class="overflow-item" onclick="runDryRunTest('${rule.id}')">
+                                    <span class="overflow-icon">🧪</span> Test (Dry Run)
+                                </button>
+                                <button type="button" class="overflow-item" onclick="duplicateRule('${rule.id}')" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>
+                                    <span class="overflow-icon">📋</span> Duplicate
+                                </button>
+                                <button type="button" class="overflow-item" onclick="editRule('${rule.id}')" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>
+                                    <span class="overflow-icon">✏️</span> Edit Rule
+                                </button>
+                                <div class="overflow-divider"></div>
+                                <button type="button" class="overflow-item danger" onclick="deleteRule('${rule.id}')" ${isViewer ? 'disabled style="opacity:0.5;"' : ''}>
+                                    <span class="overflow-icon">🗑️</span> Delete Rule
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </td>
             </tr>
@@ -406,11 +508,121 @@ function renderRulesTable() {
 }
 
 function handleRuleRowClick(event, ruleId) {
-    // If the click originated from an interactive button, toggle switch, or action icon, do not trigger row edit
-    if (event.target.closest('button') || event.target.closest('.toggle-switch') || event.target.closest('input') || event.target.closest('a') || event.target.closest('.action-btn-row')) {
+    if (event.target.closest('button') || event.target.closest('.toggle-switch') || event.target.closest('input') || event.target.closest('a') || event.target.closest('.action-overflow-wrapper') || event.target.closest('.action-btn-row')) {
         return;
     }
-    editRule(ruleId);
+    openRuleDetailsDrawer(ruleId);
+}
+
+function toggleActionOverflow(event, ruleId) {
+    event.stopPropagation();
+    const menuId = `overflow-menu-${ruleId}`;
+    const allMenus = document.querySelectorAll('.action-overflow-menu');
+    allMenus.forEach(m => {
+        if (m.id !== menuId) m.style.display = 'none';
+    });
+    const currentMenu = document.getElementById(menuId);
+    if (currentMenu) {
+        currentMenu.style.display = currentMenu.style.display === 'block' ? 'none' : 'block';
+    }
+}
+
+function openRuleDetailsDrawer(ruleId) {
+    const rule = state.rules.find(r => String(r.id) === String(ruleId));
+    if (!rule) return;
+    state.activeDrawerRuleId = ruleId;
+
+    const drawer = document.getElementById('workflowDetailsDrawer');
+    const overlay = document.getElementById('workflowDetailsDrawerOverlay');
+    if (!drawer || !overlay) return;
+
+    document.getElementById('drawerRuleName').textContent = rule.name || 'Unnamed Workflow';
+    document.getElementById('drawerRuleDesc').textContent = rule.description || 'No description provided.';
+    const catEl = document.getElementById('drawerRuleCategory');
+    if (catEl) {
+        catEl.textContent = rule.category || 'System';
+        catEl.className = `category-chip ${rule.category ? rule.category.toLowerCase() : 'system'}`;
+    }
+    document.getElementById('drawerRulePriority').textContent = rule.priority || 10;
+    document.getElementById('drawerRuleCooldown').textContent = `${rule.cooldown_seconds || 0}s`;
+    document.getElementById('drawerRuleRuns').textContent = (rule.execution_count || 0).toLocaleString();
+
+    const isEnabled = rule.enabled === 1 || rule.enabled === true;
+    document.getElementById('drawerRuleStatus').innerHTML = isEnabled
+        ? '<span class="status-dot green"></span> Active'
+        : '<span class="status-dot red"></span> Paused';
+
+    const trigger = rule.trigger || {};
+    const triggerBox = document.getElementById('drawerTriggerBox');
+    if (triggerBox) {
+        triggerBox.innerHTML = `<code>Type: <strong>${escapeHtml(trigger.type || 'event')}</strong> &bull; Event: <strong>${escapeHtml(trigger.event_name || '*')}</strong></code>`;
+    }
+
+    const conditionsBox = document.getElementById('drawerConditionsBox');
+    if (conditionsBox) {
+        const conds = (rule.conditions && rule.conditions.all) ? rule.conditions.all : (rule.conditions || []);
+        if (Array.isArray(conds) && conds.length > 0) {
+            conditionsBox.innerHTML = conds.map(c => `
+                <div style="background:#0b1120; border:1px solid var(--border-color); border-radius:6px; padding:8px 12px; font-size:12px; font-family:var(--font-mono); color:#38bdf8; margin-bottom:6px;">
+                    ${escapeHtml(c.field || '')} <strong style="color:#f59e0b;">${escapeHtml(c.operator || '==')}</strong> "${escapeHtml(String(c.value !== undefined ? c.value : ''))}"
+                </div>
+            `).join('');
+        } else {
+            conditionsBox.innerHTML = '<span style="color:#64748b; font-size:13px;">No evaluation conditions (rule triggers on all matching events).</span>';
+        }
+    }
+
+    const actionsBox = document.getElementById('drawerActionsBox');
+    if (actionsBox) {
+        const actions = rule.actions || [];
+        if (actions.length > 0) {
+            actionsBox.innerHTML = actions.map((a, idx) => `
+                <div style="background:#0b1120; border:1px solid var(--border-color); border-radius:6px; padding:10px 12px; font-size:12px; display:flex; align-items:flex-start; gap:10px; margin-bottom:6px;">
+                    <span style="display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:rgba(0,240,255,0.15); color:var(--cyan-glow); font-weight:700; font-size:11px;">${idx + 1}</span>
+                    <div style="flex:1;">
+                        <strong style="color:#f8fafc; font-size:13px;">${escapeHtml(a.type || 'Action')}</strong>
+                        <div style="font-size:11px; color:#94a3b8; font-family:var(--font-mono); margin-top:2px;">${escapeHtml(JSON.stringify(a.params || {}))}</div>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            actionsBox.innerHTML = '<span style="color:#64748b; font-size:13px;">No actions configured.</span>';
+        }
+    }
+
+    overlay.style.display = 'block';
+    setTimeout(() => drawer.classList.add('open'), 10);
+}
+
+function closeRuleDetailsDrawer() {
+    const drawer = document.getElementById('workflowDetailsDrawer');
+    const overlay = document.getElementById('workflowDetailsDrawerOverlay');
+    if (drawer) drawer.classList.remove('open');
+    if (overlay) {
+        setTimeout(() => overlay.style.display = 'none', 250);
+    }
+}
+
+function openExecutionConsoleFromDrawer() {
+    if (state.activeDrawerRuleId) {
+        const id = state.activeDrawerRuleId;
+        closeRuleDetailsDrawer();
+        openExecutionConsole(id);
+    }
+}
+
+function runDryRunFromDrawer() {
+    if (state.activeDrawerRuleId) {
+        runDryRunTest(state.activeDrawerRuleId);
+    }
+}
+
+function editRuleFromDrawer() {
+    if (state.activeDrawerRuleId) {
+        const id = state.activeDrawerRuleId;
+        closeRuleDetailsDrawer();
+        editRule(id);
+    }
 }
 
 async function toggleRuleEnabled(ruleId) {
@@ -1359,8 +1571,7 @@ async function loadIncidents() {
 
         // Update tab counter
         const openCount = state.incidents.filter(i => i.status === 'open').length;
-        const countBadge = document.getElementById('tabIncidentCount');
-        if (countBadge) countBadge.textContent = openCount;
+        updateNavBadge('tabIncidentCount', openCount);
     } catch (e) {
         console.error('Failed to load incidents:', e);
     }
@@ -2462,8 +2673,7 @@ function updateLeadsKpis(leads) {
     if (salesEl) salesEl.textContent = leads.filter(l => (l.route_department || '').toLowerCase() === 'sales').length;
     if (supportEl) supportEl.textContent = leads.filter(l => (l.route_department || '').toLowerCase().includes('support')).length;
 
-    const tabBadge = document.getElementById('tabLeadCount');
-    if (tabBadge) tabBadge.textContent = leads.length;
+    updateNavBadge('tabLeadCount', leads.length);
 }
 
 function renderLeads(leads) {
@@ -3601,7 +3811,7 @@ async function loadWhatsAppDashboard() {
             const tbody = document.getElementById('waMessagesTableBody');
 
             if (countBadge) countBadge.textContent = `${messages.length} messages`;
-            if (tabCount) tabCount.textContent = messages.length;
+            updateNavBadge('tabWhatsAppCount', messages.length);
 
             if (tbody) {
                 if (messages.length === 0) {
@@ -4007,4 +4217,8 @@ document.addEventListener('click', (e) => {
     if (wrapper && !wrapper.contains(e.target)) {
         closeAccountMenu();
     }
+    if (!e.target.closest('.action-overflow-wrapper')) {
+        document.querySelectorAll('.action-overflow-menu').forEach(m => m.style.display = 'none');
+    }
 });
+

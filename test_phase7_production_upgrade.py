@@ -558,9 +558,12 @@ class TestPhase7ProductionUpgrade(unittest.TestCase):
         self.assertIn('id="enterpriseSidebar"', html)
         self.assertIn('class="sidebar-nav hud-tabs"', html)
         self.assertIn('id="sidebarToggleBtn"', html)
-        self.assertIn("CORE OPERATIONS", html)
-        self.assertIn("INTEGRATIONS & CHANNELS", html)
-        self.assertIn("OBSERVABILITY & DOCS", html)
+        self.assertIn("OVERVIEW", html)
+        self.assertIn("AUTOMATION", html)
+        self.assertIn("CUSTOMERS", html)
+        self.assertIn("INTEGRATIONS", html)
+        self.assertIn("OPERATIONS", html)
+        self.assertIn("DEVELOPER", html)
         self.assertIn("ADMINISTRATION", html)
 
         # 2. Enterprise Topbar & Breadcrumbs

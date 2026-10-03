@@ -55,32 +55,37 @@
 
         <!-- Categorized Navigation Menu -->
         <nav class="sidebar-nav hud-tabs">
-            <!-- GROUP 1: CORE OPERATIONS -->
+            <!-- GROUP 1: OVERVIEW -->
             <div class="nav-category-header">
-                <span>CORE OPERATIONS</span>
+                <span>OVERVIEW</span>
             </div>
             <button class="hud-tab active" onclick="switchTab('dashboard')" title="Executive Overview">
                 <span class="tab-icon">📊</span>
                 <span class="tab-label">Executive Overview</span>
             </button>
+
+            <!-- GROUP 2: AUTOMATION -->
+            <div class="nav-category-header">
+                <span>AUTOMATION</span>
+            </div>
             <button class="hud-tab" onclick="switchTab('rules')" title="Workflow Studio">
                 <span class="tab-icon">⚡</span>
                 <span class="tab-label">Workflow Studio</span>
             </button>
+
+            <!-- GROUP 3: CUSTOMERS -->
+            <div class="nav-category-header">
+                <span>CUSTOMERS</span>
+            </div>
             <button class="hud-tab" onclick="switchTab('leads')" title="CRM Leads">
                 <span class="tab-icon">🎯</span>
                 <span class="tab-label">CRM Leads</span>
-                <span class="nav-counter-pill" id="tabLeadCount">0</span>
-            </button>
-            <button class="hud-tab" onclick="switchTab('incidents')" title="Incidents">
-                <span class="tab-icon">🚨</span>
-                <span class="tab-label">Incidents</span>
-                <span class="nav-counter-pill danger" id="tabIncidentCount">0</span>
+                <span class="nav-counter-pill" id="tabLeadCount" style="display:none;">0</span>
             </button>
 
-            <!-- GROUP 2: INTEGRATIONS & CHANNELS -->
+            <!-- GROUP 4: INTEGRATIONS -->
             <div class="nav-category-header">
-                <span>INTEGRATIONS & CHANNELS</span>
+                <span>INTEGRATIONS</span>
             </div>
             <button class="hud-tab" onclick="switchTab('webhooks')" title="Inbound Webhooks">
                 <span class="tab-icon">🔌</span>
@@ -89,49 +94,59 @@
             <button class="hud-tab" onclick="switchTab('whatsapp')" title="WhatsApp Cloud API">
                 <span class="tab-icon">💬</span>
                 <span class="tab-label">WhatsApp Cloud</span>
-                <span class="nav-counter-pill success" id="tabWhatsAppCount">0</span>
+                <span class="nav-counter-pill success" id="tabWhatsAppCount" style="display:none;">0</span>
             </button>
-            <button class="hud-tab" onclick="switchTab('nlp')" title="AI Engine Sandbox">
-                <span class="tab-icon">🧠</span>
-                <span class="tab-label">AI Engine Sandbox</span>
+
+            <!-- GROUP 5: OPERATIONS -->
+            <div class="nav-category-header">
+                <span>OPERATIONS</span>
+            </div>
+            <button class="hud-tab" onclick="switchTab('incidents')" title="Incidents">
+                <span class="tab-icon">🚨</span>
+                <span class="tab-label">Incidents</span>
+                <span class="nav-counter-pill danger" id="tabIncidentCount" style="display:none;">0</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('logs')" title="Forensics & Audits">
+                <span class="tab-icon">📜</span>
+                <span class="tab-label">Forensics &amp; Audits</span>
+            </button>
+            <button class="hud-tab" onclick="switchTab('simulator')" title="Metrics">
+                <span class="tab-icon">🧪</span>
+                <span class="tab-label">Metrics</span>
+            </button>
+
+            <!-- GROUP 6: DEVELOPER -->
+            <div class="nav-category-header">
+                <span>DEVELOPER</span>
+            </div>
+            <button class="hud-tab" onclick="switchTab('apikeys')" title="API Keys">
+                <span class="tab-icon">🔑</span>
+                <span class="tab-label">API Keys</span>
             </button>
             <button class="hud-tab" onclick="switchTab('blueprints')" title="Templates">
                 <span class="tab-icon">📦</span>
                 <span class="tab-label">Templates</span>
             </button>
-            <button class="hud-tab" onclick="switchTab('simulator')" title="Metrics Simulator">
-                <span class="tab-icon">🧪</span>
-                <span class="tab-label">Metrics Simulator</span>
-            </button>
-
-            <!-- GROUP 3: OBSERVABILITY & GOVERNANCE -->
-            <div class="nav-category-header">
-                <span>OBSERVABILITY & DOCS</span>
-            </div>
-            <button class="hud-tab" onclick="switchTab('logs')" title="Forensics & Audits">
-                <span class="tab-icon">📜</span>
-                <span class="tab-label">Forensics & Audits</span>
-            </button>
-            <button class="hud-tab" onclick="switchTab('apikeys')" title="API Keys">
-                <span class="tab-icon">🔑</span>
-                <span class="tab-label">API Keys</span>
-            </button>
             <button class="hud-tab" onclick="switchTab('apidocs')" title="API Docs">
                 <span class="tab-icon">📖</span>
                 <span class="tab-label">API Docs</span>
             </button>
+            <button class="hud-tab" onclick="switchTab('nlp')" title="AI Engine Sandbox">
+                <span class="tab-icon">🧠</span>
+                <span class="tab-label">AI Engine Sandbox</span>
+            </button>
 
-            <!-- GROUP 4: ENTERPRISE ADMINISTRATION -->
+            <!-- GROUP 7: ADMINISTRATION -->
             <div class="nav-category-header">
                 <span>ADMINISTRATION</span>
             </div>
             <button class="hud-tab" onclick="switchTab('team')" title="Team & RBAC">
                 <span class="tab-icon">👥</span>
-                <span class="tab-label">Team & RBAC</span>
+                <span class="tab-label">Team &amp; RBAC</span>
             </button>
             <button class="hud-tab" onclick="switchTab('billing')" title="Plans & Billing">
                 <span class="tab-icon">💳</span>
-                <span class="tab-label">Plans & Billing</span>
+                <span class="tab-label">Plans &amp; Billing</span>
             </button>
             <button class="hud-tab" onclick="switchTab('settings')" title="Settings">
                 <span class="tab-icon">⚙️</span>
@@ -275,21 +290,12 @@
 
         <!-- TAB 1: EXECUTIVE OVERVIEW -->
         <section id="tab-dashboard" class="tab-panel active">
-            <!-- Key Metric Counters -->
+            <!-- Primary Executive KPI Cards -->
             <div class="metrics-grid">
-                <div class="metric-card cyan">
-                    <div class="metric-header">
-                        <span class="metric-title">ACTIVE WORKFLOWS</span>
-                        <span class="metric-badge">RULES</span>
-                    </div>
-                    <div class="metric-val" id="statActiveRules">0 / 0</div>
-                    <div class="metric-sub" id="statTotalRules">0 Total Configured</div>
-                </div>
-
                 <div class="metric-card emerald">
                     <div class="metric-header">
                         <span class="metric-title">TOTAL EXECUTIONS</span>
-                        <span class="metric-badge">24H</span>
+                        <span class="metric-badge">DISPATCHED</span>
                     </div>
                     <div class="metric-val" id="statTotalExecutions">0</div>
                     <div class="metric-sub" id="statSuccessExecutions">0 Successful Dispatches</div>
@@ -300,8 +306,17 @@
                         <span class="metric-title">SUCCESS RATE</span>
                         <span class="metric-badge">RELIABILITY</span>
                     </div>
-                    <div class="metric-val" id="statSuccessRate">100%</div>
-                    <div class="metric-sub">Zero unhandled crashes</div>
+                    <div class="metric-val" id="statSuccessRate">—</div>
+                    <div class="metric-sub" id="statSuccessRateSub">Awaiting first execution</div>
+                </div>
+
+                <div class="metric-card red">
+                    <div class="metric-header">
+                        <span class="metric-title">FAILED EXECUTIONS</span>
+                        <span class="metric-badge">ERRORS</span>
+                    </div>
+                    <div class="metric-val" id="statFailedExecutions">0</div>
+                    <div class="metric-sub" id="statFailedExecutionsSub">0 Unresolved Failures</div>
                 </div>
 
                 <div class="metric-card amber">
@@ -322,34 +337,40 @@
                     <div class="metric-sub" id="statTotalLeads">0 Total Inquiries</div>
                 </div>
 
-                <div class="metric-card red">
-                    <div class="metric-header">
-                        <span class="metric-title">INBOUND WEBHOOKS</span>
-                        <span class="metric-badge">GATEWAY</span>
-                    </div>
-                    <div class="metric-val" id="statActiveWebhooks">0</div>
-                    <div class="metric-sub">Live ingestion connectors</div>
-                </div>
-
                 <div class="metric-card cyan">
                     <div class="metric-header">
-                        <span class="metric-title">SYSTEM UPTIME</span>
-                        <span class="metric-badge">HEALTH</span>
+                        <span class="metric-title">ACTIVE WORKFLOWS</span>
+                        <span class="metric-badge">RULES</span>
                     </div>
-                    <div class="metric-val" id="statUptime">0s</div>
-                    <div class="metric-sub">Engine Online</div>
+                    <div class="metric-val" id="statActiveRules">0 / 0</div>
+                    <div class="metric-sub" id="statTotalRules">0 Total Configured</div>
                 </div>
+            </div>
 
-                <div class="metric-card gold" style="cursor: pointer; transition: transform 0.2s ease;" onclick="switchTab('billing')" title="Click to view Plans &amp; Billing dashboard">
-                    <div class="metric-header">
-                        <span class="metric-title">WORKSPACE PLAN</span>
-                        <span class="metric-badge" id="dashBillingBadge">ACTIVE</span>
+            <!-- Operational Subsystems & Gateway Bar -->
+            <div class="hud-panel op-status-strip" style="margin-bottom: 20px; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; border: 1px solid var(--border-color); background: rgba(15, 23, 42, 0.5); border-radius: 8px;">
+                <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap; font-size: 13px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="color: var(--cyan-glow);">🔌</span>
+                        <span style="color: var(--text-secondary);">Active Webhooks:</span>
+                        <strong id="statActiveWebhooks" style="color: var(--text-primary); font-family: var(--font-mono);">0</strong>
                     </div>
-                    <div class="metric-val" id="dashPlanTier" style="color: #f59e0b;">Free Tier</div>
-                    <div class="metric-sub" id="dashPlanCycle" style="display: flex; justify-content: space-between; align-items: center;">
-                        <span id="dashPlanDesc">Free Community Tier</span>
-                        <span style="color: var(--cyan-glow); font-weight: 600;">Manage &rarr;</span>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="color: var(--emerald-glow);">⚡</span>
+                        <span style="color: var(--text-secondary);">Engine Uptime:</span>
+                        <strong id="statUptime" style="color: var(--text-primary); font-family: var(--font-mono);">0s</strong>
                     </div>
+                    <div style="display: flex; align-items: center; gap: 8px; cursor: pointer;" onclick="switchTab('billing')" title="Click to view Plans &amp; Billing">
+                        <span style="color: #f59e0b;">💳</span>
+                        <span style="color: var(--text-secondary);">Plan Tier:</span>
+                        <strong id="dashPlanTier" style="color: #f59e0b;">Free Tier</strong>
+                        <span class="status-badge active" id="dashBillingBadge" style="font-size: 10px; padding: 1px 6px;">ACTIVE</span>
+                        <span id="dashPlanDesc" style="display:none;">Free Community Tier</span>
+                        <span id="dashPlanCycle" style="display:none;"></span>
+                    </div>
+                </div>
+                <div>
+                    <button class="hud-btn outline small" onclick="switchTab('billing')" style="font-size: 12px; padding: 4px 10px;">Manage Billing &rarr;</button>
                 </div>
             </div>
 
@@ -458,7 +479,39 @@
 
         <!-- TAB 2: WORKFLOW STUDIO -->
         <section id="tab-rules" class="tab-panel">
-            <div class="panel-toolbar">
+            <!-- Studio Header & Summary Stats -->
+            <div class="workflow-studio-header hud-panel" style="margin-bottom: 20px; padding: 16px 20px; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color);">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+                    <div>
+                        <h2 style="font-size: 1.25rem; font-weight: 700; margin: 0 0 4px 0; display: flex; align-items: center; gap: 10px;">
+                            <span>⚡</span>
+                            <span>Workflow Studio</span>
+                        </h2>
+                        <p style="color: var(--text-secondary); font-size: 13px; margin: 0;">
+                            Configure event triggers, conditional business logic, and automated action pipelines.
+                        </p>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <div class="wf-summary-pills" style="display: flex; gap: 10px; font-size: 12px; font-family: var(--font-mono);">
+                            <span class="summary-pill" style="background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.2); padding: 4px 10px; border-radius: 6px; color: var(--cyan-glow);">
+                                <strong id="wfStudioActiveCount">0</strong> Active
+                            </span>
+                            <span class="summary-pill" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; color: var(--text-secondary);">
+                                <strong id="wfStudioTotalCount">0</strong> Total Rules
+                            </span>
+                            <span class="summary-pill" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); padding: 4px 10px; border-radius: 6px; color: var(--emerald-glow);">
+                                <strong id="wfStudioRunsCount">0</strong> Total Runs
+                            </span>
+                        </div>
+                        <button class="hud-btn primary" id="btnNewWorkflow" onclick="openNewRuleModal()" style="font-weight: 600; display: inline-flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 1.1rem; line-height: 1;">+</span> New Workflow
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category Filter Toolbar -->
+            <div class="panel-toolbar" style="margin-bottom: 16px;">
                 <div class="filter-group">
                     <span class="filter-label">Filter Category:</span>
                     <button class="filter-chip active" onclick="filterRulesCategory('All', this)">All</button>
@@ -469,27 +522,25 @@
                     <button class="filter-chip" onclick="filterRulesCategory('Data', this)">Data</button>
                 </div>
                 <div class="action-group">
-                    <button class="hud-btn primary" onclick="openNewRuleModal()">+ New Workflow</button>
+                    <button class="hud-btn outline small" onclick="loadRules()" title="Refresh workflows">🔄 Refresh</button>
                 </div>
             </div>
 
             <div class="table-container">
-                <table class="hud-table">
+                <table class="hud-table workflow-table">
                     <thead>
                         <tr>
-                            <th>State</th>
-                            <th>Workflow Name</th>
-                            <th>Category</th>
-                            <th>Trigger</th>
-                            <th>Priority</th>
-                            <th>Cooldown</th>
-                            <th>Runs</th>
-                            <th>Last Triggered</th>
-                            <th>Actions</th>
+                            <th style="width: 75px;">Status</th>
+                            <th>Workflow</th>
+                            <th style="width: 110px;">Category</th>
+                            <th style="width: 170px;">Trigger</th>
+                            <th style="width: 80px; text-align: center;">Runs</th>
+                            <th style="width: 140px;">Last Run</th>
+                            <th style="width: 160px; text-align: right;">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="rulesTableBody">
-                        <tr><td colspan="9" class="empty-cell">Loading workflow rules...</td></tr>
+                        <tr><td colspan="7" class="empty-cell">Loading workflow rules...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1579,11 +1630,98 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                     </div>
                     <button type="button" class="hud-btn outline small-btn" onclick="addActionRow()">+ Add Action</button>
 
+                    <!-- Guided Stepped Flow Indicator -->
+                    <div class="guided-steps-indicator" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 10px 14px; background: rgba(15, 23, 42, 0.6); border-radius: 8px; border: 1px solid var(--border-color); font-size: 12px;">
+                        <div class="guided-step active" style="display:flex; align-items:center; gap:6px; color:var(--cyan-glow); font-weight:600;">
+                            <span style="display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:rgba(0,240,255,0.15); border:1px solid var(--cyan-glow); font-size:11px;">1</span>
+                            <span>Trigger</span>
+                        </div>
+                        <span style="color:var(--text-dim);">&rarr;</span>
+                        <div class="guided-step" style="display:flex; align-items:center; gap:6px; color:var(--text-secondary);">
+                            <span style="display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:rgba(255,255,255,0.05); border:1px solid var(--border-color); font-size:11px;">2</span>
+                            <span>Conditions</span>
+                        </div>
+                        <span style="color:var(--text-dim);">&rarr;</span>
+                        <div class="guided-step" style="display:flex; align-items:center; gap:6px; color:var(--text-secondary);">
+                            <span style="display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:rgba(255,255,255,0.05); border:1px solid var(--border-color); font-size:11px;">3</span>
+                            <span>Actions</span>
+                        </div>
+                        <span style="color:var(--text-dim);">&rarr;</span>
+                        <div class="guided-step" style="display:flex; align-items:center; gap:6px; color:var(--text-secondary);">
+                            <span style="display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:rgba(255,255,255,0.05); border:1px solid var(--border-color); font-size:11px;">4</span>
+                            <span>Review &amp; Activate</span>
+                        </div>
+                    </div>
+
                     <div class="modal-footer">
                         <button type="button" class="hud-btn outline" onclick="closeRuleModal()">Cancel</button>
-                        <button type="submit" class="hud-btn primary">Save Workflow Rule</button>
+                        <button type="submit" class="hud-btn primary">Save &amp; Activate Workflow</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE-OUT WORKFLOW DETAILS DRAWER -->
+    <div class="workflow-drawer-overlay" id="workflowDetailsDrawerOverlay" style="display:none;" onclick="closeRuleDetailsDrawer()">
+        <div class="workflow-details-drawer" id="workflowDetailsDrawer" onclick="event.stopPropagation()">
+            <div class="drawer-header" style="display:flex; justify-content:space-between; align-items:flex-start; padding:20px 24px; border-bottom:1px solid var(--border-color); background:rgba(15,23,42,0.85);">
+                <div>
+                    <span class="category-chip" id="drawerRuleCategory" style="margin-bottom:6px; display:inline-block;">System</span>
+                    <h3 id="drawerRuleName" style="margin:4px 0; font-size:1.25rem; font-weight:700; color:#f8fafc;">Workflow Details</h3>
+                    <p id="drawerRuleDesc" style="color:#94a3b8; font-size:0.85rem; margin:0; line-height:1.4;">Full description</p>
+                </div>
+                <button type="button" class="close-btn" onclick="closeRuleDetailsDrawer()" style="background:none; border:none; font-size:1.5rem; color:#94a3b8; cursor:pointer;">&times;</button>
+            </div>
+            <div class="drawer-body" style="padding:20px 24px; overflow-y:auto; max-height:calc(100vh - 160px);">
+                <!-- Metadata Grid -->
+                <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; margin-bottom:20px; padding:14px; background:rgba(30,41,59,0.4); border-radius:8px; border:1px solid var(--border-color);">
+                    <div>
+                        <div style="font-size:11px; color:#64748b; font-family:var(--font-mono);">STATUS</div>
+                        <div id="drawerRuleStatus" style="font-size:13px; font-weight:600; color:#f1f5f9; margin-top:2px;">Active</div>
+                    </div>
+                    <div>
+                        <div style="font-size:11px; color:#64748b; font-family:var(--font-mono);">TOTAL RUNS</div>
+                        <div id="drawerRuleRuns" style="font-size:13px; font-weight:600; color:#f1f5f9; margin-top:2px;">0</div>
+                    </div>
+                    <div>
+                        <div style="font-size:11px; color:#64748b; font-family:var(--font-mono);">EXECUTION PRIORITY</div>
+                        <div id="drawerRulePriority" style="font-size:13px; font-weight:600; color:#f1f5f9; margin-top:2px;">10</div>
+                    </div>
+                    <div>
+                        <div style="font-size:11px; color:#64748b; font-family:var(--font-mono);">COOLDOWN PERIOD</div>
+                        <div id="drawerRuleCooldown" style="font-size:13px; font-weight:600; color:#f1f5f9; margin-top:2px;">0s</div>
+                    </div>
+                </div>
+
+                <!-- Trigger Source -->
+                <div style="margin-bottom:20px;">
+                    <h4 style="font-size:12px; color:#94a3b8; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:8px;">Trigger Specification</h4>
+                    <div id="drawerTriggerBox" style="padding:12px 14px; background:#0b1120; border:1px solid var(--border-color); border-radius:6px; font-size:13px; color:#e2e8f0;">
+                        <code>event: system.metrics</code>
+                    </div>
+                </div>
+
+                <!-- Conditions -->
+                <div style="margin-bottom:20px;">
+                    <h4 style="font-size:12px; color:#94a3b8; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:8px;">Evaluation Conditions</h4>
+                    <div id="drawerConditionsBox" style="display:flex; flex-direction:column; gap:8px;">
+                        <span style="color:#64748b; font-size:13px;">No conditions (always runs when triggered)</span>
+                    </div>
+                </div>
+
+                <!-- Action Pipeline -->
+                <div style="margin-bottom:20px;">
+                    <h4 style="font-size:12px; color:#94a3b8; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:8px;">Action Pipeline</h4>
+                    <div id="drawerActionsBox" style="display:flex; flex-direction:column; gap:8px;">
+                        <span style="color:#64748b; font-size:13px;">No actions configured</span>
+                    </div>
+                </div>
+            </div>
+            <div class="drawer-footer" style="padding:16px 24px; border-top:1px solid var(--border-color); background:rgba(15,23,42,0.95); display:flex; gap:10px; justify-content:flex-end;">
+                <button type="button" class="hud-btn primary small" onclick="openExecutionConsoleFromDrawer()" style="font-weight:600;"><span style="color:#fbbf24;">⚡</span> Run Now</button>
+                <button type="button" class="hud-btn purple small" onclick="runDryRunFromDrawer()">🧪 Test (Dry Run)</button>
+                <button type="button" class="hud-btn outline small" onclick="editRuleFromDrawer()">✏️ Edit</button>
             </div>
         </div>
     </div>
