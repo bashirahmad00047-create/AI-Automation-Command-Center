@@ -378,6 +378,7 @@ gunicorn --config gunicorn.conf.py app:app
 | `WHATSAPP_VERIFY_TOKEN` | Optional | `opsflow_whatsapp_verify_2026` | Webhook verification token configured in Meta App Dashboard. |
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | Optional | `""` | Meta WhatsApp Business Account (WABA) ID. |
 | `WHATSAPP_APP_SECRET` | Optional | `""` | App Secret used for `X-Hub-Signature-256` HMAC webhook verification. |
+| `SLACK_WEBHOOK_URL` | Optional | `""` | Slack Incoming Webhook URL (e.g. `https://hooks.slack.com/services/...`) for instant operational alerts. |
 
 ### 2. Authentication & Forgot Password / Password Reset Flow
 
@@ -397,7 +398,14 @@ gunicorn --config gunicorn.conf.py app:app
 - **Outbound Messaging**: `POST /api/v1/whatsapp/messages/send` dispatches messages through Meta Graph API v19.0 or provides a deterministic mock simulation when credentials are unconfigured.
 - **Workflow Trigger Integration**: Ingests `whatsapp.message` events into the OpsFlow Automation Engine to trigger alerts and automated incident workflows.
 
-### 4. Health & Cloud Readiness Probes
+### 4. Enterprise Observability & Compliance Export
+
+- **Prometheus Telemetry Exposition**: `GET /metrics` and `GET /api/v1/metrics` export standard Prometheus metrics (`text/plain; version=0.0.4; charset=utf-8`) covering process uptime, CPU and memory utilization, active rules, and execution counters for Kubernetes, Grafana, and Datadog scraping.
+- **Compliance Audit Trail Export**: `GET /api/v1/audit-trail/export?format=csv` (with automatic attachment headers) and `?format=json` for SOC 2, ISO 27001, and corporate compliance audit investigations.
+- **Hardened Security Headers**: Enforces `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`, and strict CSP headers.
+- **Enterprise Slack Notifications**: Integrates real-time Slack incoming webhooks with dynamic context interpolation and mock fallbacks in development environments.
+
+### 5. Health & Cloud Readiness Probes
 
 - `GET /health` and `GET /api/v1/health`: Liveness probe for Render, Kubernetes, and load balancers.
 - `GET /ready` and `GET /api/v1/ready`: Comprehensive readiness probe verifying:
@@ -405,10 +413,10 @@ gunicorn --config gunicorn.conf.py app:app
   - Workflow automation engine responsiveness
   - Persistent storage availability
 
-### 5. Running the Test Suite
+### 6. Running the Test Suite
 
 ```bash
-# Run all 127 platform unit, integration, and security tests
+# Run all 131 platform unit, integration, and security tests
 pytest -v
 
 # Run Phase 7 specific upgrade tests

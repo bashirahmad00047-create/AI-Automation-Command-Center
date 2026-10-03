@@ -92,3 +92,42 @@ class TelemetryMonitor:
         if minutes > 0:
             return f"{minutes}m {secs}s"
         return f"{secs}s"
+
+    def generate_prometheus_exposition(self, engine: Any = None) -> str:
+        """Renders standard Prometheus exposition format."""
+        metrics = self.get_metrics()
+        eng_online = 1 if (engine and engine.is_running) else 0
+        total_rules = 0
+        total_execs = 0
+        try:
+            from models import AutomationRule, WorkflowExecution
+            total_rules = AutomationRule.query.count()
+            total_execs = WorkflowExecution.query.count()
+        except Exception:
+            pass
+
+        lines = [
+            "# HELP opsflow_engine_online Automation engine running state (1=online, 0=offline)",
+            "# TYPE opsflow_engine_online gauge",
+            f"opsflow_engine_online {eng_online}",
+            "# HELP opsflow_uptime_seconds Process uptime in seconds",
+            "# TYPE opsflow_uptime_seconds counter",
+            f"opsflow_uptime_seconds {metrics.get('uptime_seconds', 0)}",
+            "# HELP opsflow_cpu_utilization_percent CPU utilization percentage",
+            "# TYPE opsflow_cpu_utilization_percent gauge",
+            f"opsflow_cpu_utilization_percent {metrics.get('cpu_percent', 0.0)}",
+            "# HELP opsflow_memory_utilization_percent Memory utilization percentage",
+            "# TYPE opsflow_memory_utilization_percent gauge",
+            f"opsflow_memory_utilization_percent {metrics.get('memory_percent', 0.0)}",
+            "# HELP opsflow_process_memory_mb Process RSS memory in megabytes",
+            "# TYPE opsflow_process_memory_mb gauge",
+            f"opsflow_process_memory_mb {metrics.get('process_memory_mb', 0.0)}",
+            "# HELP opsflow_active_rules Total configured workflow rules",
+            "# TYPE opsflow_active_rules gauge",
+            f"opsflow_active_rules {total_rules}",
+            "# HELP opsflow_total_executions Total executions recorded",
+            "# TYPE opsflow_total_executions counter",
+            f"opsflow_total_executions {total_execs}",
+        ]
+        return "\n".join(lines) + "\n"
+

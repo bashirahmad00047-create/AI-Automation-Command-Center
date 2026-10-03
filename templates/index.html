@@ -902,6 +902,10 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
             <div class="hud-panel">
                 <div class="panel-header">
                     <h3>COMPLIANCE & SECURITY AUDIT TRAIL</h3>
+                    <div style="display: flex; gap: 8px;">
+                        <a href="/api/v1/audit-trail/export?format=csv" class="hud-btn outline small" download title="Download Audit Logs as CSV">📥 Export CSV</a>
+                        <a href="/api/v1/audit-trail/export?format=json" class="hud-btn outline small" download title="Download Audit Logs as JSON">📥 Export JSON</a>
+                    </div>
                 </div>
                 <div class="table-container">
                     <table class="hud-table">

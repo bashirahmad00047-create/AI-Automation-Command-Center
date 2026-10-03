@@ -17,6 +17,7 @@ import unittest
 
 from sqlalchemy import text
 
+from actions import ActionRunner
 from app import create_app
 from database import db
 from limiter import limiter
@@ -464,6 +465,89 @@ class TestPhase7ProductionUpgrade(unittest.TestCase):
         self.assertEqual(api_ready_res.status_code, 200)
         self.assertEqual(api_ready_res.get_json()["status"], "ready")
 
+    def test_slack_action_execution_and_rendering(self):
+        """ActionRunner executes slack_notification with rendered context and mock fallback."""
+        runner = ActionRunner()
+        context = {
+            "event": "alert.critical",
+            "payload": {"service": "payment-api", "error_code": "503"},
+            "organization_id": self.org1.id
+        }
+        action = {
+            "type": "slack_notification",
+            "params": {
+                "channel": "#incident-response",
+                "message": "Outage detected on {{ payload.service }}: HTTP {{ payload.error_code }}"
+            }
+        }
+        result = runner.execute_action(action, context)
+        self.assertEqual(result["status"], "success")
+        output = result.get("output", {})
+        self.assertEqual(output.get("status"), "mock_sent")
+        self.assertEqual(output.get("channel"), "#incident-response")
+        self.assertIn("payment-api", output.get("text", ""))
+
+    def test_audit_trail_export_csv_and_json(self):
+        """Exports compliance audit trail in both CSV and JSON formats."""
+        # Log in as Tenant Alpha owner
+        self.client.post("/api/v1/auth/login", json={
+            "email": "owner@alphacorp.io",
+            "password": "AlphaPass2026!"
+        })
+
+        # Generate some audit events
+        audit1 = AuditLog(
+            organization_id=self.org1.id,
+            user_id=self.user1.id,
+            user_email=self.user1.email,
+            action="rule.create",
+            resource_type="automation_rule",
+            resource_id="rule-test-01",
+            details_json=json.dumps({"name": "Test Rule"}),
+            ip_address="127.0.0.1"
+        )
+        db.session.add(audit1)
+        db.session.commit()
+
+        # 1. Export JSON format
+        res_json = self.client.get("/api/v1/audit-trail/export?format=json")
+        self.assertEqual(res_json.status_code, 200)
+        json_data = res_json.get_json()
+        self.assertEqual(json_data["organization_id"], self.org1.id)
+        self.assertGreaterEqual(json_data["count"], 1)
+
+        # 2. Export CSV format
+        res_csv = self.client.get("/api/v1/audit-trail/export?format=csv")
+        self.assertEqual(res_csv.status_code, 200)
+        self.assertIn("text/csv", res_csv.content_type)
+        csv_text = res_csv.data.decode("utf-8")
+        self.assertIn("Action,Resource Type,Resource ID", csv_text)
+        self.assertIn("rule.create", csv_text)
+
+    def test_prometheus_metrics_exposition(self):
+        """Verifies standard Prometheus exposition format on root /metrics and API endpoint."""
+        res = self.client.get("/metrics")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("text/plain", res.content_type)
+        metrics_text = res.data.decode("utf-8")
+        self.assertIn("# HELP opsflow_engine_online", metrics_text)
+        self.assertIn("# TYPE opsflow_engine_online gauge", metrics_text)
+        self.assertIn("opsflow_engine_online 1", metrics_text)
+        self.assertIn("opsflow_uptime_seconds", metrics_text)
+
+        api_res = self.client.get("/api/v1/metrics")
+        self.assertEqual(api_res.status_code, 200)
+        self.assertIn("opsflow_engine_online", api_res.data.decode("utf-8"))
+
+    def test_enhanced_security_headers(self):
+        """Verifies enterprise security headers are applied to HTTP responses."""
+        res = self.client.get("/health")
+        self.assertEqual(res.headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertEqual(res.headers.get("X-Frame-Options"), "SAMEORIGIN")
+        self.assertEqual(res.headers.get("Referrer-Policy"), "strict-origin-when-cross-origin")
+        self.assertIn("geolocation=()", res.headers.get("Permissions-Policy", ""))
+
 
 if __name__ == "__main__":
     unittest.main()
+

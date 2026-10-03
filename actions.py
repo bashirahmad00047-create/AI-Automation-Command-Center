@@ -99,6 +99,8 @@ class ActionRunner:
                 output = self._action_ai_classify(rendered_params, context)
             elif action_type in ("whatsapp_message", "whatsapp_send", "send_whatsapp", "whatsapp"):
                 output = self._action_whatsapp(rendered_params, context)
+            elif action_type in ("slack_notification", "slack_message", "send_slack", "slack"):
+                output = self._action_slack(rendered_params, context)
             elif action_type in ("file_write", "file_append"):
                 output = self._action_file_io(action_type, rendered_params, context)
             elif action_type == "data_transform":
@@ -505,4 +507,52 @@ class ActionRunner:
             message_text=message_text,
             execution_id=execution_id
         )
+
+    def _action_slack(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatches an enterprise Slack notification via Incoming Webhook with dev mock fallback."""
+        webhook_url = params.get("webhook_url") or os.environ.get("SLACK_WEBHOOK_URL", "").strip()
+        channel = params.get("channel") or "#alerts"
+        text = params.get("text") or params.get("message") or "OpsFlow Automation Alert"
+        username = params.get("username") or "OpsFlow Bot"
+        icon_emoji = params.get("icon_emoji") or ":zap:"
+
+        payload = {
+            "channel": channel,
+            "username": username,
+            "text": text,
+            "icon_emoji": icon_emoji,
+        }
+
+        if webhook_url and webhook_url.startswith("https://hooks.slack.com/"):
+            try:
+                resp = requests.post(webhook_url, json=payload, timeout=8)
+                if resp.status_code == 200:
+                    return {
+                        "status": "sent",
+                        "channel": channel,
+                        "text": text,
+                        "live_dispatch": True
+                    }
+                else:
+                    return {
+                        "status": "failed",
+                        "error": f"Slack API HTTP {resp.status_code}: {resp.text}",
+                        "channel": channel
+                    }
+            except Exception as e:
+                return {
+                    "status": "failed",
+                    "error": str(e),
+                    "channel": channel
+                }
+
+        # Safe development simulation mock mode
+        return {
+            "status": "mock_sent",
+            "simulated": True,
+            "channel": channel,
+            "text": text,
+            "notice": "Slack webhook not configured; simulated channel delivery."
+        }
+
 

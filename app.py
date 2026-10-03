@@ -77,6 +77,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
         csp = (
             "default-src 'self' 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net; "
             "img-src 'self' data:; "
@@ -101,6 +103,17 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "timestamp": datetime.datetime.utcnow().isoformat(),
             "version": "2.4.0-enterprise"
         }), 200
+
+    # Prometheus Metrics Exporter (Grafana, K8s, Cloud Monitoring)
+    @application.route("/metrics", methods=["GET"])
+    def root_prometheus_metrics():
+        eng = application.config.get("AUTOMATION_ENGINE")
+        telemetry = eng.telemetry if eng else None
+        if not telemetry:
+            from telemetry import TelemetryMonitor
+            telemetry = TelemetryMonitor()
+        exposition = telemetry.generate_prometheus_exposition(engine=eng)
+        return exposition, 200, {"Content-Type": "text/plain; version=0.0.4; charset=utf-8"}
 
     # Frontend Dashboard View
     @application.route("/")

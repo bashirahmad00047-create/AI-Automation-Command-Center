@@ -483,6 +483,14 @@ class AutomationEngine:
                             step_status = "FAILED"
                             step_error = wa_res.get("error")
 
+                    elif st_type in ("slack", "slack_notification", "slack_message"):
+                        slack_res = self.runner.execute_action({"type": "slack_notification", "params": st_config}, context, self.storage, dry_run=dry_run)
+                        step_output = slack_res.get("output", {})
+                        action_results.append(slack_res)
+                        if slack_res.get("status") == "failed":
+                            step_status = "FAILED"
+                            step_error = slack_res.get("error")
+
                     elif st_type == "delay":
                         step_output = {"delayed_seconds": min(float(st_config.get("seconds", 1)), 5.0), "simulated": True}
 

@@ -1824,6 +1824,69 @@ def get_audit_trail():
     return jsonify({"audit_trail": [a.to_dict() for a in audits], "count": len(audits)})
 
 
+@api_v1.route("/audit-trail/export", methods=["GET"])
+@api_v1.route("/audit/export", methods=["GET"])
+@require_role(["owner", "admin"])
+@require_feature("audit_trail")
+def export_audit_trail():
+    """Exports tenant audit trail in CSV or JSON format for enterprise compliance."""
+    org = g.current_org
+    fmt = request.args.get("format", "json").lower()
+    limit = min(int(request.args.get("limit", 500)), 5000)
+    audits = AuditLog.query.filter_by(organization_id=org.id).order_by(desc(AuditLog.created_at)).limit(limit).all()
+
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    org_slug = org.slug if org else "workspace"
+
+    if fmt == "csv":
+        import csv
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["ID", "Timestamp", "User Email", "Action", "Resource Type", "Resource ID", "IP Address", "Details"])
+        for a in audits:
+            writer.writerow([
+                a.id,
+                a.created_at.isoformat() if a.created_at else "",
+                a.user_email or "System",
+                a.action,
+                a.resource_type,
+                a.resource_id or "",
+                a.ip_address or "",
+                a.details_json or "{}"
+            ])
+        log_audit_event("audit.export_csv", "audit_trail", org.id, {"count": len(audits)})
+        response = current_app.response_class(
+            output.getvalue(),
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=audit_trail_{org_slug}_{timestamp}.csv"}
+        )
+        return response
+
+    log_audit_event("audit.export_json", "audit_trail", org.id, {"count": len(audits)})
+    return jsonify({
+        "organization_id": org.id,
+        "organization_name": org.name,
+        "exported_at": datetime.datetime.utcnow().isoformat(),
+        "count": len(audits),
+        "audit_trail": [a.to_dict() for a in audits]
+    }), 200
+
+
+@api_v1.route("/metrics", methods=["GET"])
+@api_v1.route("/system/metrics-prometheus", methods=["GET"])
+def system_prometheus_metrics():
+    """Prometheus exposition telemetry for enterprise monitoring."""
+    engine = get_engine()
+    telemetry = engine.telemetry if engine else None
+    if not telemetry:
+        from telemetry import TelemetryMonitor
+        telemetry = TelemetryMonitor()
+    exposition = telemetry.generate_prometheus_exposition(engine=engine)
+    return exposition, 200, {"Content-Type": "text/plain; version=0.0.4; charset=utf-8"}
+
+
+
 @api_v1.route("/health", methods=["GET"])
 @api_v1.route("/system/health", methods=["GET"])
 def system_health():
