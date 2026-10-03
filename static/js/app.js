@@ -425,18 +425,13 @@ function renderRulesTable() {
     if (runsPill) runsPill.textContent = totalRuns.toLocaleString();
 
     if (state.rules.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="7" class="empty-cell" style="padding: 48px 20px; text-align: center;">
-                    <div style="font-size: 2.5rem; margin-bottom: 10px;">⚡</div>
-                    <div style="font-size: 1.1rem; font-weight: 600; color: #f1f5f9; margin-bottom: 6px;">No workflows found in this category</div>
-                    <div style="font-size: 0.85rem; color: #94a3b8; max-width: 420px; margin: 0 auto 16px;">Automate incident remediation, lead routing, webhook processing, and alert escalation with custom workflows.</div>
-                    <button type="button" class="hud-btn primary small" onclick="openNewRuleModal()" style="display: inline-flex; align-items: center; gap: 6px;">
-                        <span>+</span> Create New Workflow
-                    </button>
-                </td>
-            </tr>
-        `;
+        tbody.innerHTML = renderEmptyStateRow({
+            colspan: 7,
+            icon: '⚡',
+            title: 'No workflows found in this category',
+            description: 'Automate incident remediation, lead routing, webhook processing, and alert escalation with custom workflows.',
+            actionHtml: '<button type="button" class="hud-btn primary small" onclick="openNewRuleModal()"><span>+</span> Create New Workflow</button>'
+        });
         return;
     }
 
@@ -1093,16 +1088,13 @@ function renderWebhooksTable() {
     if (!tbody) return;
 
     if (!state.webhooks || state.webhooks.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="7" class="text-center" style="padding: 56px 20px; text-align: center;">
-                    <div style="font-size: 2.8rem; margin-bottom: 12px;">🔗</div>
-                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No webhooks configured yet</div>
-                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Connect Datadog, Stripe, GitHub, AWS SNS, or custom services to trigger automated workflows.</p>
-                    <button type="button" class="hud-btn primary small" onclick="openNewWebhookModal()"><span>+</span> Create Inbound Webhook</button>
-                </td>
-            </tr>
-        `;
+        tbody.innerHTML = renderEmptyStateRow({
+            colspan: 7,
+            icon: '🔗',
+            title: 'No webhooks configured yet',
+            description: 'Connect Datadog, Stripe, GitHub, AWS SNS, or custom services to trigger automated workflows.',
+            actionHtml: '<button type="button" class="hud-btn primary small" onclick="openNewWebhookModal()"><span>+</span> Create Inbound Webhook</button>'
+        });
         return;
     }
 
@@ -1474,16 +1466,13 @@ function renderLogsTable() {
     if (!tbody) return;
 
     if (!state.logs || state.logs.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="7" class="text-center" style="padding: 56px 20px; text-align: center;">
-                    <div style="font-size: 2.8rem; margin-bottom: 12px;">📊</div>
-                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No execution records yet</div>
-                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">When automated workflows or incident responders trigger, complete telemetry and step traces will appear here.</p>
-                    <button type="button" class="hud-btn primary small" onclick="switchTab('rules')"><span>⚡</span> View Workflows</button>
-                </td>
-            </tr>
-        `;
+        tbody.innerHTML = renderEmptyStateRow({
+            colspan: 7,
+            icon: '📊',
+            title: 'No execution records yet',
+            description: 'When automated workflows or incident responders trigger, complete telemetry and step traces will appear here.',
+            actionHtml: '<button type="button" class="hud-btn primary small" onclick="switchTab(\'rules\')"><span>⚡</span> View Workflows</button>'
+        });
         return;
     }
 
@@ -1515,16 +1504,13 @@ function renderDashboardMiniLogs() {
 
     const recent = state.logs.slice(0, 5);
     if (!recent || recent.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="5" class="text-center" style="padding: 36px 16px; text-align: center;">
-                    <div style="font-size: 1.8rem; margin-bottom: 8px;">⚡</div>
-                    <div style="font-weight: 600; color: #f8fafc; font-size: 0.95rem; margin-bottom: 4px;">No workflow executions yet</div>
-                    <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 14px;">Create or run a workflow to start tracking operational activity.</div>
-                    <button type="button" class="hud-btn primary small" onclick="switchTab('rules')">⚡ View Workflows</button>
-                </td>
-            </tr>
-        `;
+        tbody.innerHTML = renderEmptyStateRow({
+            colspan: 5,
+            icon: '⚡',
+            title: 'No workflow executions yet',
+            description: 'Create or run a workflow to start tracking operational activity.',
+            actionHtml: '<button type="button" class="hud-btn primary small" onclick="switchTab(\'rules\')">⚡ View Workflows</button>'
+        });
         return;
     }
 
@@ -1672,13 +1658,11 @@ function renderIncidentsQueue() {
     if (!container) return;
 
     if (!state.incidents || state.incidents.length === 0) {
-        container.innerHTML = `
-            <div style="padding: 56px 20px; text-align: center;">
-                <div style="font-size: 2.8rem; margin-bottom: 12px;">🛡️</div>
-                <div style="font-size: 1.15rem; font-weight: 700; color: #10b981; margin-bottom: 6px;">All systems operational</div>
-                <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto;">No incidents in this queue. Security and reliability guardrails are actively monitoring events.</p>
-            </div>
-        `;
+        container.innerHTML = renderEmptyStateCard({
+            icon: '🛡️',
+            title: 'All systems operational',
+            description: 'No incidents in this queue. Security and reliability guardrails are actively monitoring events.'
+        });
         return;
     }
 
@@ -2050,15 +2034,12 @@ function renderAuditTrail() {
     if (!tbody) return;
 
     if (!state.auditLogs || state.auditLogs.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="5" class="text-center" style="padding: 56px 20px; text-align: center;">
-                    <div style="font-size: 2.8rem; margin-bottom: 12px;">📋</div>
-                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No audit events recorded yet</div>
-                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto;">Administrative actions, authentication events, and workflow modifications will appear here with cryptographic integrity.</p>
-                </td>
-            </tr>
-        `;
+        tbody.innerHTML = renderEmptyStateRow({
+            colspan: 5,
+            icon: '📋',
+            title: 'No audit events recorded yet',
+            description: 'Administrative actions, authentication events, and workflow modifications will appear here with cryptographic integrity.'
+        });
         return;
     }
 
@@ -2740,6 +2721,33 @@ function escapeHtml(str) {
         .replace(/'/g, '&#039;');
 }
 
+/**
+ * Reusable Enterprise Empty State Card generator (Section 26).
+ */
+function renderEmptyStateCard({ icon = '📂', title = 'No records found', description = '', actionHtml = '' } = {}) {
+    return `
+        <div class="hud-empty-state">
+            <div class="empty-icon">${icon}</div>
+            <div class="empty-title">${escapeHtml(title)}</div>
+            ${description ? `<p class="empty-desc">${escapeHtml(description)}</p>` : ''}
+            ${actionHtml ? `<div class="empty-action">${actionHtml}</div>` : ''}
+        </div>
+    `;
+}
+
+/**
+ * Reusable Enterprise Empty State Row generator for HTML tables (Section 26).
+ */
+function renderEmptyStateRow({ colspan = 7, icon = '📂', title = 'No records found', description = '', actionHtml = '' } = {}) {
+    return `
+        <tr>
+            <td colspan="${colspan}" class="hud-empty-state-cell">
+                ${renderEmptyStateCard({ icon, title, description, actionHtml })}
+            </td>
+        </tr>
+    `;
+}
+
 function importRulesFile(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -2813,26 +2821,21 @@ function renderLeads(leads) {
 
     if (!leads || !leads.length) {
         if (!leadsCache || !leadsCache.length) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="8" class="text-center" style="padding: 56px 20px; text-align: center;">
-                        <div style="font-size: 2.8rem; margin-bottom: 12px;">📭</div>
-                        <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No customer inquiries yet</div>
-                        <p style="font-size: 0.88rem; color: #94a3b8; max-width: 460px; margin: 0 auto 18px;">New leads will appear here when received via webhook, website contact forms, or manual intake.</p>
-                        <button type="button" class="hud-btn primary small" onclick="openNewLeadModal()"><span>+</span> Ingest New Lead</button>
-                    </td>
-                </tr>
-            `;
+            tbody.innerHTML = renderEmptyStateRow({
+                colspan: 8,
+                icon: '📭',
+                title: 'No customer inquiries yet',
+                description: 'New leads will appear here when received via webhook, website contact forms, or manual intake.',
+                actionHtml: '<button type="button" class="hud-btn primary small" onclick="openNewLeadModal()"><span>+</span> Ingest New Lead</button>'
+            });
         } else {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="8" class="text-center" style="padding: 40px; color: #64748b;">
-                        <div style="font-size: 2rem; margin-bottom: 8px;">🔍</div>
-                        <div style="font-weight: 600; color: #cbd5e1; margin-bottom: 6px;">No CRM leads match current filter criteria.</div>
-                        <button type="button" class="hud-btn outline small" style="margin-top: 8px;" onclick="resetLeadFilters()">Reset Filters</button>
-                    </td>
-                </tr>
-            `;
+            tbody.innerHTML = renderEmptyStateRow({
+                colspan: 8,
+                icon: '🔍',
+                title: 'No matching leads found',
+                description: 'No CRM leads match current filter criteria.',
+                actionHtml: '<button type="button" class="hud-btn outline small" onclick="resetLeadFilters()">Reset Filters</button>'
+            });
         }
         return;
     }

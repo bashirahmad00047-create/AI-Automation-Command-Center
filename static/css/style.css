@@ -3481,3 +3481,49 @@ summary:focus-visible {
     white-space: pre-wrap;
 }
 
+/* ==========================================================================
+   REUSABLE ENTERPRISE EMPTY STATE COMPONENT (SECTION 26)
+   ========================================================================== */
+.hud-empty-state {
+    padding: 52px 20px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.hud-empty-state-cell {
+    padding: 0 !important;
+    border: none !important;
+}
+
+.hud-empty-state .empty-icon {
+    font-size: 2.6rem;
+    margin-bottom: 12px;
+    line-height: 1;
+}
+
+.hud-empty-state .empty-title {
+    font-size: 1.12rem;
+    font-weight: 700;
+    color: var(--text-light, #f8fafc);
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+}
+
+.hud-empty-state .empty-desc {
+    font-size: 0.88rem;
+    color: var(--text-dim, #94a3b8);
+    max-width: 440px;
+    margin: 0 auto 18px;
+    line-height: 1.5;
+}
+
+.hud-empty-state .empty-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+
