@@ -1079,30 +1079,80 @@ function renderWebhooksTable() {
     const tbody = document.getElementById('webhooksTableBody');
     if (!tbody) return;
 
-    if (state.webhooks.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No inbound webhooks configured for this workspace.</td></tr>';
+    if (!state.webhooks || state.webhooks.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center" style="padding: 56px 20px; text-align: center;">
+                    <div style="font-size: 2.8rem; margin-bottom: 12px;">🔗</div>
+                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No webhooks configured yet</div>
+                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Connect Datadog, Stripe, GitHub, AWS SNS, or custom services to trigger automated workflows.</p>
+                    <button type="button" class="hud-btn primary small" onclick="openNewWebhookModal()"><span>+</span> Create Inbound Webhook</button>
+                </td>
+            </tr>
+        `;
         return;
     }
 
     tbody.innerHTML = state.webhooks.map(wh => {
+        const securityBadge = wh.secret_configured
+            ? '<span class="status-pill green" style="font-size: 0.75rem;">🛡️ HMAC Protected</span>'
+            : '<span class="status-pill blue" style="font-size: 0.75rem;">Standard Token</span>';
+
         return `
             <tr>
-                <td><strong>${escapeHtml(wh.name)}</strong></td>
+                <td>
+                    <div style="font-weight: 600; color: #f8fafc;">${escapeHtml(wh.name)}</div>
+                    <div style="font-size: 0.75rem; color: #94a3b8; font-family: monospace;">${escapeHtml(wh.id)}</div>
+                </td>
+                <td>${securityBadge}</td>
                 <td>
                     <div style="display:flex; align-items:center; gap:6px;">
-                        <code style="font-size:0.75rem; color:var(--emerald-glow);">${escapeHtml(wh.webhook_url)}</code>
+                        <code style="font-size:0.75rem; color:var(--emerald-glow); background: rgba(16,185,129,0.08); padding: 3px 8px; border-radius: 4px;">${escapeHtml(wh.webhook_url)}</code>
                         <button class="copy-btn" onclick="copyWebhookUrl('${wh.webhook_url}')">Copy</button>
                     </div>
                 </td>
-                <td><span style="font-size:0.8rem; color:var(--text-muted);">${wh.target_rule_id || 'All Matching Rules'}</span></td>
-                <td><span style="font-weight:700; font-family:var(--font-mono);">${wh.request_count || 0}</span></td>
-                <td style="font-size:0.75rem; color:var(--text-muted);">${wh.last_received_at || 'Never'}</td>
+                <td><span style="font-size:0.8rem; color:var(--text-muted);">${escapeHtml(wh.target_rule_id || 'All Matching Rules')}</span></td>
+                <td><span style="font-weight:700; font-family:var(--font-mono); color: #f8fafc;">${wh.request_count || 0} reqs</span></td>
+                <td style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(wh.last_received_at || 'Never run')}</td>
                 <td>
-                    <button class="action-btn red-btn" onclick="deleteWebhook('${wh.id}')" title="Delete Webhook">🗑️</button>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <button class="action-btn cyan-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="testWebhookEndpoint('${wh.id}', '${wh.webhook_url}', ${Boolean(wh.secret_configured)})" title="Test Webhook Ingestion">⚡ Test</button>
+                        <button class="action-btn red-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="deleteWebhook('${wh.id}')" title="Delete Webhook">🗑️ Delete</button>
+                    </div>
                 </td>
             </tr>
         `;
     }).join('');
+}
+
+async function testWebhookEndpoint(id, url, isHmac) {
+    if (isHmac) {
+        showToast('Webhook has HMAC verification active. In live environments, send signed payloads with X-Hub-Signature-256.', 'info');
+    }
+    showToast('Sending test signal to webhook endpoint...', 'info');
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                event: 'system.metrics',
+                cpu_percent: 91.2,
+                source: 'OpsFlow Webhook Test Console',
+                test_id: id,
+                timestamp: new Date().toISOString()
+            })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('✅ Webhook test successful! Signal received and processed.', 'success');
+            loadWebhooks();
+            pollTelemetry();
+        } else {
+            showToast(`Webhook responded (${res.status}): ${data.error || 'Check signature / payload'}`, res.status === 401 ? 'warning' : 'error');
+        }
+    } catch (err) {
+        showToast(`Webhook network test error: ${err.message}`, 'error');
+    }
 }
 
 function copyWebhookUrl(url) {
@@ -1410,8 +1460,17 @@ function renderLogsTable() {
     const tbody = document.getElementById('logsTableBody');
     if (!tbody) return;
 
-    if (state.logs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">No execution logs found.</td></tr>';
+    if (!state.logs || state.logs.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center" style="padding: 56px 20px; text-align: center;">
+                    <div style="font-size: 2.8rem; margin-bottom: 12px;">📊</div>
+                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No execution records yet</div>
+                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">When automated workflows or incident responders trigger, complete telemetry and step traces will appear here.</p>
+                    <button type="button" class="hud-btn primary small" onclick="switchTab('studio')"><span>⚡</span> View Workflows</button>
+                </td>
+            </tr>
+        `;
         return;
     }
 
@@ -1441,8 +1500,17 @@ function renderDashboardMiniLogs() {
     if (!tbody) return;
 
     const recent = state.logs.slice(0, 5);
-    if (recent.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">No recent dispatches recorded.</td></tr>';
+    if (!recent || recent.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center" style="padding: 36px 16px; text-align: center;">
+                    <div style="font-size: 1.8rem; margin-bottom: 8px;">⚡</div>
+                    <div style="font-weight: 600; color: #f8fafc; font-size: 0.95rem; margin-bottom: 4px;">No executions yet</div>
+                    <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 12px;">Run a workflow to see execution activity here.</div>
+                    <button type="button" class="hud-btn primary small" onclick="switchTab('studio')">Run Workflow</button>
+                </td>
+            </tr>
+        `;
         return;
     }
 
@@ -1588,8 +1656,14 @@ function renderIncidentsQueue() {
     const container = document.getElementById('incidentsQueueContainer');
     if (!container) return;
 
-    if (state.incidents.length === 0) {
-        container.innerHTML = '<div class="empty-cell">No incidents in this queue. All systems operating normally.</div>';
+    if (!state.incidents || state.incidents.length === 0) {
+        container.innerHTML = `
+            <div style="padding: 56px 20px; text-align: center;">
+                <div style="font-size: 2.8rem; margin-bottom: 12px;">🛡️</div>
+                <div style="font-size: 1.15rem; font-weight: 700; color: #10b981; margin-bottom: 6px;">All systems operational</div>
+                <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto;">No incidents in this queue. Security and reliability guardrails are actively monitoring events.</p>
+            </div>
+        `;
         return;
     }
 
@@ -1633,8 +1707,14 @@ function renderDashboardIncidents() {
     if (!container) return;
 
     const openList = state.incidents.filter(i => i.status === 'open').slice(0, 3);
-    if (openList.length === 0) {
-        container.innerHTML = '<div class="empty-cell">No active open incidents. System healthy.</div>';
+    if (!openList || openList.length === 0) {
+        container.innerHTML = `
+            <div style="padding: 32px 16px; text-align: center;">
+                <div style="font-size: 1.8rem; margin-bottom: 8px;">🛡️</div>
+                <div style="font-weight: 600; color: #10b981; font-size: 0.95rem; margin-bottom: 4px;">No incidents</div>
+                <div style="font-size: 0.8rem; color: #94a3b8;">Your workspace currently has no open incidents. All operational systems are healthy.</div>
+            </div>
+        `;
         return;
     }
 
@@ -1714,8 +1794,17 @@ function renderApiKeysTable() {
     const tbody = document.getElementById('apiKeysTableBody');
     if (!tbody) return;
 
-    if (state.apiKeys.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No API keys created in this workspace.</td></tr>';
+    if (!state.apiKeys || state.apiKeys.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center" style="padding: 56px 20px; text-align: center;">
+                    <div style="font-size: 2.8rem; margin-bottom: 12px;">🔑</div>
+                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No API keys yet</div>
+                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Generate programmatic API tokens to integrate OpsFlow Cloud into your CI/CD pipelines, backend services, or monitoring scripts.</p>
+                    <button type="button" class="hud-btn primary small" onclick="openNewApiKeyModal()"><span>+</span> Generate API Key</button>
+                </td>
+            </tr>
+        `;
         return;
     }
 
@@ -1840,8 +1929,17 @@ function renderTeamMembers() {
     const tbody = document.getElementById('teamMembersTableBody');
     if (!tbody) return;
 
-    if (state.teamMembers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">No team members found.</td></tr>';
+    if (!state.teamMembers || state.teamMembers.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center" style="padding: 56px 20px; text-align: center;">
+                    <div style="font-size: 2.8rem; margin-bottom: 12px;">👥</div>
+                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No team members found</div>
+                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Collaborate with engineers and operators by inviting members with role-based access control.</p>
+                    <button type="button" class="hud-btn primary small" onclick="openAddMemberModal()"><span>+</span> Invite Member</button>
+                </td>
+            </tr>
+        `;
         return;
     }
 
@@ -1935,8 +2033,16 @@ function renderAuditTrail() {
     const tbody = document.getElementById('auditTrailTableBody');
     if (!tbody) return;
 
-    if (state.auditLogs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">No audit log records yet.</td></tr>';
+    if (!state.auditLogs || state.auditLogs.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center" style="padding: 56px 20px; text-align: center;">
+                    <div style="font-size: 2.8rem; margin-bottom: 12px;">📋</div>
+                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No audit events recorded yet</div>
+                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto;">Administrative actions, authentication events, and workflow modifications will appear here with cryptographic integrity.</p>
+                </td>
+            </tr>
+        `;
         return;
     }
 
@@ -2262,8 +2368,8 @@ async function loadBillingDashboard() {
 
         const tier = (data.plan_tier || 'free').toLowerCase();
         const tierName = tier.charAt(0).toUpperCase() + tier.slice(1);
-        const sub = data.subscription || {};
-        const subStatus = (sub.status || (tier === 'free' ? 'active' : 'unmanaged')).toUpperCase();
+        const rawStatus = (sub.status || (tier === 'free' ? 'active' : 'active')).toUpperCase();
+        const displayStatus = ['UNMANAGED'].includes(rawStatus) ? 'ACTIVE' : rawStatus;
 
         // 1. Header & Gateway Notices
         const headerBadge = document.getElementById('tabBillingHeaderBadge');
@@ -2280,8 +2386,8 @@ async function loadBillingDashboard() {
         // 2. Overview Card
         const overviewBadge = document.getElementById('tabBillingOverviewBadge');
         if (overviewBadge) {
-            overviewBadge.textContent = subStatus;
-            overviewBadge.className = `metric-badge ${['ACTIVE', 'TRIALING'].includes(subStatus) ? 'active' : 'warn'}`;
+            overviewBadge.textContent = displayStatus;
+            overviewBadge.className = `metric-badge ${['ACTIVE', 'TRIALING'].includes(displayStatus) ? 'active' : 'warn'}`;
         }
 
         const overviewPlan = document.getElementById('tabBillingOverviewPlan');
@@ -2295,7 +2401,15 @@ async function loadBillingDashboard() {
                 overviewCycle.textContent = 'Free Community Tier • Unlimited Duration';
             } else {
                 const interval = (sub.billing_interval || 'month') === 'year' ? 'Annually' : 'Monthly';
-                const renewText = sub.cancel_at_period_end ? 'Cancels at period end' : 'Auto-renewing';
+                let renewText = sub.cancel_at_period_end ? 'Cancels at period end' : 'Auto-renewing';
+                if (sub.current_period_end) {
+                    try {
+                        const d = new Date(sub.current_period_end * 1000);
+                        if (!isNaN(d.getTime())) {
+                            renewText += ` • Next renewal: ${d.toLocaleDateString()}`;
+                        }
+                    } catch (e) {}
+                }
                 overviewCycle.textContent = `Billed ${interval} • ${renewText}`;
             }
         }
@@ -2310,10 +2424,10 @@ async function loadBillingDashboard() {
         const rulesPct = maxRules > 0 ? Math.min(100, Math.round((curRules / maxRules) * 100)) : 0;
 
         const rulesBadge = document.getElementById('tabBillingRulesUsageBadge');
-        if (rulesBadge) rulesBadge.textContent = `${curRules} / ${maxRules}`;
+        if (rulesBadge) rulesBadge.textContent = `${rulesPct}% used`;
 
         const rulesLimit = document.getElementById('tabBillingRulesLimit');
-        if (rulesLimit) rulesLimit.textContent = `${maxRules} Max`;
+        if (rulesLimit) rulesLimit.textContent = `${curRules} / ${maxRules}`;
 
         const rulesProg = document.getElementById('tabBillingRulesProgress');
         if (rulesProg) {
@@ -2327,10 +2441,10 @@ async function loadBillingDashboard() {
         const eventsPct = maxEvents > 0 ? Math.min(100, Math.round((curEvents / maxEvents) * 100)) : 0;
 
         const eventsBadge = document.getElementById('tabBillingEventsUsageBadge');
-        if (eventsBadge) eventsBadge.textContent = `${curEvents.toLocaleString()} / ${maxEvents.toLocaleString()}`;
+        if (eventsBadge) eventsBadge.textContent = `${eventsPct}% used`;
 
         const eventsLimit = document.getElementById('tabBillingEventsLimit');
-        if (eventsLimit) eventsLimit.textContent = Number(maxEvents).toLocaleString();
+        if (eventsLimit) eventsLimit.textContent = `${curEvents.toLocaleString()} / ${Number(maxEvents).toLocaleString()}`;
 
         const eventsProg = document.getElementById('tabBillingEventsProgress');
         if (eventsProg) {
@@ -2344,10 +2458,10 @@ async function loadBillingDashboard() {
         const seatsPct = maxSeats > 0 ? Math.min(100, Math.round((curSeats / maxSeats) * 100)) : 0;
 
         const seatsBadge = document.getElementById('tabBillingSeatsUsageBadge');
-        if (seatsBadge) seatsBadge.textContent = `${curSeats} / ${maxSeats}`;
+        if (seatsBadge) seatsBadge.textContent = `${seatsPct}% used`;
 
         const seatsLimit = document.getElementById('tabBillingSeatsLimit');
-        if (seatsLimit) seatsLimit.textContent = `${maxSeats} Seats`;
+        if (seatsLimit) seatsLimit.textContent = `${curSeats} / ${maxSeats}`;
 
         const seatsProg = document.getElementById('tabBillingSeatsProgress');
         if (seatsProg) {
@@ -2680,15 +2794,29 @@ function renderLeads(leads) {
     const tbody = document.getElementById('leadsTableBody');
     if (!tbody) return;
 
-    if (!leads.length) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="8" class="text-center" style="padding: 40px; color: #64748b;">
-                    <div style="font-size: 2rem; margin-bottom: 8px;">📭</div>
-                    <div>No CRM leads found matching current filters.</div>
-                </td>
-            </tr>
-        `;
+    if (!leads || !leads.length) {
+        if (!leadsCache || !leadsCache.length) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="text-center" style="padding: 56px 20px; text-align: center;">
+                        <div style="font-size: 2.8rem; margin-bottom: 12px;">📭</div>
+                        <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No leads yet</div>
+                        <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Customer inquiries will appear here once they are ingested via webhook, website contact forms, or email intake.</p>
+                        <button type="button" class="hud-btn primary small" onclick="openNewLeadModal()"><span>+</span> Add your first lead</button>
+                    </td>
+                </tr>
+            `;
+        } else {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="text-center" style="padding: 40px; color: #64748b;">
+                        <div style="font-size: 2rem; margin-bottom: 8px;">🔍</div>
+                        <div style="font-weight: 600; color: #cbd5e1; margin-bottom: 6px;">No CRM leads match current filter criteria.</div>
+                        <button type="button" class="hud-btn outline small" style="margin-top: 8px;" onclick="resetLeadFilters()">Reset Filters</button>
+                    </td>
+                </tr>
+            `;
+        }
         return;
     }
 
@@ -2755,6 +2883,7 @@ function renderLeads(leads) {
 function filterLeads() {
     const searchVal = (document.getElementById('leadSearchInput')?.value || '').toLowerCase().trim();
     const statusVal = document.getElementById('leadStatusFilter')?.value || 'all';
+    const intentVal = document.getElementById('leadIntentFilter')?.value || 'all';
     const deptVal = document.getElementById('leadDeptFilter')?.value || 'all';
 
     const filtered = leadsCache.filter(l => {
@@ -2765,12 +2894,21 @@ function filterLeads() {
             (l.message || '').toLowerCase().includes(searchVal);
 
         const matchesStatus = statusVal === 'all' || l.status === statusVal;
+        const matchesIntent = intentVal === 'all' || (l.intent || '').toLowerCase() === intentVal.toLowerCase();
         const matchesDept = deptVal === 'all' || (l.route_department || '').toLowerCase() === deptVal.toLowerCase();
 
-        return matchesSearch && matchesStatus && matchesDept;
+        return matchesSearch && matchesStatus && matchesIntent && matchesDept;
     });
 
     renderLeads(filtered);
+}
+
+function resetLeadFilters() {
+    const s = document.getElementById('leadSearchInput'); if (s) s.value = '';
+    const st = document.getElementById('leadStatusFilter'); if (st) st.value = 'all';
+    const it = document.getElementById('leadIntentFilter'); if (it) it.value = 'all';
+    const dp = document.getElementById('leadDeptFilter'); if (dp) dp.value = 'all';
+    renderLeads(leadsCache);
 }
 
 async function updateLeadStatus(leadId, newStatus) {
@@ -3775,28 +3913,53 @@ async function cancelAsyncJob(jobId) {
 async function loadWhatsAppDashboard() {
     try {
         // 1. Load config
+        let isConfigured = false;
         const confRes = await fetch('/api/v1/whatsapp/config');
         if (confRes.ok) {
             const conf = await confRes.json();
+            isConfigured = Boolean(conf.is_configured);
             const urlInput = document.getElementById('waWebhookUrlInput');
             const tokenInput = document.getElementById('waVerifyTokenInput');
             const phoneIdInput = document.getElementById('waPhoneNumberIdInput');
             const modeBadge = document.getElementById('whatsappModeBadge');
+            const connStatus = document.getElementById('waConnectionStatus');
+            const banner = document.getElementById('whatsappModeBanner');
+            const bannerTitle = document.getElementById('whatsappBannerTitle');
+            const bannerDesc = document.getElementById('whatsappBannerDesc');
 
             if (urlInput) urlInput.value = conf.webhook_url;
             if (tokenInput) tokenInput.value = conf.verify_token;
             if (phoneIdInput) phoneIdInput.value = conf.phone_number_id || 'Not configured';
+
             if (modeBadge) {
-                if (conf.is_configured) {
-                    modeBadge.textContent = 'LIVE META CLOUD API';
-                    modeBadge.style.background = 'rgba(16,185,129,0.15)';
-                    modeBadge.style.color = '#10b981';
-                    modeBadge.style.borderColor = '#10b981';
+                if (isConfigured) {
+                    modeBadge.className = 'status-pill green';
+                    modeBadge.textContent = '● Connected';
                 } else {
-                    modeBadge.textContent = 'DEV SIMULATION MOCK MODE';
-                    modeBadge.style.background = 'rgba(0,240,255,0.15)';
-                    modeBadge.style.color = '#00f0ff';
-                    modeBadge.style.borderColor = '#00f0ff';
+                    modeBadge.className = 'status-pill blue';
+                    modeBadge.textContent = '🧪 Simulation';
+                }
+            }
+            if (connStatus) {
+                if (isConfigured) {
+                    connStatus.innerHTML = '<span class="status-pill green" style="font-size:0.75rem;">● Connected (Meta Cloud API)</span>';
+                } else {
+                    connStatus.innerHTML = '<span class="status-pill blue" style="font-size:0.75rem;">🧪 Simulation (Local Sandbox)</span>';
+                }
+            }
+            if (banner && bannerTitle && bannerDesc) {
+                if (isConfigured) {
+                    banner.style.background = 'rgba(16, 185, 129, 0.08)';
+                    banner.style.border = '1px solid rgba(16, 185, 129, 0.25)';
+                    bannerTitle.style.color = '#10b981';
+                    bannerTitle.textContent = 'Production WhatsApp Business Cloud API Connected';
+                    bannerDesc.textContent = 'Verified webhook ingress and live Meta Cloud API delivery active. Outbound notifications will be delivered to live user devices.';
+                } else {
+                    banner.style.background = 'rgba(0, 240, 255, 0.06)';
+                    banner.style.border = '1px solid rgba(0, 240, 255, 0.2)';
+                    bannerTitle.style.color = '#00f0ff';
+                    bannerTitle.textContent = 'Simulation Mode Active';
+                    bannerDesc.textContent = 'Operating in local sandbox mode. Outbound dispatches are simulated and persisted to local logs. Webhooks verify locally without external Meta API calls.';
                 }
             }
         }
@@ -3815,7 +3978,27 @@ async function loadWhatsAppDashboard() {
 
             if (tbody) {
                 if (messages.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No WhatsApp messages recorded in this workspace.</td></tr>';
+                    if (isConfigured) {
+                        tbody.innerHTML = `
+                            <tr>
+                                <td colspan="6" class="text-center" style="padding: 56px 20px; text-align: center;">
+                                    <div style="font-size: 2.8rem; margin-bottom: 12px;">💬</div>
+                                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No WhatsApp messages yet</div>
+                                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto;">Messages received through your WhatsApp Business connection will appear here.</p>
+                                </td>
+                            </tr>
+                        `;
+                    } else {
+                        tbody.innerHTML = `
+                            <tr>
+                                <td colspan="6" class="text-center" style="padding: 56px 20px; text-align: center;">
+                                    <div style="font-size: 2.8rem; margin-bottom: 12px;">📱</div>
+                                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">Connect WhatsApp Business to start receiving messages.</div>
+                                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Configure your Meta Business Phone Number ID and Access Token in environment variables or test outbound dispatch using the simulation form on the left.</p>
+                                </td>
+                            </tr>
+                        `;
+                    }
                 } else {
                     tbody.innerHTML = messages.map(m => {
                         const isInbound = m.direction === 'inbound';
@@ -3909,6 +4092,31 @@ function copyWhatsAppWebhookUrl() {
         input.select();
         document.execCommand('copy');
         showToast('Webhook URL copied!', 'success');
+    });
+}
+
+function toggleWhatsAppVerifyTokenVisibility() {
+    const input = document.getElementById('waVerifyTokenInput');
+    const btn = document.getElementById('waToggleTokenBtn');
+    if (!input) return;
+    if (input.type === 'password') {
+        input.type = 'text';
+        if (btn) btn.textContent = 'Hide';
+    } else {
+        input.type = 'password';
+        if (btn) btn.textContent = 'Show';
+    }
+}
+
+function copyWhatsAppVerifyToken() {
+    const input = document.getElementById('waVerifyTokenInput');
+    if (!input) return;
+    navigator.clipboard.writeText(input.value).then(() => {
+        showToast('WhatsApp verify token copied to clipboard safely.', 'success');
+    }).catch(() => {
+        input.select();
+        document.execCommand('copy');
+        showToast('Verify token copied.', 'info');
     });
 }
 
