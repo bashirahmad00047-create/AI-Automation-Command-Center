@@ -98,6 +98,7 @@ class JazzCashService:
             SystemSetting.get_val("JAZZCASH_ACCOUNT_NUMBER")
             or cfg.get("JAZZCASH_ACCOUNT_NUMBER")
             or os.environ.get("JAZZCASH_ACCOUNT_NUMBER")
+            or os.environ.get("JAZZCASH_NUMBER")
             or "0300-1234567"
         ).strip()
 

@@ -48,7 +48,8 @@ class WhatsAppService:
             SystemSetting.get_val("WHATSAPP_PHONE_NUMBER_ID")
             or cfg.get("WHATSAPP_PHONE_NUMBER_ID")
             or os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
-            or os.environ.get("META_PHONE_NUMBER_ID", "")
+            or os.environ.get("META_PHONE_NUMBER_ID")
+            or os.environ.get("ID_INSTANCE", "")
         ).strip()
         access_token = (
             SystemSetting.get_val("WHATSAPP_ACCESS_TOKEN")
@@ -57,7 +58,8 @@ class WhatsAppService:
             or cfg.get("WHATSAPP_TOKEN")
             or os.environ.get("WHATSAPP_TOKEN")
             or os.environ.get("WHATSAPP_ACCESS_TOKEN")
-            or os.environ.get("META_ACCESS_TOKEN", "")
+            or os.environ.get("META_ACCESS_TOKEN")
+            or os.environ.get("API_TOKEN_INSTANCE", "")
         ).strip()
         verify_token = (
             SystemSetting.get_val("WHATSAPP_VERIFY_TOKEN")

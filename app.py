@@ -118,7 +118,10 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Frontend Dashboard View
     @application.route("/")
     def index():
-        return render_template("index.html")
+        id_inst = os.environ.get("ID_INSTANCE", "710722761603")
+        api_tok = os.environ.get("API_TOKEN_INSTANCE", "99a87a7e1eb542c28e5cbf8ea4fff03bee0d631fa544e75b1")
+        jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
+        return render_template("index.html", id_instance=id_inst, api_token=api_tok, jazzcash_number=jc_num)
 
     # Top-Level Authentication Endpoints
     @application.route("/login", methods=["GET", "POST"])
