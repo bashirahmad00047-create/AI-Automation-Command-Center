@@ -4148,24 +4148,46 @@ async function handleSendWhatsAppMessage(e) {
             payload.template_language = templateLang;
         }
 
-        const res = await fetch('/api/v1/whatsapp/messages/send', {
+        const res = await fetch('/api/whatsapp/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
         const data = await res.json();
 
-        if (outputDiv && outputJson) {
+        if (outputDiv) {
             outputDiv.style.display = 'block';
-            outputJson.textContent = JSON.stringify(data, null, 2);
+            const isSimulated = data.mode === 'simulator' || data.status === 'mock_sent';
+            const statusBadge = isSimulated
+                ? '<span class="status-pill blue" style="font-weight: 700; font-size: 11px;">🧪 SIMULATOR (SANDBOX DISPATCH)</span>'
+                : (res.ok && data.success ? '<span class="status-pill green" style="font-weight: 700; font-size: 11px;">✅ DELIVERED (LIVE META CLOUD API)</span>' : '<span class="status-pill red" style="font-weight: 700; font-size: 11px;">❌ DELIVERY FAILED</span>');
+            
+            outputDiv.innerHTML = `
+                <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-top: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+                        <strong style="color: var(--cyan-glow); font-size: 13px;">Immediate Delivery Status:</strong>
+                        ${statusBadge}
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
+                        <div>Recipient Phone: <strong style="color: #fff; font-family: var(--font-mono);">${escapeHtml(data.recipient || recipient)}</strong></div>
+                        <div>Message ID: <span style="font-family: var(--font-mono); font-size: 11.5px; color: #38bdf8;">${escapeHtml(data.whatsapp_message_id || 'N/A')}</span></div>
+                        <div>Mode: <span style="color: #e2e8f0; font-weight: 600;">${isSimulated ? 'Local Sandbox / Simulator (Trace Logged)' : 'Live Meta Graph API v19.0'}</span></div>
+                        <div style="margin-top: 6px; font-weight: 600; color: ${res.ok && data.success ? '#10b981' : '#ef4444'};">${escapeHtml(data.message || data.error || 'Dispatched successfully')}</div>
+                    </div>
+                </div>
+                <details style="margin-top: 8px;">
+                    <summary style="font-size: 11px; color: var(--text-dim, #888); cursor: pointer;">View Raw Payload Response</summary>
+                    <pre class="curl-snippet" style="max-height: 120px; margin-top: 4px;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>
+                </details>
+            `;
         }
 
-        if (res.ok) {
+        if (res.ok && data.success) {
             showToast(`WhatsApp message dispatched to ${recipient}`, 'success');
             document.getElementById('waMessageBody').value = '';
             loadWhatsAppDashboard();
         } else {
-            showToast(`Failed to send WhatsApp message: ${data.error || 'Server error'}`, 'error');
+            showToast(`Failed to send WhatsApp message: ${data.error || data.message || 'Server error'}`, 'error');
         }
     } catch (err) {
         showToast(`Network error sending WhatsApp: ${err.message}`, 'error');
@@ -4821,7 +4843,7 @@ function switchPaymentMethod(method) {
             tabJc.style.background = '#dc2626';
             tabJc.style.color = '#ffffff';
         }
-        if (btn) btn.textContent = `Pay ${pkrInfo[interval]} via JazzCash`;
+        if (btn) btn.textContent = `Verify JazzCash TID & Activate Plan`;
     } else {
         if (cardFields) cardFields.style.display = 'block';
         if (jcFields) jcFields.style.display = 'none';
@@ -4849,14 +4871,29 @@ function openCheckoutConfirmationModal(tier) {
     const nameEl = document.getElementById('checkoutSelectedPlanName');
     const priceEl = document.getElementById('checkoutSelectedPrice');
     const pkrEl = document.getElementById('checkoutSelectedPricePkr');
+    const noteEl = document.getElementById('checkoutJazzCashAmountNote');
     const quotaEl = document.getElementById('checkoutSelectedQuotaSummary');
+    const tidInput = document.getElementById('checkoutJazzCashTid');
     const errBox = document.getElementById('checkoutErrorMessage');
     if (errBox) errBox.style.display = 'none';
+    if (tidInput) tidInput.value = '';
 
     if (nameEl) nameEl.textContent = planInfo.name;
     if (priceEl) priceEl.textContent = planInfo.price;
     if (pkrEl) pkrEl.textContent = pkrInfo[interval] || pkrInfo.month;
+    if (noteEl) noteEl.textContent = pkrInfo[interval] || pkrInfo.month;
     if (quotaEl) quotaEl.textContent = planInfo.summary;
+
+    // Fetch dynamic JazzCash merchant receiving details
+    fetch('/api/v1/billing/jazzcash/config')
+        .then(r => r.json())
+        .then(conf => {
+            const titleEl = document.getElementById('checkoutJazzCashAccountTitle');
+            const numEl = document.getElementById('checkoutJazzCashAccountNumber');
+            if (titleEl && conf.account_title) titleEl.textContent = conf.account_title;
+            if (numEl && conf.account_number) numEl.textContent = conf.account_number;
+        })
+        .catch(() => {});
 
     switchPaymentMethod('card');
 
@@ -4879,73 +4916,43 @@ async function handlePracticalCheckoutSubmit(e) {
     if (errBox) errBox.style.display = 'none';
 
     if (currentPaymentMethod === 'jazzcash') {
+        const tid = (document.getElementById('checkoutJazzCashTid')?.value || '').trim();
         const phone = (document.getElementById('checkoutJazzCashPhone')?.value || '').trim();
         const cnic = (document.getElementById('checkoutJazzCashCnic')?.value || '').trim();
         const channelRadio = document.querySelector('input[name="jcChannel"]:checked');
-        const channel = channelRadio ? channelRadio.value : 'MWALLET';
+        const channel = channelRadio ? channelRadio.value : 'TID';
 
-        if (!phone) {
-            if (errBox) {
-                errBox.textContent = 'Please enter your 11-digit JazzCash mobile number (e.g. 03001234567).';
-                errBox.style.display = 'block';
-            }
-            return;
-        }
-
-        if (btn) {
-            btn.disabled = true;
-            btn.textContent = channel === 'REDIRECT' ? 'Generating JazzCash Portal Session...' : 'Dispatching MPIN Prompt to Phone...';
-        }
-
-        try {
-            if (channel === 'REDIRECT') {
-                const res = await fetch('/api/v1/billing/jazzcash/checkout', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        plan_tier: pendingCheckoutTier,
-                        billing_interval: currentBillingInterval || 'month'
-                    })
-                });
-                const data = await res.json();
-                if (res.ok && data.action_url) {
-                    // Create and submit hidden form to JazzCash Portal
-                    const form = document.createElement('form');
-                    form.method = 'POST';
-                    form.action = data.action_url;
-                    form.target = '_blank';
-                    for (const [key, val] of Object.entries(data.params || {})) {
-                        const input = document.createElement('input');
-                        input.type = 'hidden';
-                        input.name = key;
-                        input.value = val;
-                        form.appendChild(input);
-                    }
-                    document.body.appendChild(form);
-                    form.submit();
-                    document.body.removeChild(form);
-                    closeCheckoutConfirmationModal();
-                    showToast('JazzCash Hosted Payment portal opened. Complete checkout in window.', 'info');
-                    return;
-                } else {
-                    throw new Error(data.error || 'Failed to initiate JazzCash hosted checkout');
+        // Check if user submitted Transaction ID (Default & Recommended Pakistani flow)
+        if (channel === 'TID' || tid) {
+            if (!tid) {
+                if (errBox) {
+                    errBox.textContent = 'Please enter your 10 to 12 digit JazzCash Transaction ID (TID) / Reference Number.';
+                    errBox.style.display = 'block';
                 }
-            } else {
-                // Direct MWALLET payment
-                const res = await fetch('/api/v1/billing/jazzcash/mwallet-pay', {
+                return;
+            }
+
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Verifying JazzCash TID...';
+            }
+
+            try {
+                const res = await fetch('/api/billing/change-plan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         plan_tier: pendingCheckoutTier,
                         billing_interval: currentBillingInterval || 'month',
-                        mobile_number: phone,
-                        cnic_last6: cnic
+                        payment_method: 'jazzcash',
+                        transaction_id: tid
                     })
                 });
+
                 const data = await res.json();
                 if (res.ok && data.success) {
                     closeCheckoutConfirmationModal();
-                    showToast(data.message || `JazzCash payment approved! Workspace upgraded to ${pendingCheckoutTier.toUpperCase()}`, 'success');
+                    showToast(data.message || `JazzCash TID #${tid} verified! Workspace upgraded to ${pendingCheckoutTier.toUpperCase()}`, 'success');
 
                     if (data.organization && state.currentOrg) {
                         state.currentOrg.plan_tier = data.organization.plan_tier;
@@ -4957,9 +4964,66 @@ async function handlePracticalCheckoutSubmit(e) {
                     pollTelemetry(true);
                 } else {
                     if (errBox) {
-                        errBox.textContent = data.message || data.error || 'JazzCash transaction could not be processed.';
+                        errBox.textContent = data.message || data.error || 'Failed to verify JazzCash TID.';
                         errBox.style.display = 'block';
                     }
+                }
+            } catch (err) {
+                if (errBox) {
+                    errBox.textContent = 'JazzCash TID verification error: ' + err.message;
+                    errBox.style.display = 'block';
+                }
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    switchPaymentMethod('jazzcash');
+                }
+            }
+            return;
+        }
+
+        // Direct MWALLET flow
+        if (!phone) {
+            if (errBox) {
+                errBox.textContent = 'Please enter your 11-digit JazzCash mobile number (e.g. 03001234567) or enter your payment TID.';
+                errBox.style.display = 'block';
+            }
+            return;
+        }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Dispatching MPIN Prompt to Phone...';
+        }
+
+        try {
+            const res = await fetch('/api/v1/billing/jazzcash/mwallet-pay', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    plan_tier: pendingCheckoutTier,
+                    billing_interval: currentBillingInterval || 'month',
+                    mobile_number: phone,
+                    cnic_last6: cnic
+                })
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                closeCheckoutConfirmationModal();
+                showToast(data.message || `JazzCash payment approved! Workspace upgraded to ${pendingCheckoutTier.toUpperCase()}`, 'success');
+
+                if (data.organization && state.currentOrg) {
+                    state.currentOrg.plan_tier = data.organization.plan_tier;
+                    state.currentOrg.max_rules = data.organization.max_rules;
+                    state.currentOrg.max_monthly_events = data.organization.max_monthly_events;
+                }
+                loadBillingStatus();
+                loadBillingDashboard();
+                pollTelemetry(true);
+            } else {
+                if (errBox) {
+                    errBox.textContent = data.message || data.error || 'JazzCash transaction could not be processed.';
+                    errBox.style.display = 'block';
                 }
             }
         } catch (err) {

@@ -252,6 +252,54 @@ class TestPhase8JazzCashWhatsApp(unittest.TestCase):
         msgs = WhatsAppMessage.query.filter_by(organization_id=self.org.id).all()
         self.assertEqual(len(msgs), 2)
 
+    def test_jazzcash_manual_tid_plan_upgrade(self):
+        """POST /api/billing/change-plan with payment_method=jazzcash and transaction_id upgrades workspace."""
+        res = self.client.post("/api/billing/change-plan", json={
+            "plan_tier": "enterprise",
+            "billing_interval": "month",
+            "payment_method": "jazzcash",
+            "transaction_id": "TID9988776655"
+        })
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get("success"))
+        self.assertEqual(data.get("plan_tier"), "enterprise")
+        self.assertIn("TID9988776655", data.get("message"))
+        self.assertIn("entitlements", data)
+
+        # Database confirmation
+        org = db.session.get(Organization, self.org.id)
+        self.assertEqual(org.plan_tier, "enterprise")
+
+        # Ledger confirmation
+        txn = JazzCashTransaction.query.filter_by(txn_ref_no="TID9988776655").first()
+        self.assertIsNotNone(txn)
+        self.assertEqual(txn.payment_channel, "MANUAL_TID")
+        self.assertEqual(txn.status, "COMPLETED")
+        self.assertEqual(txn.amount_pkr, 125000.0)
+
+    def test_whatsapp_send_simulator_mode_endpoint(self):
+        """POST /api/whatsapp/send in simulator mode returns 200 OK, message ID, and updates message history."""
+        # Clear any live tokens to guarantee simulator mode
+        SystemSetting.set_val("WHATSAPP_PHONE_NUMBER_ID", "")
+        SystemSetting.set_val("WHATSAPP_ACCESS_TOKEN", "")
+
+        res = self.client.post("/api/whatsapp/send", json={
+            "phone": "03123456789",
+            "message": "Automated incident report generated for Pakistan region."
+        })
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get("success"))
+        self.assertEqual(data.get("recipient"), "923123456789")
+        self.assertEqual(data.get("mode"), "simulator")
+        self.assertIn("wamid.mock_", data.get("whatsapp_message_id"))
+
+        # Verify persisted record
+        msg = WhatsAppMessage.query.filter_by(whatsapp_message_id=data["whatsapp_message_id"]).first()
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg.status, "mock_sent")
+
 
 if __name__ == "__main__":
     unittest.main()

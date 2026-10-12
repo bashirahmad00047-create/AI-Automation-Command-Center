@@ -2230,13 +2230,24 @@ def cancel_subscription():
 
 @api_v1.route("/billing/upgrade", methods=["POST"])
 @api_v1.route("/billing/change-plan", methods=["POST"])
+@api_v1.route("/billing/submit-manual-payment", methods=["POST"])
+@require_auth
 @require_role(["owner", "admin"])
 def upgrade_subscription():
-    """Updates the current workspace subscription tier and quota in the database."""
-    org = g.current_org
+    """Updates the current workspace subscription tier and quota in the database.
+    
+    Supports:
+    - Card / Stripe instant tier activation
+    - JazzCash manual TID reference submission & verification
+    """
+    org = get_current_org() or getattr(g, "current_org", None)
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
     data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
     target_tier = (data.get("plan_tier") or data.get("tier") or "").strip().lower()
-    interval = (data.get("interval") or "month").strip().lower()
+    interval = (data.get("interval") or data.get("billing_interval") or "month").strip().lower()
+    payment_method = (data.get("payment_method") or "").strip().lower()
+    tid = (data.get("transaction_id") or data.get("tid") or "").strip()
 
     if target_tier not in PLAN_DEFINITIONS:
         return jsonify({
@@ -2244,6 +2255,41 @@ def upgrade_subscription():
             "code": "INVALID_PLAN"
         }), 400
 
+    current_user = get_current_user()
+    user_id = current_user.id if current_user else None
+
+    # Handle JazzCash TID payment method
+    if payment_method == "jazzcash" or tid:
+        if not tid:
+            return jsonify({
+                "error": "JazzCash Transaction ID (TID) is required to complete verification.",
+                "code": "VALIDATION_ERROR"
+            }), 400
+
+        try:
+            result = JazzCashService.record_manual_tid_payment(
+                organization=org,
+                user_id=user_id,
+                plan_tier=target_tier,
+                interval=interval,
+                transaction_id=tid
+            )
+            return jsonify({
+                "success": True,
+                "message": result.get("message"),
+                "plan_tier": target_tier,
+                "organization": org.to_dict(),
+                "entitlements": get_org_entitlements(org),
+                "transaction_id": tid,
+                "payment_method": "jazzcash"
+            }), 200
+        except ValueError as ve:
+            return jsonify({"error": str(ve), "code": "VALIDATION_ERROR"}), 400
+        except Exception as e:
+            logger.error(f"Failed to record JazzCash manual payment: {e}")
+            return jsonify({"error": "Failed to record payment TID", "detail": str(e)}), 500
+
+    # Default / Card subscription synchronization
     old_tier = org.plan_tier
     sync_organization_subscription(
         org=org,
@@ -2255,7 +2301,8 @@ def upgrade_subscription():
     log_audit_event("billing.plan_upgraded", "organization", org.id, {
         "previous_tier": old_tier,
         "new_tier": target_tier,
-        "interval": interval
+        "interval": interval,
+        "payment_method": "card"
     })
 
     return jsonify({
@@ -2263,7 +2310,8 @@ def upgrade_subscription():
         "message": f"Successfully updated workspace plan to {target_tier.upper()}.",
         "plan_tier": target_tier,
         "organization": org.to_dict(),
-        "entitlements": get_org_entitlements(org)
+        "entitlements": get_org_entitlements(org),
+        "payment_method": "card"
     }), 200
 
 
@@ -2395,6 +2443,8 @@ def whatsapp_webhook_ingress():
 
 
 @api_v1.route("/whatsapp/messages/send", methods=["POST"])
+@api_v1.route("/whatsapp/send", methods=["POST"])
+@api_v1.route("/whatsapp/test-message", methods=["POST"])
 @require_auth
 @require_role(["owner", "admin", "member"])
 @rate_limit(limit=30, window=60, message="Rate limit exceeded for outbound WhatsApp messages.")
@@ -2413,8 +2463,8 @@ def whatsapp_send_message():
         }), 429
 
     data = request.get_json(silent=True) or {}
-    to_phone = data.get("to") or data.get("recipient")
-    message = data.get("message") or data.get("body")
+    to_phone = data.get("to") or data.get("phone") or data.get("recipient")
+    message = data.get("message") or data.get("body") or data.get("text")
     preview_url = bool(data.get("preview_url", False))
 
     template_name = data.get("template_name")
@@ -2539,8 +2589,10 @@ def get_jazzcash_config():
         "is_configured": JazzCashService.is_configured(),
         "environment": conf["environment"],
         "merchant_id": masked_merchant,
+        "account_number": conf.get("account_number", "0300-1234567"),
+        "account_title": conf.get("account_title", "OpsFlow Billing"),
         "pricing_pkr": PLAN_PRICING_PKR,
-        "supported_channels": ["MWALLET", "REDIRECT"]
+        "supported_channels": ["MWALLET", "REDIRECT", "MANUAL_TID"]
     }), 200
 
 

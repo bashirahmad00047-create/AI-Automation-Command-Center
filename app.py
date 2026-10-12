@@ -166,9 +166,18 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/billing/upgrade", methods=["POST"])
     @application.route("/api/billing/change-plan", methods=["POST"])
+    @application.route("/api/billing/submit-manual-payment", methods=["POST"])
+    @require_auth
     def legacy_billing_upgrade():
         from api_v1 import upgrade_subscription
         return upgrade_subscription()
+
+    @application.route("/api/whatsapp/send", methods=["POST"])
+    @application.route("/api/whatsapp/test-message", methods=["POST"])
+    @require_auth
+    def legacy_whatsapp_send():
+        from api_v1 import whatsapp_send_message
+        return whatsapp_send_message()
 
 
     # ==========================================

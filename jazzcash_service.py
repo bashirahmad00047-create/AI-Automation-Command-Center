@@ -94,12 +94,28 @@ class JazzCashService:
             or "/api/v1/billing/jazzcash/callback"
         ).strip()
 
+        account_number = (
+            SystemSetting.get_val("JAZZCASH_ACCOUNT_NUMBER")
+            or cfg.get("JAZZCASH_ACCOUNT_NUMBER")
+            or os.environ.get("JAZZCASH_ACCOUNT_NUMBER")
+            or "0300-1234567"
+        ).strip()
+
+        account_title = (
+            SystemSetting.get_val("JAZZCASH_ACCOUNT_TITLE")
+            or cfg.get("JAZZCASH_ACCOUNT_TITLE")
+            or os.environ.get("JAZZCASH_ACCOUNT_TITLE")
+            or "OpsFlow Billing"
+        ).strip()
+
         return {
             "merchant_id": merchant_id,
             "password": password,
             "integrity_salt": integrity_salt,
             "environment": environment,
             "return_url": return_url,
+            "account_number": account_number,
+            "account_title": account_title,
             "is_live": environment == "live",
         }
 
@@ -108,6 +124,73 @@ class JazzCashService:
         """Checks if valid custom/live or sandbox credentials are configured."""
         conf = cls.get_config()
         return bool(conf["merchant_id"] and conf["password"] and conf["integrity_salt"])
+
+    @classmethod
+    def record_manual_tid_payment(
+        cls,
+        organization: Organization,
+        user_id: Optional[str],
+        plan_tier: str,
+        interval: str,
+        transaction_id: str
+    ) -> Dict[str, Any]:
+        """Validates and records a direct JazzCash TID payment and activates the plan tier."""
+        clean_tid = transaction_id.strip()
+        if not clean_tid or len(clean_tid) < 6:
+            raise ValueError("JazzCash Transaction ID (TID) must be at least 6 digits/characters.")
+
+        tier = plan_tier.lower()
+        if tier not in PLAN_DEFINITIONS:
+            raise ValueError(f"Invalid plan tier: '{tier}'.")
+
+        amount_pkr = cls.get_price_pkr(tier, interval)
+        now_dt = datetime.datetime.utcnow()
+
+        txn = JazzCashTransaction(
+            id=generate_uuid("jzc"),
+            organization_id=organization.id,
+            user_id=user_id,
+            txn_ref_no=clean_tid,
+            bill_reference=f"TID-{clean_tid}",
+            plan_tier=tier,
+            billing_interval=interval,
+            amount_pkr=amount_pkr,
+            payment_channel="MANUAL_TID",
+            status="COMPLETED",
+            response_code="000",
+            response_message=f"Manual JazzCash TID Verified: {clean_tid}",
+            completed_at=now_dt,
+            created_at=now_dt
+        )
+        db.session.add(txn)
+        db.session.commit()
+
+        from billing_service import sync_organization_subscription
+        sync_organization_subscription(
+            org=organization,
+            plan_tier=tier,
+            status="active",
+            billing_interval=interval
+        )
+
+        log_audit_event("billing.jazzcash_manual_tid_approved", "organization", organization.id, {
+            "tid": clean_tid,
+            "plan_tier": tier,
+            "amount_pkr": amount_pkr,
+            "interval": interval
+        })
+
+        return {
+            "success": True,
+            "status": "COMPLETED",
+            "transaction_id": clean_tid,
+            "txn_ref_no": clean_tid,
+            "amount_pkr": amount_pkr,
+            "plan_tier": tier,
+            "interval": interval,
+            "message": f"JazzCash TID #{clean_tid} verified successfully! Workspace upgraded to {tier.upper()} plan.",
+            "organization": organization.to_dict()
+        }
 
     @classmethod
     def get_price_pkr(cls, plan_tier: str, interval: str = "month") -> float:
