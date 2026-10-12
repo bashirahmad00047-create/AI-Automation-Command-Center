@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpsFlow Cloud - Enterprise Intelligent Automation</title>
     <link rel="stylesheet" href="/static/css/style.css?v=2.5.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class'
+        };
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -13,26 +19,26 @@
     <!-- ==========================================================================
          ENTERPRISE COLLAPSIBLE SIDEBAR NAVIGATION
          ========================================================================== -->
-    <aside class="enterprise-sidebar" id="enterpriseSidebar">
+    <aside class="enterprise-sidebar bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 border-r border-slate-200 dark:border-slate-800" id="enterpriseSidebar">
         <!-- Sidebar Brand -->
-        <div class="sidebar-brand">
+        <div class="sidebar-brand bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
             <div class="brand-hexagon">
                 <span class="pulse-ring"></span>
                 <span class="brand-symbol">⚡</span>
             </div>
             <div class="brand-meta">
-                <div class="brand-title">OPSFLOW CLOUD</div>
+                <div class="brand-title text-gray-900 dark:text-white">OPSFLOW CLOUD</div>
                 <span class="brand-badge-cloud">AI AUTOMATION COMMAND CENTER</span>
             </div>
 
         </div>
 
         <!-- Workspace & Organization Selector Card -->
-        <div class="sidebar-workspace-card">
-            <div class="workspace-card-inner">
+        <div class="sidebar-workspace-card border-b border-slate-200 dark:border-slate-800">
+            <div class="workspace-card-inner bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
                 <div class="workspace-avatar">🏢</div>
                 <div class="workspace-details">
-                    <select id="workspaceSelect" class="workspace-select" onchange="handleWorkspaceChange(this.value)" title="Switch Active Workspace">
+                    <select id="workspaceSelect" class="workspace-select text-gray-900 dark:text-white" onchange="handleWorkspaceChange(this.value)" title="Switch Active Workspace">
                         <option value="org-enterprise-default">Acme Enterprise Global</option>
                         <option value="org-apex-health-tenant">Apex HealthTech</option>
                     </select>
@@ -47,116 +53,116 @@
         </div>
 
         <!-- Quick Search / Command Palette Trigger Button in Sidebar -->
-        <div class="sidebar-search-btn" onclick="openCommandPalette()" title="Press Ctrl+K to search">
+        <div class="sidebar-search-btn bg-slate-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700" onclick="openCommandPalette()" title="Press Ctrl+K to search">
             <span class="search-icon">🔍</span>
             <span class="search-text">Quick Search...</span>
             <kbd class="search-kbd">Ctrl K</kbd>
         </div>
 
         <!-- Categorized Navigation Menu -->
-        <nav class="sidebar-nav hud-tabs">
+        <nav class="sidebar-nav bg-white dark:bg-slate-900">
             <!-- GROUP 1: OVERVIEW -->
-            <div class="nav-category-header">
+            <div class="nav-category-header text-gray-500 dark:text-slate-400">
                 <span>OVERVIEW</span>
             </div>
-            <button class="hud-tab active" onclick="switchTab('dashboard')" title="Executive Overview">
+            <button class="hud-tab active text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('dashboard')" title="Executive Overview">
                 <span class="tab-icon">📊</span>
                 <span class="tab-label">Executive Overview</span>
             </button>
 
             <!-- GROUP 2: AUTOMATION -->
-            <div class="nav-category-header">
+            <div class="nav-category-header text-gray-500 dark:text-slate-400">
                 <span>AUTOMATION</span>
             </div>
-            <button class="hud-tab" onclick="switchTab('rules')" title="Workflow Studio">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('rules')" title="Workflow Studio">
                 <span class="tab-icon">⚡</span>
                 <span class="tab-label">Workflow Studio</span>
             </button>
 
             <!-- GROUP 3: CUSTOMERS -->
-            <div class="nav-category-header">
+            <div class="nav-category-header text-gray-500 dark:text-slate-400">
                 <span>CUSTOMERS</span>
             </div>
-            <button class="hud-tab" onclick="switchTab('leads')" title="CRM Leads">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('leads')" title="CRM Leads">
                 <span class="tab-icon">🎯</span>
                 <span class="tab-label">CRM Leads</span>
                 <span class="nav-counter-pill" id="tabLeadCount" style="display:none;">0</span>
             </button>
 
             <!-- GROUP 4: INTEGRATIONS -->
-            <div class="nav-category-header">
+            <div class="nav-category-header text-gray-500 dark:text-slate-400">
                 <span>INTEGRATIONS</span>
             </div>
-            <button class="hud-tab" onclick="switchTab('webhooks')" title="Webhooks & Integrations">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('webhooks')" title="Webhooks & Integrations">
                 <span class="tab-icon">🔌</span>
                 <span class="tab-label">Webhooks &amp; Integrations</span>
             </button>
-            <button class="hud-tab" onclick="switchTab('whatsapp')" title="WhatsApp Cloud API">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('whatsapp')" title="WhatsApp Cloud API">
                 <span class="tab-icon">💬</span>
                 <span class="tab-label">WhatsApp Cloud</span>
                 <span class="nav-counter-pill success" id="tabWhatsAppCount" style="display:none;">0</span>
             </button>
 
             <!-- GROUP 5: OPERATIONS -->
-            <div class="nav-category-header">
+            <div class="nav-category-header text-gray-500 dark:text-slate-400">
                 <span>OPERATIONS</span>
             </div>
-            <button class="hud-tab" onclick="switchTab('incidents')" title="Incidents">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('incidents')" title="Incidents">
                 <span class="tab-icon">🚨</span>
                 <span class="tab-label">Incidents</span>
                 <span class="nav-counter-pill danger" id="tabIncidentCount" style="display:none;">0</span>
             </button>
-            <button class="hud-tab" onclick="switchTab('logs')" title="Forensics & Audits">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('logs')" title="Forensics & Audits">
                 <span class="tab-icon">📜</span>
                 <span class="tab-label">Forensics &amp; Audits</span>
             </button>
-            <button class="hud-tab" onclick="switchTab('simulator')" title="Metrics">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('simulator')" title="Metrics">
                 <span class="tab-icon">🧪</span>
                 <span class="tab-label">Metrics</span>
             </button>
 
             <!-- GROUP 6: DEVELOPER -->
-            <div class="nav-category-header">
+            <div class="nav-category-header text-gray-500 dark:text-slate-400">
                 <span>DEVELOPER</span>
             </div>
-            <button class="hud-tab" onclick="switchTab('apikeys')" title="API Keys">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('apikeys')" title="API Keys">
                 <span class="tab-icon">🔑</span>
                 <span class="tab-label">API Keys</span>
             </button>
-            <button class="hud-tab" onclick="switchTab('blueprints')" title="Templates">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('blueprints')" title="Templates">
                 <span class="tab-icon">📦</span>
                 <span class="tab-label">Templates</span>
             </button>
-            <button class="hud-tab" onclick="switchTab('apidocs')" title="API Docs">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('apidocs')" title="API Docs">
                 <span class="tab-icon">📖</span>
                 <span class="tab-label">API Docs</span>
             </button>
-            <button class="hud-tab" onclick="switchTab('nlp')" title="AI Engine Sandbox">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('nlp')" title="AI Engine Sandbox">
                 <span class="tab-icon">🧠</span>
                 <span class="tab-label">AI Engine Sandbox</span>
             </button>
 
             <!-- GROUP 7: ADMINISTRATION -->
-            <div class="nav-category-header">
+            <div class="nav-category-header text-gray-500 dark:text-slate-400">
                 <span>ADMINISTRATION</span>
             </div>
-            <button class="hud-tab" onclick="switchTab('team')" title="Team & RBAC">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('team')" title="Team & RBAC">
                 <span class="tab-icon">👥</span>
                 <span class="tab-label">Team &amp; RBAC</span>
             </button>
-            <button class="hud-tab" onclick="switchTab('billing')" title="Plans & Billing">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('billing')" title="Plans & Billing">
                 <span class="tab-icon">💳</span>
                 <span class="tab-label">Plans &amp; Billing</span>
             </button>
-            <button class="hud-tab" onclick="switchTab('settings')" title="Settings">
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('settings')" title="Settings">
                 <span class="tab-icon">⚙️</span>
                 <span class="tab-label">Settings</span>
             </button>
         </nav>
 
         <!-- Sidebar Collapse / Expand Footer -->
-        <div class="sidebar-footer">
-            <button class="sidebar-toggle-btn" id="sidebarToggleBtn" onclick="toggleSidebarCollapse()" title="Toggle Sidebar (Ctrl+[)">
+        <div class="sidebar-footer bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
+            <button class="sidebar-toggle-btn bg-slate-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700" id="sidebarToggleBtn" onclick="toggleSidebarCollapse()" title="Toggle Sidebar (Ctrl+[)">
                 <span class="toggle-icon">◀</span>
                 <span class="toggle-label">Collapse Menu</span>
             </button>
@@ -297,63 +303,63 @@
         <section id="tab-dashboard" class="tab-panel active">
             <!-- Primary Executive KPI Cards -->
             <div class="metrics-grid">
-                <div class="metric-card emerald">
+                <div class="metric-card emerald bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
-                        <span class="metric-title">TOTAL EXECUTIONS</span>
-                        <span class="metric-badge">DISPATCHED</span>
+                        <span class="metric-title text-gray-600 dark:text-slate-400">TOTAL EXECUTIONS</span>
+                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">DISPATCHED</span>
                     </div>
-                    <div class="metric-val" id="statTotalExecutions">0</div>
-                    <div class="metric-sub" id="statSuccessExecutions">0 Successful Dispatches</div>
+                    <div class="metric-val text-gray-900 dark:text-white" id="statTotalExecutions">0</div>
+                    <div class="metric-sub text-gray-500 dark:text-slate-400" id="statSuccessExecutions">0 Successful Dispatches</div>
                 </div>
 
-                <div class="metric-card purple">
+                <div class="metric-card purple bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
-                        <span class="metric-title">SUCCESS RATE</span>
-                        <span class="metric-badge">RELIABILITY</span>
+                        <span class="metric-title text-gray-600 dark:text-slate-400">SUCCESS RATE</span>
+                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">RELIABILITY</span>
                     </div>
-                    <div class="metric-val" id="statSuccessRate">—</div>
-                    <div class="metric-sub" id="statSuccessRateSub">Awaiting first execution</div>
+                    <div class="metric-val text-gray-900 dark:text-white" id="statSuccessRate">—</div>
+                    <div class="metric-sub text-gray-500 dark:text-slate-400" id="statSuccessRateSub">Awaiting first execution</div>
                 </div>
 
-                <div class="metric-card red">
+                <div class="metric-card red bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
-                        <span class="metric-title">FAILED EXECUTIONS</span>
-                        <span class="metric-badge">ERRORS</span>
+                        <span class="metric-title text-gray-600 dark:text-slate-400">FAILED EXECUTIONS</span>
+                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">ERRORS</span>
                     </div>
-                    <div class="metric-val" id="statFailedExecutions">0</div>
-                    <div class="metric-sub" id="statFailedExecutionsSub">0 Unresolved Failures</div>
+                    <div class="metric-val text-gray-900 dark:text-white" id="statFailedExecutions">0</div>
+                    <div class="metric-sub text-gray-500 dark:text-slate-400" id="statFailedExecutionsSub">0 Unresolved Failures</div>
                 </div>
 
-                <div class="metric-card amber">
+                <div class="metric-card amber bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
-                        <span class="metric-title">OPEN INCIDENTS</span>
-                        <span class="metric-badge">TRIAGE</span>
+                        <span class="metric-title text-gray-600 dark:text-slate-400">OPEN INCIDENTS</span>
+                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">TRIAGE</span>
                     </div>
-                    <div class="metric-val" id="statOpenIncidents">0</div>
-                    <div class="metric-sub" id="statAckIncidents">0 Acknowledged</div>
+                    <div class="metric-val text-gray-900 dark:text-white" id="statOpenIncidents">0</div>
+                    <div class="metric-sub text-gray-500 dark:text-slate-400" id="statAckIncidents">0 Acknowledged</div>
                 </div>
 
-                <div class="metric-card emerald">
+                <div class="metric-card emerald bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
-                        <span class="metric-title">QUALIFIED LEADS</span>
-                        <span class="metric-badge">AI SCORED</span>
+                        <span class="metric-title text-gray-600 dark:text-slate-400">QUALIFIED LEADS</span>
+                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">AI SCORED</span>
                     </div>
-                    <div class="metric-val" id="statHighPriorityLeads">0</div>
-                    <div class="metric-sub" id="statTotalLeads">0 Total Inquiries</div>
+                    <div class="metric-val text-gray-900 dark:text-white" id="statHighPriorityLeads">0</div>
+                    <div class="metric-sub text-gray-500 dark:text-slate-400" id="statTotalLeads">0 Total Inquiries</div>
                 </div>
 
-                <div class="metric-card cyan">
+                <div class="metric-card cyan bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
-                        <span class="metric-title">ACTIVE WORKFLOWS</span>
-                        <span class="metric-badge">RULES</span>
+                        <span class="metric-title text-gray-600 dark:text-slate-400">ACTIVE WORKFLOWS</span>
+                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">RULES</span>
                     </div>
-                    <div class="metric-val" id="statActiveRules">0 / 0</div>
-                    <div class="metric-sub" id="statTotalRules">0 Total Configured</div>
+                    <div class="metric-val text-gray-900 dark:text-white" id="statActiveRules">0 / 0</div>
+                    <div class="metric-sub text-gray-500 dark:text-slate-400" id="statTotalRules">0 Total Configured</div>
                 </div>
             </div>
 
             <!-- Operational Subsystems & Gateway Bar -->
-            <div class="hud-panel op-status-strip" style="margin-bottom: 20px; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; border: 1px solid var(--border-color); background: rgba(15, 23, 42, 0.5); border-radius: 8px;">
+            <div class="hud-panel op-status-strip" style="margin-bottom: 20px; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; border: 1px solid var(--border-color); border-radius: 8px;">
                 <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap; font-size: 13px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span style="color: var(--cyan-glow);">🔌</span>
@@ -403,55 +409,55 @@
             </div>
 
             <!-- Polished Live Hardware & Cluster Telemetry Widget Cards -->
-            <div class="hud-panel telemetry-widget-panel" style="margin-bottom: 24px;">
-                <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px;">
+            <div class="hud-panel telemetry-widget-panel bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-gray-900 dark:text-white" style="margin-bottom: 24px;">
+                <div class="panel-header bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-800 text-gray-900 dark:text-white" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span style="font-size: 16px;">⚡</span>
-                        <h3 style="font-size: 13px; font-weight: 700; letter-spacing: 0.5px; margin: 0;">LIVE HARDWARE &amp; CLUSTER TELEMETRY</h3>
+                        <h3 class="text-gray-900 dark:text-white" style="font-size: 13px; font-weight: 700; letter-spacing: 0.5px; margin: 0;">LIVE HARDWARE &amp; CLUSTER TELEMETRY</h3>
                     </div>
-                    <span class="refresh-indicator" style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">POLLING INTERVAL: 2.5s</span>
+                    <span class="refresh-indicator text-gray-500 dark:text-slate-400" style="font-size: 11px; font-family: var(--font-mono);">POLLING INTERVAL: 2.5s</span>
                 </div>
                 <div class="telemetry-cards-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding: 20px;">
                     <!-- CPU Utilization Widget Card -->
-                    <div class="telemetry-gauge-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+                    <div class="telemetry-gauge-card bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-gray-900 dark:text-white" style="border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.5px;">CPU UTILIZATION</span>
+                            <span class="text-gray-700 dark:text-slate-300" style="font-size: 12px; font-weight: 600; letter-spacing: 0.5px;">CPU UTILIZATION</span>
                             <strong class="gauge-val" id="telemCpuVal" style="font-family: var(--font-mono); font-size: 18px; color: var(--cyan-glow);">0%</strong>
                         </div>
-                        <div class="progress-track" style="background: rgba(0,0,0,0.25); height: 8px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color);">
+                        <div class="progress-track bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700" style="height: 8px; border-radius: 4px; overflow: hidden;">
                             <div class="progress-fill cyan-glow" id="telemCpuBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #0284c7, var(--cyan-glow)); transition: width 0.4s ease;"></div>
                         </div>
-                        <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">
+                        <div class="text-gray-500 dark:text-slate-400" style="display: flex; justify-content: space-between; font-size: 11px; font-family: var(--font-mono);">
                             <span>Core Load</span>
                             <span>Multi-Threaded</span>
                         </div>
                     </div>
 
                     <!-- RAM Allocation Widget Card -->
-                    <div class="telemetry-gauge-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+                    <div class="telemetry-gauge-card bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-gray-900 dark:text-white" style="border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.5px;">RAM ALLOCATION</span>
+                            <span class="text-gray-700 dark:text-slate-300" style="font-size: 12px; font-weight: 600; letter-spacing: 0.5px;">RAM ALLOCATION</span>
                             <strong class="gauge-val" id="telemRamVal" style="font-family: var(--font-mono); font-size: 18px; color: var(--purple-glow);">0%</strong>
                         </div>
-                        <div class="progress-track" style="background: rgba(0,0,0,0.25); height: 8px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color);">
+                        <div class="progress-track bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700" style="height: 8px; border-radius: 4px; overflow: hidden;">
                             <div class="progress-fill purple-glow" id="telemRamBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #7c3aed, var(--purple-glow)); transition: width 0.4s ease;"></div>
                         </div>
-                        <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">
+                        <div class="text-gray-500 dark:text-slate-400" style="display: flex; justify-content: space-between; font-size: 11px; font-family: var(--font-mono);">
                             <span>Memory Footprint</span>
                             <span id="telemRamGb">0.0 / 0.0 GB</span>
                         </div>
                     </div>
 
                     <!-- Disk Occupancy Widget Card -->
-                    <div class="telemetry-gauge-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+                    <div class="telemetry-gauge-card bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-gray-900 dark:text-white" style="border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.5px;">DISK OCCUPANCY</span>
+                            <span class="text-gray-700 dark:text-slate-300" style="font-size: 12px; font-weight: 600; letter-spacing: 0.5px;">DISK OCCUPANCY</span>
                             <strong class="gauge-val" id="telemDiskVal" style="font-family: var(--font-mono); font-size: 18px; color: var(--emerald-glow);">0%</strong>
                         </div>
-                        <div class="progress-track" style="background: rgba(0,0,0,0.25); height: 8px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color);">
+                        <div class="progress-track bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700" style="height: 8px; border-radius: 4px; overflow: hidden;">
                             <div class="progress-fill emerald-glow" id="telemDiskBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #059669, var(--emerald-glow)); transition: width 0.4s ease;"></div>
                         </div>
-                        <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">
+                        <div class="text-gray-500 dark:text-slate-400" style="display: flex; justify-content: space-between; font-size: 11px; font-family: var(--font-mono);">
                             <span>Storage Usage</span>
                             <span id="telemDiskGb">0.0 / 0.0 GB</span>
                         </div>
@@ -501,7 +507,7 @@
         <!-- TAB 2: WORKFLOW STUDIO -->
         <section id="tab-rules" class="tab-panel">
             <!-- Studio Header & Summary Stats -->
-            <div class="workflow-studio-header hud-panel" style="margin-bottom: 20px; padding: 16px 20px; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color);">
+            <div class="workflow-studio-header hud-panel" style="margin-bottom: 20px; padding: 16px 20px; border-radius: 8px; border: 1px solid var(--border-color);">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
                     <div>
                         <h2 style="font-size: 1.25rem; font-weight: 700; margin: 0 0 4px 0; display: flex; align-items: center; gap: 10px;">
@@ -532,15 +538,15 @@
             </div>
 
             <!-- Category Filter Toolbar -->
-            <div class="panel-toolbar" style="margin-bottom: 16px;">
-                <div class="filter-group">
-                    <span class="filter-label">Filter Category:</span>
-                    <button class="filter-chip active" onclick="filterRulesCategory('All', this)">All</button>
-                    <button class="filter-chip" onclick="filterRulesCategory('System', this)">System</button>
-                    <button class="filter-chip" onclick="filterRulesCategory('Security', this)">Security</button>
-                    <button class="filter-chip" onclick="filterRulesCategory('DevOps', this)">DevOps</button>
-                    <button class="filter-chip" onclick="filterRulesCategory('NLP', this)">NLP</button>
-                    <button class="filter-chip" onclick="filterRulesCategory('Data', this)">Data</button>
+            <div class="panel-toolbar" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div class="pill-segmented-control" id="wfCategoryPillGroup">
+                    <span class="filter-label">Category:</span>
+                    <button type="button" class="pill-toggle active filter-chip" onclick="filterRulesCategory('All', this)">All</button>
+                    <button type="button" class="pill-toggle filter-chip" onclick="filterRulesCategory('System', this)">System</button>
+                    <button type="button" class="pill-toggle filter-chip" onclick="filterRulesCategory('Security', this)">Security</button>
+                    <button type="button" class="pill-toggle filter-chip" onclick="filterRulesCategory('DevOps', this)">DevOps</button>
+                    <button type="button" class="pill-toggle filter-chip" onclick="filterRulesCategory('NLP', this)">NLP</button>
+                    <button type="button" class="pill-toggle filter-chip" onclick="filterRulesCategory('Data', this)">Data</button>
                 </div>
                 <div class="action-group">
                     <button class="hud-btn outline small" onclick="loadRules()" title="Refresh workflows">🔄 Refresh</button>
@@ -635,8 +641,17 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                             </div>
                         </div>
                         <div class="form-group">
-                            <label>Payload (JSON)</label>
-                            <textarea id="manualEventPayload" class="hud-textarea" rows="6" required>{"cpu_percent": 91.5, "host": "prod-app-01"}</textarea>
+                            <label style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <span>Payload (JSON)</span>
+                                <span style="font-size: 11px; color: var(--text-muted); cursor: pointer;" onclick="formatManualPayloadJson()">Format JSON</span>
+                            </label>
+                            <div class="code-editor-card">
+                                <div class="code-editor-header">
+                                    <span class="code-editor-tag">JSON PAYLOAD</span>
+                                    <span style="font-size: 10px; font-family: var(--font-mono); color: #64748b;">UTF-8 &bull; application/json</span>
+                                </div>
+                                <textarea id="manualEventPayload" class="code-editor-textarea" rows="6" required>{"cpu_percent": 91.5, "host": "prod-app-01"}</textarea>
+                            </div>
                         </div>
                         <div class="form-row">
                             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
@@ -915,30 +930,34 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
         <!-- TAB 6: FORENSICS & AUDITS -->
         <section id="tab-logs" class="tab-panel">
             <!-- Forensics Hub Sub-Navigation -->
-            <div style="display: flex; gap: 10px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color, #2a2e3d); padding-bottom: 12px; flex-wrap: wrap;">
-                <button class="hud-tab active" id="subtabForensicsBtn" onclick="switchLogsSubTab('forensics')" style="padding: 8px 16px; border-radius: 6px;">
-                    📜 Execution Forensics
-                </button>
-                <button class="hud-tab" id="subtabDlqBtn" onclick="switchLogsSubTab('dlq')" style="padding: 8px 16px; border-radius: 6px;">
-                    💀 Dead-Letter Queue (<span id="countDlqBadge">0</span>)
-                </button>
-                <button class="hud-tab" id="subtabJobsBtn" onclick="switchLogsSubTab('jobs')" style="padding: 8px 16px; border-radius: 6px;">
-                    ⚡ Background Async Jobs (<span id="countJobsBadge">0</span>)
-                </button>
+            <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid var(--border-color, #2a2e3d); padding-bottom: 16px;">
+                <div class="pill-segmented-control" id="forensicsSubTabGroup">
+                    <button type="button" class="pill-toggle active" id="subtabForensicsBtn" onclick="switchLogsSubTab('forensics')">
+                        <span>📜</span> Execution Forensics
+                    </button>
+                    <button type="button" class="pill-toggle" id="subtabDlqBtn" onclick="switchLogsSubTab('dlq')">
+                        <span>💀</span> Dead-Letter Queue (<span id="countDlqBadge">0</span>)
+                    </button>
+                    <button type="button" class="pill-toggle" id="subtabJobsBtn" onclick="switchLogsSubTab('jobs')">
+                        <span>⚡</span> Background Async Jobs (<span id="countJobsBadge">0</span>)
+                    </button>
+                </div>
             </div>
 
             <!-- SUB-VIEW 1: Execution Forensics -->
             <div id="logsSubViewForensics">
-                <div class="panel-toolbar">
-                    <div class="filter-group">
+                <div class="panel-toolbar" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                    <div class="pill-segmented-control" id="forensicsStatusPillGroup">
                         <span class="filter-label">Filter Status:</span>
-                        <button class="filter-chip active" onclick="filterLogsStatus('all', this)">All</button>
-                        <button class="filter-chip" onclick="filterLogsStatus('success', this)">Success</button>
-                        <button class="filter-chip" onclick="filterLogsStatus('skipped', this)">Skipped</button>
-                        <button class="filter-chip" onclick="filterLogsStatus('failed', this)">Failed</button>
+                        <button type="button" class="pill-toggle active filter-chip" onclick="filterLogsStatus('all', this)">All</button>
+                        <button type="button" class="pill-toggle filter-chip" onclick="filterLogsStatus('success', this)">Success</button>
+                        <button type="button" class="pill-toggle filter-chip" onclick="filterLogsStatus('skipped', this)">Skipped</button>
+                        <button type="button" class="pill-toggle filter-chip" onclick="filterLogsStatus('failed', this)">Failed</button>
                     </div>
                     <div class="action-group">
-                        <button class="action-btn red-btn" onclick="clearAllLogs()">Purge Logs</button>
+                        <button type="button" class="hud-btn small destructive-danger" onclick="promptPurgeLogsModal()" title="Purge historical execution logs and mock test clutter">
+                            <span>🗑️</span> Purge Logs
+                        </button>
                     </div>
                 </div>
 
@@ -1444,23 +1463,53 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                     </div>
                 </div>
 
-                <div class="settings-card">
-                    <h3>Database &amp; Logs Maintenance</h3>
-                    <p>Reset audit trail logs or purge historical event archives:</p>
-                    <div class="settings-btn-row">
-                        <button class="action-btn red-btn" onclick="clearAllLogs()">Purge Execution Logs</button>
-                        <button class="action-btn amber-btn" onclick="clearNotifications()">Clear All Alerts</button>
+                <div class="settings-card" style="border-left: 4px solid #ef4444;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <h3 style="color: #f87171; margin: 0;">Database &amp; Logs Maintenance</h3>
+                        <span class="status-pill red" style="font-size: 10px;">Destructive Operations</span>
+                    </div>
+                    <p style="margin-bottom: 16px;">Purge execution audit trails or reset incident alert queues with safety confirmation prompts:</p>
+                    <div class="settings-btn-row" style="display: flex; gap: 12px; flex-wrap: wrap;">
+                        <button type="button" class="hud-btn destructive-danger" onclick="promptPurgeLogsModal()">
+                            <span>🗑️</span> Purge Execution Logs
+                        </button>
+                        <button type="button" class="hud-btn destructive-danger" onclick="promptClearAlertsModal()">
+                            <span>⚠️</span> Clear All Alerts
+                        </button>
                     </div>
                 </div>
 
-                <div class="settings-card">
-                    <h3>Engine Architecture &amp; Runtime Specs</h3>
-                    <div class="specs-list">
-                        <div class="spec-row"><span>Engine Runtime:</span><span>Python Flask 3.1 / SQLAlchemy 2.0</span></div>
-                        <div class="spec-row"><span>Persistence Engine:</span><span>SQLite WAL (Local) / PostgreSQL Ready</span></div>
-                        <div class="spec-row"><span>NLP Model:</span><span>Local Heuristic Core (0 External Tokens)</span></div>
-                        <div class="spec-row"><span>Action Dispatchers:</span><span>Real HTTP Webhook, Alert, Log, File, Email</span></div>
-                        <div class="spec-row"><span>Security Posture:</span><span>Multi-Tenant Scoped / Scoped API Keys</span></div>
+                <div class="settings-card" style="grid-column: 1 / -1;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <h3 style="margin: 0;">Engine Architecture &amp; Enterprise Runtime Specs</h3>
+                        <span class="status-pill green" style="font-size: 11px;">● Verified Operational</span>
+                    </div>
+                    <p style="margin-bottom: 0;">Verified runtime capabilities, execution engines, and active subsystems:</p>
+                    <div class="engine-specs-grid">
+                        <div class="engine-spec-item">
+                            <span class="engine-spec-key">Core Runtime</span>
+                            <span class="engine-spec-val"><span>⚡</span> Python 3.11 / Flask WSGI</span>
+                        </div>
+                        <div class="engine-spec-item">
+                            <span class="engine-spec-key">ORM &amp; Migrations</span>
+                            <span class="engine-spec-val"><span>📦</span> SQLAlchemy 2.0 / Alembic Batch</span>
+                        </div>
+                        <div class="engine-spec-item">
+                            <span class="engine-spec-key">Persistence Engine</span>
+                            <span class="engine-spec-val"><span>💾</span> SQLite WAL (Local) / PostgreSQL Compatible</span>
+                        </div>
+                        <div class="engine-spec-item">
+                            <span class="engine-spec-key">AI Intelligence Core</span>
+                            <span class="engine-spec-val"><span>🧠</span> Local Deterministic Heuristics + Gemini / OpenAI</span>
+                        </div>
+                        <div class="engine-spec-item">
+                            <span class="engine-spec-key">Action Dispatchers</span>
+                            <span class="engine-spec-val"><span>🔌</span> Outbound Webhooks, Alerts, CRM DB, WhatsApp, Logs</span>
+                        </div>
+                        <div class="engine-spec-item">
+                            <span class="engine-spec-key">Tenant Isolation</span>
+                            <span class="engine-spec-val"><span>🛡️</span> Cryptographic Org-Scoped Keys &amp; Strict RBAC</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1507,14 +1556,14 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 </div>
             </div>
 
-            <!-- Filter Controls -->
-            <div class="rules-filter-bar" style="margin-bottom: 20px;">
-                <div class="search-box">
+            <!-- Sleek Horizontal Filter Bar -->
+            <div class="sleek-filter-bar" style="margin-bottom: 20px;">
+                <div class="embedded-search-wrapper">
                     <span class="search-icon">🔍</span>
-                    <input type="text" id="leadSearchInput" class="hud-input" placeholder="Search by name, email, company, or message..." oninput="filterLeads()">
+                    <input type="text" id="leadSearchInput" class="embedded-search-input" placeholder="Search by name, email, company, or inquiry message..." oninput="filterLeads()">
                 </div>
-                <div class="category-filters">
-                    <select id="leadStatusFilter" class="hud-input" onchange="filterLeads()">
+                <div class="filter-select-group">
+                    <select id="leadStatusFilter" class="custom-sleek-select" onchange="filterLeads()">
                         <option value="all">All Statuses</option>
                         <option value="new">New</option>
                         <option value="qualified">Qualified</option>
@@ -1522,7 +1571,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                         <option value="closed">Closed</option>
                         <option value="archived">Archived</option>
                     </select>
-                    <select id="leadIntentFilter" class="hud-input" onchange="filterLeads()">
+                    <select id="leadIntentFilter" class="custom-sleek-select" onchange="filterLeads()">
                         <option value="all">All Intents</option>
                         <option value="lead_inquiry">Lead / Sales Inquiry</option>
                         <option value="support_request">Support Request</option>
@@ -1531,7 +1580,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                         <option value="server_alert">Server Alert</option>
                         <option value="general_query">General Query</option>
                     </select>
-                    <select id="leadDeptFilter" class="hud-input" onchange="filterLeads()">
+                    <select id="leadDeptFilter" class="custom-sleek-select" onchange="filterLeads()">
                         <option value="all">All Departments</option>
                         <option value="Sales">Sales</option>
                         <option value="Support">Support</option>
@@ -1539,6 +1588,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                         <option value="General Queue">General Queue</option>
                         <option value="Review">Review</option>
                     </select>
+                    <button type="button" class="hud-btn outline small" onclick="loadLeads()" title="Refresh Leads Pipeline">🔄</button>
                 </div>
             </div>
 
@@ -1659,9 +1709,9 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
     </main>
 
     <!-- Global Application Footer -->
-    <footer class="app-global-footer" id="appGlobalFooter">
+    <footer class="app-global-footer bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 text-gray-600 dark:text-slate-400" id="appGlobalFooter">
         <div class="footer-inner">
-            <span class="creator-mark">2026 OpsFlow Cloud  Built by Bashir Khanii</span>
+            <span class="creator-mark text-gray-600 dark:text-slate-400">2026 OpsFlow Cloud &bull; Built by Bashir Khanii</span>
         </div>
     </footer>
     </div><!-- end .enterprise-app-main -->
@@ -2618,12 +2668,21 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 <div class="form-group" style="margin-bottom: 16px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                         <label style="font-size: 12px; font-weight: 600;">Event Payload (JSON)</label>
-                        <button type="button" class="hud-btn outline small" onclick="loadSamplePayloadForCurrentRule()" style="font-size: 11px; padding: 2px 8px;">Load Sample Payload</button>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="hud-btn outline small" onclick="formatConsolePayloadJson()" style="font-size: 11px; padding: 2px 8px;">Format</button>
+                            <button type="button" class="hud-btn outline small" onclick="loadSamplePayloadForCurrentRule()" style="font-size: 11px; padding: 2px 8px;">Load Sample Payload</button>
+                        </div>
                     </div>
-                    <textarea id="execConsolePayload" class="hud-input" rows="5" style="font-family: var(--font-mono); font-size: 12px; width: 100%;">{
+                    <div class="code-editor-card">
+                        <div class="code-editor-header">
+                            <span class="code-editor-tag">JSON PAYLOAD</span>
+                            <span style="font-size: 10px; font-family: var(--font-mono); color: #64748b;">UTF-8 &bull; payload object</span>
+                        </div>
+                        <textarea id="execConsolePayload" class="code-editor-textarea" rows="5">{
   "test_source": "execution_console",
   "timestamp": "2026-10-02T12:00:00Z"
 }</textarea>
+                    </div>
                 </div>
 
                 <!-- Run Action Button -->
@@ -2685,6 +2744,29 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
         </div>
     </div>
 
+
+    <!-- REUSABLE SAFETY CONFIRMATION MODAL FOR DESTRUCTIVE ACTIONS -->
+    <div class="hud-modal-overlay" id="safetyConfirmModal" style="display:none;" onclick="handleSafetyModalOverlayClick(event)">
+        <div class="hud-modal" style="max-width: 440px; border: 1px solid rgba(239, 68, 68, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8), 0 0 25px rgba(239, 68, 68, 0.2);">
+            <div class="modal-header" style="background: rgba(239, 68, 68, 0.08); border-bottom: 1px solid rgba(239, 68, 68, 0.2);">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 20px; color: #f87171;">⚠️</span>
+                    <h3 id="safetyModalTitle" style="color: #f87171; margin: 0; font-size: 16px;">Confirm Destructive Action</h3>
+                </div>
+                <button type="button" class="close-btn" onclick="closeSafetyConfirmModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <p id="safetyModalMessage" style="color: var(--text-secondary); font-size: 13.5px; line-height: 1.5; margin: 0 0 16px 0;">
+                    Are you sure you want to proceed? This operation will permanently delete records and cannot be undone.
+                </p>
+                <div id="safetyModalDetailBox" style="display:none; background: rgba(0,0,0,0.3); padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08); font-family: var(--font-mono); font-size: 11.5px; color: #fca5a5; margin-bottom: 16px;"></div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button type="button" class="hud-btn outline" onclick="closeSafetyConfirmModal()">Cancel</button>
+                    <button type="button" class="hud-btn destructive-danger" id="safetyModalConfirmBtn">Proceed &amp; Confirm</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div id="toastContainer" class="toast-container"></div>
 

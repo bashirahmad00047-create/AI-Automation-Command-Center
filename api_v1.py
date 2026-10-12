@@ -1816,6 +1816,16 @@ def resolve_alert(alert_id: int):
     return jsonify({"success": True, "alert": alert})
 
 
+@api_v1.route("/alerts/clear", methods=["POST", "DELETE"])
+@require_role(["owner", "admin", "operator"])
+def clear_all_alerts():
+    org = g.current_org
+    storage = get_storage()
+    storage.clear_notifications(organization_id=org.id)
+    log_audit_event("alerts.clear_all", "incident_alerts", None)
+    return jsonify({"success": True, "message": "All incident alerts cleared."})
+
+
 # ==========================================
 # Compliance Audit Trail & System Health
 # ==========================================

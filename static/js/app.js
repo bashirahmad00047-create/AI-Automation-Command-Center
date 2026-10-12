@@ -1144,9 +1144,9 @@ function renderWebhooksTable() {
                 </td>
                 <td>${securityBadge}</td>
                 <td>
-                    <div style="display:flex; align-items:center; gap:6px;">
-                        <code style="font-size:0.75rem; color:var(--emerald-glow); background: rgba(16,185,129,0.08); padding: 3px 8px; border-radius: 4px;">${escapeHtml(wh.webhook_url)}</code>
-                        <button class="copy-btn" onclick="copyWebhookUrl('${wh.webhook_url}')">Copy</button>
+                    <div style="display: flex; align-items: center; gap: 8px; max-width: 380px;">
+                        <code style="font-size: 0.75rem; color: var(--emerald-glow); background: rgba(16, 185, 129, 0.08); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.2); word-break: break-all; flex: 1;">${escapeHtml(wh.webhook_url)}</code>
+                        <button class="hud-btn small outline" style="padding: 3px 8px; font-size: 0.72rem; white-space: nowrap; flex-shrink: 0;" onclick="copyWebhookUrl('${wh.webhook_url}')" title="Copy Ingestion URL">📋 Copy</button>
                     </div>
                 </td>
                 <td><span style="font-size:0.8rem; color:var(--text-muted);">${escapeHtml(wh.target_rule_id || 'All Matching Rules')}</span></td>
@@ -1155,7 +1155,7 @@ function renderWebhooksTable() {
                 <td>
                     <div style="display: flex; gap: 6px; align-items: center;">
                         <button class="action-btn cyan-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="testWebhookEndpoint('${wh.id}', '${wh.webhook_url}', ${Boolean(wh.secret_configured)})" title="Test Webhook Ingestion">⚡ Test</button>
-                        <button class="action-btn red-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="deleteWebhook('${wh.id}')" title="Delete Webhook">🗑️ Delete</button>
+                        <button class="action-btn destructive-danger" style="padding: 4px 8px; font-size: 0.75rem;" onclick="promptDeleteWebhook('${wh.id}', '${escapeHtml(wh.name)}')" title="Delete Webhook">🗑️ Delete</button>
                     </div>
                 </td>
             </tr>
@@ -1234,8 +1234,21 @@ async function submitNewWebhook(e) {
     }
 }
 
-async function deleteWebhook(id) {
-    if (!confirm('Are you sure you want to delete this webhook connector?')) return;
+function promptDeleteWebhook(id, name) {
+    openSafetyConfirmModal({
+        title: 'Delete Webhook Endpoint',
+        message: `Are you sure you want to permanently delete webhook connector "${name || id}"? Inbound events targeting this endpoint will be rejected.`,
+        detail: `Target Endpoint: /api/v1/webhooks/${id} (DELETE)`,
+        confirmBtnText: 'Delete Webhook',
+        onConfirm: () => executeDeleteWebhook(id)
+    });
+}
+
+function deleteWebhook(id) {
+    promptDeleteWebhook(id);
+}
+
+async function executeDeleteWebhook(id) {
     try {
         const res = await fetch(`/api/v1/webhooks/${id}`, { method: 'DELETE' });
         const data = await res.json();
@@ -1510,9 +1523,10 @@ function renderLogsTable() {
     }
 
     tbody.innerHTML = state.logs.map(log => {
-        const isSuccess = log.status === 'success';
-        const isSkipped = log.status === 'skipped';
-        const badgeClass = isSuccess ? 'status-badge resolved' : (isSkipped ? 'status-badge paused' : 'status-badge open');
+        const rawStatus = (log.status || '').toLowerCase();
+        const isSuccess = rawStatus === 'success' || rawStatus === 'completed' || rawStatus === 'ok';
+        const isSkipped = rawStatus === 'skipped' || rawStatus === 'ignored';
+        const badgeClass = isSuccess ? 'status-badge success' : (isSkipped ? 'status-badge skipped' : 'status-badge failed');
         const statusIcon = isSuccess ? '✓' : (isSkipped ? '○' : '✕');
 
         return `
@@ -1520,7 +1534,7 @@ function renderLogsTable() {
                 <td><code style="font-size:0.8rem; color:var(--text-muted);">${log.id}</code></td>
                 <td><strong>${escapeHtml(log.rule_name || 'System Dispatcher')}</strong></td>
                 <td><code style="color:var(--cyan-glow);">${escapeHtml(log.trigger_event || log.event_name)}</code></td>
-                <td><span class="${badgeClass}">${statusIcon} ${log.status.toUpperCase()}</span></td>
+                <td><span class="${badgeClass}">${statusIcon} ${(log.status || 'SUCCESS').toUpperCase()}</span></td>
                 <td><span style="font-family:var(--font-mono);">${log.duration_ms || log.execution_time_ms || 0} ms</span></td>
                 <td style="font-size:0.75rem; color:var(--text-muted);">${log.timestamp || log.executed_at}</td>
                 <td>
@@ -1548,13 +1562,14 @@ function renderDashboardMiniLogs() {
     }
 
     tbody.innerHTML = recent.map(log => {
-        const isSuccess = log.status === 'success';
-        const isSkipped = log.status === 'skipped';
-        const badgeClass = isSuccess ? 'status-badge resolved' : (isSkipped ? 'status-badge paused' : 'status-badge open');
+        const rawStatus = (log.status || '').toLowerCase();
+        const isSuccess = rawStatus === 'success' || rawStatus === 'completed' || rawStatus === 'ok';
+        const isSkipped = rawStatus === 'skipped' || rawStatus === 'ignored';
+        const badgeClass = isSuccess ? 'status-badge success' : (isSkipped ? 'status-badge skipped' : 'status-badge failed');
         const statusIcon = isSuccess ? '✓' : (isSkipped ? '○' : '✕');
         return `
             <tr>
-                <td><span class="${badgeClass}">${statusIcon} ${log.status.toUpperCase()}</span></td>
+                <td><span class="${badgeClass}">${statusIcon} ${(log.status || 'SUCCESS').toUpperCase()}</span></td>
                 <td><strong>${escapeHtml(log.rule_name || 'Dispatcher')}</strong></td>
                 <td><code style="color:var(--cyan-glow);">${escapeHtml(log.trigger_event || log.event_name)}</code></td>
                 <td>${log.duration_ms || log.execution_time_ms || 0} ms</td>
@@ -1570,6 +1585,8 @@ function inspectExecution(execId) {
 
     const modal = document.getElementById('logDetailModal');
     const content = document.getElementById('logDetailContent');
+    const rawStatus = (log.status || '').toLowerCase();
+    const isSuccess = rawStatus === 'success' || rawStatus === 'completed' || rawStatus === 'ok';
 
     content.innerHTML = `
         <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
@@ -1578,7 +1595,7 @@ function inspectExecution(execId) {
                 <strong>Trigger Event:</strong> <code style="color:var(--cyan-glow);">${escapeHtml(log.trigger_event || log.event_name)}</code>
             </div>
             <div style="text-align:right;">
-                <strong>Execution Status:</strong> <span style="font-weight:700; color:${log.status === 'success' ? 'var(--emerald-glow)' : 'var(--red-glow)'};">${log.status.toUpperCase()}</span><br>
+                <strong>Execution Status:</strong> <span style="font-weight:700; color:${isSuccess ? '#10b981' : '#f87171'};">${(log.status || 'SUCCESS').toUpperCase()}</span><br>
                 <strong>Execution Duration:</strong> ${log.duration_ms || log.execution_time_ms || 0} ms
             </div>
         </div>
@@ -1636,20 +1653,136 @@ function closeLogModal() {
     document.getElementById('logDetailModal').style.display = 'none';
 }
 
-async function clearAllLogs() {
-    if (!confirm('Are you sure you want to purge all execution forensic logs?')) return;
+// Safety Confirmation Modal Handlers
+let pendingSafetyAction = null;
+
+function openSafetyConfirmModal({ title, message, detail, confirmBtnText = 'Proceed & Confirm', onConfirm }) {
+    const modal = document.getElementById('safetyConfirmModal');
+    if (!modal) {
+        if (confirm(message)) onConfirm();
+        return;
+    }
+    document.getElementById('safetyModalTitle').textContent = title || 'Confirm Destructive Action';
+    document.getElementById('safetyModalMessage').textContent = message || 'Are you sure?';
+
+    const detailBox = document.getElementById('safetyModalDetailBox');
+    if (detail) {
+        detailBox.textContent = detail;
+        detailBox.style.display = 'block';
+    } else {
+        detailBox.style.display = 'none';
+    }
+
+    const confirmBtn = document.getElementById('safetyModalConfirmBtn');
+    confirmBtn.textContent = confirmBtnText;
+    pendingSafetyAction = onConfirm;
+
+    confirmBtn.onclick = async () => {
+        closeSafetyConfirmModal();
+        if (typeof pendingSafetyAction === 'function') {
+            await pendingSafetyAction();
+        }
+    };
+
+    modal.style.display = 'flex';
+}
+
+function closeSafetyConfirmModal() {
+    const modal = document.getElementById('safetyConfirmModal');
+    if (modal) modal.style.display = 'none';
+    pendingSafetyAction = null;
+}
+
+function handleSafetyModalOverlayClick(e) {
+    if (e.target && e.target.id === 'safetyConfirmModal') {
+        closeSafetyConfirmModal();
+    }
+}
+
+function promptPurgeLogsModal() {
+    openSafetyConfirmModal({
+        title: 'Purge Execution Forensic Logs',
+        message: 'Are you sure you want to permanently clear all historical workflow execution logs and mock test traces? This action cannot be undone.',
+        detail: 'Target Endpoint: /api/v1/executions (DELETE)',
+        confirmBtnText: 'Purge All Logs',
+        onConfirm: executePurgeAllLogs
+    });
+}
+
+async function executePurgeAllLogs() {
     try {
-        const res = await fetch('/api/v1/executions', { method: 'DELETE' });
+        let res = await fetch('/api/v1/executions', { method: 'DELETE' });
+        if (!res.ok) {
+            res = await fetch('/api/executions', { method: 'DELETE' });
+        }
         const data = await res.json();
         if (res.ok) {
-            showToast('Execution logs cleared.', 'info');
-            loadExecutionLogs();
-            pollTelemetry();
+            state.logs = [];
+            renderLogsTable();
+            renderDashboardMiniLogs();
+            showToast('Execution forensic logs purged successfully.', 'success');
+            pollTelemetry(true);
         } else {
             showToast(data.error || 'Failed to clear logs', 'error');
         }
     } catch (e) {
         showToast(`Clear error: ${e.message}`, 'error');
+    }
+}
+
+function clearAllLogs() {
+    promptPurgeLogsModal();
+}
+
+function promptClearAlertsModal() {
+    openSafetyConfirmModal({
+        title: 'Clear All Active Incident Alerts',
+        message: 'Are you sure you want to dismiss and clear all active alerts across the workspace?',
+        detail: 'Target Endpoint: /api/v1/alerts/clear & /api/notifications (DELETE)',
+        confirmBtnText: 'Clear All Alerts',
+        onConfirm: executeClearAllNotifications
+    });
+}
+
+async function executeClearAllNotifications() {
+    try {
+        let res = await fetch('/api/v1/alerts/clear', { method: 'POST' });
+        if (!res.ok) {
+            res = await fetch('/api/notifications', { method: 'DELETE' });
+        }
+        showToast('All alerts cleared successfully.', 'success');
+        loadIncidents();
+        pollTelemetry(true);
+    } catch (e) {
+        showToast(`Clear alerts error: ${e.message}`, 'error');
+    }
+}
+
+function clearNotifications() {
+    promptClearAlertsModal();
+}
+
+function formatManualPayloadJson() {
+    const el = document.getElementById('manualEventPayload');
+    if (!el) return;
+    try {
+        const parsed = JSON.parse(el.value);
+        el.value = JSON.stringify(parsed, null, 2);
+        showToast('JSON payload formatted.', 'info');
+    } catch (e) {
+        showToast('Invalid JSON: ' + e.message, 'error');
+    }
+}
+
+function formatConsolePayloadJson() {
+    const el = document.getElementById('execConsolePayload');
+    if (!el) return;
+    try {
+        const parsed = JSON.parse(el.value);
+        el.value = JSON.stringify(parsed, null, 2);
+        showToast('Console payload formatted.', 'info');
+    } catch (e) {
+        showToast('Invalid JSON: ' + e.message, 'error');
     }
 }
 
@@ -1987,7 +2120,7 @@ function renderTeamMembers() {
 
         if (isManager) {
             roleCol = `
-                <select class="hud-input small" style="padding: 2px 6px; font-size: 11px; background: rgba(0,0,0,0.3);" onchange="changeMemberRole('${memberId}', this.value)">
+                <select class="custom-sleek-select" style="min-width: 105px; padding: 4px 8px; font-size: 11px;" onchange="changeMemberRole('${memberId}', this.value)">
                     <option value="owner" ${role === 'owner' ? 'selected' : ''}>Owner</option>
                     <option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option>
                     <option value="operator" ${role === 'operator' ? 'selected' : ''}>Operator</option>
@@ -1998,7 +2131,7 @@ function renderTeamMembers() {
                 actionsCol = `<span style="font-size: 11px; color: var(--text-dim);">(You)</span>`;
             } else {
                 actionsCol = `
-                    <button class="hud-btn small red-btn" style="padding: 2px 8px; font-size: 11px;" onclick="removeTeamMember('${memberId}', '${escapeHtml(fullName)}')">Remove</button>
+                    <button class="hud-btn small destructive-danger" style="padding: 3px 8px; font-size: 11px;" onclick="promptRemoveTeamMember('${memberId}', '${escapeHtml(fullName)}')">Remove</button>
                 `;
             }
         }
@@ -2036,10 +2169,21 @@ async function changeMemberRole(targetId, newRole) {
     }
 }
 
-async function removeTeamMember(targetId, name) {
-    if (!confirm(`Are you sure you want to remove ${name || 'this member'} from the workspace?`)) {
-        return;
-    }
+function promptRemoveTeamMember(targetId, name) {
+    openSafetyConfirmModal({
+        title: 'Remove Team Member',
+        message: `Are you sure you want to remove "${name || 'this member'}" from the workspace? They will immediately lose all RBAC access and permissions.`,
+        detail: `Target: Member ID ${targetId} (/api/v1/team/members/${targetId})`,
+        confirmBtnText: 'Remove Member',
+        onConfirm: () => executeRemoveTeamMember(targetId)
+    });
+}
+
+function removeTeamMember(targetId, name) {
+    promptRemoveTeamMember(targetId, name);
+}
+
+async function executeRemoveTeamMember(targetId) {
     try {
         const res = await fetch(`/api/v1/team/members/${targetId}`, {
             method: 'DELETE'
