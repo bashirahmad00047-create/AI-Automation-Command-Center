@@ -117,12 +117,18 @@ def send_password_reset_email(
                 "recipient": to_email
             }
 
-    # Safe development mock mode
-    logger.info("[DEV EMAIL DISPATCH] Password reset for %s. Reset link: %s", to_email, reset_url)
+    # Safe development mock mode removed as per requirements.
+    # Do not pretend a reset email was delivered. Identify missing configuration.
+    missing = []
+    if not os.environ.get("SMTP_HOST"): missing.append("SMTP_HOST")
+    if not os.environ.get("SMTP_USER"): missing.append("SMTP_USER")
+    if not os.environ.get("SMTP_PASSWORD"): missing.append("SMTP_PASSWORD")
+    
+    logger.warning("Email provider credentials missing: %s", ", ".join(missing))
     return {
-        "sent": True,
-        "method": "mock_development",
-        "recipient": to_email,
-        "reset_url": reset_url,
-        "notice": "SMTP not configured; simulated email dispatch recorded safely."
+        "sent": False,
+        "method": "none",
+        "error": "Email provider credentials are missing.",
+        "missing_configuration": missing,
+        "recipient": to_email
     }

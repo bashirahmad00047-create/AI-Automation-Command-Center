@@ -32,6 +32,7 @@ const state = {
 // ==========================================
 
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
     initClock();
     initEnterpriseSidebar();
     initCommandPalette();
@@ -394,7 +395,11 @@ async function loadRules() {
             url += `?category=${encodeURIComponent(state.selectedCategory)}`;
         }
         const res = await fetch(url);
-        if (!res.ok) return;
+        if (!res.ok) {
+            const tbody = document.getElementById('rulesTableBody');
+            if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-cell" style="color: #ef4444;">Failed to load rules: ${res.statusText} (Please Sign In)</td></tr>`;
+            return;
+        }
         const data = await res.json();
         state.rules = data.rules || [];
         renderRulesTable();
@@ -482,7 +487,7 @@ function renderRulesTable() {
                 <td>${lastRunText}</td>
                 <td style="text-align: right;" onclick="event.stopPropagation()">
                     <div class="action-btn-row" style="justify-content: flex-end; align-items: center; gap: 6px;">
-                        <button type="button" class="hud-btn primary small run-primary-btn" onclick="openExecutionConsole('${rule.id}')" title="Execute Workflow Now">
+                        <button type="button" class="hud-btn primary small run-primary-btn" onclick="executeRuleDirectly(this, '${rule.id}')" title="Execute Workflow Now">
                             <span>⚡</span> Run
                         </button>
                         <div class="action-overflow-wrapper" style="position: relative; display: inline-block;">
@@ -670,6 +675,34 @@ async function runRuleTest(ruleId) {
         }
     } catch (e) {
         showToast(`Execution error: ${e.message}`, 'error');
+    }
+}
+
+async function executeRuleDirectly(btn, ruleId) {
+    const originalText = btn.innerHTML;
+    try {
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳</span> Running...';
+        
+        const res = await fetch(`/api/v1/rules/${ruleId}/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: false, payload: { test_source: "manual_ui", timestamp: new Date().toISOString() } })
+        });
+        
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`Workflow executed: ${data.status.toUpperCase()}`, 'success');
+            loadExecutionLogs();
+            loadRules();
+        } else {
+            showToast(data.error || 'Execution failed', 'error');
+        }
+    } catch (e) {
+        showToast(`Execution error: ${e.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
     }
 }
 
@@ -2108,6 +2141,7 @@ async function loadBillingStatus() {
 
         const tierName = (data.plan_tier || 'free').toUpperCase();
         const tierTitle = (data.plan_tier || 'free').charAt(0).toUpperCase() + (data.plan_tier || 'free').slice(1);
+        const sub = data.subscription || {};
         const rawSubStatus = (sub.status || (data.plan_tier === 'free' ? 'active' : 'unmanaged')).toUpperCase();
         const subStatus = ['UNMANAGED'].includes(rawSubStatus) ? 'ACTIVE' : rawSubStatus;
 
@@ -3018,13 +3052,12 @@ function openAuthModal(mode = 'login', isForced = false) {
     switchAuthTab(mode);
     const closeBtn = document.getElementById('authModalCloseBtn');
     if (closeBtn) {
-        closeBtn.style.display = (isForced || !state.currentUser) ? 'none' : 'block';
+        closeBtn.style.display = 'block';
     }
     modal.style.display = 'flex';
 }
 
 function closeAuthModal(force = false) {
-    if (!state.currentUser && !force) return;
     const modal = document.getElementById('authModal');
     if (modal) modal.style.display = 'none';
 }
@@ -4368,11 +4401,73 @@ function filterCommandPalette(query) {
     if (!q) {
         filteredCommandItems = [...COMMAND_PALETTE_ITEMS];
     } else {
-        filteredCommandItems = COMMAND_PALETTE_ITEMS.filter(item => 
+        const matchingCommands = COMMAND_PALETTE_ITEMS.filter(item => 
             item.title.toLowerCase().includes(q) || 
             item.category.toLowerCase().includes(q) ||
             (item.shortcut && item.shortcut.toLowerCase().includes(q))
         );
+
+        // Dynamic Entity Search 1: Workflows (by title, status, trigger)
+        const matchingWorkflows = (state.rules || []).filter(r => 
+            (r.name && r.name.toLowerCase().includes(q)) ||
+            (r.id && r.id.toLowerCase().includes(q)) ||
+            (r.category && r.category.toLowerCase().includes(q)) ||
+            (r.status && r.status.toLowerCase().includes(q)) ||
+            (r.trigger && r.trigger.event_name && r.trigger.event_name.toLowerCase().includes(q))
+        ).slice(0, 5).map(r => ({
+            id: `wf-${r.id}`,
+            category: 'Workflows',
+            icon: '⚡',
+            title: `${r.name || r.id} (${(r.status || 'Active').toUpperCase()})`,
+            shortcut: r.trigger ? r.trigger.event_name || 'Event' : 'Workflow',
+            action: () => {
+                switchTab('rules');
+                openRuleDetailsDrawer(r.id);
+            }
+        }));
+
+        // Dynamic Entity Search 2: CRM Leads (by lead name, status, score)
+        const matchingLeads = (state.leads || []).filter(l => 
+            (l.name && l.name.toLowerCase().includes(q)) ||
+            (l.email && l.email.toLowerCase().includes(q)) ||
+            (l.company && l.company.toLowerCase().includes(q)) ||
+            (l.status && l.status.toLowerCase().includes(q)) ||
+            (String(l.score || '').includes(q))
+        ).slice(0, 5).map(l => ({
+            id: `lead-${l.id}`,
+            category: 'CRM Leads',
+            icon: '🎯',
+            title: `${l.name || l.email} — ${l.company || 'Lead'} (Score: ${l.score || 0})`,
+            shortcut: (l.status || 'new').toUpperCase(),
+            action: () => {
+                switchTab('leads');
+            }
+        }));
+
+        // Dynamic Entity Search 3: Forensics & Audit Logs (by execution ID, event)
+        const matchingLogs = (state.logs || []).filter(log => 
+            (log.id && String(log.id).toLowerCase().includes(q)) ||
+            (log.rule_name && log.rule_name.toLowerCase().includes(q)) ||
+            (log.event_name && log.event_name.toLowerCase().includes(q)) ||
+            (log.status && log.status.toLowerCase().includes(q))
+        ).slice(0, 5).map(log => ({
+            id: `log-${log.id}`,
+            category: 'Forensics & Audits',
+            icon: '📜',
+            title: `Execution #${log.id}: ${log.rule_name || log.event_name} [${(log.status || 'OK').toUpperCase()}]`,
+            shortcut: log.timestamp ? log.timestamp.split(' ')[1] : 'Log',
+            action: () => {
+                switchTab('logs');
+                inspectExecutionDetails(log.id);
+            }
+        }));
+
+        filteredCommandItems = [
+            ...matchingWorkflows,
+            ...matchingLeads,
+            ...matchingLogs,
+            ...matchingCommands
+        ];
     }
     selectedCommandIndex = 0;
     renderCommandPaletteResults();
@@ -4487,4 +4582,144 @@ document.addEventListener('click', (e) => {
         document.querySelectorAll('.action-overflow-menu').forEach(m => m.style.display = 'none');
     }
 });
+
+// ==========================================================================
+// THEME CONTROLLER (DARK / LIGHT MODE PERSISTENCE)
+// ==========================================================================
+
+function initTheme() {
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    applyTheme(savedTheme);
+}
+
+function toggleTheme() {
+    const isDark = document.documentElement.classList.contains('dark');
+    const newTheme = isDark ? 'light' : 'dark';
+    applyTheme(newTheme);
+    localStorage.setItem('theme', newTheme);
+    showToast(`Switched to ${newTheme === 'dark' ? 'Dark' : 'Light'} theme`, 'info');
+}
+
+function applyTheme(theme) {
+    const icon = document.getElementById('themeToggleIcon');
+    if (theme === 'light') {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
+        if (icon) icon.textContent = '☀️';
+    } else {
+        document.documentElement.classList.remove('light');
+        document.documentElement.classList.add('dark');
+        if (icon) icon.textContent = '🌙';
+    }
+}
+
+// ==========================================================================
+// PRACTICAL CHECKOUT & PLAN UPGRADE MODAL CONTROLLER
+// ==========================================================================
+
+let pendingCheckoutTier = null;
+
+const PLAN_QUOTA_SUMMARIES = {
+    free: {
+        name: 'Free Community Tier',
+        price: '$0 / month',
+        summary: '3 Workflow Rules, 1,000 Monthly Events, 1 Team Seat, Community Support.'
+    },
+    starter: {
+        name: 'Starter Plan',
+        price: '$29 / month',
+        summary: '10 Workflow Rules, 5,000 Monthly Events, 2 Team Seats, 2 API Keys & Webhooks.'
+    },
+    pro: {
+        name: 'Professional Plan',
+        price: '$99 / month',
+        summary: '50 Workflow Rules, 200,000 Monthly Events, 10 Team Seats, Google Gemini AI Integration.'
+    },
+    enterprise: {
+        name: 'Enterprise Plan',
+        price: '$499 / month',
+        summary: '250 Workflow Rules, 1,000,000 Monthly Events, 100 Team Seats, Multimodal AI & Dedicated SLA.'
+    }
+};
+
+function openCheckoutConfirmationModal(tier) {
+    pendingCheckoutTier = tier.toLowerCase();
+    closeUpgradePlanModal();
+
+    const planInfo = PLAN_QUOTA_SUMMARIES[pendingCheckoutTier] || PLAN_QUOTA_SUMMARIES['starter'];
+    const nameEl = document.getElementById('checkoutSelectedPlanName');
+    const priceEl = document.getElementById('checkoutSelectedPrice');
+    const quotaEl = document.getElementById('checkoutSelectedQuotaSummary');
+    const errBox = document.getElementById('checkoutErrorMessage');
+    if (errBox) errBox.style.display = 'none';
+
+    if (nameEl) nameEl.textContent = planInfo.name;
+    if (priceEl) priceEl.textContent = planInfo.price;
+    if (quotaEl) quotaEl.textContent = planInfo.summary;
+
+    const modal = document.getElementById('checkoutConfirmationModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeCheckoutConfirmationModal() {
+    const modal = document.getElementById('checkoutConfirmationModal');
+    if (modal) modal.style.display = 'none';
+    pendingCheckoutTier = null;
+}
+
+async function handlePracticalCheckoutSubmit(e) {
+    if (e) e.preventDefault();
+    if (!pendingCheckoutTier) return;
+
+    const btn = document.getElementById('btnSubmitCheckout');
+    const errBox = document.getElementById('checkoutErrorMessage');
+    if (errBox) errBox.style.display = 'none';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Processing Payment...';
+    }
+
+    try {
+        const res = await fetch('/api/v1/billing/upgrade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plan_tier: pendingCheckoutTier,
+                interval: currentBillingInterval || 'month'
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            closeCheckoutConfirmationModal();
+            showToast(`Workspace upgraded to ${pendingCheckoutTier.toUpperCase()} plan successfully!`, 'success');
+            
+            // Immediately update badges and tenant state
+            if (data.organization && state.currentOrg) {
+                state.currentOrg.plan_tier = data.organization.plan_tier;
+                state.currentOrg.max_rules = data.organization.max_rules;
+                state.currentOrg.max_monthly_events = data.organization.max_monthly_events;
+            }
+            loadBillingStatus();
+            loadBillingDashboard();
+            pollTelemetry(true);
+        } else {
+            if (errBox) {
+                errBox.textContent = data.error || 'Failed to upgrade plan. Please try again.';
+                errBox.style.display = 'block';
+            }
+        }
+    } catch (err) {
+        if (errBox) {
+            errBox.textContent = 'Network error: ' + err.message;
+            errBox.style.display = 'block';
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Confirm & Activate Plan';
+        }
+    }
+}
+
 

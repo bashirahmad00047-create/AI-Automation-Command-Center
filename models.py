@@ -108,6 +108,12 @@ class User(db.Model):
     full_name = db.Column(db.String(128), nullable=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     is_superuser = db.Column(db.Boolean, nullable=False, default=False)
+    
+    # MFA / TOTP Fields
+    mfa_secret = db.Column(db.String(64), nullable=True)
+    is_mfa_enabled = db.Column(db.Boolean, nullable=False, default=False)
+    mfa_backup_codes = db.Column(db.Text, nullable=True)
+    
     last_login_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
 
@@ -129,6 +135,7 @@ class User(db.Model):
             "full_name": self.full_name,
             "is_active": self.is_active,
             "is_superuser": self.is_superuser,
+            "is_mfa_enabled": self.is_mfa_enabled,
             "last_login_at": self.last_login_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_login_at else None,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
         }

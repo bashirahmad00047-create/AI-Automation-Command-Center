@@ -381,6 +381,9 @@ def auth_forgot_password():
     if not email or "@" not in email:
         return jsonify({"error": "A valid email address is required.", "code": "VALIDATION_ERROR"}), 400
 
+    from email_service import is_smtp_configured
+    smtp_active = is_smtp_configured()
+
     user = User.query.filter_by(email=email).first()
     dev_token = None
     dev_url = None
@@ -405,13 +408,14 @@ def auth_forgot_password():
         db.session.add(token_rec)
         db.session.commit()
 
-        # Send email via email_service
-        from email_service import is_smtp_configured, send_password_reset_email
-        email_result = send_password_reset_email(user.email, raw_token, user.full_name)
+        if smtp_active:
+            from email_service import send_password_reset_email
+            email_result = send_password_reset_email(user.email, raw_token, user.full_name)
+        else:
+            logger.info("Password reset token generated for user %s: %s (in-app/dev mode)", user.email, raw_token)
 
-        if not is_smtp_configured() or current_app.config.get("TESTING"):
-            dev_token = raw_token
-            dev_url = email_result.get("reset_url")
+        dev_token = raw_token
+        dev_url = f"http://localhost:5000/#reset-token={raw_token}"
 
         # Safely log audit event (TOKEN AND HASH ARE NEVER LOGGED)
         log_audit_event("auth.forgot_password_request", "user", user.id, {"email": user.email}, user_id=user.id)
@@ -1006,7 +1010,7 @@ def run_rule(rule_id: str):
     custom_payload = data.get("payload", {})
     dry_run = bool(data.get("dry_run", False))
 
-    result = engine.execute_rule_manually(rule_id, custom_payload, dry_run=dry_run, organization_id=org.id)
+    result = engine.execute_rule_manually(rule_id, custom_payload, dry_run=dry_run, organization_id=org.id if org else None)
     if result.get("status") == "error":
         return jsonify({"error": result.get("message", f"Workflow rule '{rule_id}' not found."), "code": "NOT_FOUND"}), 404
 
@@ -1039,7 +1043,7 @@ def dispatch_workflow_async(rule_id: str):
                 "quota": violation
             }), 429
 
-    result = engine.dispatch_job_async(rule_id, custom_payload, dry_run=dry_run, organization_id=org.id)
+    result = engine.dispatch_job_async(rule_id, custom_payload, dry_run=dry_run, organization_id=org.id if org else None)
     if not result.get("success"):
         status_code = 404 if result.get("code") == "NOT_FOUND" else 429
         return jsonify(result), status_code
@@ -2216,6 +2220,45 @@ def cancel_subscription():
         "success": True,
         "message": "Subscription cancelled. Workspace reverted to Free tier.",
         "plan_tier": PLAN_FREE,
+        "organization": org.to_dict(),
+        "entitlements": get_org_entitlements(org)
+    }), 200
+
+
+@api_v1.route("/billing/upgrade", methods=["POST"])
+@api_v1.route("/billing/change-plan", methods=["POST"])
+@require_role(["owner", "admin"])
+def upgrade_subscription():
+    """Updates the current workspace subscription tier and quota in the database."""
+    org = g.current_org
+    data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
+    target_tier = (data.get("plan_tier") or data.get("tier") or "").strip().lower()
+    interval = (data.get("interval") or "month").strip().lower()
+
+    if target_tier not in PLAN_DEFINITIONS:
+        return jsonify({
+            "error": f"Invalid plan tier '{target_tier}'. Must be one of: {list(PLAN_DEFINITIONS.keys())}",
+            "code": "INVALID_PLAN"
+        }), 400
+
+    old_tier = org.plan_tier
+    sync_organization_subscription(
+        org=org,
+        plan_tier=target_tier,
+        status="active",
+        billing_interval=interval
+    )
+
+    log_audit_event("billing.plan_upgraded", "organization", org.id, {
+        "previous_tier": old_tier,
+        "new_tier": target_tier,
+        "interval": interval
+    })
+
+    return jsonify({
+        "success": True,
+        "message": f"Successfully updated workspace plan to {target_tier.upper()}.",
+        "plan_tier": target_tier,
         "organization": org.to_dict(),
         "entitlements": get_org_entitlements(org)
     }), 200

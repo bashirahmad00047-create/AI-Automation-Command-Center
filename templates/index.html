@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -199,6 +199,11 @@
                     <div id="hudClock" style="display:none;">00:00:00</div>
                 </div>
 
+                <!-- Theme Toggle Button (Dark / Light) -->
+                <button type="button" class="hud-icon-btn topbar-icon-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle Theme (Dark / Light Mode)" aria-label="Toggle Theme">
+                    <span id="themeToggleIcon">🌙</span>
+                </button>
+
                 <!-- Notifications Bell & Drawer -->
                 <div class="notif-wrapper">
                     <button class="hud-icon-btn topbar-icon-btn" id="notifBellBtn" onclick="toggleNotificationsDrawer()" title="Active Incidents &amp; Alerts">
@@ -397,43 +402,59 @@
                 </div>
             </div>
 
-            <!-- Telemetry Gauges Section -->
-            <div class="telemetry-bar-card">
-                <div class="card-header">
-                    <h3>⚡ LIVE HARDWARE & CLUSTER TELEMETRY</h3>
-                    <span class="refresh-indicator">POLLING INTERVAL: 2.5s</span>
+            <!-- Polished Live Hardware & Cluster Telemetry Widget Cards -->
+            <div class="hud-panel telemetry-widget-panel" style="margin-bottom: 24px;">
+                <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 16px;">⚡</span>
+                        <h3 style="font-size: 13px; font-weight: 700; letter-spacing: 0.5px; margin: 0;">LIVE HARDWARE &amp; CLUSTER TELEMETRY</h3>
+                    </div>
+                    <span class="refresh-indicator" style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">POLLING INTERVAL: 2.5s</span>
                 </div>
-                <div class="gauges-grid">
-                    <div class="gauge-item">
-                        <div class="gauge-label">
-                            <span>CPU UTILIZATION</span>
-                            <span class="gauge-val" id="telemCpuVal">0%</span>
+                <div class="telemetry-cards-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding: 20px;">
+                    <!-- CPU Utilization Widget Card -->
+                    <div class="telemetry-gauge-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.5px;">CPU UTILIZATION</span>
+                            <strong class="gauge-val" id="telemCpuVal" style="font-family: var(--font-mono); font-size: 18px; color: var(--cyan-glow);">0%</strong>
                         </div>
-                        <div class="progress-track">
-                            <div class="progress-fill cyan-glow" id="telemCpuBar" style="width: 0%;"></div>
+                        <div class="progress-track" style="background: rgba(0,0,0,0.25); height: 8px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color);">
+                            <div class="progress-fill cyan-glow" id="telemCpuBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #0284c7, var(--cyan-glow)); transition: width 0.4s ease;"></div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">
+                            <span>Core Load</span>
+                            <span>Multi-Threaded</span>
                         </div>
                     </div>
 
-                    <div class="gauge-item">
-                        <div class="gauge-label">
-                            <span>RAM ALLOCATION</span>
-                            <span class="gauge-val" id="telemRamVal">0%</span>
+                    <!-- RAM Allocation Widget Card -->
+                    <div class="telemetry-gauge-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.5px;">RAM ALLOCATION</span>
+                            <strong class="gauge-val" id="telemRamVal" style="font-family: var(--font-mono); font-size: 18px; color: var(--purple-glow);">0%</strong>
                         </div>
-                        <div class="progress-track">
-                            <div class="progress-fill purple-glow" id="telemRamBar" style="width: 0%;"></div>
+                        <div class="progress-track" style="background: rgba(0,0,0,0.25); height: 8px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color);">
+                            <div class="progress-fill purple-glow" id="telemRamBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #7c3aed, var(--purple-glow)); transition: width 0.4s ease;"></div>
                         </div>
-                        <span class="gauge-sub" id="telemRamGb">0.0 / 0.0 GB</span>
+                        <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">
+                            <span>Memory Footprint</span>
+                            <span id="telemRamGb">0.0 / 0.0 GB</span>
+                        </div>
                     </div>
 
-                    <div class="gauge-item">
-                        <div class="gauge-label">
-                            <span>DISK OCCUPANCY</span>
-                            <span class="gauge-val" id="telemDiskVal">0%</span>
+                    <!-- Disk Occupancy Widget Card -->
+                    <div class="telemetry-gauge-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.5px;">DISK OCCUPANCY</span>
+                            <strong class="gauge-val" id="telemDiskVal" style="font-family: var(--font-mono); font-size: 18px; color: var(--emerald-glow);">0%</strong>
                         </div>
-                        <div class="progress-track">
-                            <div class="progress-fill emerald-glow" id="telemDiskBar" style="width: 0%;"></div>
+                        <div class="progress-track" style="background: rgba(0,0,0,0.25); height: 8px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color);">
+                            <div class="progress-fill emerald-glow" id="telemDiskBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #059669, var(--emerald-glow)); transition: width 0.4s ease;"></div>
                         </div>
-                        <span class="gauge-sub" id="telemDiskGb">0.0 / 0.0 GB</span>
+                        <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">
+                            <span>Storage Usage</span>
+                            <span id="telemDiskGb">0.0 / 0.0 GB</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2047,6 +2068,20 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                     <button type="button" class="hud-btn outline" id="btnIntervalYear" onclick="setBillingInterval('year')">Annual Billing (2 Months Free)</button>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
+                    <!-- Free Community Tier -->
+                    <div class="hud-panel" style="padding: 20px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color, #2a2e3d);">
+                        <h4 style="color: var(--text-secondary); margin: 0 0 8px 0;">Free Tier</h4>
+                        <div style="font-size: 26px; font-weight: 700; margin-bottom: 8px;">$0<span style="font-size: 13px; color: var(--text-dim, #888);">/mo</span></div>
+                        <p style="font-size: 12px; color: var(--text-dim, #888); min-height: 36px;">Community tier for test environments and sandbox exploration</p>
+                        <ul style="text-align: left; font-size: 12px; list-style: none; padding: 0; margin: 16px 0; line-height: 1.8;">
+                            <li>✓ 3 Workflow Rules</li>
+                            <li>✓ 1,000 Monthly Events</li>
+                            <li>✓ 1 Team Member Seat</li>
+                            <li>✓ Community Support</li>
+                        </ul>
+                        <button class="hud-btn outline" style="width: 100%;" onclick="openCheckoutConfirmationModal('free')">Select Free Tier</button>
+                    </div>
+
                     <!-- Starter Plan -->
                     <div class="hud-panel" style="padding: 20px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color, #2a2e3d);">
                         <h4 style="color: var(--cyan-glow, #00f0ff); margin: 0 0 8px 0;">Starter</h4>
@@ -2058,7 +2093,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                             <li>✓ 2 Team Member Seats</li>
                             <li>✓ 2 API Keys & Webhooks</li>
                         </ul>
-                        <button class="hud-btn outline" style="width: 100%;" onclick="selectPlanForCheckout('starter')">Select Starter</button>
+                        <button class="hud-btn outline" style="width: 100%;" onclick="openCheckoutConfirmationModal('starter')">Select Starter</button>
                     </div>
 
                     <!-- Pro Plan -->
@@ -2074,7 +2109,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                             <li>✓ Google Gemini AI Integration</li>
                             <li>✓ Advanced Telemetry & Audits</li>
                         </ul>
-                        <button class="hud-btn primary" style="width: 100%;" onclick="selectPlanForCheckout('pro')">Select Professional</button>
+                        <button class="hud-btn primary" style="width: 100%;" onclick="openCheckoutConfirmationModal('pro')">Select Professional</button>
                     </div>
 
                     <!-- Enterprise Plan -->
@@ -2089,9 +2124,59 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                             <li>✓ OpenAI & Gemini Multimodal</li>
                             <li>✓ Dedicated SLA & Priority</li>
                         </ul>
-                        <button class="hud-btn emerald" style="width: 100%;" onclick="selectPlanForCheckout('enterprise')">Select Enterprise</button>
+                        <button class="hud-btn emerald" style="width: 100%;" onclick="openCheckoutConfirmationModal('enterprise')">Select Enterprise</button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PRACTICAL CHECKOUT CONFIRMATION MODAL -->
+    <div class="hud-modal-overlay" id="checkoutConfirmationModal" style="display:none;">
+        <div class="hud-modal" style="max-width: 520px;">
+            <div class="modal-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">💳</span>
+                    <h3 id="checkoutModalTitle">Complete Workspace Upgrade</h3>
+                </div>
+                <button class="close-btn" onclick="closeCheckoutConfirmationModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <div id="checkoutSummaryBox" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-weight: 600;" id="checkoutSelectedPlanName">Professional Plan</span>
+                        <strong style="color: var(--cyan-glow); font-size: 16px;" id="checkoutSelectedPrice">$99 / month</strong>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted);" id="checkoutSelectedQuotaSummary">
+                        Upgrades workspace quota to 50 rules, 200,000 events, 10 team seats.
+                    </div>
+                </div>
+
+                <form id="practicalCheckoutForm" onsubmit="handlePracticalCheckoutSubmit(event)">
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Cardholder Name</label>
+                        <input type="text" id="checkoutCardName" class="hud-input" required placeholder="Alexander Wright" style="width: 100%;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Card Number</label>
+                        <input type="text" id="checkoutCardNumber" class="hud-input" required placeholder="•••• •••• •••• 4242" value="4242 •••• •••• 4242" style="width: 100%; font-family: var(--font-mono);">
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                        <div class="form-group">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Expiration Date</label>
+                            <input type="text" id="checkoutCardExp" class="hud-input" required placeholder="MM/YY" value="12/28" style="width: 100%; font-family: var(--font-mono);">
+                        </div>
+                        <div class="form-group">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">CVC / Security Code</label>
+                            <input type="password" id="checkoutCardCvc" class="hud-input" required placeholder="•••" value="123" maxlength="4" style="width: 100%; font-family: var(--font-mono);">
+                        </div>
+                    </div>
+                    <div id="checkoutErrorMessage" style="display: none; color: #ef4444; font-size: 12px; margin-bottom: 12px; padding: 8px 10px; background: rgba(239,68,68,0.1); border-radius: 6px;"></div>
+                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                        <button type="button" class="hud-btn outline" onclick="closeCheckoutConfirmationModal()">Cancel</button>
+                        <button type="submit" class="hud-btn primary" id="btnSubmitCheckout">Confirm &amp; Activate Plan</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
@@ -2104,7 +2189,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                     <span style="font-size: 20px;">⚡</span>
                     <h3 id="authModalTitle">OpsFlow Cloud Authentication</h3>
                 </div>
-                <button class="close-btn" id="authModalCloseBtn" onclick="closeAuthModal()">&times;</button>
+                <button class="close-btn" id="authModalCloseBtn" onclick="closeAuthModal()" aria-label="Close" title="Close">&times;</button>
             </div>
 
             <!-- Auth Tabs -->
@@ -2139,7 +2224,10 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                         <a href="javascript:void(0)" onclick="switchAuthTab('register')" style="color: var(--text-dim, #888); font-size: 12px;">New here? Create Workspace &rarr;</a>
                     </div>
                     <div id="loginErrorMessage" style="display:none; color: #ef4444; font-size: 13px; margin-bottom: 14px; padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 6px; border-left: 3px solid #ef4444;"></div>
-                    <button type="submit" class="hud-btn primary" id="loginSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600;">Sign In to Workspace</button>
+                    <div style="display: flex; gap: 10px;">
+                        <button type="button" class="hud-btn" onclick="closeAuthModal()" style="width: 30%; padding: 12px; font-weight: 600; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-dim, #888);">Cancel</button>
+                        <button type="submit" class="hud-btn primary" id="loginSubmitBtn" style="flex: 1; padding: 12px; font-weight: 600;">Sign In to Workspace</button>
+                    </div>
                 </form>
 
                 <!-- REGISTER / CREATE WORKSPACE FORM -->
@@ -2189,6 +2277,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                     <button type="submit" class="hud-btn primary" id="registerSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600;">Launch Workspace &amp; Begin Tour</button>
                     <div style="text-align: center; margin-top: 14px;">
                         <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color: var(--text-dim, #888); font-size: 12px;">Already have an account? Sign In &rarr;</a>
+                    </div>
                 </form>
 
                 <!-- FORGOT PASSWORD FORM -->

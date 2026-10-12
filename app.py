@@ -154,6 +154,22 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         token = request.args.get("token", "")
         return render_template("index.html", reset_token=token)
 
+    @application.route("/api/auth/forgot-password", methods=["POST"])
+    def legacy_forgot_password():
+        from api_v1 import auth_forgot_password
+        return auth_forgot_password()
+
+    @application.route("/api/auth/reset-password", methods=["POST"])
+    def legacy_reset_password():
+        from api_v1 import auth_reset_password
+        return auth_reset_password()
+
+    @application.route("/api/billing/upgrade", methods=["POST"])
+    @application.route("/api/billing/change-plan", methods=["POST"])
+    def legacy_billing_upgrade():
+        from api_v1 import upgrade_subscription
+        return upgrade_subscription()
+
 
     # ==========================================
     # Backward-Compatible Legacy Endpoints

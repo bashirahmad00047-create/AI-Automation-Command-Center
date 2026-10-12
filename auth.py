@@ -182,7 +182,7 @@ def require_role(allowed_roles: List[str]) -> Callable:
             if user.is_superuser:
                 return f(*args, **kwargs)
 
-            role = get_user_role(user.id, org.id)
+            role = get_user_role(user.id, org.id) if org else None
             if not role or role not in allowed_roles:
                 return jsonify({
                     "error": f"Permission denied. Required role in [{', '.join(allowed_roles)}], but your role is '{role or 'none'}'.",

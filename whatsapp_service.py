@@ -296,27 +296,31 @@ class WhatsAppService:
                     "recipient": clean_to
                 }
 
-        # Safe development mock mode
-        mock_msg_id = f"mock_wamid_{uuid.uuid4().hex[:16]}"
-        logger.info("[DEV WHATSAPP MOCK] Outbound to %s: %s", clean_to, message_text)
-        record = cls.record_message(
+        # Safe development mock mode removed.
+        # Do not fabricate successful delivery. Report precise missing configuration.
+        missing = []
+        if not conf["phone_number_id"] or conf["phone_number_id"].startswith("mock_"): missing.append("WHATSAPP_PHONE_NUMBER_ID")
+        if not conf["access_token"] or conf["access_token"].startswith("mock_"): missing.append("WHATSAPP_ACCESS_TOKEN")
+        
+        err_msg = f"WhatsApp credentials not configured. Missing or invalid: {', '.join(missing)}"
+        logger.warning(err_msg)
+        
+        cls.record_message(
             organization_id=organization_id,
             sender="OpsFlow-Mock-Gateway",
             recipient=clean_to,
             direction="outbound",
             body=message_text,
-            status="mock_sent",
-            whatsapp_message_id=mock_msg_id,
+            status="failed",
             execution_id=execution_id,
-            raw_payload={"mock": True, "notice": "Simulation mode (no live Meta credentials)"}
+            error_message=err_msg,
+            raw_payload={"mock": False, "notice": "Simulation mode rejected as per requirements"}
         )
 
         return {
-            "success": True,
-            "status": "mock_sent",
-            "whatsapp_message_id": mock_msg_id,
-            "message_record_id": record.id,
+            "success": False,
+            "status": "failed",
+            "error": err_msg,
             "recipient": clean_to,
-            "mode": "development_mock",
-            "notice": "WhatsApp credentials not configured; recorded simulated dispatch."
+            "missing_configuration": missing
         }

@@ -417,8 +417,9 @@ class TestPhase7ProductionUpgrade(unittest.TestCase):
         })
         self.assertEqual(send_res.status_code, 200)
         data = send_res.get_json()
-        self.assertTrue(data.get("success"))
-        self.assertIn(data.get("status"), ["sent", "mock_sent"])
+        self.assertFalse(data.get("success"))
+        self.assertEqual(data.get("status"), "failed")
+        self.assertIn("missing_configuration", data)
 
         # 3. Check Alpha message history
         alpha_msgs = self.client.get("/api/v1/whatsapp/messages")
