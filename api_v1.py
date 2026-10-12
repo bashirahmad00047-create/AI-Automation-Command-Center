@@ -67,6 +67,8 @@ from models import (
     StripeWebhookEvent,
     Subscription,
     SystemEvent,
+    JazzCashTransaction,
+    SystemSetting,
     User,
     WebhookEndpoint,
     WhatsAppMessage,
@@ -75,6 +77,7 @@ from models import (
     WorkflowStep,
     generate_uuid,
 )
+from jazzcash_service import JazzCashService, PLAN_PRICING_PKR
 from presets import PRESET_BLUEPRINTS
 from billing_service import (
     BillingError,
@@ -2414,19 +2417,27 @@ def whatsapp_send_message():
     message = data.get("message") or data.get("body")
     preview_url = bool(data.get("preview_url", False))
 
-    if not to_phone or not message:
-        return jsonify({"error": "Both 'to' and 'message' fields are required.", "code": "VALIDATION_ERROR"}), 400
+    template_name = data.get("template_name")
+    template_language = data.get("template_language", "en_US")
+
+    if not to_phone:
+        return jsonify({"error": "'to' (recipient phone number) is required.", "code": "VALIDATION_ERROR"}), 400
+    if not message and not template_name:
+        return jsonify({"error": "Either 'message' body or 'template_name' is required.", "code": "VALIDATION_ERROR"}), 400
 
     try:
         result = WhatsAppService.send_message(
             organization_id=org.id,
             to_phone=to_phone,
-            message_text=message,
-            preview_url=preview_url
+            message_text=message or "",
+            preview_url=preview_url,
+            template_name=template_name,
+            template_language=template_language
         )
         log_audit_event("whatsapp.message_sent", "whatsapp", result.get("whatsapp_message_id"), {
             "recipient": to_phone,
-            "status": result.get("status")
+            "status": result.get("status"),
+            "template_name": template_name
         })
         return jsonify(result), 200
     except ValueError as ve:
@@ -2473,6 +2484,217 @@ def get_whatsapp_config():
         "verify_token": conf.get("verify_token", WhatsAppService.DEFAULT_VERIFY_TOKEN),
         "webhook_url": webhook_url,
         "mode": "live" if WhatsAppService.is_configured() else "development_mock"
+    }), 200
+
+
+@api_v1.route("/whatsapp/config", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+def save_whatsapp_config():
+    """Updates live Meta WhatsApp credentials in SystemSetting."""
+    data = request.get_json(silent=True) or {}
+    phone_id = data.get("phone_number_id")
+    access_token = data.get("access_token")
+    waba_id = data.get("business_account_id")
+    app_secret = data.get("app_secret")
+    verify_token = data.get("verify_token")
+
+    updated = WhatsAppService.save_config(
+        phone_number_id=phone_id,
+        access_token=access_token,
+        business_account_id=waba_id,
+        app_secret=app_secret,
+        verify_token=verify_token
+    )
+    current_user = get_current_user()
+    log_audit_event("whatsapp.config_updated", "system", "whatsapp", {"user_id": current_user.id if current_user else "admin"})
+    return jsonify({
+        "success": True,
+        "message": "WhatsApp configuration updated successfully.",
+        "is_configured": WhatsAppService.is_configured()
+    }), 200
+
+
+@api_v1.route("/whatsapp/test-connection", methods=["POST"])
+@require_auth
+def test_whatsapp_connection():
+    """Tests live connection to Meta Graph API using current credentials."""
+    result = WhatsAppService.test_live_connection()
+    status_code = 200 if result.get("success") else 400
+    return jsonify(result), status_code
+
+
+# ==========================================
+# Pakistan Local Payment Gateway (JazzCash)
+# ==========================================
+
+@api_v1.route("/billing/jazzcash/config", methods=["GET"])
+@require_auth
+def get_jazzcash_config():
+    """Returns JazzCash gateway status, environment, and PKR tier pricing."""
+    conf = JazzCashService.get_config()
+    merchant_id = conf["merchant_id"]
+    masked_merchant = merchant_id[:2] + "****" + merchant_id[-2:] if len(merchant_id) > 4 else merchant_id
+    return jsonify({
+        "is_configured": JazzCashService.is_configured(),
+        "environment": conf["environment"],
+        "merchant_id": masked_merchant,
+        "pricing_pkr": PLAN_PRICING_PKR,
+        "supported_channels": ["MWALLET", "REDIRECT"]
+    }), 200
+
+
+@api_v1.route("/billing/jazzcash/config", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+def save_jazzcash_config():
+    """Updates JazzCash merchant settings in SystemSetting."""
+    data = request.get_json(silent=True) or {}
+    m_id = data.get("merchant_id")
+    pwd = data.get("password")
+    salt = data.get("integrity_salt")
+    env = data.get("environment")
+
+    if m_id is not None:
+        SystemSetting.set_val("JAZZCASH_MERCHANT_ID", m_id.strip(), is_secret=False, description="JazzCash Merchant ID")
+    if pwd is not None:
+        SystemSetting.set_val("JAZZCASH_PASSWORD", pwd.strip(), is_secret=True, description="JazzCash API Password")
+    if salt is not None:
+        SystemSetting.set_val("JAZZCASH_INTEGRITY_SALT", salt.strip(), is_secret=True, description="JazzCash Integrity Salt")
+    if env is not None:
+        SystemSetting.set_val("JAZZCASH_ENVIRONMENT", env.strip().lower(), is_secret=False, description="JazzCash Environment (sandbox/live)")
+
+    return jsonify({
+        "success": True,
+        "message": "JazzCash gateway settings saved successfully."
+    }), 200
+
+
+@api_v1.route("/billing/jazzcash/mwallet-pay", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+@rate_limit(limit=15, window=60)
+def jazzcash_mwallet_pay():
+    """Processes instant direct JazzCash Mobile Wallet payment."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    plan_tier = (data.get("plan_tier") or data.get("plan") or "starter").lower()
+    billing_interval = (data.get("billing_interval") or data.get("interval") or "month").lower()
+    mobile_number = data.get("mobile_number") or data.get("phone")
+    cnic_last6 = data.get("cnic_last6") or data.get("cnic")
+
+    if not mobile_number:
+        return jsonify({"error": "Mobile number is required for JazzCash Mobile Account payment.", "code": "VALIDATION_ERROR"}), 400
+
+    current_user = get_current_user()
+    user_id = current_user.id if current_user else None
+
+    try:
+        result = JazzCashService.process_mwallet_payment(
+            organization=org,
+            user_id=user_id,
+            plan_tier=plan_tier,
+            interval=billing_interval,
+            mobile_number=mobile_number,
+            cnic_last6=cnic_last6
+        )
+        status_code = 200 if result.get("success") else 400
+        return jsonify(result), status_code
+    except ValueError as ve:
+        return jsonify({"error": str(ve), "code": "VALIDATION_ERROR"}), 400
+    except Exception as e:
+        logger.error(f"JazzCash MWALLET payment failed: {e}")
+        return jsonify({"error": "Payment processing error", "detail": str(e)}), 500
+
+
+@api_v1.route("/billing/jazzcash/checkout", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+def jazzcash_checkout():
+    """Generates redirection form payload with HMAC-SHA256 signature for JazzCash Customer Portal."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    plan_tier = (data.get("plan_tier") or data.get("plan") or "starter").lower()
+    billing_interval = (data.get("billing_interval") or data.get("interval") or "month").lower()
+    return_url = data.get("return_url")
+
+    current_user = get_current_user()
+    user_id = current_user.id if current_user else None
+
+    try:
+        payload = JazzCashService.generate_web_checkout_payload(
+            organization=org,
+            user_id=user_id,
+            plan_tier=plan_tier,
+            interval=billing_interval,
+            return_url=return_url
+        )
+        return jsonify(payload), 200
+    except Exception as e:
+        logger.error(f"Failed to generate JazzCash checkout: {e}")
+        return jsonify({"error": "Failed to create JazzCash checkout session", "detail": str(e)}), 500
+
+
+@api_v1.route("/billing/jazzcash/callback", methods=["GET", "POST"])
+def jazzcash_callback():
+    """IPN Callback / Webhook endpoint from JazzCash."""
+    params = {}
+    if request.is_json and request.get_json(silent=True):
+        params = request.get_json()
+    elif request.form:
+        params = request.form.to_dict()
+    elif request.args:
+        params = request.args.to_dict()
+
+    success, message, txn = JazzCashService.handle_ipn_callback(params)
+
+    if request.headers.get("Accept", "").find("text/html") != -1 or request.method == "GET":
+        from flask import render_template_string
+        return render_template_string("""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>JazzCash Payment Confirmation - OpsFlow</title>
+            <meta http-equiv="refresh" content="3;url=/app" />
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+        </head>
+        <body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+            <div class="bg-gray-800 p-8 rounded-xl border border-gray-700 max-w-md text-center">
+                <div class="text-4xl mb-4">{{ "✅" if success else "❌" }}</div>
+                <h2 class="text-2xl font-bold mb-2">{{ "Payment Successful!" if success else "Payment Status" }}</h2>
+                <p class="text-gray-300 text-sm mb-4">{{ message }}</p>
+                <a href="/app" class="inline-block bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-6 rounded-lg text-sm">Return to Dashboard</a>
+            </div>
+        </body>
+        </html>
+        """, success=success, message=message), (200 if success else 400)
+
+    return jsonify({
+        "success": success,
+        "message": message,
+        "transaction": txn.to_dict() if txn else None
+    }), (200 if success else 400)
+
+
+@api_v1.route("/billing/jazzcash/transactions", methods=["GET"])
+@require_auth
+def list_jazzcash_transactions():
+    """Returns tenant-isolated JazzCash payment history."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    limit = min(int(request.args.get("limit", 50)), 100)
+    txns = JazzCashTransaction.query.filter_by(organization_id=org.id).order_by(JazzCashTransaction.created_at.desc()).limit(limit).all()
+    return jsonify({
+        "transactions": [t.to_dict() for t in txns],
+        "count": len(txns)
     }), 200
 
 

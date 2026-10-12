@@ -66,6 +66,7 @@ class Organization(db.Model):
     usages = db.relationship("OrganizationUsage", backref="organization", cascade="all, delete-orphan", lazy="select")
     subscription = db.relationship("Subscription", backref="organization", uselist=False, cascade="all, delete-orphan", lazy="select")
     whatsapp_messages = db.relationship("WhatsAppMessage", backref="organization", cascade="all, delete-orphan", lazy="select")
+    jazzcash_transactions = db.relationship("JazzCashTransaction", backref="organization", cascade="all, delete-orphan", lazy="select")
 
     def get_subscription(self) -> "Subscription":
         """Get or lazily initialize the tenant subscription record."""
@@ -786,3 +787,94 @@ class WhatsAppMessage(db.Model):
             "error_message": self.error_message,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
         }
+
+
+class SystemSetting(db.Model):
+    """Dynamic configuration settings stored in database for gateways & integrations."""
+    __tablename__ = "system_settings"
+
+    key = db.Column(db.String(128), primary_key=True)
+    value = db.Column(db.Text, nullable=True)
+    is_secret = db.Column(db.Boolean, nullable=False, default=False)
+    description = db.Column(db.String(255), nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    @classmethod
+    def get_val(cls, key: str, default: Optional[str] = None) -> Optional[str]:
+        try:
+            setting = cls.query.filter_by(key=key).first()
+            if setting and setting.value is not None and setting.value.strip() != "":
+                return setting.value.strip()
+        except Exception:
+            pass
+        return default
+
+    @classmethod
+    def set_val(cls, key: str, value: Optional[str], is_secret: bool = False, description: Optional[str] = None):
+        setting = cls.query.filter_by(key=key).first()
+        clean_val = value.strip() if value else None
+        if not setting:
+            setting = cls(key=key, value=clean_val, is_secret=is_secret, description=description)
+            db.session.add(setting)
+        else:
+            setting.value = clean_val
+            if description:
+                setting.description = description
+            setting.updated_at = datetime.datetime.utcnow()
+        db.session.commit()
+        return setting
+
+    def to_dict(self) -> Dict[str, Any]:
+        val = self.value
+        if self.is_secret and val:
+            val = val[:4] + "••••••••" + val[-4:] if len(val) > 8 else "••••••••"
+        return {
+            "key": self.key,
+            "value": val,
+            "is_secret": self.is_secret,
+            "description": self.description,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
+
+
+class JazzCashTransaction(db.Model):
+    """Multi-tenant JazzCash mobile wallet and card payment transaction ledger."""
+    __tablename__ = "jazzcash_transactions"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("jzc"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = db.Column(db.String(64), db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    txn_ref_no = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    bill_reference = db.Column(db.String(64), nullable=True, index=True)
+    plan_tier = db.Column(db.String(32), nullable=False)  # starter, pro, enterprise
+    billing_interval = db.Column(db.String(16), nullable=False, default="month")  # month, year
+    amount_pkr = db.Column(db.Float, nullable=False)
+    mobile_number = db.Column(db.String(20), nullable=True)
+    cnic_last6 = db.Column(db.String(10), nullable=True)
+    payment_channel = db.Column(db.String(32), nullable=False, default="MWALLET")  # MWALLET, REDIRECT
+    status = db.Column(db.String(32), nullable=False, default="PENDING")  # PENDING, COMPLETED, FAILED
+    response_code = db.Column(db.String(10), nullable=True)
+    response_message = db.Column(db.String(255), nullable=True)
+    raw_response_json = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "user_id": self.user_id,
+            "txn_ref_no": self.txn_ref_no,
+            "bill_reference": self.bill_reference,
+            "plan_tier": self.plan_tier,
+            "billing_interval": self.billing_interval,
+            "amount_pkr": self.amount_pkr,
+            "mobile_number": self.mobile_number,
+            "payment_channel": self.payment_channel,
+            "status": self.status,
+            "response_code": self.response_code,
+            "response_message": self.response_message,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "completed_at": self.completed_at.strftime("%Y-%m-%d %H:%M:%S") if self.completed_at else None,
+        }
+

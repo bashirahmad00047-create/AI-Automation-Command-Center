@@ -29,7 +29,7 @@ import requests
 from flask import current_app
 
 from database import db
-from models import Organization, WhatsAppMessage, generate_uuid
+from models import Organization, SystemSetting, WhatsAppMessage, generate_uuid
 
 logger = logging.getLogger("opsflow.whatsapp")
 
@@ -42,15 +42,123 @@ class WhatsAppService:
 
     @classmethod
     def get_config(cls) -> Dict[str, str]:
-        """Retrieves WhatsApp configuration from environment or app config."""
+        """Retrieves WhatsApp configuration from database settings, environment, or app config."""
         cfg = current_app.config if current_app else {}
+        phone_id = (
+            SystemSetting.get_val("WHATSAPP_PHONE_NUMBER_ID")
+            or cfg.get("WHATSAPP_PHONE_NUMBER_ID")
+            or os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
+        ).strip()
+        access_token = (
+            SystemSetting.get_val("WHATSAPP_ACCESS_TOKEN")
+            or cfg.get("WHATSAPP_ACCESS_TOKEN")
+            or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+        ).strip()
+        verify_token = (
+            SystemSetting.get_val("WHATSAPP_VERIFY_TOKEN")
+            or cfg.get("WHATSAPP_VERIFY_TOKEN")
+            or os.environ.get("WHATSAPP_VERIFY_TOKEN", cls.DEFAULT_VERIFY_TOKEN)
+        ).strip()
+        business_account_id = (
+            SystemSetting.get_val("WHATSAPP_BUSINESS_ACCOUNT_ID")
+            or cfg.get("WHATSAPP_BUSINESS_ACCOUNT_ID")
+            or os.environ.get("WHATSAPP_BUSINESS_ACCOUNT_ID", "")
+        ).strip()
+        app_secret = (
+            SystemSetting.get_val("WHATSAPP_APP_SECRET")
+            or cfg.get("WHATSAPP_APP_SECRET")
+            or os.environ.get("WHATSAPP_APP_SECRET", "")
+        ).strip()
+
         return {
-            "phone_number_id": cfg.get("WHATSAPP_PHONE_NUMBER_ID") or os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip(),
-            "access_token": cfg.get("WHATSAPP_ACCESS_TOKEN") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip(),
-            "verify_token": cfg.get("WHATSAPP_VERIFY_TOKEN") or os.environ.get("WHATSAPP_VERIFY_TOKEN", cls.DEFAULT_VERIFY_TOKEN).strip(),
-            "business_account_id": cfg.get("WHATSAPP_BUSINESS_ACCOUNT_ID") or os.environ.get("WHATSAPP_BUSINESS_ACCOUNT_ID", "").strip(),
-            "app_secret": cfg.get("WHATSAPP_APP_SECRET") or os.environ.get("WHATSAPP_APP_SECRET", "").strip(),
+            "phone_number_id": phone_id,
+            "access_token": access_token,
+            "verify_token": verify_token,
+            "business_account_id": business_account_id,
+            "app_secret": app_secret,
         }
+
+    @classmethod
+    def save_config(
+        cls,
+        phone_number_id: str,
+        access_token: str,
+        business_account_id: Optional[str] = None,
+        app_secret: Optional[str] = None,
+        verify_token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Saves live WhatsApp configuration dynamically into the database."""
+        if phone_number_id is not None:
+            SystemSetting.set_val("WHATSAPP_PHONE_NUMBER_ID", phone_number_id, is_secret=False, description="Meta Graph Phone Number ID")
+        if access_token is not None:
+            SystemSetting.set_val("WHATSAPP_ACCESS_TOKEN", access_token, is_secret=True, description="Meta Graph Access Token")
+        if business_account_id is not None:
+            SystemSetting.set_val("WHATSAPP_BUSINESS_ACCOUNT_ID", business_account_id, is_secret=False, description="WhatsApp Business Account ID")
+        if app_secret is not None:
+            SystemSetting.set_val("WHATSAPP_APP_SECRET", app_secret, is_secret=True, description="Meta App Secret for HMAC webhook verification")
+        if verify_token is not None:
+            SystemSetting.set_val("WHATSAPP_VERIFY_TOKEN", verify_token, is_secret=False, description="Webhook Verify Token")
+
+        return cls.get_config()
+
+    @classmethod
+    def format_phone_number(cls, phone: str) -> str:
+        """Formats phone number to international E.164 digits, handling Pakistani local numbers automatically."""
+        clean = "".join(filter(str.isdigit, phone))
+        # Handle Pakistani local formats like 03001234567 -> 923001234567
+        if clean.startswith("03") and len(clean) == 11:
+            return "92" + clean[1:]
+        if clean.startswith("00"):
+            return clean[2:]
+        return clean
+
+    @classmethod
+    def test_live_connection(cls) -> Dict[str, Any]:
+        """Probes Meta Cloud API with configured credentials to verify connectivity and account status."""
+        conf = cls.get_config()
+        phone_id = conf["phone_number_id"]
+        token = conf["access_token"]
+
+        if not phone_id or not token:
+            return {
+                "success": False,
+                "status": "not_configured",
+                "message": "Both Phone Number ID and Access Token must be configured."
+            }
+
+        url = f"https://graph.facebook.com/{cls.GRAPH_API_VERSION}/{phone_id}?fields=verified_name,display_phone_number,quality_rating,code_verification_status"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            data = resp.json() if resp.status_code < 500 else {}
+            if resp.status_code == 200:
+                return {
+                    "success": True,
+                    "status": "connected",
+                    "phone_number_id": phone_id,
+                    "verified_name": data.get("verified_name", "Verified Meta Business Account"),
+                    "display_phone_number": data.get("display_phone_number", ""),
+                    "quality_rating": data.get("quality_rating", "GREEN"),
+                    "code_verification_status": data.get("code_verification_status", "VERIFIED"),
+                    "message": "Live Meta Graph API connection verified successfully!"
+                }
+            else:
+                err_detail = data.get("error", {}).get("message") or f"HTTP {resp.status_code}"
+                return {
+                    "success": False,
+                    "status": "error",
+                    "error": err_detail,
+                    "error_code": data.get("error", {}).get("code"),
+                    "message": f"Meta Graph API rejected credentials: {err_detail}"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "status": "network_error",
+                "error": str(e),
+                "message": f"Network connection failed while probing Meta Graph API: {str(e)}"
+            }
 
     @classmethod
     def is_configured(cls) -> bool:
@@ -207,11 +315,13 @@ class WhatsAppService:
         to_phone: str,
         message_text: str,
         preview_url: bool = False,
-        execution_id: Optional[int] = None
+        execution_id: Optional[int] = None,
+        template_name: Optional[str] = None,
+        template_language: str = "en_US"
     ) -> Dict[str, Any]:
-        """Dispatches an outbound WhatsApp text message via Meta Cloud API or safe mock."""
+        """Dispatches an outbound WhatsApp text or template message via Meta Cloud API."""
         conf = cls.get_config()
-        clean_to = "".join(filter(str.isdigit, to_phone))
+        clean_to = cls.format_phone_number(to_phone)
         if not clean_to or len(clean_to) < 7:
             raise ValueError(f"Invalid recipient phone number: '{to_phone}'. Must include country code and digits.")
 
@@ -223,16 +333,35 @@ class WhatsAppService:
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json"
             }
-            payload = {
-                "messaging_product": "whatsapp",
-                "recipient_type": "individual",
-                "to": clean_to,
-                "type": "text",
-                "text": {
-                    "preview_url": preview_url,
-                    "body": message_text
+
+            if template_name:
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
+                    "to": clean_to,
+                    "type": "template",
+                    "template": {
+                        "name": template_name,
+                        "language": {
+                            "code": template_language
+                        }
+                    }
                 }
-            }
+                actual_body = f"[Template: {template_name}] {message_text}" if message_text else f"[Template: {template_name}]"
+                msg_type = "template"
+            else:
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
+                    "to": clean_to,
+                    "type": "text",
+                    "text": {
+                        "preview_url": preview_url,
+                        "body": message_text
+                    }
+                }
+                actual_body = message_text
+                msg_type = "text"
 
             try:
                 resp = requests.post(url, json=payload, headers=headers, timeout=10)
@@ -245,7 +374,8 @@ class WhatsAppService:
                         sender=conf.get("phone_number_id", "System"),
                         recipient=clean_to,
                         direction="outbound",
-                        body=message_text,
+                        body=actual_body,
+                        message_type=msg_type,
                         status="sent",
                         whatsapp_message_id=msg_id,
                         execution_id=execution_id,
@@ -256,7 +386,8 @@ class WhatsAppService:
                         "status": "sent",
                         "whatsapp_message_id": msg_id,
                         "message_record_id": record.id,
-                        "recipient": clean_to
+                        "recipient": clean_to,
+                        "message_type": msg_type
                     }
                 else:
                     err = resp_json.get("error", {}).get("message") or f"HTTP {resp.status_code}"
@@ -265,7 +396,8 @@ class WhatsAppService:
                         sender=conf.get("phone_number_id", "System"),
                         recipient=clean_to,
                         direction="outbound",
-                        body=message_text,
+                        body=actual_body,
+                        message_type=msg_type,
                         status="failed",
                         execution_id=execution_id,
                         error_message=err,

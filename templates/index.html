@@ -750,12 +750,29 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                     <form onsubmit="handleSendWhatsAppMessage(event)">
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label style="font-size: 12px; margin-bottom: 4px; display: block;">Recipient Phone Number *</label>
-                            <input type="text" id="waRecipientPhone" class="hud-input" required placeholder="+14155552671" style="width: 100%;">
-                            <span style="font-size: 11px; color: var(--text-dim, #888);">Must include country code and digits (e.g. +14155552671 or +447700900077)</span>
+                            <input type="text" id="waRecipientPhone" class="hud-input" required placeholder="+923001234567 or 03001234567" style="width: 100%;">
+                            <span style="font-size: 11px; color: var(--text-dim, #888);">Supports international E.164 and Pakistani local numbers (03xx auto-converts to +923xx)</span>
                         </div>
-                        <div class="form-group" style="margin-bottom: 14px;">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="font-size: 12px; margin-bottom: 4px; display: block;">Message Type</label>
+                            <div style="display: flex; gap: 12px; font-size: 12px;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="radio" name="waMsgType" value="text" checked onchange="toggleWaMsgType('text')"> Free-form Text
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="radio" name="waMsgType" value="template" onchange="toggleWaMsgType('template')"> Meta Approved Template (e.g. hello_world)
+                                </label>
+                            </div>
+                        </div>
+                        <div id="waTemplateFields" style="display: none; margin-bottom: 12px; background: rgba(0,240,255,0.04); border: 1px solid rgba(0,240,255,0.15); border-radius: 6px; padding: 10px;">
+                            <label style="font-size: 11px; font-weight: 600; display: block; margin-bottom: 4px;">Template Name</label>
+                            <input type="text" id="waTemplateName" class="hud-input" value="hello_world" placeholder="hello_world" style="width: 100%; margin-bottom: 8px;">
+                            <label style="font-size: 11px; font-weight: 600; display: block; margin-bottom: 4px;">Language Code</label>
+                            <input type="text" id="waTemplateLang" class="hud-input" value="en_US" placeholder="en_US" style="width: 100%;">
+                        </div>
+                        <div class="form-group" id="waMessageBodyGroup" style="margin-bottom: 14px;">
                             <label style="font-size: 12px; margin-bottom: 4px; display: block;">Message Body *</label>
-                            <textarea id="waMessageBody" class="hud-textarea" rows="4" required placeholder="Hello from OpsFlow Cloud automation engine! Your incident #104 has been triaged."></textarea>
+                            <textarea id="waMessageBody" class="hud-textarea" rows="4" placeholder="Hello from OpsFlow Cloud automation engine! Your incident #104 has been triaged."></textarea>
                         </div>
                         <button type="submit" class="hud-btn primary" id="waSendBtn" style="width: 100%;">Send WhatsApp Message</button>
                     </form>
@@ -1992,31 +2009,64 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
         </div>
     </div>
 
-    <!-- WHATSAPP CONNECT GUIDE MODAL -->
+    <!-- WHATSAPP CONNECT & LIVE CONFIGURATION MODAL -->
     <div class="hud-modal-overlay" id="whatsappConnectModal" style="display:none;">
-        <div class="hud-modal" style="max-width: 520px;">
+        <div class="hud-modal" style="max-width: 580px;">
             <div class="modal-header">
-                <h3>Connect Meta WhatsApp Business Cloud API</h3>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">💬</span>
+                    <h3>Meta WhatsApp Business Cloud API Gateway</h3>
+                </div>
                 <button class="close-btn" onclick="closeWhatsAppConnectModal()">&times;</button>
             </div>
-            <div class="modal-body">
-                <p style="font-size: 0.88rem; color: #cbd5e1; margin-bottom: 16px;">
-                    To transition from Sandbox Simulation to Live Production Meta Cloud API, provide your Meta Developer credentials in your environment configuration:
+            <div class="modal-body" style="padding: 20px;">
+                <p style="font-size: 0.86rem; color: #cbd5e1; margin-bottom: 16px;">
+                    Configure official Meta Cloud API v19.0 credentials. Once configured, outbound messages route directly to WhatsApp and inbound webhooks are verified via HMAC-SHA256.
                 </p>
-                <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 14px; font-family: monospace; font-size: 0.82rem; margin-bottom: 16px;">
-                    <div style="color: #94a3b8;"># In your .env or production environment:</div>
-                    <div style="color: #00f0ff;">META_PHONE_NUMBER_ID=1092837465...</div>
-                    <div style="color: #00f0ff;">META_ACCESS_TOKEN=EAAG...</div>
-                    <div style="color: #00f0ff;">META_WABA_ID=987654321...</div>
-                    <div style="color: #10b981;">WHATSAPP_VERIFY_TOKEN=opsflow_whatsapp_verify_2026</div>
-                </div>
-                <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 0;">
-                    Once set, reload the gateway. Inbound webhooks will be verified cryptographically and outbound messages will route directly via Meta Cloud API.
-                </p>
-                <div class="modal-footer" style="margin-top: 20px;">
-                    <button type="button" class="hud-btn outline" onclick="closeWhatsAppConnectModal()">Close</button>
-                    <button type="button" class="hud-btn primary" onclick="copyWhatsAppEnvSnippet()">Copy Env Variables</button>
-                </div>
+
+                <form id="waConfigForm" onsubmit="handleSaveWhatsAppConfig(event)">
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Phone Number ID *</label>
+                        <input type="text" id="waConfigPhoneId" class="hud-input" placeholder="e.g., 109283746509876" style="width: 100%; font-family: var(--font-mono);">
+                        <span style="font-size: 11px; color: var(--text-dim, #888);">Found in Meta App Dashboard &gt; WhatsApp &gt; API Setup</span>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">System User Access Token *</label>
+                        <div style="display: flex; gap: 6px;">
+                            <input type="password" id="waConfigAccessToken" class="hud-input" placeholder="EAAG..." style="flex: 1; font-family: var(--font-mono);">
+                            <button type="button" class="hud-btn small outline" onclick="toggleWaConfigTokenVisibility()">Show</button>
+                        </div>
+                        <span style="font-size: 11px; color: var(--text-dim, #888);">Permanent System User access token with whatsapp_business_messaging permission</span>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                        <div class="form-group">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">WABA ID (Account ID)</label>
+                            <input type="text" id="waConfigWabaId" class="hud-input" placeholder="e.g., 987654321012345" style="width: 100%; font-family: var(--font-mono);">
+                        </div>
+                        <div class="form-group">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Meta App Secret</label>
+                            <input type="password" id="waConfigAppSecret" class="hud-input" placeholder="App Secret for Webhook HMAC" style="width: 100%; font-family: var(--font-mono);">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Webhook Verify Token</label>
+                        <input type="text" id="waConfigVerifyToken" class="hud-input" value="opsflow_whatsapp_verify_2026" style="width: 100%; font-family: var(--font-mono);">
+                    </div>
+
+                    <!-- Connection Diagnostics Output Box -->
+                    <div id="waConnectionTestOutput" style="display: none; padding: 12px; border-radius: 6px; font-size: 12px; margin-bottom: 16px; border: 1px solid transparent;"></div>
+
+                    <div style="display: flex; gap: 8px; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 14px;">
+                        <button type="button" class="hud-btn outline" id="btnTestWaConnection" onclick="handleTestWhatsAppConnection()">⚡ Test Live Connection</button>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="hud-btn outline" onclick="closeWhatsAppConnectModal()">Cancel</button>
+                            <button type="submit" class="hud-btn primary" id="btnSaveWaConfig">Save Credentials</button>
+                        </div>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
@@ -2145,32 +2195,77 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 <div id="checkoutSummaryBox" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                         <span style="font-weight: 600;" id="checkoutSelectedPlanName">Professional Plan</span>
-                        <strong style="color: var(--cyan-glow); font-size: 16px;" id="checkoutSelectedPrice">$99 / month</strong>
+                        <div style="text-align: right;">
+                            <strong style="color: var(--cyan-glow); font-size: 16px; display: block;" id="checkoutSelectedPrice">$99 / month</strong>
+                            <span style="color: #ef4444; font-size: 12px; font-weight: 600;" id="checkoutSelectedPricePkr">PKR 25,000 / month</span>
+                        </div>
                     </div>
                     <div style="font-size: 12px; color: var(--text-muted);" id="checkoutSelectedQuotaSummary">
                         Upgrades workspace quota to 50 rules, 200,000 events, 10 team seats.
                     </div>
                 </div>
 
+                <!-- Payment Method Switcher Tabs -->
+                <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+                    <button type="button" id="tabPayCard" class="hud-btn small primary" style="flex: 1;" onclick="switchPaymentMethod('card')">💳 Credit Card (Stripe)</button>
+                    <button type="button" id="tabPayJazzCash" class="hud-btn small outline" style="flex: 1;" onclick="switchPaymentMethod('jazzcash')">🇵🇰 JazzCash (Pakistan)</button>
+                </div>
+
+                <!-- CARD FORM -->
                 <form id="practicalCheckoutForm" onsubmit="handlePracticalCheckoutSubmit(event)">
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Cardholder Name</label>
-                        <input type="text" id="checkoutCardName" class="hud-input" required placeholder="Alexander Wright" style="width: 100%;">
-                    </div>
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Card Number</label>
-                        <input type="text" id="checkoutCardNumber" class="hud-input" required placeholder="•••• •••• •••• 4242" value="4242 •••• •••• 4242" style="width: 100%; font-family: var(--font-mono);">
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
-                        <div class="form-group">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Expiration Date</label>
-                            <input type="text" id="checkoutCardExp" class="hud-input" required placeholder="MM/YY" value="12/28" style="width: 100%; font-family: var(--font-mono);">
+                    <div id="checkoutCardFields">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Cardholder Name</label>
+                            <input type="text" id="checkoutCardName" class="hud-input" required placeholder="Alexander Wright" style="width: 100%;">
                         </div>
-                        <div class="form-group">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">CVC / Security Code</label>
-                            <input type="password" id="checkoutCardCvc" class="hud-input" required placeholder="•••" value="123" maxlength="4" style="width: 100%; font-family: var(--font-mono);">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Card Number</label>
+                            <input type="text" id="checkoutCardNumber" class="hud-input" required placeholder="•••• •••• •••• 4242" value="4242 •••• •••• 4242" style="width: 100%; font-family: var(--font-mono);">
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                            <div class="form-group">
+                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Expiration Date</label>
+                                <input type="text" id="checkoutCardExp" class="hud-input" required placeholder="MM/YY" value="12/28" style="width: 100%; font-family: var(--font-mono);">
+                            </div>
+                            <div class="form-group">
+                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">CVC / Security Code</label>
+                                <input type="password" id="checkoutCardCvc" class="hud-input" required placeholder="•••" value="123" maxlength="4" style="width: 100%; font-family: var(--font-mono);">
+                            </div>
                         </div>
                     </div>
+
+                    <!-- JAZZCASH FIELDS -->
+                    <div id="checkoutJazzCashFields" style="display: none;">
+                        <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 12px; margin-bottom: 14px; font-size: 12px;">
+                            <div style="font-weight: 600; color: #f87171; margin-bottom: 4px;">⚡ Instant JazzCash Mobile Account Processing</div>
+                            <div style="color: var(--text-secondary);">Direct MPIN prompt will appear on your registered JazzCash mobile number to approve this transaction.</div>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">JazzCash Mobile Account Number *</label>
+                            <input type="text" id="checkoutJazzCashPhone" class="hud-input" placeholder="03001234567" value="03001234567" style="width: 100%; font-family: var(--font-mono);" maxlength="11">
+                            <span style="font-size: 11px; color: var(--text-dim, #888);">Enter 11-digit Pakistani mobile number (e.g. 03001234567)</span>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 14px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">CNIC Last 6 Digits (Optional / High-Value Verification)</label>
+                            <input type="text" id="checkoutJazzCashCnic" class="hud-input" placeholder="123456" value="123456" maxlength="6" style="width: 100%; font-family: var(--font-mono);">
+                            <span style="font-size: 11px; color: var(--text-dim, #888);">Required by JazzCash for biometric wallet limit checks</span>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 6px;">Payment Mode</label>
+                            <div style="display: flex; gap: 12px; font-size: 12px;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="radio" name="jcChannel" value="MWALLET" checked> Direct Mobile Wallet (MPIN Prompt)
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="radio" name="jcChannel" value="REDIRECT"> Hosted Web Checkout
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="checkoutErrorMessage" style="display: none; color: #ef4444; font-size: 12px; margin-bottom: 12px; padding: 8px 10px; background: rgba(239,68,68,0.1); border-radius: 6px;"></div>
                     <div style="display: flex; gap: 10px; justify-content: flex-end;">
                         <button type="button" class="hud-btn outline" onclick="closeCheckoutConfirmationModal()">Cancel</button>

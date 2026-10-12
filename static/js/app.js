@@ -4103,15 +4103,35 @@ async function loadWhatsAppDashboard() {
     }
 }
 
+function toggleWaMsgType(type) {
+    const templateFields = document.getElementById('waTemplateFields');
+    const bodyGroup = document.getElementById('waMessageBodyGroup');
+    const bodyInput = document.getElementById('waMessageBody');
+    if (type === 'template') {
+        if (templateFields) templateFields.style.display = 'block';
+        if (bodyGroup) bodyGroup.style.display = 'none';
+        if (bodyInput) bodyInput.required = false;
+    } else {
+        if (templateFields) templateFields.style.display = 'none';
+        if (bodyGroup) bodyGroup.style.display = 'block';
+        if (bodyInput) bodyInput.required = true;
+    }
+}
+
 async function handleSendWhatsAppMessage(e) {
     if (e) e.preventDefault();
     const recipient = document.getElementById('waRecipientPhone').value.trim();
+    const msgTypeRadio = document.querySelector('input[name="waMsgType"]:checked');
+    const msgType = msgTypeRadio ? msgTypeRadio.value : 'text';
     const message = document.getElementById('waMessageBody').value.trim();
+    const templateName = document.getElementById('waTemplateName')?.value.trim();
+    const templateLang = document.getElementById('waTemplateLang')?.value.trim() || 'en_US';
     const sendBtn = document.getElementById('waSendBtn');
     const outputDiv = document.getElementById('waSendOutput');
     const outputJson = document.getElementById('waSendOutputJson');
 
-    if (!recipient || !message) return;
+    if (!recipient) return;
+    if (msgType === 'text' && !message) return;
 
     if (sendBtn) {
         sendBtn.disabled = true;
@@ -4119,10 +4139,19 @@ async function handleSendWhatsAppMessage(e) {
     }
 
     try {
+        const payload = {
+            to: recipient,
+            message: message || ''
+        };
+        if (msgType === 'template') {
+            payload.template_name = templateName || 'hello_world';
+            payload.template_language = templateLang;
+        }
+
         const res = await fetch('/api/v1/whatsapp/messages/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ to: recipient, message })
+            body: JSON.stringify(payload)
         });
         const data = await res.json();
 
@@ -4173,6 +4202,12 @@ function toggleWhatsAppVerifyTokenVisibility() {
     }
 }
 
+function toggleWaConfigTokenVisibility() {
+    const input = document.getElementById('waConfigAccessToken');
+    if (!input) return;
+    input.type = input.type === 'password' ? 'text' : 'password';
+}
+
 function copyWhatsAppVerifyToken() {
     const input = document.getElementById('waVerifyTokenInput');
     if (!input) return;
@@ -4185,30 +4220,141 @@ function copyWhatsAppVerifyToken() {
     });
 }
 
-function openWhatsAppConnectGuide() {
+async function openWhatsAppConnectGuide() {
     const modal = document.getElementById('whatsappConnectModal');
     if (modal) modal.style.display = 'flex';
+
+    // Populate existing values if available
+    try {
+        const res = await fetch('/api/v1/whatsapp/config');
+        if (res.ok) {
+            const data = await res.json();
+            const phoneInput = document.getElementById('waConfigPhoneId');
+            const wabaInput = document.getElementById('waConfigWabaId');
+            const tokenInput = document.getElementById('waConfigVerifyToken');
+            if (phoneInput && data.phone_number_id && !data.phone_number_id.includes('...')) {
+                phoneInput.value = data.phone_number_id;
+            }
+            if (wabaInput && data.business_account_id && data.business_account_id !== 'Not Configured') {
+                wabaInput.value = data.business_account_id;
+            }
+            if (tokenInput && data.verify_token) {
+                tokenInput.value = data.verify_token;
+            }
+        }
+    } catch (e) {
+        console.warn('Could not prefill WhatsApp config:', e);
+    }
 }
 
 function closeWhatsAppConnectModal() {
     const modal = document.getElementById('whatsappConnectModal');
     if (modal) modal.style.display = 'none';
+    const output = document.getElementById('waConnectionTestOutput');
+    if (output) output.style.display = 'none';
 }
 
-function copyWhatsAppEnvSnippet() {
-    const snippet = `META_PHONE_NUMBER_ID=\nMETA_ACCESS_TOKEN=\nMETA_WABA_ID=\nWHATSAPP_VERIFY_TOKEN=opsflow_whatsapp_verify_2026`;
-    navigator.clipboard.writeText(snippet).then(() => {
-        showToast('WhatsApp environment variable template copied to clipboard!', 'success');
-    }).catch(() => {
-        showToast('Environment template copied.', 'info');
-    });
+async function handleSaveWhatsAppConfig(e) {
+    if (e) e.preventDefault();
+    const btn = document.getElementById('btnSaveWaConfig');
+    const phoneId = (document.getElementById('waConfigPhoneId')?.value || '').trim();
+    const token = (document.getElementById('waConfigAccessToken')?.value || '').trim();
+    const wabaId = (document.getElementById('waConfigWabaId')?.value || '').trim();
+    const secret = (document.getElementById('waConfigAppSecret')?.value || '').trim();
+    const verifyToken = (document.getElementById('waConfigVerifyToken')?.value || '').trim();
+
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+    }
+
+    try {
+        const res = await fetch('/api/v1/whatsapp/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                phone_number_id: phoneId,
+                access_token: token,
+                business_account_id: wabaId,
+                app_secret: secret,
+                verify_token: verifyToken
+            })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('WhatsApp gateway credentials saved successfully!', 'success');
+            loadWhatsAppDashboard();
+            closeWhatsAppConnectModal();
+        } else {
+            showToast(data.error || 'Failed to save WhatsApp config', 'error');
+        }
+    } catch (err) {
+        showToast('Network error saving config: ' + err.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Save Credentials';
+        }
+    }
+}
+
+async function handleTestWhatsAppConnection() {
+    const btn = document.getElementById('btnTestWaConnection');
+    const output = document.getElementById('waConnectionTestOutput');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Testing Meta API Connection...';
+    }
+    if (output) {
+        output.style.display = 'block';
+        output.style.background = 'rgba(0, 240, 255, 0.08)';
+        output.style.borderColor = 'rgba(0, 240, 255, 0.2)';
+        output.style.color = '#00f0ff';
+        output.innerHTML = 'Connecting to Meta Graph API v19.0 endpoint...';
+    }
+
+    try {
+        const res = await fetch('/api/v1/whatsapp/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            output.style.background = 'rgba(16, 185, 129, 0.1)';
+            output.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+            output.style.color = '#10b981';
+            output.innerHTML = `<strong>✅ Connection Established!</strong><br>
+                Verified Account: ${escapeHtml(data.verified_name || 'Meta Verified')}<br>
+                Display Phone: ${escapeHtml(data.display_phone_number || data.phone_number_id)}<br>
+                Quality Rating: <span class="status-pill green">${escapeHtml(data.quality_rating || 'GREEN')}</span>`;
+            showToast('Meta Cloud API connection test passed!', 'success');
+        } else {
+            output.style.background = 'rgba(239, 68, 68, 0.1)';
+            output.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+            output.style.color = '#ef4444';
+            output.innerHTML = `<strong>⚠️ Connection Failed:</strong><br>${escapeHtml(data.message || data.error || 'Check Phone ID and Access Token')}`;
+            showToast('WhatsApp connection probe returned error', 'error');
+        }
+    } catch (err) {
+        if (output) {
+            output.style.background = 'rgba(239, 68, 68, 0.1)';
+            output.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+            output.style.color = '#ef4444';
+            output.innerHTML = `<strong>Network Error:</strong> ${escapeHtml(err.message)}`;
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '⚡ Test Live Connection';
+        }
+    }
 }
 
 function disconnectWhatsApp() {
     if (!confirm('Are you sure you want to disconnect WhatsApp Business Cloud API? The gateway will revert to local sandbox simulation mode.')) {
         return;
     }
-    showToast('To disconnect permanently, clear META_ACCESS_TOKEN and META_PHONE_NUMBER_ID from your environment (.env) and reload.', 'info');
+    showToast('To disconnect permanently, clear META_ACCESS_TOKEN and META_PHONE_NUMBER_ID from your environment (.env) or gateway settings.', 'info');
 }
 
 // ==========================================
@@ -4642,20 +4788,77 @@ const PLAN_QUOTA_SUMMARIES = {
     }
 };
 
+const PLAN_PKR_PRICING = {
+    free: { month: 'PKR 0 / month', year: 'PKR 0 / year' },
+    starter: { month: 'PKR 7,500 / month', year: 'PKR 75,000 / year' },
+    pro: { month: 'PKR 25,000 / month', year: 'PKR 250,000 / year' },
+    enterprise: { month: 'PKR 125,000 / month', year: 'PKR 1,250,000 / year' }
+};
+
+let currentPaymentMethod = 'card'; // 'card' or 'jazzcash'
+
+function switchPaymentMethod(method) {
+    currentPaymentMethod = method;
+    const cardFields = document.getElementById('checkoutCardFields');
+    const jcFields = document.getElementById('checkoutJazzCashFields');
+    const tabCard = document.getElementById('tabPayCard');
+    const tabJc = document.getElementById('tabPayJazzCash');
+    const btn = document.getElementById('btnSubmitCheckout');
+
+    const tier = (pendingCheckoutTier || 'starter').toLowerCase();
+    const interval = currentBillingInterval || 'month';
+    const pkrInfo = PLAN_PKR_PRICING[tier] || PLAN_PKR_PRICING['starter'];
+
+    if (method === 'jazzcash') {
+        if (cardFields) cardFields.style.display = 'none';
+        if (jcFields) jcFields.style.display = 'block';
+        if (tabCard) {
+            tabCard.className = 'hud-btn small outline';
+        }
+        if (tabJc) {
+            tabJc.className = 'hud-btn small primary';
+            tabJc.style.borderColor = '#ef4444';
+            tabJc.style.background = '#dc2626';
+            tabJc.style.color = '#ffffff';
+        }
+        if (btn) btn.textContent = `Pay ${pkrInfo[interval]} via JazzCash`;
+    } else {
+        if (cardFields) cardFields.style.display = 'block';
+        if (jcFields) jcFields.style.display = 'none';
+        if (tabCard) {
+            tabCard.className = 'hud-btn small primary';
+        }
+        if (tabJc) {
+            tabJc.className = 'hud-btn small outline';
+            tabJc.style.borderColor = '';
+            tabJc.style.background = '';
+            tabJc.style.color = '';
+        }
+        if (btn) btn.textContent = 'Confirm & Activate Plan';
+    }
+}
+
 function openCheckoutConfirmationModal(tier) {
     pendingCheckoutTier = tier.toLowerCase();
     closeUpgradePlanModal();
 
     const planInfo = PLAN_QUOTA_SUMMARIES[pendingCheckoutTier] || PLAN_QUOTA_SUMMARIES['starter'];
+    const pkrInfo = PLAN_PKR_PRICING[pendingCheckoutTier] || PLAN_PKR_PRICING['starter'];
+    const interval = currentBillingInterval || 'month';
+
     const nameEl = document.getElementById('checkoutSelectedPlanName');
     const priceEl = document.getElementById('checkoutSelectedPrice');
+    const pkrEl = document.getElementById('checkoutSelectedPricePkr');
     const quotaEl = document.getElementById('checkoutSelectedQuotaSummary');
     const errBox = document.getElementById('checkoutErrorMessage');
     if (errBox) errBox.style.display = 'none';
 
     if (nameEl) nameEl.textContent = planInfo.name;
     if (priceEl) priceEl.textContent = planInfo.price;
+    if (pkrEl) pkrEl.textContent = pkrInfo[interval] || pkrInfo.month;
     if (quotaEl) quotaEl.textContent = planInfo.summary;
+
+    switchPaymentMethod('card');
 
     const modal = document.getElementById('checkoutConfirmationModal');
     if (modal) modal.style.display = 'flex';
@@ -4674,50 +4877,148 @@ async function handlePracticalCheckoutSubmit(e) {
     const btn = document.getElementById('btnSubmitCheckout');
     const errBox = document.getElementById('checkoutErrorMessage');
     if (errBox) errBox.style.display = 'none';
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Processing Payment...';
-    }
 
-    try {
-        const res = await fetch('/api/v1/billing/upgrade', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                plan_tier: pendingCheckoutTier,
-                interval: currentBillingInterval || 'month'
-            })
-        });
+    if (currentPaymentMethod === 'jazzcash') {
+        const phone = (document.getElementById('checkoutJazzCashPhone')?.value || '').trim();
+        const cnic = (document.getElementById('checkoutJazzCashCnic')?.value || '').trim();
+        const channelRadio = document.querySelector('input[name="jcChannel"]:checked');
+        const channel = channelRadio ? channelRadio.value : 'MWALLET';
 
-        const data = await res.json();
-        if (res.ok) {
-            closeCheckoutConfirmationModal();
-            showToast(`Workspace upgraded to ${pendingCheckoutTier.toUpperCase()} plan successfully!`, 'success');
-            
-            // Immediately update badges and tenant state
-            if (data.organization && state.currentOrg) {
-                state.currentOrg.plan_tier = data.organization.plan_tier;
-                state.currentOrg.max_rules = data.organization.max_rules;
-                state.currentOrg.max_monthly_events = data.organization.max_monthly_events;
-            }
-            loadBillingStatus();
-            loadBillingDashboard();
-            pollTelemetry(true);
-        } else {
+        if (!phone) {
             if (errBox) {
-                errBox.textContent = data.error || 'Failed to upgrade plan. Please try again.';
+                errBox.textContent = 'Please enter your 11-digit JazzCash mobile number (e.g. 03001234567).';
                 errBox.style.display = 'block';
             }
+            return;
         }
-    } catch (err) {
-        if (errBox) {
-            errBox.textContent = 'Network error: ' + err.message;
-            errBox.style.display = 'block';
-        }
-    } finally {
+
         if (btn) {
-            btn.disabled = false;
-            btn.textContent = 'Confirm & Activate Plan';
+            btn.disabled = true;
+            btn.textContent = channel === 'REDIRECT' ? 'Generating JazzCash Portal Session...' : 'Dispatching MPIN Prompt to Phone...';
+        }
+
+        try {
+            if (channel === 'REDIRECT') {
+                const res = await fetch('/api/v1/billing/jazzcash/checkout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        plan_tier: pendingCheckoutTier,
+                        billing_interval: currentBillingInterval || 'month'
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.action_url) {
+                    // Create and submit hidden form to JazzCash Portal
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = data.action_url;
+                    form.target = '_blank';
+                    for (const [key, val] of Object.entries(data.params || {})) {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = key;
+                        input.value = val;
+                        form.appendChild(input);
+                    }
+                    document.body.appendChild(form);
+                    form.submit();
+                    document.body.removeChild(form);
+                    closeCheckoutConfirmationModal();
+                    showToast('JazzCash Hosted Payment portal opened. Complete checkout in window.', 'info');
+                    return;
+                } else {
+                    throw new Error(data.error || 'Failed to initiate JazzCash hosted checkout');
+                }
+            } else {
+                // Direct MWALLET payment
+                const res = await fetch('/api/v1/billing/jazzcash/mwallet-pay', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        plan_tier: pendingCheckoutTier,
+                        billing_interval: currentBillingInterval || 'month',
+                        mobile_number: phone,
+                        cnic_last6: cnic
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    closeCheckoutConfirmationModal();
+                    showToast(data.message || `JazzCash payment approved! Workspace upgraded to ${pendingCheckoutTier.toUpperCase()}`, 'success');
+
+                    if (data.organization && state.currentOrg) {
+                        state.currentOrg.plan_tier = data.organization.plan_tier;
+                        state.currentOrg.max_rules = data.organization.max_rules;
+                        state.currentOrg.max_monthly_events = data.organization.max_monthly_events;
+                    }
+                    loadBillingStatus();
+                    loadBillingDashboard();
+                    pollTelemetry(true);
+                } else {
+                    if (errBox) {
+                        errBox.textContent = data.message || data.error || 'JazzCash transaction could not be processed.';
+                        errBox.style.display = 'block';
+                    }
+                }
+            }
+        } catch (err) {
+            if (errBox) {
+                errBox.textContent = 'JazzCash processing error: ' + err.message;
+                errBox.style.display = 'block';
+            }
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                switchPaymentMethod('jazzcash');
+            }
+        }
+    } else {
+        // Stripe Card flow
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Processing Payment...';
+        }
+
+        try {
+            const res = await fetch('/api/v1/billing/upgrade', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    plan_tier: pendingCheckoutTier,
+                    interval: currentBillingInterval || 'month'
+                })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                closeCheckoutConfirmationModal();
+                showToast(`Workspace upgraded to ${pendingCheckoutTier.toUpperCase()} plan successfully!`, 'success');
+                
+                if (data.organization && state.currentOrg) {
+                    state.currentOrg.plan_tier = data.organization.plan_tier;
+                    state.currentOrg.max_rules = data.organization.max_rules;
+                    state.currentOrg.max_monthly_events = data.organization.max_monthly_events;
+                }
+                loadBillingStatus();
+                loadBillingDashboard();
+                pollTelemetry(true);
+            } else {
+                if (errBox) {
+                    errBox.textContent = data.error || 'Failed to upgrade plan. Please try again.';
+                    errBox.style.display = 'block';
+                }
+            }
+        } catch (err) {
+            if (errBox) {
+                errBox.textContent = 'Network error: ' + err.message;
+                errBox.style.display = 'block';
+            }
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                switchPaymentMethod('card');
+            }
         }
     }
 }
