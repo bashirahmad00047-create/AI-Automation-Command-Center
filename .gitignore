@@ -46,4 +46,20 @@ Desktop.ini
 backups/
 *.phase*-backup
 *.backup
+*.bak
+*.db.bak
+
+# Ephemeral scratch scripts and dumps
+check_*.py
+test_*.py
+cleanup_*.py
+dependency_*.py
+patch_app.py
+dry_run.py
+find_missing.py
+trace_rules.py
+verify_restore.py
+backup_*.py
+*_dump*.json
+targeted_cleanup_backup.json
 

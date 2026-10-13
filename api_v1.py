@@ -2375,23 +2375,33 @@ def whatsapp_webhook_verification():
 @api_v1.route("/webhooks/whatsapp", methods=["POST"])
 @rate_limit(limit=120, window=60, message="Too many WhatsApp webhook requests.")
 def whatsapp_webhook_ingress():
-    """Meta Cloud API Incoming Webhook Gateway.
+    """Universal Incoming WhatsApp Webhook Gateway (Meta Cloud API & Green-API).
     
-    Validates X-Hub-Signature-256 HMAC (if secret configured).
-    Normalizes Meta payload, deduplicates message IDs for idempotency,
-    persists message records in tenant workspace, and dispatches to automation engine.
+    Automatically detects whether incoming payload is from Green-API or Meta Cloud API.
+    Normalizes payloads, deduplicates message IDs for idempotency, persists records,
+    and dispatches to the automation engine for rule execution.
     """
-    raw_body = request.get_data()
-    sig = request.headers.get("X-Hub-Signature-256")
-    if not WhatsAppService.verify_signature(raw_body, sig):
-        logger.warning("WhatsApp webhook rejected: HMAC signature verification failed.")
-        return jsonify({"error": "Invalid signature", "code": "UNAUTHORIZED"}), 401
-
     payload = request.get_json(silent=True) or {}
-    messages = WhatsAppService.parse_webhook_payload(payload)
+
+    # Detect Green-API Webhook format (typeWebhook or instanceData)
+    is_green_api = bool(payload.get("typeWebhook") or payload.get("instanceData"))
+
+    if is_green_api:
+        messages = WhatsAppService.parse_green_api_payload(payload)
+        provider_name = "green_api"
+    else:
+        # Meta Cloud API signature verification
+        raw_body = request.get_data()
+        sig = request.headers.get("X-Hub-Signature-256")
+        if not WhatsAppService.verify_signature(raw_body, sig):
+            logger.warning("WhatsApp Meta webhook rejected: HMAC signature verification failed.")
+            return jsonify({"error": "Invalid signature", "code": "UNAUTHORIZED"}), 401
+        messages = WhatsAppService.parse_webhook_payload(payload)
+        provider_name = "meta"
+
     if not messages:
         # Acknowledging delivery reports, read receipts, or non-message events
-        return jsonify({"status": "acknowledged", "processed": 0}), 200
+        return jsonify({"status": "acknowledged", "provider": provider_name, "processed": 0}), 200
 
     # Resolve target tenant
     target_org = None
@@ -2434,13 +2444,14 @@ def whatsapp_webhook_ingress():
                 "whatsapp_message_id": msg_id,
                 "recipient_phone_id": msg.get("recipient_phone_id", ""),
                 "direction": "inbound",
-                "record_id": record.id
+                "record_id": record.id,
+                "provider": provider_name
             }
             try:
                 engine.ingest_event(
                     event_name="whatsapp.message",
                     payload=event_data,
-                    source="whatsapp_webhook",
+                    source=f"whatsapp_{provider_name}_webhook",
                     dry_run=False,
                     organization_id=target_org.id
                 )
@@ -2449,7 +2460,84 @@ def whatsapp_webhook_ingress():
 
         processed_count += 1
 
-    return jsonify({"status": "ok", "processed": processed_count}), 200
+    return jsonify({"status": "ok", "provider": provider_name, "processed": processed_count}), 200
+
+
+@api_v1.route("/webhooks/whatsapp/green-api", methods=["GET", "POST"])
+@rate_limit(limit=120, window=60, message="Too many Green-API webhook requests.")
+def green_api_webhook_ingress():
+    """Dedicated Production-Ready Green-API Inbound Webhook Endpoint."""
+    if request.method == "GET":
+        return jsonify({
+            "status": "online",
+            "provider": "green_api",
+            "message": "Green-API Webhook Endpoint is ready to receive POST notifications.",
+            "instructions": "Configure this URL in your Green-API console under Webhook settings."
+        }), 200
+
+    payload = request.get_json(silent=True) or {}
+    messages = WhatsAppService.parse_green_api_payload(payload)
+
+    if not messages:
+        return jsonify({"status": "acknowledged", "provider": "green_api", "processed": 0}), 200
+
+    target_org = None
+    target_org_id = request.args.get("org_id")
+    if target_org_id:
+        target_org = db.session.get(Organization, target_org_id)
+    if not target_org:
+        target_org = Organization.query.filter_by(is_active=True).first()
+
+    if not target_org:
+        return jsonify({"error": "No active organization found to receive WhatsApp message", "code": "NOT_FOUND"}), 404
+
+    engine = get_engine()
+    processed_count = 0
+
+    for msg in messages:
+        msg_id = msg.get("message_id")
+        if msg_id and WhatsAppService.is_duplicate_message(msg_id):
+            logger.info(f"Duplicate Green-API message ignored: {msg_id}")
+            continue
+
+        record = WhatsAppService.record_message(
+            organization_id=target_org.id,
+            sender=msg.get("from_phone", "unknown"),
+            recipient=msg.get("recipient_phone_id", "system"),
+            direction="inbound",
+            body=msg.get("body", ""),
+            status="received",
+            whatsapp_message_id=msg_id,
+            message_type=msg.get("message_type", "text"),
+            raw_payload=msg
+        )
+
+        if engine:
+            event_data = {
+                "from": msg.get("from_phone"),
+                "sender_name": msg.get("sender_name", ""),
+                "message": msg.get("body", ""),
+                "text": msg.get("body", ""),
+                "whatsapp_message_id": msg_id,
+                "recipient_phone_id": msg.get("recipient_phone_id", ""),
+                "direction": "inbound",
+                "record_id": record.id,
+                "provider": "green_api"
+            }
+            try:
+                engine.ingest_event(
+                    event_name="whatsapp.message",
+                    payload=event_data,
+                    source="green_api_webhook",
+                    dry_run=False,
+                    organization_id=target_org.id
+                )
+            except Exception as e:
+                logger.error(f"Error triggering engine for Green-API message {msg_id}: {e}")
+
+        processed_count += 1
+
+    return jsonify({"status": "ok", "provider": "green_api", "processed": processed_count}), 200
 
 
 @api_v1.route("/whatsapp/messages/send", methods=["POST"])
@@ -2528,22 +2616,36 @@ def list_whatsapp_messages():
 @api_v1.route("/whatsapp/config", methods=["GET"])
 @require_auth
 def get_whatsapp_config():
-    """Returns non-sensitive WhatsApp configuration status and webhook URL."""
+    """Returns non-sensitive WhatsApp configuration status and webhook URLs for both Meta and Green-API."""
     org = get_current_org()
     conf = WhatsAppService.get_config()
     base_url = request.host_url.rstrip("/")
-    webhook_url = f"{base_url}/api/v1/webhooks/whatsapp" + (f"?org_id={org.id}" if org else "")
+    meta_webhook_url = f"{base_url}/api/v1/webhooks/whatsapp" + (f"?org_id={org.id}" if org else "")
+    green_api_webhook_url = f"{base_url}/api/v1/webhooks/whatsapp/green-api" + (f"?org_id={org.id}" if org else "")
 
     phone_number_id = conf.get("phone_number_id", "")
     masked_phone_id = phone_number_id[:4] + "..." + phone_number_id[-4:] if len(phone_number_id) > 8 else (phone_number_id or "Not Configured")
 
+    green_api_id = conf.get("green_api_id_instance", "")
+    masked_green_id = green_api_id[:4] + "..." + green_api_id[-3:] if len(green_api_id) > 7 else (green_api_id or "Not Configured")
+
+    active_provider = WhatsAppService.get_active_provider()
+
     return jsonify({
         "is_configured": WhatsAppService.is_configured(),
+        "active_provider": active_provider,
+        "whatsapp_provider": conf.get("whatsapp_provider", "auto"),
+        "meta_configured": WhatsAppService.is_meta_configured(),
+        "green_api_configured": WhatsAppService.is_green_api_configured(),
         "phone_number_id": masked_phone_id,
         "business_account_id": conf.get("business_account_id") or "Not Configured",
         "verify_token": conf.get("verify_token", WhatsAppService.DEFAULT_VERIFY_TOKEN),
-        "webhook_url": webhook_url,
-        "mode": "live" if WhatsAppService.is_configured() else "development_mock"
+        "webhook_url": green_api_webhook_url if active_provider == "green_api" else meta_webhook_url,
+        "meta_webhook_url": meta_webhook_url,
+        "green_api_id_instance": masked_green_id,
+        "green_api_host": conf.get("green_api_host", "https://api.green-api.com"),
+        "green_api_webhook_url": green_api_webhook_url,
+        "mode": active_provider
     }), 200
 
 
@@ -2551,7 +2653,7 @@ def get_whatsapp_config():
 @require_auth
 @require_role(["owner", "admin"])
 def save_whatsapp_config():
-    """Updates live Meta WhatsApp credentials in SystemSetting."""
+    """Updates live Meta WhatsApp and Green-API credentials in SystemSetting."""
     data = request.get_json(silent=True) or {}
     phone_id = data.get("phone_number_id")
     access_token = data.get("access_token")
@@ -2559,27 +2661,42 @@ def save_whatsapp_config():
     app_secret = data.get("app_secret")
     verify_token = data.get("verify_token")
 
+    green_id = data.get("green_api_id_instance")
+    green_token = data.get("green_api_token_instance")
+    green_host = data.get("green_api_host")
+    provider = data.get("whatsapp_provider") or data.get("provider")
+
     updated = WhatsAppService.save_config(
         phone_number_id=phone_id,
         access_token=access_token,
         business_account_id=waba_id,
         app_secret=app_secret,
-        verify_token=verify_token
+        verify_token=verify_token,
+        green_api_id_instance=green_id,
+        green_api_token_instance=green_token,
+        green_api_host=green_host,
+        whatsapp_provider=provider
     )
     current_user = get_current_user()
-    log_audit_event("whatsapp.config_updated", "system", "whatsapp", {"user_id": current_user.id if current_user else "admin"})
+    log_audit_event("whatsapp.config_updated", "system", "whatsapp", {
+        "user_id": current_user.id if current_user else "admin",
+        "active_provider": WhatsAppService.get_active_provider()
+    })
     return jsonify({
         "success": True,
         "message": "WhatsApp configuration updated successfully.",
-        "is_configured": WhatsAppService.is_configured()
+        "is_configured": WhatsAppService.is_configured(),
+        "active_provider": WhatsAppService.get_active_provider()
     }), 200
 
 
 @api_v1.route("/whatsapp/test-connection", methods=["POST"])
 @require_auth
 def test_whatsapp_connection():
-    """Tests live connection to Meta Graph API using current credentials."""
-    result = WhatsAppService.test_live_connection()
+    """Tests live connection to Meta Graph API or Green-API using current credentials."""
+    data = request.get_json(silent=True) or {}
+    provider = data.get("provider")
+    result = WhatsAppService.test_live_connection(provider=provider)
     status_code = 200 if result.get("success") else 400
     return jsonify(result), status_code
 

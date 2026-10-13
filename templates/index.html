@@ -705,30 +705,43 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 <div class="hud-panel flex-1">
                     <div class="panel-header">
                         <h3>📱 GATEWAY CONFIGURATION</h3>
+                        <span id="waActiveProviderBadge" class="status-pill blue" style="font-size: 11px;">Simulation Mode</span>
                     </div>
                     
                     <div style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 20px;">
                         <!-- Connection Status -->
                         <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;">
-                            <span style="font-size: 0.82rem; color: var(--text-secondary);">WhatsApp Business Connection</span>
+                            <span style="font-size: 0.82rem; color: var(--text-secondary);">WhatsApp Active Connection</span>
                             <span id="waConnectionStatus"><span class="status-pill blue" style="font-size:0.75rem;">🧪 Simulation (Sandbox)</span></span>
                         </div>
 
-                        <!-- Business Number -->
+                        <!-- Business Phone / Green-API Instance ID -->
                         <div>
-                            <label style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600; display: block; margin-bottom: 4px;">Business Phone Number ID</label>
+                            <label id="waIdentifierLabel" style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600; display: block; margin-bottom: 4px;">Configured Identifier (Phone ID / Instance ID)</label>
                             <input type="text" id="waPhoneNumberIdInput" class="hud-input" readonly value="Loading..." style="width: 100%; font-family: monospace; font-size: 12px;">
                         </div>
 
-                        <!-- Webhook Status & Callback URL -->
+                        <!-- Webhook Status & Unified Callback URL -->
                         <div>
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                                <label style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600;">Webhook Callback URL</label>
-                                <span style="font-size: 11px; color: #10b981; font-weight: 600;">● Active</span>
+                                <label style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600;">Meta Cloud API Webhook URL</label>
+                                <span style="font-size: 11px; color: #10b981; font-weight: 600;">● Ready</span>
                             </div>
                             <div style="display: flex; gap: 6px;">
                                 <input type="text" id="waWebhookUrlInput" class="hud-input" readonly value="/api/v1/webhooks/whatsapp" style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px;">
                                 <button type="button" class="hud-btn small outline" onclick="copyWhatsAppWebhookUrl()">Copy</button>
+                            </div>
+                        </div>
+
+                        <!-- Dedicated Green-API Webhook Callback URL -->
+                        <div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                <label style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600;">Green-API Webhook URL (Production Ready)</label>
+                                <span style="font-size: 11px; color: #10b981; font-weight: 600;">● Ready</span>
+                            </div>
+                            <div style="display: flex; gap: 6px;">
+                                <input type="text" id="waGreenWebhookUrlInput" class="hud-input" readonly value="/api/v1/webhooks/whatsapp/green-api" style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px;">
+                                <button type="button" class="hud-btn small outline" onclick="copyGreenApiWebhookUrl()">Copy</button>
                             </div>
                         </div>
 
@@ -745,15 +758,15 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                         <!-- Security Status & Message Deduplication -->
                         <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06);">
                             <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
-                                <span style="color: var(--text-secondary);">Security Status</span>
+                                <span style="color: var(--text-secondary);">Security Protocol</span>
                                 <span style="color: #10b981; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
-                                    <span>🔒</span> HMAC-SHA256 Enforced
+                                    <span>🔒</span> HMAC-SHA256 &amp; Instance Token Verified
                                 </span>
                             </div>
                             <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
                                 <span style="color: var(--text-secondary);">Message Deduplication</span>
                                 <span style="color: #00f0ff; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
-                                    <span>⚡</span> Active (wamid deduplication)
+                                    <span>⚡</span> Active (Idempotent Message ID)
                                 </span>
                             </div>
                         </div>
@@ -2061,59 +2074,111 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
 
     <!-- WHATSAPP CONNECT & LIVE CONFIGURATION MODAL -->
     <div class="hud-modal-overlay" id="whatsappConnectModal" style="display:none;">
-        <div class="hud-modal" style="max-width: 580px;">
+        <div class="hud-modal" style="max-width: 620px;">
             <div class="modal-header">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="font-size: 20px;">💬</span>
-                    <h3>Meta WhatsApp Business Cloud API Gateway</h3>
+                    <h3 id="waConnectModalTitle">WhatsApp Business Gateway Configuration</h3>
                 </div>
                 <button class="close-btn" onclick="closeWhatsAppConnectModal()">&times;</button>
             </div>
             <div class="modal-body" style="padding: 20px;">
-                <p style="font-size: 0.86rem; color: #cbd5e1; margin-bottom: 16px;">
-                    Configure official Meta Cloud API v19.0 credentials. Once configured, outbound messages route directly to WhatsApp and inbound webhooks are verified via HMAC-SHA256.
+                <p style="font-size: 0.86rem; color: #cbd5e1; margin-bottom: 14px;">
+                    Connect your WhatsApp messaging provider for automated incident dispatch, CRM outreach, and inbound webhook ingestion.
                 </p>
 
+                <!-- Provider Selector Switcher Tabs -->
+                <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color, #334155); padding-bottom: 10px;">
+                    <button type="button" class="hud-btn primary small" id="waTabBtnGreenApi" onclick="selectWaConfigProvider('green_api')">
+                        <span>⚡</span> Green-API (Instant QR / Instance)
+                    </button>
+                    <button type="button" class="hud-btn outline small" id="waTabBtnMeta" onclick="selectWaConfigProvider('meta')">
+                        <span>🏢</span> Meta Cloud API (Official WABA)
+                    </button>
+                </div>
+
                 <form id="waConfigForm" onsubmit="handleSaveWhatsAppConfig(event)">
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Phone Number ID *</label>
-                        <input type="text" id="waConfigPhoneId" class="hud-input" placeholder="e.g., 109283746509876" style="width: 100%; font-family: var(--font-mono);">
-                        <span style="font-size: 11px; color: var(--text-dim, #888);">Found in Meta App Dashboard &gt; WhatsApp &gt; API Setup</span>
+                    <input type="hidden" id="waSelectedProvider" value="green_api">
+
+                    <!-- GREEN-API CONFIGURATION SECTION -->
+                    <div id="waGreenApiConfigSection" style="display: block;">
+                        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; font-size: 0.82rem; color: #34d399;">
+                            <strong>Green-API Fast Setup:</strong> Copy your <code>idInstance</code> and <code>apiTokenInstance</code> from your Green-API console. No Meta app review required!
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Instance ID (idInstance) *</label>
+                            <input type="text" id="waConfigGreenId" class="hud-input" placeholder="e.g., 1101820000" style="width: 100%; font-family: var(--font-mono);">
+                            <span style="font-size: 11px; color: var(--text-dim, #888);">Found in Green-API Instance Dashboard</span>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">API Token Instance (apiTokenInstance) *</label>
+                            <div style="display: flex; gap: 6px;">
+                                <input type="password" id="waConfigGreenToken" class="hud-input" placeholder="e.g., d75b3a8c1f9e2..." style="flex: 1; font-family: var(--font-mono);">
+                                <button type="button" class="hud-btn small outline" onclick="toggleGreenTokenVisibility()">Show</button>
+                            </div>
+                            <span style="font-size: 11px; color: var(--text-dim, #888);">Secret instance API token for outbound messages &amp; webhook authorization</span>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">API Host URL</label>
+                            <input type="text" id="waConfigGreenHost" class="hud-input" value="https://api.green-api.com" placeholder="https://api.green-api.com" style="width: 100%; font-family: var(--font-mono);">
+                            <span style="font-size: 11px; color: var(--text-dim, #888);">Default: <code>https://api.green-api.com</code> (or custom cluster e.g. <code>https://7103.api.green-api.com</code>)</span>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Green-API Webhook Callback URL</label>
+                            <div style="display: flex; gap: 6px;">
+                                <input type="text" id="waModalGreenWebhookUrl" class="hud-input" readonly value="/api/v1/webhooks/whatsapp/green-api" style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px; background: rgba(0,0,0,0.25);">
+                                <button type="button" class="hud-btn small outline" onclick="copyModalGreenWebhookUrl()">Copy</button>
+                            </div>
+                            <span style="font-size: 11px; color: var(--text-dim, #888);">Paste this URL into your Green-API console under <em>Webhook &gt; Set Webhook</em> to receive real-time chats!</span>
+                        </div>
                     </div>
 
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">System User Access Token *</label>
-                        <div style="display: flex; gap: 6px;">
-                            <input type="password" id="waConfigAccessToken" class="hud-input" placeholder="EAAG..." style="flex: 1; font-family: var(--font-mono);">
-                            <button type="button" class="hud-btn small outline" onclick="toggleWaConfigTokenVisibility()">Show</button>
+                    <!-- META CLOUD API CONFIGURATION SECTION -->
+                    <div id="waMetaConfigSection" style="display: none;">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Phone Number ID *</label>
+                            <input type="text" id="waConfigPhoneId" class="hud-input" placeholder="e.g., 109283746509876" style="width: 100%; font-family: var(--font-mono);">
+                            <span style="font-size: 11px; color: var(--text-dim, #888);">Found in Meta App Dashboard &gt; WhatsApp &gt; API Setup</span>
                         </div>
-                        <span style="font-size: 11px; color: var(--text-dim, #888);">Permanent System User access token with whatsapp_business_messaging permission</span>
-                    </div>
 
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-                        <div class="form-group">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">WABA ID (Account ID)</label>
-                            <input type="text" id="waConfigWabaId" class="hud-input" placeholder="e.g., 987654321012345" style="width: 100%; font-family: var(--font-mono);">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">System User Access Token *</label>
+                            <div style="display: flex; gap: 6px;">
+                                <input type="password" id="waConfigAccessToken" class="hud-input" placeholder="EAAG..." style="flex: 1; font-family: var(--font-mono);">
+                                <button type="button" class="hud-btn small outline" onclick="toggleWaConfigTokenVisibility()">Show</button>
+                            </div>
+                            <span style="font-size: 11px; color: var(--text-dim, #888);">Permanent System User access token with whatsapp_business_messaging permission</span>
                         </div>
-                        <div class="form-group">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Meta App Secret</label>
-                            <input type="password" id="waConfigAppSecret" class="hud-input" placeholder="App Secret for Webhook HMAC" style="width: 100%; font-family: var(--font-mono);">
-                        </div>
-                    </div>
 
-                    <div class="form-group" style="margin-bottom: 16px;">
-                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Webhook Verify Token</label>
-                        <input type="text" id="waConfigVerifyToken" class="hud-input" value="opsflow_whatsapp_verify_2026" style="width: 100%; font-family: var(--font-mono);">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                            <div class="form-group">
+                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">WABA ID (Account ID)</label>
+                                <input type="text" id="waConfigWabaId" class="hud-input" placeholder="e.g., 987654321012345" style="width: 100%; font-family: var(--font-mono);">
+                            </div>
+                            <div class="form-group">
+                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Meta App Secret</label>
+                                <input type="password" id="waConfigAppSecret" class="hud-input" placeholder="App Secret for Webhook HMAC" style="width: 100%; font-family: var(--font-mono);">
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Webhook Verify Token</label>
+                            <input type="text" id="waConfigVerifyToken" class="hud-input" value="opsflow_whatsapp_verify_2026" style="width: 100%; font-family: var(--font-mono);">
+                        </div>
                     </div>
 
                     <!-- Connection Diagnostics Output Box -->
                     <div id="waConnectionTestOutput" style="display: none; padding: 12px; border-radius: 6px; font-size: 12px; margin-bottom: 16px; border: 1px solid transparent;"></div>
 
                     <div style="display: flex; gap: 8px; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 14px;">
-                        <button type="button" class="hud-btn outline" id="btnTestWaConnection" onclick="handleTestWhatsAppConnection()">⚡ Test Live Connection</button>
+                        <button type="button" class="hud-btn outline" id="btnTestWaConnection" onclick="handleTestWhatsAppConnection()">⚡ Test Connection</button>
                         <div style="display: flex; gap: 8px;">
                             <button type="button" class="hud-btn outline" onclick="closeWhatsAppConnectModal()">Cancel</button>
-                            <button type="submit" class="hud-btn primary" id="btnSaveWaConfig">Save Credentials</button>
+                            <button type="submit" class="hud-btn primary" id="btnSaveWaConfig">Save &amp; Activate</button>
                         </div>
                     </div>
                 </form>

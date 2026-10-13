@@ -41,15 +41,14 @@ class WhatsAppService:
     DEFAULT_VERIFY_TOKEN = "opsflow_whatsapp_verify_2026"
 
     @classmethod
-    def get_config(cls) -> Dict[str, str]:
+    def get_config(cls) -> Dict[str, Any]:
         """Retrieves WhatsApp configuration from database settings, environment, or app config."""
         cfg = current_app.config if current_app else {}
         phone_id = (
             SystemSetting.get_val("WHATSAPP_PHONE_NUMBER_ID")
             or cfg.get("WHATSAPP_PHONE_NUMBER_ID")
             or os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
-            or os.environ.get("META_PHONE_NUMBER_ID")
-            or os.environ.get("ID_INSTANCE", "")
+            or os.environ.get("META_PHONE_NUMBER_ID", "")
         ).strip()
         access_token = (
             SystemSetting.get_val("WHATSAPP_ACCESS_TOKEN")
@@ -58,8 +57,7 @@ class WhatsAppService:
             or cfg.get("WHATSAPP_TOKEN")
             or os.environ.get("WHATSAPP_TOKEN")
             or os.environ.get("WHATSAPP_ACCESS_TOKEN")
-            or os.environ.get("META_ACCESS_TOKEN")
-            or os.environ.get("API_TOKEN_INSTANCE", "")
+            or os.environ.get("META_ACCESS_TOKEN", "")
         ).strip()
         verify_token = (
             SystemSetting.get_val("WHATSAPP_VERIFY_TOKEN")
@@ -79,24 +77,63 @@ class WhatsAppService:
             or os.environ.get("META_APP_SECRET", "")
         ).strip()
 
+        # Green-API Parameters
+        green_api_id = (
+            SystemSetting.get_val("GREEN_API_ID_INSTANCE")
+            or SystemSetting.get_val("ID_INSTANCE")
+            or cfg.get("GREEN_API_ID_INSTANCE")
+            or cfg.get("ID_INSTANCE")
+            or os.environ.get("GREEN_API_ID_INSTANCE")
+            or os.environ.get("ID_INSTANCE", "")
+        ).strip()
+        green_api_token = (
+            SystemSetting.get_val("GREEN_API_TOKEN_INSTANCE")
+            or SystemSetting.get_val("API_TOKEN_INSTANCE")
+            or cfg.get("GREEN_API_TOKEN_INSTANCE")
+            or cfg.get("API_TOKEN_INSTANCE")
+            or os.environ.get("GREEN_API_TOKEN_INSTANCE")
+            or os.environ.get("API_TOKEN_INSTANCE", "")
+        ).strip()
+        green_api_host = (
+            SystemSetting.get_val("GREEN_API_HOST")
+            or cfg.get("GREEN_API_HOST")
+            or os.environ.get("GREEN_API_HOST", "https://api.green-api.com")
+        ).strip().rstrip("/")
+        if not green_api_host:
+            green_api_host = "https://api.green-api.com"
+
+        provider = (
+            SystemSetting.get_val("WHATSAPP_PROVIDER")
+            or cfg.get("WHATSAPP_PROVIDER")
+            or os.environ.get("WHATSAPP_PROVIDER", "auto")
+        ).strip().lower()
+
         return {
             "phone_number_id": phone_id,
             "access_token": access_token,
             "verify_token": verify_token,
             "business_account_id": business_account_id,
             "app_secret": app_secret,
+            "green_api_id_instance": green_api_id,
+            "green_api_token_instance": green_api_token,
+            "green_api_host": green_api_host,
+            "whatsapp_provider": provider,
         }
 
     @classmethod
     def save_config(
         cls,
-        phone_number_id: str,
-        access_token: str,
+        phone_number_id: Optional[str] = None,
+        access_token: Optional[str] = None,
         business_account_id: Optional[str] = None,
         app_secret: Optional[str] = None,
-        verify_token: Optional[str] = None
+        verify_token: Optional[str] = None,
+        green_api_id_instance: Optional[str] = None,
+        green_api_token_instance: Optional[str] = None,
+        green_api_host: Optional[str] = None,
+        whatsapp_provider: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Saves live WhatsApp configuration dynamically into the database."""
+        """Saves live WhatsApp / Green-API configuration dynamically into database settings."""
         if phone_number_id is not None:
             SystemSetting.set_val("WHATSAPP_PHONE_NUMBER_ID", phone_number_id, is_secret=False, description="Meta Graph Phone Number ID")
         if access_token is not None:
@@ -108,12 +145,21 @@ class WhatsAppService:
         if verify_token is not None:
             SystemSetting.set_val("WHATSAPP_VERIFY_TOKEN", verify_token, is_secret=False, description="Webhook Verify Token")
 
+        if green_api_id_instance is not None:
+            SystemSetting.set_val("GREEN_API_ID_INSTANCE", green_api_id_instance, is_secret=False, description="Green-API Instance ID")
+        if green_api_token_instance is not None:
+            SystemSetting.set_val("GREEN_API_TOKEN_INSTANCE", green_api_token_instance, is_secret=True, description="Green-API API Token Instance")
+        if green_api_host is not None:
+            SystemSetting.set_val("GREEN_API_HOST", green_api_host, is_secret=False, description="Green-API API Host")
+        if whatsapp_provider is not None:
+            SystemSetting.set_val("WHATSAPP_PROVIDER", whatsapp_provider, is_secret=False, description="Active WhatsApp Provider (auto, meta, green_api)")
+
         return cls.get_config()
 
     @classmethod
     def format_phone_number(cls, phone: str) -> str:
         """Formats phone number to international E.164 digits, handling Pakistani local numbers automatically."""
-        clean = "".join(filter(str.isdigit, phone))
+        clean = "".join(filter(str.isdigit, str(phone or "")))
         # Handle Pakistani local formats like 03001234567 -> 923001234567
         if clean.startswith("03") and len(clean) == 11:
             return "92" + clean[1:]
@@ -122,8 +168,115 @@ class WhatsAppService:
         return clean
 
     @classmethod
-    def test_live_connection(cls) -> Dict[str, Any]:
-        """Probes Meta Cloud API with configured credentials to verify connectivity and account status."""
+    def is_meta_configured(cls) -> bool:
+        """Returns True if live Meta WhatsApp credentials are configured."""
+        conf = cls.get_config()
+        phone_id = conf["phone_number_id"]
+        token = conf["access_token"]
+        return bool(
+            phone_id
+            and token
+            and not phone_id.startswith("mock_")
+            and not token.startswith("mock_")
+        )
+
+    @classmethod
+    def is_green_api_configured(cls) -> bool:
+        """Returns True if live Green-API credentials are configured."""
+        conf = cls.get_config()
+        id_inst = conf.get("green_api_id_instance", "")
+        tok_inst = conf.get("green_api_token_instance", "")
+        return bool(
+            id_inst
+            and tok_inst
+            and not str(id_inst).startswith("mock_")
+            and not str(tok_inst).startswith("mock_")
+        )
+
+    @classmethod
+    def get_active_provider(cls) -> str:
+        """Resolves active WhatsApp provider: 'green_api', 'meta', or 'simulator'."""
+        conf = cls.get_config()
+        configured_pref = conf.get("whatsapp_provider", "auto")
+
+        if configured_pref == "green_api" and cls.is_green_api_configured():
+            return "green_api"
+        if configured_pref == "meta" and cls.is_meta_configured():
+            return "meta"
+
+        # Auto resolution
+        if cls.is_green_api_configured():
+            return "green_api"
+        if cls.is_meta_configured():
+            return "meta"
+        return "simulator"
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        """Returns True if either Meta Cloud API or Green-API credentials are configured."""
+        return cls.is_green_api_configured() or cls.is_meta_configured()
+
+    @classmethod
+    def test_green_api_connection(cls) -> Dict[str, Any]:
+        """Probes Green-API getStateInstance endpoint with configured credentials."""
+        conf = cls.get_config()
+        id_inst = conf.get("green_api_id_instance", "")
+        tok_inst = conf.get("green_api_token_instance", "")
+        host = conf.get("green_api_host") or "https://api.green-api.com"
+
+        if not id_inst or not tok_inst:
+            return {
+                "success": False,
+                "provider": "green_api",
+                "status": "not_configured",
+                "message": "Both Green-API Instance ID and API Token Instance must be configured."
+            }
+
+        url = f"{host}/waInstance{id_inst}/getStateInstance/{tok_inst}"
+        try:
+            resp = requests.get(url, timeout=10)
+            data = resp.json() if resp.status_code < 500 else {}
+            if resp.status_code == 200:
+                state = data.get("stateInstance", "unknown")
+                is_authorized = (state.lower() == "authorized")
+                return {
+                    "success": is_authorized,
+                    "provider": "green_api",
+                    "status": state,
+                    "id_instance": id_inst,
+                    "state_instance": state,
+                    "message": (
+                        f"Green-API Instance {id_inst} is ONLINE and AUTHORIZED!"
+                        if is_authorized else
+                        f"Green-API Instance state: '{state}'. Please link WhatsApp by scanning the QR code in your Green-API console."
+                    )
+                }
+            else:
+                err_text = data.get("message") or resp.text[:200] or f"HTTP {resp.status_code}"
+                return {
+                    "success": False,
+                    "provider": "green_api",
+                    "status": f"http_{resp.status_code}",
+                    "error": err_text,
+                    "message": f"Green-API rejected credentials: {err_text}"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "provider": "green_api",
+                "status": "network_error",
+                "error": str(e),
+                "message": f"Network error contacting Green-API host: {str(e)}"
+            }
+
+    @classmethod
+    def test_live_connection(cls, provider: Optional[str] = None) -> Dict[str, Any]:
+        """Probes Meta Cloud API or Green-API with configured credentials."""
+        target_provider = provider or cls.get_active_provider()
+        if target_provider == "green_api":
+            return cls.test_green_api_connection()
+
+        # Meta Cloud API check
         conf = cls.get_config()
         phone_id = conf["phone_number_id"]
         token = conf["access_token"]
@@ -131,6 +284,7 @@ class WhatsAppService:
         if not phone_id or not token:
             return {
                 "success": False,
+                "provider": "meta",
                 "status": "not_configured",
                 "message": "Both Phone Number ID and Access Token must be configured."
             }
@@ -144,6 +298,7 @@ class WhatsAppService:
             if resp.status_code == 200:
                 return {
                     "success": True,
+                    "provider": "meta",
                     "status": "connected",
                     "phone_number_id": phone_id,
                     "verified_name": data.get("verified_name", "Verified Meta Business Account"),
@@ -156,6 +311,7 @@ class WhatsAppService:
                 err_detail = data.get("error", {}).get("message") or f"HTTP {resp.status_code}"
                 return {
                     "success": False,
+                    "provider": "meta",
                     "status": "error",
                     "error": err_detail,
                     "error_code": data.get("error", {}).get("code"),
@@ -164,23 +320,11 @@ class WhatsAppService:
         except Exception as e:
             return {
                 "success": False,
+                "provider": "meta",
                 "status": "network_error",
                 "error": str(e),
                 "message": f"Network connection failed while probing Meta Graph API: {str(e)}"
             }
-
-    @classmethod
-    def is_configured(cls) -> bool:
-        """Returns True if live Meta WhatsApp credentials are configured."""
-        conf = cls.get_config()
-        phone_id = conf["phone_number_id"]
-        token = conf["access_token"]
-        return bool(
-            phone_id
-            and token
-            and not phone_id.startswith("mock_")
-            and not token.startswith("mock_")
-        )
 
     @classmethod
     def verify_webhook_challenge(
@@ -275,6 +419,88 @@ class WhatsAppService:
         return messages
 
     @classmethod
+    def parse_green_api_payload(cls, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Parses Green-API webhook notification JSON payload into normalized message events."""
+        messages: List[Dict[str, Any]] = []
+        if not data or not isinstance(data, dict):
+            return messages
+
+        type_webhook = data.get("typeWebhook")
+
+        # Handle message delivery status updates
+        if type_webhook in ("outgoingMessageStatus", "statusInstanceChanged"):
+            msg_id = data.get("idMessage")
+            status = data.get("status") or type_webhook
+            if msg_id and status:
+                cls.update_message_status(msg_id, status)
+            return messages
+
+        if type_webhook != "incomingMessageReceived":
+            # Non-message notifications (e.g., stateInstanceChanged, deviceInfo, etc.)
+            return messages
+
+        msg_id = data.get("idMessage")
+        timestamp = data.get("timestamp")
+        sender_data = data.get("senderData", {})
+        chat_id = sender_data.get("chatId", "")
+        from_phone = chat_id.replace("@c.us", "").replace("@g.us", "")
+        sender_name = sender_data.get("senderName") or sender_data.get("chatName") or from_phone or "WhatsApp Contact"
+
+        instance_data = data.get("instanceData", {})
+        instance_id = str(instance_data.get("idInstance", "green_api"))
+
+        message_data = data.get("messageData", {})
+        type_message = message_data.get("typeMessage", "textMessage")
+
+        body = ""
+        if type_message == "textMessage":
+            body = message_data.get("textMessageData", {}).get("textMessage", "")
+        elif type_message == "extendedTextMessage":
+            body = message_data.get("extendedTextMessageData", {}).get("text", "")
+        elif type_message == "buttonsResponseMessage":
+            btn_data = message_data.get("buttonsResponseMessageData", {})
+            body = btn_data.get("selectedDisplayText") or btn_data.get("selectedButtonId", "")
+        elif type_message == "listResponseMessage":
+            body = message_data.get("listResponseMessageData", {}).get("title", "")
+        elif type_message == "imageMessage":
+            cap = message_data.get("fileMessageData", {}).get("caption", "")
+            body = f"[Image] {cap}" if cap else "[Image message]"
+        elif type_message == "documentMessage":
+            fname = message_data.get("fileMessageData", {}).get("fileName", "")
+            body = f"[Document: {fname}]" if fname else "[Document message]"
+        else:
+            body = f"[{type_message}]"
+
+        messages.append({
+            "message_id": msg_id,
+            "from_phone": from_phone,
+            "sender_name": sender_name,
+            "recipient_phone_id": instance_id,
+            "display_phone_number": instance_data.get("wid", instance_id),
+            "timestamp": timestamp,
+            "message_type": type_message,
+            "body": body,
+            "provider": "green_api",
+            "raw": data
+        })
+
+        return messages
+
+    @classmethod
+    def update_message_status(cls, whatsapp_message_id: str, status: str, error_message: Optional[str] = None) -> bool:
+        """Updates the status of a tracked WhatsApp message by its provider message ID."""
+        if not whatsapp_message_id:
+            return False
+        msg = WhatsAppMessage.query.filter_by(whatsapp_message_id=whatsapp_message_id).first()
+        if msg:
+            msg.status = status
+            if error_message:
+                msg.error_message = error_message
+            db.session.commit()
+            return True
+        return False
+
+    @classmethod
     def is_duplicate_message(cls, message_id: str) -> bool:
         """Guarantees idempotency by checking if a message ID was already processed."""
         if not message_id:
@@ -318,6 +544,97 @@ class WhatsAppService:
         return msg
 
     @classmethod
+    def send_green_api_message(
+        cls,
+        organization_id: str,
+        to_phone: str,
+        message_text: str,
+        execution_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Dispatches an outbound WhatsApp text message via Green-API."""
+        conf = cls.get_config()
+        clean_to = cls.format_phone_number(to_phone)
+        if not clean_to or len(clean_to) < 7:
+            raise ValueError(f"Invalid recipient phone number: '{to_phone}'. Must include country code and digits.")
+
+        id_inst = conf.get("green_api_id_instance")
+        tok_inst = conf.get("green_api_token_instance")
+        host = conf.get("green_api_host") or "https://api.green-api.com"
+        chat_id = f"{clean_to}@c.us"
+        url = f"{host}/waInstance{id_inst}/sendMessage/{tok_inst}"
+        payload = {
+            "chatId": chat_id,
+            "message": message_text
+        }
+
+        try:
+            resp = requests.post(url, json=payload, timeout=12)
+            resp_json = resp.json() if resp.status_code < 500 else {}
+            if resp.status_code == 200 and resp_json.get("idMessage"):
+                msg_id = resp_json.get("idMessage")
+                record = cls.record_message(
+                    organization_id=organization_id,
+                    sender=f"GreenAPI Instance {id_inst}",
+                    recipient=clean_to,
+                    direction="outbound",
+                    body=message_text,
+                    message_type="text",
+                    status="sent",
+                    whatsapp_message_id=msg_id,
+                    execution_id=execution_id,
+                    raw_payload=resp_json
+                )
+                return {
+                    "success": True,
+                    "status": "sent",
+                    "provider": "green_api",
+                    "whatsapp_message_id": msg_id,
+                    "message_record_id": record.id,
+                    "recipient": clean_to,
+                    "message_type": "text"
+                }
+            else:
+                err = resp_json.get("message") or resp.text[:200] or f"HTTP {resp.status_code}"
+                cls.record_message(
+                    organization_id=organization_id,
+                    sender=f"GreenAPI Instance {id_inst}",
+                    recipient=clean_to,
+                    direction="outbound",
+                    body=message_text,
+                    message_type="text",
+                    status="failed",
+                    execution_id=execution_id,
+                    error_message=err,
+                    raw_payload=resp_json
+                )
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "provider": "green_api",
+                    "error": err,
+                    "recipient": clean_to
+                }
+        except Exception as e:
+            err_msg = str(e)
+            cls.record_message(
+                organization_id=organization_id,
+                sender=f"GreenAPI Instance {id_inst}",
+                recipient=clean_to,
+                direction="outbound",
+                body=message_text,
+                status="failed",
+                execution_id=execution_id,
+                error_message=err_msg
+            )
+            return {
+                "success": False,
+                "status": "failed",
+                "provider": "green_api",
+                "error": err_msg,
+                "recipient": clean_to
+            }
+
+    @classmethod
     def send_message(
         cls,
         organization_id: str,
@@ -328,13 +645,25 @@ class WhatsAppService:
         template_name: Optional[str] = None,
         template_language: str = "en_US"
     ) -> Dict[str, Any]:
-        """Dispatches an outbound WhatsApp text or template message via Meta Cloud API."""
+        """Dispatches an outbound WhatsApp text or template message via the active provider (Green-API or Meta Cloud API)."""
         conf = cls.get_config()
         clean_to = cls.format_phone_number(to_phone)
         if not clean_to or len(clean_to) < 7:
             raise ValueError(f"Invalid recipient phone number: '{to_phone}'. Must include country code and digits.")
 
-        if cls.is_configured():
+        active_provider = cls.get_active_provider()
+
+        # If Green-API is the active configured provider
+        if active_provider == "green_api":
+            return cls.send_green_api_message(
+                organization_id=organization_id,
+                to_phone=to_phone,
+                message_text=message_text,
+                execution_id=execution_id
+            )
+
+        # If Meta Cloud API is the active configured provider
+        if active_provider == "meta":
             phone_id = conf["phone_number_id"]
             token = conf["access_token"]
             url = f"https://graph.facebook.com/{cls.GRAPH_API_VERSION}/{phone_id}/messages"
@@ -393,6 +722,7 @@ class WhatsAppService:
                     return {
                         "success": True,
                         "status": "sent",
+                        "provider": "meta",
                         "whatsapp_message_id": msg_id,
                         "message_record_id": record.id,
                         "recipient": clean_to,
@@ -415,6 +745,7 @@ class WhatsAppService:
                     return {
                         "success": False,
                         "status": "failed",
+                        "provider": "meta",
                         "error": err,
                         "recipient": clean_to
                     }
@@ -433,6 +764,7 @@ class WhatsAppService:
                 return {
                     "success": False,
                     "status": "failed",
+                    "provider": "meta",
                     "error": err_msg,
                     "recipient": clean_to
                 }
