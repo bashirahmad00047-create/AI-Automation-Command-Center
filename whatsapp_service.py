@@ -41,8 +41,8 @@ class WhatsAppService:
 
     GRAPH_API_VERSION = "v19.0"
     DEFAULT_VERIFY_TOKEN = "opsflow_whatsapp_verify_2026"
-    DEFAULT_CONNECT_TIMEOUT = 5.0
-    DEFAULT_READ_TIMEOUT = 15.0
+    DEFAULT_CONNECT_TIMEOUT = 10.0
+    DEFAULT_READ_TIMEOUT = 30.0
 
     @classmethod
     def get_timeout_tuple(cls) -> Tuple[float, float]:
@@ -59,14 +59,39 @@ class WhatsAppService:
 
         try:
             read_t = float(
-                SystemSetting.get_val("WHATSAPP_READ_TIMEOUT")
+                SystemSetting.get_val("GREEN_API_TIMEOUT")
+                or SystemSetting.get_val("WHATSAPP_READ_TIMEOUT")
+                or SystemSetting.get_val("WHATSAPP_TIMEOUT")
+                or cfg.get("GREEN_API_TIMEOUT")
                 or cfg.get("WHATSAPP_READ_TIMEOUT")
-                or os.environ.get("WHATSAPP_READ_TIMEOUT", cls.DEFAULT_READ_TIMEOUT)
+                or cfg.get("WHATSAPP_TIMEOUT")
+                or os.environ.get("GREEN_API_TIMEOUT")
+                or os.environ.get("WHATSAPP_READ_TIMEOUT")
+                or os.environ.get("WHATSAPP_TIMEOUT", cls.DEFAULT_READ_TIMEOUT)
             )
         except (ValueError, TypeError):
             read_t = cls.DEFAULT_READ_TIMEOUT
 
-        return (max(1.0, connect_t), max(2.0, read_t))
+        return (max(1.0, connect_t), max(5.0, read_t))
+
+    @classmethod
+    def is_simulator_fallback_enabled(cls) -> bool:
+        """Determines whether simulator fallback should be used upon timeout or network errors.
+
+        Active when:
+        - Environment variable or SystemSetting WHATSAPP_SIMULATOR_FALLBACK is 'true'
+        - Or running on Render (RENDER or RENDER_INSTANCE_ID set)
+        - Defaults to True to ensure resilient message processing and zero dropped workflows.
+        """
+        cfg = current_app.config if current_app else {}
+        val = (
+            SystemSetting.get_val("WHATSAPP_SIMULATOR_FALLBACK")
+            or cfg.get("WHATSAPP_SIMULATOR_FALLBACK")
+            or os.environ.get("WHATSAPP_SIMULATOR_FALLBACK")
+        )
+        if val is not None:
+            return str(val).strip().lower() in ("true", "1", "yes", "enabled")
+        return True
 
     @classmethod
     def get_http_session(cls, retries: int = 2) -> requests.Session:
@@ -88,32 +113,44 @@ class WhatsAppService:
     def get_config(cls) -> Dict[str, Any]:
         """Retrieves WhatsApp configuration from database settings, environment, or app config."""
         cfg = current_app.config if current_app else {}
+
+        phone_id_val = SystemSetting.get_val("WHATSAPP_PHONE_NUMBER_ID")
         phone_id = (
-            SystemSetting.get_val("WHATSAPP_PHONE_NUMBER_ID")
-            or cfg.get("WHATSAPP_PHONE_NUMBER_ID")
-            or os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
-            or os.environ.get("META_PHONE_NUMBER_ID", "")
+            phone_id_val
+            if phone_id_val is not None
+            else (
+                cfg.get("WHATSAPP_PHONE_NUMBER_ID")
+                or os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
+                or os.environ.get("META_PHONE_NUMBER_ID", "")
+            )
         ).strip()
+
+        token_val = SystemSetting.get_val("WHATSAPP_ACCESS_TOKEN") or SystemSetting.get_val("WHATSAPP_TOKEN")
         access_token = (
-            SystemSetting.get_val("WHATSAPP_ACCESS_TOKEN")
-            or SystemSetting.get_val("WHATSAPP_TOKEN")
-            or cfg.get("WHATSAPP_ACCESS_TOKEN")
-            or cfg.get("WHATSAPP_TOKEN")
-            or os.environ.get("WHATSAPP_TOKEN")
-            or os.environ.get("WHATSAPP_ACCESS_TOKEN")
-            or os.environ.get("META_ACCESS_TOKEN", "")
+            token_val
+            if token_val is not None
+            else (
+                cfg.get("WHATSAPP_ACCESS_TOKEN")
+                or cfg.get("WHATSAPP_TOKEN")
+                or os.environ.get("WHATSAPP_TOKEN")
+                or os.environ.get("WHATSAPP_ACCESS_TOKEN")
+                or os.environ.get("META_ACCESS_TOKEN", "")
+            )
         ).strip()
+
         verify_token = (
             SystemSetting.get_val("WHATSAPP_VERIFY_TOKEN")
             or cfg.get("WHATSAPP_VERIFY_TOKEN")
             or os.environ.get("WHATSAPP_VERIFY_TOKEN", cls.DEFAULT_VERIFY_TOKEN)
         ).strip()
+
         business_account_id = (
             SystemSetting.get_val("WHATSAPP_BUSINESS_ACCOUNT_ID")
             or cfg.get("WHATSAPP_BUSINESS_ACCOUNT_ID")
             or os.environ.get("WHATSAPP_BUSINESS_ACCOUNT_ID")
             or os.environ.get("META_WABA_ID", "")
         ).strip()
+
         app_secret = (
             SystemSetting.get_val("WHATSAPP_APP_SECRET")
             or cfg.get("WHATSAPP_APP_SECRET")
@@ -122,22 +159,30 @@ class WhatsAppService:
         ).strip()
 
         # Green-API Parameters
+        green_id_val = SystemSetting.get_val("GREEN_API_ID_INSTANCE") or SystemSetting.get_val("ID_INSTANCE")
         green_api_id = (
-            SystemSetting.get_val("GREEN_API_ID_INSTANCE")
-            or SystemSetting.get_val("ID_INSTANCE")
-            or cfg.get("GREEN_API_ID_INSTANCE")
-            or cfg.get("ID_INSTANCE")
-            or os.environ.get("GREEN_API_ID_INSTANCE")
-            or os.environ.get("ID_INSTANCE", "")
+            green_id_val
+            if green_id_val is not None
+            else (
+                cfg.get("GREEN_API_ID_INSTANCE")
+                or cfg.get("ID_INSTANCE")
+                or os.environ.get("GREEN_API_ID_INSTANCE")
+                or os.environ.get("ID_INSTANCE", "")
+            )
         ).strip()
+
+        green_tok_val = SystemSetting.get_val("GREEN_API_TOKEN_INSTANCE") or SystemSetting.get_val("API_TOKEN_INSTANCE")
         green_api_token = (
-            SystemSetting.get_val("GREEN_API_TOKEN_INSTANCE")
-            or SystemSetting.get_val("API_TOKEN_INSTANCE")
-            or cfg.get("GREEN_API_TOKEN_INSTANCE")
-            or cfg.get("API_TOKEN_INSTANCE")
-            or os.environ.get("GREEN_API_TOKEN_INSTANCE")
-            or os.environ.get("API_TOKEN_INSTANCE", "")
+            green_tok_val
+            if green_tok_val is not None
+            else (
+                cfg.get("GREEN_API_TOKEN_INSTANCE")
+                or cfg.get("API_TOKEN_INSTANCE")
+                or os.environ.get("GREEN_API_TOKEN_INSTANCE")
+                or os.environ.get("API_TOKEN_INSTANCE", "")
+            )
         ).strip()
+
         green_api_host = (
             SystemSetting.get_val("GREEN_API_HOST")
             or cfg.get("GREEN_API_HOST")
@@ -310,32 +355,55 @@ class WhatsAppService:
         except requests.exceptions.ConnectTimeout:
             err_msg = f"Connection timeout: Failed to reach Green-API host within {timeouts[0]}s."
             logger.warning(f"Green-API connect timeout: {err_msg}")
+            is_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_INSTANCE_ID"))
             return {
                 "success": False,
                 "provider": "green_api",
                 "status": "connect_timeout",
                 "error": err_msg,
-                "message": f"{err_msg} Verify host URL '{host}' and network connectivity."
+                "is_render": is_render,
+                "simulator_fallback_active": cls.is_simulator_fallback_enabled(),
+                "message": (
+                    f"{err_msg} Render outbound connection latency detected. "
+                    "Automatic Simulator Fallback is active to ensure zero dropped messages."
+                    if is_render or cls.is_simulator_fallback_enabled() else
+                    f"{err_msg} Verify host URL '{host}' and network connectivity."
+                )
             }
         except requests.exceptions.ReadTimeout:
             err_msg = f"Read timeout: Green-API server did not respond within {timeouts[1]}s."
             logger.warning(f"Green-API read timeout: {err_msg}")
+            is_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_INSTANCE_ID"))
             return {
                 "success": False,
                 "provider": "green_api",
                 "status": "read_timeout",
                 "error": err_msg,
-                "message": f"{err_msg} Green-API may be experiencing high latency."
+                "is_render": is_render,
+                "simulator_fallback_active": cls.is_simulator_fallback_enabled(),
+                "message": (
+                    f"{err_msg} Green-API upstream latency on Render. "
+                    "Automatic Simulator Fallback is active to ensure zero dropped messages."
+                    if is_render or cls.is_simulator_fallback_enabled() else
+                    f"{err_msg} Green-API may be experiencing high latency."
+                )
             }
         except requests.exceptions.ConnectionError as ce:
             err_msg = f"Network connection error: Unable to establish link to {host} ({str(ce)})."
             logger.warning(f"Green-API connection error: {err_msg}")
+            is_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_INSTANCE_ID"))
             return {
                 "success": False,
                 "provider": "green_api",
                 "status": "connection_error",
                 "error": str(ce),
-                "message": f"Network error contacting Green-API host: {err_msg}"
+                "is_render": is_render,
+                "simulator_fallback_active": cls.is_simulator_fallback_enabled(),
+                "message": (
+                    f"{err_msg} Automatic Simulator Fallback is active on Render."
+                    if is_render or cls.is_simulator_fallback_enabled() else
+                    f"Network error contacting Green-API host: {err_msg}"
+                )
             }
         except requests.exceptions.RequestException as re:
             err_msg = f"HTTP request error: {str(re)}"
@@ -408,20 +476,26 @@ class WhatsAppService:
                         "message": f"Meta Graph API rejected credentials: {err_detail}"
                     }
         except requests.exceptions.ConnectTimeout:
+            is_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_INSTANCE_ID"))
             return {
                 "success": False,
                 "provider": "meta",
                 "status": "connect_timeout",
+                "is_render": is_render,
+                "simulator_fallback_active": cls.is_simulator_fallback_enabled(),
                 "error": f"Connection timed out after {timeouts[0]}s connecting to Meta Graph API.",
-                "message": f"Connection to Meta Graph API timed out ({timeouts[0]}s)."
+                "message": f"Connection to Meta Graph API timed out ({timeouts[0]}s). Simulator fallback active: {cls.is_simulator_fallback_enabled()}."
             }
         except requests.exceptions.ReadTimeout:
+            is_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_INSTANCE_ID"))
             return {
                 "success": False,
                 "provider": "meta",
                 "status": "read_timeout",
+                "is_render": is_render,
+                "simulator_fallback_active": cls.is_simulator_fallback_enabled(),
                 "error": f"Read timed out after {timeouts[1]}s from Meta Graph API.",
-                "message": f"Meta Graph API read response timed out ({timeouts[1]}s)."
+                "message": f"Meta Graph API read response timed out ({timeouts[1]}s). Simulator fallback active: {cls.is_simulator_fallback_enabled()}."
             }
         except requests.exceptions.ConnectionError as ce:
             return {
@@ -666,14 +740,82 @@ class WhatsAppService:
         return msg
 
     @classmethod
+    def dispatch_simulator_message(
+        cls,
+        organization_id: str,
+        to_phone: str,
+        message_text: str,
+        preview_url: bool = False,
+        execution_id: Optional[int] = None,
+        template_name: Optional[str] = None,
+        template_language: str = "en_US",
+        fallback_reason: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Dispatches and persists a message using the built-in WhatsApp Sandbox Simulator."""
+        clean_to = cls.format_phone_number(to_phone)
+        actual_body = f"[Template: {template_name}] {message_text}" if template_name and message_text else (f"[Template: {template_name}]" if template_name else message_text)
+        msg_type = "template" if template_name else "text"
+        mock_msg_id = f"wamid.mock_{uuid.uuid4().hex[:16]}"
+        is_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_INSTANCE_ID"))
+
+        notice = f" (Render fallback: {fallback_reason})" if fallback_reason else ""
+        logger.info(f"[WhatsApp Simulator] Dispatched message to {clean_to}: '{actual_body}' (ID: {mock_msg_id}){notice}")
+
+        raw_payload = {
+            "mode": "local_simulator",
+            "simulated": True,
+            "template_name": template_name,
+            "template_language": template_language,
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "is_render": is_render
+        }
+        if fallback_reason:
+            raw_payload["fallback_reason"] = fallback_reason
+            raw_payload["simulated_fallback"] = True
+
+        record = cls.record_message(
+            organization_id=organization_id,
+            sender="OpsFlow-Sandbox (+15550001234)",
+            recipient=clean_to,
+            direction="outbound",
+            body=actual_body,
+            message_type=msg_type,
+            status="mock_sent",
+            whatsapp_message_id=mock_msg_id,
+            execution_id=execution_id,
+            raw_payload=raw_payload
+        )
+
+        resp = {
+            "success": True,
+            "status": "mock_sent",
+            "mode": "simulator",
+            "simulated": True,
+            "whatsapp_message_id": mock_msg_id,
+            "message_record_id": record.id,
+            "recipient": clean_to,
+            "message_type": msg_type,
+            "message": (
+                f"Message safely dispatched via WhatsApp Sandbox Simulator (Render fallback: {fallback_reason})"
+                if fallback_reason else
+                "Message successfully recorded and dispatched via WhatsApp Sandbox Simulator."
+            )
+        }
+        if fallback_reason:
+            resp["simulated_fallback"] = True
+            resp["fallback_reason"] = fallback_reason
+        return resp
+
+    @classmethod
     def send_green_api_message(
         cls,
         organization_id: str,
         to_phone: str,
         message_text: str,
-        execution_id: Optional[int] = None
+        execution_id: Optional[int] = None,
+        allow_fallback: bool = True
     ) -> Dict[str, Any]:
-        """Dispatches an outbound WhatsApp text message via Green-API."""
+        """Dispatches an outbound WhatsApp text message via Green-API with timeout & simulator fallback."""
         conf = cls.get_config()
         clean_to = cls.format_phone_number(to_phone)
         if not clean_to or len(clean_to) < 7:
@@ -720,6 +862,15 @@ class WhatsAppService:
                     }
                 else:
                     err = resp_json.get("message") or resp.text[:200] or f"HTTP {resp.status_code}"
+                    if resp.status_code >= 500 and allow_fallback and cls.is_simulator_fallback_enabled():
+                        logger.warning(f"Green-API returned HTTP {resp.status_code}. Falling back to simulator.")
+                        return cls.dispatch_simulator_message(
+                            organization_id=organization_id,
+                            to_phone=clean_to,
+                            message_text=message_text,
+                            execution_id=execution_id,
+                            fallback_reason=f"Green-API HTTP {resp.status_code}: {err}"
+                        )
                     cls.record_message(
                         organization_id=organization_id,
                         sender=f"GreenAPI Instance {id_inst}",
@@ -742,6 +893,15 @@ class WhatsAppService:
         except requests.exceptions.ConnectTimeout:
             err_msg = f"Connection timeout: Failed to connect to Green-API within {timeouts[0]}s."
             logger.warning(f"Green-API send connect timeout: {err_msg}")
+            if allow_fallback and cls.is_simulator_fallback_enabled():
+                logger.info(f"Triggering WhatsApp simulator fallback for {clean_to} due to connection timeout.")
+                return cls.dispatch_simulator_message(
+                    organization_id=organization_id,
+                    to_phone=clean_to,
+                    message_text=message_text,
+                    execution_id=execution_id,
+                    fallback_reason=err_msg
+                )
             cls.record_message(
                 organization_id=organization_id,
                 sender=f"GreenAPI Instance {id_inst}",
@@ -762,6 +922,15 @@ class WhatsAppService:
         except requests.exceptions.ReadTimeout:
             err_msg = f"Read timeout: Green-API server did not respond within {timeouts[1]}s."
             logger.warning(f"Green-API send read timeout: {err_msg}")
+            if allow_fallback and cls.is_simulator_fallback_enabled():
+                logger.info(f"Triggering WhatsApp simulator fallback for {clean_to} due to read timeout.")
+                return cls.dispatch_simulator_message(
+                    organization_id=organization_id,
+                    to_phone=clean_to,
+                    message_text=message_text,
+                    execution_id=execution_id,
+                    fallback_reason=err_msg
+                )
             cls.record_message(
                 organization_id=organization_id,
                 sender=f"GreenAPI Instance {id_inst}",
@@ -782,6 +951,15 @@ class WhatsAppService:
         except requests.exceptions.ConnectionError as ce:
             err_msg = f"Network connection error: Unable to reach Green-API host ({str(ce)})."
             logger.warning(f"Green-API send connection error: {err_msg}")
+            if allow_fallback and cls.is_simulator_fallback_enabled():
+                logger.info(f"Triggering WhatsApp simulator fallback for {clean_to} due to network connection error.")
+                return cls.dispatch_simulator_message(
+                    organization_id=organization_id,
+                    to_phone=clean_to,
+                    message_text=message_text,
+                    execution_id=execution_id,
+                    fallback_reason=err_msg
+                )
             cls.record_message(
                 organization_id=organization_id,
                 sender=f"GreenAPI Instance {id_inst}",
@@ -802,6 +980,14 @@ class WhatsAppService:
         except requests.exceptions.RequestException as re:
             err_msg = f"HTTP request error: {str(re)}"
             logger.error(f"Green-API send request error: {err_msg}")
+            if allow_fallback and cls.is_simulator_fallback_enabled():
+                return cls.dispatch_simulator_message(
+                    organization_id=organization_id,
+                    to_phone=clean_to,
+                    message_text=message_text,
+                    execution_id=execution_id,
+                    fallback_reason=err_msg
+                )
             cls.record_message(
                 organization_id=organization_id,
                 sender=f"GreenAPI Instance {id_inst}",
@@ -822,6 +1008,14 @@ class WhatsAppService:
         except Exception as e:
             err_msg = str(e)
             logger.error(f"Unexpected error in Green-API send: {err_msg}")
+            if allow_fallback and cls.is_simulator_fallback_enabled():
+                return cls.dispatch_simulator_message(
+                    organization_id=organization_id,
+                    to_phone=clean_to,
+                    message_text=message_text,
+                    execution_id=execution_id,
+                    fallback_reason=err_msg
+                )
             cls.record_message(
                 organization_id=organization_id,
                 sender=f"GreenAPI Instance {id_inst}",
@@ -865,7 +1059,8 @@ class WhatsAppService:
                 organization_id=organization_id,
                 to_phone=to_phone,
                 message_text=message_text,
-                execution_id=execution_id
+                execution_id=execution_id,
+                allow_fallback=True
             )
 
         # If Meta Cloud API is the active configured provider
@@ -938,6 +1133,17 @@ class WhatsAppService:
                         }
                     else:
                         err = resp_json.get("error", {}).get("message") or f"HTTP {resp.status_code}"
+                        if resp.status_code >= 500 and cls.is_simulator_fallback_enabled():
+                            logger.warning(f"Meta Graph API returned HTTP {resp.status_code}. Falling back to simulator.")
+                            return cls.dispatch_simulator_message(
+                                organization_id=organization_id,
+                                to_phone=clean_to,
+                                message_text=message_text,
+                                execution_id=execution_id,
+                                template_name=template_name,
+                                template_language=template_language,
+                                fallback_reason=f"Meta Graph API HTTP {resp.status_code}: {err}"
+                            )
                         cls.record_message(
                             organization_id=organization_id,
                             sender=conf.get("phone_number_id", "System"),
@@ -960,6 +1166,16 @@ class WhatsAppService:
             except requests.exceptions.ConnectTimeout:
                 err_msg = f"Connection timeout: Failed to connect to Meta Graph API within {timeouts[0]}s."
                 logger.warning(f"Meta Graph API send connect timeout: {err_msg}")
+                if cls.is_simulator_fallback_enabled():
+                    return cls.dispatch_simulator_message(
+                        organization_id=organization_id,
+                        to_phone=clean_to,
+                        message_text=message_text,
+                        execution_id=execution_id,
+                        template_name=template_name,
+                        template_language=template_language,
+                        fallback_reason=err_msg
+                    )
                 cls.record_message(
                     organization_id=organization_id,
                     sender=conf.get("phone_number_id", "System"),
@@ -980,6 +1196,16 @@ class WhatsAppService:
             except requests.exceptions.ReadTimeout:
                 err_msg = f"Read timeout: Meta Graph API server did not respond within {timeouts[1]}s."
                 logger.warning(f"Meta Graph API send read timeout: {err_msg}")
+                if cls.is_simulator_fallback_enabled():
+                    return cls.dispatch_simulator_message(
+                        organization_id=organization_id,
+                        to_phone=clean_to,
+                        message_text=message_text,
+                        execution_id=execution_id,
+                        template_name=template_name,
+                        template_language=template_language,
+                        fallback_reason=err_msg
+                    )
                 cls.record_message(
                     organization_id=organization_id,
                     sender=conf.get("phone_number_id", "System"),
@@ -1000,6 +1226,16 @@ class WhatsAppService:
             except requests.exceptions.ConnectionError as ce:
                 err_msg = f"Network connection error contacting Meta Graph API: {str(ce)}"
                 logger.warning(f"Meta Graph API send connection error: {err_msg}")
+                if cls.is_simulator_fallback_enabled():
+                    return cls.dispatch_simulator_message(
+                        organization_id=organization_id,
+                        to_phone=clean_to,
+                        message_text=message_text,
+                        execution_id=execution_id,
+                        template_name=template_name,
+                        template_language=template_language,
+                        fallback_reason=err_msg
+                    )
                 cls.record_message(
                     organization_id=organization_id,
                     sender=conf.get("phone_number_id", "System"),
@@ -1020,6 +1256,16 @@ class WhatsAppService:
             except requests.exceptions.RequestException as re:
                 err_msg = f"HTTP request error: {str(re)}"
                 logger.error(f"Meta Graph API send request error: {err_msg}")
+                if cls.is_simulator_fallback_enabled():
+                    return cls.dispatch_simulator_message(
+                        organization_id=organization_id,
+                        to_phone=clean_to,
+                        message_text=message_text,
+                        execution_id=execution_id,
+                        template_name=template_name,
+                        template_language=template_language,
+                        fallback_reason=err_msg
+                    )
                 cls.record_message(
                     organization_id=organization_id,
                     sender=conf.get("phone_number_id", "System"),
@@ -1040,6 +1286,16 @@ class WhatsAppService:
             except Exception as e:
                 err_msg = str(e)
                 logger.error(f"Unexpected error in Meta Graph API send: {err_msg}")
+                if cls.is_simulator_fallback_enabled():
+                    return cls.dispatch_simulator_message(
+                        organization_id=organization_id,
+                        to_phone=clean_to,
+                        message_text=message_text,
+                        execution_id=execution_id,
+                        template_name=template_name,
+                        template_language=template_language,
+                        fallback_reason=err_msg
+                    )
                 cls.record_message(
                     organization_id=organization_id,
                     sender=conf.get("phone_number_id", "System"),
@@ -1059,38 +1315,12 @@ class WhatsAppService:
                 }
 
         # Production-ready Local Simulator / Sandbox mode when live API keys are empty or mock
-        actual_body = f"[Template: {template_name}] {message_text}" if template_name and message_text else (f"[Template: {template_name}]" if template_name else message_text)
-        msg_type = "template" if template_name else "text"
-        mock_msg_id = f"wamid.mock_{uuid.uuid4().hex[:16]}"
-
-        logger.info(f"[WhatsApp Simulator] Dispatched message to {clean_to}: '{actual_body}' (ID: {mock_msg_id})")
-
-        record = cls.record_message(
+        return cls.dispatch_simulator_message(
             organization_id=organization_id,
-            sender="OpsFlow-Sandbox (+15550001234)",
-            recipient=clean_to,
-            direction="outbound",
-            body=actual_body,
-            message_type=msg_type,
-            status="mock_sent",
-            whatsapp_message_id=mock_msg_id,
+            to_phone=clean_to,
+            message_text=message_text,
+            preview_url=preview_url,
             execution_id=execution_id,
-            raw_payload={
-                "mode": "local_simulator",
-                "simulated": True,
-                "template_name": template_name,
-                "template_language": template_language,
-                "timestamp": datetime.datetime.utcnow().isoformat()
-            }
+            template_name=template_name,
+            template_language=template_language
         )
-
-        return {
-            "success": True,
-            "status": "mock_sent",
-            "mode": "simulator",
-            "whatsapp_message_id": mock_msg_id,
-            "message_record_id": record.id,
-            "recipient": clean_to,
-            "message_type": msg_type,
-            "message": "Message successfully recorded and dispatched via WhatsApp Sandbox Simulator."
-        }

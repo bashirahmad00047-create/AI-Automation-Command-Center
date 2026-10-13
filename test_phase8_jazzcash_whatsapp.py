@@ -283,6 +283,8 @@ class TestPhase8JazzCashWhatsApp(unittest.TestCase):
         # Clear any live tokens to guarantee simulator mode
         SystemSetting.set_val("WHATSAPP_PHONE_NUMBER_ID", "")
         SystemSetting.set_val("WHATSAPP_ACCESS_TOKEN", "")
+        SystemSetting.set_val("GREEN_API_ID_INSTANCE", "")
+        SystemSetting.set_val("GREEN_API_TOKEN_INSTANCE", "")
 
         res = self.client.post("/api/whatsapp/send", json={
             "phone": "03123456789",

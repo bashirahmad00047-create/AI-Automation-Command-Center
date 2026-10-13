@@ -2637,6 +2637,8 @@ def get_whatsapp_config():
         "whatsapp_provider": conf.get("whatsapp_provider", "auto"),
         "meta_configured": WhatsAppService.is_meta_configured(),
         "green_api_configured": WhatsAppService.is_green_api_configured(),
+        "simulator_fallback_enabled": WhatsAppService.is_simulator_fallback_enabled(),
+        "timeout_seconds": 30,
         "phone_number_id": masked_phone_id,
         "business_account_id": conf.get("business_account_id") or "Not Configured",
         "verify_token": conf.get("verify_token", WhatsAppService.DEFAULT_VERIFY_TOKEN),
