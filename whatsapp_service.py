@@ -35,6 +35,22 @@ from models import Organization, SystemSetting, WhatsAppMessage, generate_uuid
 
 logger = logging.getLogger("opsflow.whatsapp")
 
+# Automatically load .env for standalone execution if present
+_base_dir = os.path.abspath(os.path.dirname(__file__))
+_env_file = os.path.join(_base_dir, ".env")
+if os.path.exists(_env_file):
+    try:
+        with open(_env_file, "r", encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    _k, _v = _k.strip(), _v.strip().strip('"').strip("'")
+                    if _k not in os.environ:
+                        os.environ[_k] = _v
+    except Exception:
+        pass
+
 
 class WhatsAppService:
     """Manages WhatsApp Business Cloud API & Green-API interactions and message tracking."""
