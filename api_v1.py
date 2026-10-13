@@ -2645,7 +2645,7 @@ def get_whatsapp_config():
         "webhook_url": green_api_webhook_url if active_provider == "green_api" else meta_webhook_url,
         "meta_webhook_url": meta_webhook_url,
         "green_api_id_instance": masked_green_id,
-        "green_api_host": conf.get("green_api_host", "https://api.green-api.com"),
+        "green_api_host": conf.get("green_api_host", "https://api.greenapi.com"),
         "green_api_webhook_url": green_api_webhook_url,
         "mode": active_provider
     }), 200

@@ -4562,7 +4562,7 @@ async function handleSaveWhatsAppConfig(e) {
             whatsapp_provider: provider,
             green_api_id_instance: greenId,
             green_api_token_instance: greenToken,
-            green_api_host: greenHost || 'https://api.green-api.com',
+            green_api_host: greenHost || 'https://api.greenapi.com',
             phone_number_id: phoneId,
             access_token: token,
             business_account_id: wabaId,

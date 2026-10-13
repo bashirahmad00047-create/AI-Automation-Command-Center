@@ -41,12 +41,13 @@ class WhatsAppService:
 
     GRAPH_API_VERSION = "v19.0"
     DEFAULT_VERIFY_TOKEN = "opsflow_whatsapp_verify_2026"
-    DEFAULT_CONNECT_TIMEOUT = 10.0
+    DEFAULT_GREEN_API_HOST = "https://api.greenapi.com"
+    DEFAULT_CONNECT_TIMEOUT = 30.0
     DEFAULT_READ_TIMEOUT = 30.0
 
     @classmethod
     def get_timeout_tuple(cls) -> Tuple[float, float]:
-        """Returns (connect_timeout, read_timeout) tuple with configurable fallbacks."""
+        """Returns (connect_timeout, read_timeout) tuple without restrictive connection timeout."""
         cfg = current_app.config if current_app else {}
         try:
             connect_t = float(
@@ -72,7 +73,10 @@ class WhatsAppService:
         except (ValueError, TypeError):
             read_t = cls.DEFAULT_READ_TIMEOUT
 
-        return (max(1.0, connect_t), max(5.0, read_t))
+        # Allow generous connection window matching full timeout duration to eliminate premature connect timeouts
+        effective_connect = max(15.0, connect_t, read_t)
+        effective_read = max(5.0, read_t)
+        return (effective_connect, effective_read)
 
     @classmethod
     def is_simulator_fallback_enabled(cls) -> bool:
@@ -108,6 +112,32 @@ class WhatsAppService:
             session.mount("https://", adapter)
             session.mount("http://", adapter)
         return session
+
+    @classmethod
+    def normalize_green_api_host(cls, host: Optional[str] = None, id_instance: Optional[str] = None) -> str:
+        """Normalizes Green-API host routing to official high-speed endpoints without connection timeouts.
+
+        - Automatically fixes legacy/typo domain 'api.green-api.com' -> 'api.greenapi.com'.
+        - Ensures valid https:// scheme without trailing slash.
+        - Directs instances with 4-digit cluster prefix (e.g. 7103xxxxxx) to their dedicated cluster host (https://7103.api.greenapi.com) for optimal latency.
+        """
+        raw = (host or "").strip().rstrip("/")
+        if not raw:
+            raw = cls.DEFAULT_GREEN_API_HOST
+        if not raw.startswith("http://") and not raw.startswith("https://"):
+            raw = f"https://{raw}"
+
+        # Fix legacy / blocked domain: api.green-api.com -> api.greenapi.com
+        raw = raw.replace("api.green-api.com", "api.greenapi.com").replace("green-api.com", "greenapi.com")
+
+        # Cluster routing: if instance starts with 4-digit cluster and host is universal, route directly to cluster host
+        if id_instance:
+            clean_id = str(id_instance).strip()
+            if len(clean_id) >= 8 and clean_id[:4].isdigit() and raw in ("https://api.greenapi.com", "http://api.greenapi.com"):
+                cluster = clean_id[:4]
+                return f"https://{cluster}.api.greenapi.com"
+
+        return raw
 
     @classmethod
     def get_config(cls) -> Dict[str, Any]:
@@ -183,13 +213,16 @@ class WhatsAppService:
             )
         ).strip()
 
+        green_api_host_val = SystemSetting.get_val("GREEN_API_HOST")
         green_api_host = (
-            SystemSetting.get_val("GREEN_API_HOST")
-            or cfg.get("GREEN_API_HOST")
-            or os.environ.get("GREEN_API_HOST", "https://api.green-api.com")
+            green_api_host_val
+            if green_api_host_val is not None
+            else (
+                cfg.get("GREEN_API_HOST")
+                or os.environ.get("GREEN_API_HOST", cls.DEFAULT_GREEN_API_HOST)
+            )
         ).strip().rstrip("/")
-        if not green_api_host:
-            green_api_host = "https://api.green-api.com"
+        green_api_host = cls.normalize_green_api_host(green_api_host, green_api_id)
 
         provider = (
             SystemSetting.get_val("WHATSAPP_PROVIDER")
@@ -239,7 +272,8 @@ class WhatsAppService:
         if green_api_token_instance is not None:
             SystemSetting.set_val("GREEN_API_TOKEN_INSTANCE", green_api_token_instance, is_secret=True, description="Green-API API Token Instance")
         if green_api_host is not None:
-            SystemSetting.set_val("GREEN_API_HOST", green_api_host, is_secret=False, description="Green-API API Host")
+            clean_host = cls.normalize_green_api_host(green_api_host)
+            SystemSetting.set_val("GREEN_API_HOST", clean_host, is_secret=False, description="Green-API API Host")
         if whatsapp_provider is not None:
             SystemSetting.set_val("WHATSAPP_PROVIDER", whatsapp_provider, is_secret=False, description="Active WhatsApp Provider (auto, meta, green_api)")
 
@@ -311,7 +345,7 @@ class WhatsAppService:
         conf = cls.get_config()
         id_inst = conf.get("green_api_id_instance", "")
         tok_inst = conf.get("green_api_token_instance", "")
-        host = conf.get("green_api_host") or "https://api.green-api.com"
+        host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
 
         if not id_inst or not tok_inst:
             return {
@@ -823,7 +857,7 @@ class WhatsAppService:
 
         id_inst = conf.get("green_api_id_instance")
         tok_inst = conf.get("green_api_token_instance")
-        host = conf.get("green_api_host") or "https://api.green-api.com"
+        host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
         chat_id = f"{clean_to}@c.us"
         url = f"{host}/waInstance{id_inst}/sendMessage/{tok_inst}"
         payload = {
