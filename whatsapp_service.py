@@ -26,6 +26,8 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from flask import current_app
 
 from database import db
@@ -35,10 +37,52 @@ logger = logging.getLogger("opsflow.whatsapp")
 
 
 class WhatsAppService:
-    """Manages WhatsApp Business Cloud API interactions and message tracking."""
+    """Manages WhatsApp Business Cloud API & Green-API interactions and message tracking."""
 
     GRAPH_API_VERSION = "v19.0"
     DEFAULT_VERIFY_TOKEN = "opsflow_whatsapp_verify_2026"
+    DEFAULT_CONNECT_TIMEOUT = 5.0
+    DEFAULT_READ_TIMEOUT = 15.0
+
+    @classmethod
+    def get_timeout_tuple(cls) -> Tuple[float, float]:
+        """Returns (connect_timeout, read_timeout) tuple with configurable fallbacks."""
+        cfg = current_app.config if current_app else {}
+        try:
+            connect_t = float(
+                SystemSetting.get_val("WHATSAPP_CONNECT_TIMEOUT")
+                or cfg.get("WHATSAPP_CONNECT_TIMEOUT")
+                or os.environ.get("WHATSAPP_CONNECT_TIMEOUT", cls.DEFAULT_CONNECT_TIMEOUT)
+            )
+        except (ValueError, TypeError):
+            connect_t = cls.DEFAULT_CONNECT_TIMEOUT
+
+        try:
+            read_t = float(
+                SystemSetting.get_val("WHATSAPP_READ_TIMEOUT")
+                or cfg.get("WHATSAPP_READ_TIMEOUT")
+                or os.environ.get("WHATSAPP_READ_TIMEOUT", cls.DEFAULT_READ_TIMEOUT)
+            )
+        except (ValueError, TypeError):
+            read_t = cls.DEFAULT_READ_TIMEOUT
+
+        return (max(1.0, connect_t), max(2.0, read_t))
+
+    @classmethod
+    def get_http_session(cls, retries: int = 2) -> requests.Session:
+        """Creates a requests.Session with connection pooling and transient retry policy."""
+        session = requests.Session()
+        if retries > 0:
+            retry_strategy = Retry(
+                total=retries,
+                backoff_factor=0.5,
+                status_forcelist=[429, 502, 503, 504],
+                allowed_methods=["GET", "POST"]
+            )
+            adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=20)
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+        return session
 
     @classmethod
     def get_config(cls) -> Dict[str, Any]:
@@ -218,7 +262,7 @@ class WhatsAppService:
 
     @classmethod
     def test_green_api_connection(cls) -> Dict[str, Any]:
-        """Probes Green-API getStateInstance endpoint with configured credentials."""
+        """Probes Green-API getStateInstance endpoint with robust timeout and error handling."""
         conf = cls.get_config()
         id_inst = conf.get("green_api_id_instance", "")
         tok_inst = conf.get("green_api_token_instance", "")
@@ -233,45 +277,89 @@ class WhatsAppService:
             }
 
         url = f"{host}/waInstance{id_inst}/getStateInstance/{tok_inst}"
+        timeouts = cls.get_timeout_tuple()
+
         try:
-            resp = requests.get(url, timeout=10)
-            data = resp.json() if resp.status_code < 500 else {}
-            if resp.status_code == 200:
-                state = data.get("stateInstance", "unknown")
-                is_authorized = (state.lower() == "authorized")
-                return {
-                    "success": is_authorized,
-                    "provider": "green_api",
-                    "status": state,
-                    "id_instance": id_inst,
-                    "state_instance": state,
-                    "message": (
-                        f"Green-API Instance {id_inst} is ONLINE and AUTHORIZED!"
-                        if is_authorized else
-                        f"Green-API Instance state: '{state}'. Please link WhatsApp by scanning the QR code in your Green-API console."
-                    )
-                }
-            else:
-                err_text = data.get("message") or resp.text[:200] or f"HTTP {resp.status_code}"
-                return {
-                    "success": False,
-                    "provider": "green_api",
-                    "status": f"http_{resp.status_code}",
-                    "error": err_text,
-                    "message": f"Green-API rejected credentials: {err_text}"
-                }
-        except Exception as e:
+            with cls.get_http_session(retries=1) as session:
+                resp = session.get(url, timeout=timeouts)
+                data = resp.json() if resp.status_code < 500 else {}
+                if resp.status_code == 200:
+                    state = data.get("stateInstance", "unknown")
+                    is_authorized = (state.lower() == "authorized")
+                    return {
+                        "success": is_authorized,
+                        "provider": "green_api",
+                        "status": state,
+                        "id_instance": id_inst,
+                        "state_instance": state,
+                        "message": (
+                            f"Green-API Instance {id_inst} is ONLINE and AUTHORIZED!"
+                            if is_authorized else
+                            f"Green-API Instance state: '{state}'. Please link WhatsApp by scanning the QR code in your Green-API console."
+                        )
+                    }
+                else:
+                    err_text = data.get("message") or resp.text[:200] or f"HTTP {resp.status_code}"
+                    return {
+                        "success": False,
+                        "provider": "green_api",
+                        "status": f"http_{resp.status_code}",
+                        "error": err_text,
+                        "message": f"Green-API rejected credentials: {err_text}"
+                    }
+        except requests.exceptions.ConnectTimeout:
+            err_msg = f"Connection timeout: Failed to reach Green-API host within {timeouts[0]}s."
+            logger.warning(f"Green-API connect timeout: {err_msg}")
             return {
                 "success": False,
                 "provider": "green_api",
-                "status": "network_error",
+                "status": "connect_timeout",
+                "error": err_msg,
+                "message": f"{err_msg} Verify host URL '{host}' and network connectivity."
+            }
+        except requests.exceptions.ReadTimeout:
+            err_msg = f"Read timeout: Green-API server did not respond within {timeouts[1]}s."
+            logger.warning(f"Green-API read timeout: {err_msg}")
+            return {
+                "success": False,
+                "provider": "green_api",
+                "status": "read_timeout",
+                "error": err_msg,
+                "message": f"{err_msg} Green-API may be experiencing high latency."
+            }
+        except requests.exceptions.ConnectionError as ce:
+            err_msg = f"Network connection error: Unable to establish link to {host} ({str(ce)})."
+            logger.warning(f"Green-API connection error: {err_msg}")
+            return {
+                "success": False,
+                "provider": "green_api",
+                "status": "connection_error",
+                "error": str(ce),
+                "message": f"Network error contacting Green-API host: {err_msg}"
+            }
+        except requests.exceptions.RequestException as re:
+            err_msg = f"HTTP request error: {str(re)}"
+            logger.error(f"Green-API request error: {err_msg}")
+            return {
+                "success": False,
+                "provider": "green_api",
+                "status": "request_error",
+                "error": str(re),
+                "message": f"Green-API request failed: {str(re)}"
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error in Green-API probe: {e}")
+            return {
+                "success": False,
+                "provider": "green_api",
+                "status": "internal_error",
                 "error": str(e),
-                "message": f"Network error contacting Green-API host: {str(e)}"
+                "message": f"Internal probe error: {str(e)}"
             }
 
     @classmethod
     def test_live_connection(cls, provider: Optional[str] = None) -> Dict[str, Any]:
-        """Probes Meta Cloud API or Green-API with configured credentials."""
+        """Probes Meta Cloud API or Green-API with configured credentials and robust timeout handling."""
         target_provider = provider or cls.get_active_provider()
         if target_provider == "green_api":
             return cls.test_green_api_connection()
@@ -291,39 +379,73 @@ class WhatsAppService:
 
         url = f"https://graph.facebook.com/{cls.GRAPH_API_VERSION}/{phone_id}?fields=verified_name,display_phone_number,quality_rating,code_verification_status"
         headers = {"Authorization": f"Bearer {token}"}
+        timeouts = cls.get_timeout_tuple()
 
         try:
-            resp = requests.get(url, headers=headers, timeout=10)
-            data = resp.json() if resp.status_code < 500 else {}
-            if resp.status_code == 200:
-                return {
-                    "success": True,
-                    "provider": "meta",
-                    "status": "connected",
-                    "phone_number_id": phone_id,
-                    "verified_name": data.get("verified_name", "Verified Meta Business Account"),
-                    "display_phone_number": data.get("display_phone_number", ""),
-                    "quality_rating": data.get("quality_rating", "GREEN"),
-                    "code_verification_status": data.get("code_verification_status", "VERIFIED"),
-                    "message": "Live Meta Graph API connection verified successfully!"
-                }
-            else:
-                err_detail = data.get("error", {}).get("message") or f"HTTP {resp.status_code}"
-                return {
-                    "success": False,
-                    "provider": "meta",
-                    "status": "error",
-                    "error": err_detail,
-                    "error_code": data.get("error", {}).get("code"),
-                    "message": f"Meta Graph API rejected credentials: {err_detail}"
-                }
-        except Exception as e:
+            with cls.get_http_session(retries=1) as session:
+                resp = session.get(url, headers=headers, timeout=timeouts)
+                data = resp.json() if resp.status_code < 500 else {}
+                if resp.status_code == 200:
+                    return {
+                        "success": True,
+                        "provider": "meta",
+                        "status": "connected",
+                        "phone_number_id": phone_id,
+                        "verified_name": data.get("verified_name", "Verified Meta Business Account"),
+                        "display_phone_number": data.get("display_phone_number", ""),
+                        "quality_rating": data.get("quality_rating", "GREEN"),
+                        "code_verification_status": data.get("code_verification_status", "VERIFIED"),
+                        "message": "Live Meta Graph API connection verified successfully!"
+                    }
+                else:
+                    err_detail = data.get("error", {}).get("message") or f"HTTP {resp.status_code}"
+                    return {
+                        "success": False,
+                        "provider": "meta",
+                        "status": "error",
+                        "error": err_detail,
+                        "error_code": data.get("error", {}).get("code"),
+                        "message": f"Meta Graph API rejected credentials: {err_detail}"
+                    }
+        except requests.exceptions.ConnectTimeout:
+            return {
+                "success": False,
+                "provider": "meta",
+                "status": "connect_timeout",
+                "error": f"Connection timed out after {timeouts[0]}s connecting to Meta Graph API.",
+                "message": f"Connection to Meta Graph API timed out ({timeouts[0]}s)."
+            }
+        except requests.exceptions.ReadTimeout:
+            return {
+                "success": False,
+                "provider": "meta",
+                "status": "read_timeout",
+                "error": f"Read timed out after {timeouts[1]}s from Meta Graph API.",
+                "message": f"Meta Graph API read response timed out ({timeouts[1]}s)."
+            }
+        except requests.exceptions.ConnectionError as ce:
+            return {
+                "success": False,
+                "provider": "meta",
+                "status": "connection_error",
+                "error": str(ce),
+                "message": f"Network connection error contacting Meta Graph API: {str(ce)}"
+            }
+        except requests.exceptions.RequestException as re:
             return {
                 "success": False,
                 "provider": "meta",
                 "status": "network_error",
+                "error": str(re),
+                "message": f"Request failed while probing Meta Graph API: {str(re)}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "provider": "meta",
+                "status": "internal_error",
                 "error": str(e),
-                "message": f"Network connection failed while probing Meta Graph API: {str(e)}"
+                "message": f"Unexpected error probing Meta Graph API: {str(e)}"
             }
 
     @classmethod
@@ -567,55 +689,139 @@ class WhatsAppService:
             "message": message_text
         }
 
+        timeouts = cls.get_timeout_tuple()
+
         try:
-            resp = requests.post(url, json=payload, timeout=12)
-            resp_json = resp.json() if resp.status_code < 500 else {}
-            if resp.status_code == 200 and resp_json.get("idMessage"):
-                msg_id = resp_json.get("idMessage")
-                record = cls.record_message(
-                    organization_id=organization_id,
-                    sender=f"GreenAPI Instance {id_inst}",
-                    recipient=clean_to,
-                    direction="outbound",
-                    body=message_text,
-                    message_type="text",
-                    status="sent",
-                    whatsapp_message_id=msg_id,
-                    execution_id=execution_id,
-                    raw_payload=resp_json
-                )
-                return {
-                    "success": True,
-                    "status": "sent",
-                    "provider": "green_api",
-                    "whatsapp_message_id": msg_id,
-                    "message_record_id": record.id,
-                    "recipient": clean_to,
-                    "message_type": "text"
-                }
-            else:
-                err = resp_json.get("message") or resp.text[:200] or f"HTTP {resp.status_code}"
-                cls.record_message(
-                    organization_id=organization_id,
-                    sender=f"GreenAPI Instance {id_inst}",
-                    recipient=clean_to,
-                    direction="outbound",
-                    body=message_text,
-                    message_type="text",
-                    status="failed",
-                    execution_id=execution_id,
-                    error_message=err,
-                    raw_payload=resp_json
-                )
-                return {
-                    "success": False,
-                    "status": "failed",
-                    "provider": "green_api",
-                    "error": err,
-                    "recipient": clean_to
-                }
+            with cls.get_http_session(retries=2) as session:
+                resp = session.post(url, json=payload, timeout=timeouts)
+                resp_json = resp.json() if resp.status_code < 500 else {}
+                if resp.status_code == 200 and resp_json.get("idMessage"):
+                    msg_id = resp_json.get("idMessage")
+                    record = cls.record_message(
+                        organization_id=organization_id,
+                        sender=f"GreenAPI Instance {id_inst}",
+                        recipient=clean_to,
+                        direction="outbound",
+                        body=message_text,
+                        message_type="text",
+                        status="sent",
+                        whatsapp_message_id=msg_id,
+                        execution_id=execution_id,
+                        raw_payload=resp_json
+                    )
+                    return {
+                        "success": True,
+                        "status": "sent",
+                        "provider": "green_api",
+                        "whatsapp_message_id": msg_id,
+                        "message_record_id": record.id,
+                        "recipient": clean_to,
+                        "message_type": "text"
+                    }
+                else:
+                    err = resp_json.get("message") or resp.text[:200] or f"HTTP {resp.status_code}"
+                    cls.record_message(
+                        organization_id=organization_id,
+                        sender=f"GreenAPI Instance {id_inst}",
+                        recipient=clean_to,
+                        direction="outbound",
+                        body=message_text,
+                        message_type="text",
+                        status="failed",
+                        execution_id=execution_id,
+                        error_message=err,
+                        raw_payload=resp_json
+                    )
+                    return {
+                        "success": False,
+                        "status": "failed",
+                        "provider": "green_api",
+                        "error": err,
+                        "recipient": clean_to
+                    }
+        except requests.exceptions.ConnectTimeout:
+            err_msg = f"Connection timeout: Failed to connect to Green-API within {timeouts[0]}s."
+            logger.warning(f"Green-API send connect timeout: {err_msg}")
+            cls.record_message(
+                organization_id=organization_id,
+                sender=f"GreenAPI Instance {id_inst}",
+                recipient=clean_to,
+                direction="outbound",
+                body=message_text,
+                status="timeout",
+                execution_id=execution_id,
+                error_message=err_msg
+            )
+            return {
+                "success": False,
+                "status": "timeout",
+                "provider": "green_api",
+                "error": err_msg,
+                "recipient": clean_to
+            }
+        except requests.exceptions.ReadTimeout:
+            err_msg = f"Read timeout: Green-API server did not respond within {timeouts[1]}s."
+            logger.warning(f"Green-API send read timeout: {err_msg}")
+            cls.record_message(
+                organization_id=organization_id,
+                sender=f"GreenAPI Instance {id_inst}",
+                recipient=clean_to,
+                direction="outbound",
+                body=message_text,
+                status="timeout",
+                execution_id=execution_id,
+                error_message=err_msg
+            )
+            return {
+                "success": False,
+                "status": "timeout",
+                "provider": "green_api",
+                "error": err_msg,
+                "recipient": clean_to
+            }
+        except requests.exceptions.ConnectionError as ce:
+            err_msg = f"Network connection error: Unable to reach Green-API host ({str(ce)})."
+            logger.warning(f"Green-API send connection error: {err_msg}")
+            cls.record_message(
+                organization_id=organization_id,
+                sender=f"GreenAPI Instance {id_inst}",
+                recipient=clean_to,
+                direction="outbound",
+                body=message_text,
+                status="connection_error",
+                execution_id=execution_id,
+                error_message=err_msg
+            )
+            return {
+                "success": False,
+                "status": "connection_error",
+                "provider": "green_api",
+                "error": err_msg,
+                "recipient": clean_to
+            }
+        except requests.exceptions.RequestException as re:
+            err_msg = f"HTTP request error: {str(re)}"
+            logger.error(f"Green-API send request error: {err_msg}")
+            cls.record_message(
+                organization_id=organization_id,
+                sender=f"GreenAPI Instance {id_inst}",
+                recipient=clean_to,
+                direction="outbound",
+                body=message_text,
+                status="failed",
+                execution_id=execution_id,
+                error_message=err_msg
+            )
+            return {
+                "success": False,
+                "status": "failed",
+                "provider": "green_api",
+                "error": err_msg,
+                "recipient": clean_to
+            }
         except Exception as e:
             err_msg = str(e)
+            logger.error(f"Unexpected error in Green-API send: {err_msg}")
             cls.record_message(
                 organization_id=organization_id,
                 sender=f"GreenAPI Instance {id_inst}",
@@ -701,62 +907,145 @@ class WhatsAppService:
                 actual_body = message_text
                 msg_type = "text"
 
+            timeouts = cls.get_timeout_tuple()
             try:
-                resp = requests.post(url, json=payload, headers=headers, timeout=10)
-                resp_json = resp.json() if resp.status_code < 500 else {}
+                with cls.get_http_session(retries=2) as session:
+                    resp = session.post(url, json=payload, headers=headers, timeout=timeouts)
+                    resp_json = resp.json() if resp.status_code < 500 else {}
 
-                if resp.status_code in (200, 201):
-                    msg_id = (resp_json.get("messages", [{}])[0].get("id")) or f"wamid.{uuid.uuid4().hex[:12]}"
-                    record = cls.record_message(
-                        organization_id=organization_id,
-                        sender=conf.get("phone_number_id", "System"),
-                        recipient=clean_to,
-                        direction="outbound",
-                        body=actual_body,
-                        message_type=msg_type,
-                        status="sent",
-                        whatsapp_message_id=msg_id,
-                        execution_id=execution_id,
-                        raw_payload=resp_json
-                    )
-                    return {
-                        "success": True,
-                        "status": "sent",
-                        "provider": "meta",
-                        "whatsapp_message_id": msg_id,
-                        "message_record_id": record.id,
-                        "recipient": clean_to,
-                        "message_type": msg_type
-                    }
-                else:
-                    err = resp_json.get("error", {}).get("message") or f"HTTP {resp.status_code}"
-                    cls.record_message(
-                        organization_id=organization_id,
-                        sender=conf.get("phone_number_id", "System"),
-                        recipient=clean_to,
-                        direction="outbound",
-                        body=actual_body,
-                        message_type=msg_type,
-                        status="failed",
-                        execution_id=execution_id,
-                        error_message=err,
-                        raw_payload=resp_json
-                    )
-                    return {
-                        "success": False,
-                        "status": "failed",
-                        "provider": "meta",
-                        "error": err,
-                        "recipient": clean_to
-                    }
-            except Exception as e:
-                err_msg = str(e)
+                    if resp.status_code in (200, 201):
+                        msg_id = (resp_json.get("messages", [{}])[0].get("id")) or f"wamid.{uuid.uuid4().hex[:12]}"
+                        record = cls.record_message(
+                            organization_id=organization_id,
+                            sender=conf.get("phone_number_id", "System"),
+                            recipient=clean_to,
+                            direction="outbound",
+                            body=actual_body,
+                            message_type=msg_type,
+                            status="sent",
+                            whatsapp_message_id=msg_id,
+                            execution_id=execution_id,
+                            raw_payload=resp_json
+                        )
+                        return {
+                            "success": True,
+                            "status": "sent",
+                            "provider": "meta",
+                            "whatsapp_message_id": msg_id,
+                            "message_record_id": record.id,
+                            "recipient": clean_to,
+                            "message_type": msg_type
+                        }
+                    else:
+                        err = resp_json.get("error", {}).get("message") or f"HTTP {resp.status_code}"
+                        cls.record_message(
+                            organization_id=organization_id,
+                            sender=conf.get("phone_number_id", "System"),
+                            recipient=clean_to,
+                            direction="outbound",
+                            body=actual_body,
+                            message_type=msg_type,
+                            status="failed",
+                            execution_id=execution_id,
+                            error_message=err,
+                            raw_payload=resp_json
+                        )
+                        return {
+                            "success": False,
+                            "status": "failed",
+                            "provider": "meta",
+                            "error": err,
+                            "recipient": clean_to
+                        }
+            except requests.exceptions.ConnectTimeout:
+                err_msg = f"Connection timeout: Failed to connect to Meta Graph API within {timeouts[0]}s."
+                logger.warning(f"Meta Graph API send connect timeout: {err_msg}")
                 cls.record_message(
                     organization_id=organization_id,
                     sender=conf.get("phone_number_id", "System"),
                     recipient=clean_to,
                     direction="outbound",
-                    body=message_text,
+                    body=actual_body,
+                    status="timeout",
+                    execution_id=execution_id,
+                    error_message=err_msg
+                )
+                return {
+                    "success": False,
+                    "status": "timeout",
+                    "provider": "meta",
+                    "error": err_msg,
+                    "recipient": clean_to
+                }
+            except requests.exceptions.ReadTimeout:
+                err_msg = f"Read timeout: Meta Graph API server did not respond within {timeouts[1]}s."
+                logger.warning(f"Meta Graph API send read timeout: {err_msg}")
+                cls.record_message(
+                    organization_id=organization_id,
+                    sender=conf.get("phone_number_id", "System"),
+                    recipient=clean_to,
+                    direction="outbound",
+                    body=actual_body,
+                    status="timeout",
+                    execution_id=execution_id,
+                    error_message=err_msg
+                )
+                return {
+                    "success": False,
+                    "status": "timeout",
+                    "provider": "meta",
+                    "error": err_msg,
+                    "recipient": clean_to
+                }
+            except requests.exceptions.ConnectionError as ce:
+                err_msg = f"Network connection error contacting Meta Graph API: {str(ce)}"
+                logger.warning(f"Meta Graph API send connection error: {err_msg}")
+                cls.record_message(
+                    organization_id=organization_id,
+                    sender=conf.get("phone_number_id", "System"),
+                    recipient=clean_to,
+                    direction="outbound",
+                    body=actual_body,
+                    status="connection_error",
+                    execution_id=execution_id,
+                    error_message=err_msg
+                )
+                return {
+                    "success": False,
+                    "status": "connection_error",
+                    "provider": "meta",
+                    "error": err_msg,
+                    "recipient": clean_to
+                }
+            except requests.exceptions.RequestException as re:
+                err_msg = f"HTTP request error: {str(re)}"
+                logger.error(f"Meta Graph API send request error: {err_msg}")
+                cls.record_message(
+                    organization_id=organization_id,
+                    sender=conf.get("phone_number_id", "System"),
+                    recipient=clean_to,
+                    direction="outbound",
+                    body=actual_body,
+                    status="failed",
+                    execution_id=execution_id,
+                    error_message=err_msg
+                )
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "provider": "meta",
+                    "error": err_msg,
+                    "recipient": clean_to
+                }
+            except Exception as e:
+                err_msg = str(e)
+                logger.error(f"Unexpected error in Meta Graph API send: {err_msg}")
+                cls.record_message(
+                    organization_id=organization_id,
+                    sender=conf.get("phone_number_id", "System"),
+                    recipient=clean_to,
+                    direction="outbound",
+                    body=actual_body,
                     status="failed",
                     execution_id=execution_id,
                     error_message=err_msg
