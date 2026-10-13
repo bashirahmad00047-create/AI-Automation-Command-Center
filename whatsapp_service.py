@@ -212,7 +212,9 @@ class WhatsAppService:
             )
         ).strip()
 
-        token_val = SystemSetting.get_val("WHATSAPP_ACCESS_TOKEN") or SystemSetting.get_val("WHATSAPP_TOKEN")
+        token_val = SystemSetting.get_val("WHATSAPP_ACCESS_TOKEN")
+        if token_val is None:
+            token_val = SystemSetting.get_val("WHATSAPP_TOKEN")
         access_token = (
             token_val
             if token_val is not None
@@ -246,7 +248,9 @@ class WhatsAppService:
         ).strip()
 
         # Green-API Parameters
-        green_id_val = SystemSetting.get_val("GREEN_API_ID_INSTANCE") or SystemSetting.get_val("ID_INSTANCE")
+        green_id_val = SystemSetting.get_val("GREEN_API_ID_INSTANCE")
+        if green_id_val is None:
+            green_id_val = SystemSetting.get_val("ID_INSTANCE")
         green_api_id = (
             green_id_val
             if green_id_val is not None
@@ -258,7 +262,9 @@ class WhatsAppService:
             )
         ).strip()
 
-        green_tok_val = SystemSetting.get_val("GREEN_API_TOKEN_INSTANCE") or SystemSetting.get_val("API_TOKEN_INSTANCE")
+        green_tok_val = SystemSetting.get_val("GREEN_API_TOKEN_INSTANCE")
+        if green_tok_val is None:
+            green_tok_val = SystemSetting.get_val("API_TOKEN_INSTANCE")
         green_api_token = (
             green_tok_val
             if green_tok_val is not None
@@ -1033,8 +1039,14 @@ class WhatsAppService:
                         f"Green-API authentication failed (HTTP {resp.status_code} Unauthorized). Verify Instance ID and API Token Instance in Green-API console."
                         if resp.status_code == 401 else f"HTTP {resp.status_code}"
                     )
-                    if (resp.status_code >= 500 or resp.status_code == 401) and allow_fallback and cls.is_simulator_fallback_enabled():
-                        logger.warning(f"Green-API returned HTTP {resp.status_code}. Falling back to simulator.")
+                    is_quota_or_rate = (
+                        "quota" in err.lower()
+                        or "quote_allowed" in err.lower()
+                        or "exceeded" in err.lower()
+                        or resp.status_code == 429
+                    )
+                    if (resp.status_code >= 500 or resp.status_code == 401 or is_quota_or_rate) and allow_fallback and cls.is_simulator_fallback_enabled():
+                        logger.warning(f"Green-API returned HTTP {resp.status_code} ({err}). Falling back to simulator.")
                         return cls.dispatch_simulator_message(
                             organization_id=organization_id,
                             to_phone=clean_to,

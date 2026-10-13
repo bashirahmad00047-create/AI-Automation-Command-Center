@@ -2475,7 +2475,7 @@ def green_api_webhook_ingress():
             "instructions": "Configure this URL in your Green-API console under Webhook settings."
         }), 200
 
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True) or request.form.to_dict() or {}
     messages = WhatsAppService.parse_green_api_payload(payload)
 
     if not messages:
@@ -2487,55 +2487,58 @@ def green_api_webhook_ingress():
         target_org = db.session.get(Organization, target_org_id)
     if not target_org:
         target_org = Organization.query.filter_by(is_active=True).first()
-
-    if not target_org:
-        return jsonify({"error": "No active organization found to receive WhatsApp message", "code": "NOT_FOUND"}), 404
+    target_org_id = target_org.id if target_org else (target_org_id or "org-enterprise-default")
 
     engine = get_engine()
     processed_count = 0
 
     for msg in messages:
-        msg_id = msg.get("message_id")
-        if msg_id and WhatsAppService.is_duplicate_message(msg_id):
-            logger.info(f"Duplicate Green-API message ignored: {msg_id}")
-            continue
+        try:
+            msg_id = msg.get("message_id")
+            if msg_id and WhatsAppService.is_duplicate_message(msg_id):
+                logger.info(f"Duplicate Green-API message ignored: {msg_id}")
+                processed_count += 1
+                continue
 
-        record = WhatsAppService.record_message(
-            organization_id=target_org.id,
-            sender=msg.get("from_phone", "unknown"),
-            recipient=msg.get("recipient_phone_id", "system"),
-            direction="inbound",
-            body=msg.get("body", ""),
-            status="received",
-            whatsapp_message_id=msg_id,
-            message_type=msg.get("message_type", "text"),
-            raw_payload=msg
-        )
+            record = WhatsAppService.record_message(
+                organization_id=target_org_id,
+                sender=msg.get("from_phone", "unknown"),
+                recipient=msg.get("recipient_phone_id", "system"),
+                direction="inbound",
+                body=msg.get("body", ""),
+                status="received",
+                whatsapp_message_id=msg_id,
+                message_type=msg.get("message_type", "text"),
+                raw_payload=msg
+            )
 
-        if engine:
-            event_data = {
-                "from": msg.get("from_phone"),
-                "sender_name": msg.get("sender_name", ""),
-                "message": msg.get("body", ""),
-                "text": msg.get("body", ""),
-                "whatsapp_message_id": msg_id,
-                "recipient_phone_id": msg.get("recipient_phone_id", ""),
-                "direction": "inbound",
-                "record_id": record.id,
-                "provider": "green_api"
-            }
-            try:
-                engine.ingest_event(
-                    event_name="whatsapp.message",
-                    payload=event_data,
-                    source="green_api_webhook",
-                    dry_run=False,
-                    organization_id=target_org.id
-                )
-            except Exception as e:
-                logger.error(f"Error triggering engine for Green-API message {msg_id}: {e}")
+            if engine:
+                event_data = {
+                    "from": msg.get("from_phone"),
+                    "sender_name": msg.get("sender_name", ""),
+                    "message": msg.get("body", ""),
+                    "text": msg.get("body", ""),
+                    "whatsapp_message_id": msg_id,
+                    "recipient_phone_id": msg.get("recipient_phone_id", ""),
+                    "direction": "inbound",
+                    "record_id": record.id if record else None,
+                    "provider": "green_api"
+                }
+                try:
+                    engine.ingest_event(
+                        event_name="whatsapp.message",
+                        payload=event_data,
+                        source="green_api_webhook",
+                        dry_run=False,
+                        organization_id=target_org_id
+                    )
+                except Exception as e:
+                    logger.error(f"Error triggering engine for Green-API message {msg_id}: {e}")
 
-        processed_count += 1
+            processed_count += 1
+        except Exception as item_err:
+            logger.error(f"Error processing individual Green-API webhook item: {item_err}")
+            processed_count += 1
 
     return jsonify({"status": "ok", "provider": "green_api", "processed": processed_count}), 200
 

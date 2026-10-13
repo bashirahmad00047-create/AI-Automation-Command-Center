@@ -803,8 +803,8 @@ class SystemSetting(db.Model):
     def get_val(cls, key: str, default: Optional[str] = None) -> Optional[str]:
         try:
             setting = cls.query.filter_by(key=key).first()
-            if setting and setting.value is not None and setting.value.strip() != "":
-                return setting.value.strip()
+            if setting is not None:
+                return setting.value if setting.value is not None else ""
         except Exception:
             pass
         return default
