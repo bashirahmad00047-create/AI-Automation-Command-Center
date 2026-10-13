@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from flask import current_app
+from flask import current_app, has_app_context
 
 from database import db
 from models import Organization, SystemSetting, WhatsAppMessage, generate_uuid
@@ -45,10 +45,45 @@ class WhatsAppService:
     DEFAULT_CONNECT_TIMEOUT = 30.0
     DEFAULT_READ_TIMEOUT = 30.0
 
+    def __init__(
+        self,
+        id_instance: Optional[str] = None,
+        api_token: Optional[str] = None,
+        host: Optional[str] = None
+    ) -> None:
+        """Initializes WhatsAppService instance with optional instance-level overrides."""
+        self._id_instance = id_instance
+        self._api_token = api_token
+        self._host = host
+
+    @property
+    def id_instance(self) -> str:
+        """Returns configured Green-API idInstance or empty string."""
+        if self._id_instance:
+            return self._id_instance
+        conf = self.get_config()
+        return conf.get("green_api_id_instance") or conf.get("phone_number_id") or ""
+
+    @property
+    def api_token(self) -> str:
+        """Returns configured Green-API apiTokenInstance (or Meta access_token) or empty string."""
+        if self._api_token:
+            return self._api_token
+        conf = self.get_config()
+        return conf.get("green_api_token_instance") or conf.get("access_token") or ""
+
+    @property
+    def host(self) -> str:
+        """Returns configured Green-API host."""
+        if self._host:
+            return self.normalize_green_api_host(self._host, self.id_instance)
+        conf = self.get_config()
+        return conf.get("green_api_host") or self.DEFAULT_GREEN_API_HOST
+
     @classmethod
     def get_timeout_tuple(cls) -> Tuple[float, float]:
         """Returns (connect_timeout, read_timeout) tuple without restrictive connection timeout."""
-        cfg = current_app.config if current_app else {}
+        cfg = current_app.config if has_app_context() else {}
         try:
             connect_t = float(
                 SystemSetting.get_val("WHATSAPP_CONNECT_TIMEOUT")
@@ -87,7 +122,7 @@ class WhatsAppService:
         - Or running on Render (RENDER or RENDER_INSTANCE_ID set)
         - Defaults to True to ensure resilient message processing and zero dropped workflows.
         """
-        cfg = current_app.config if current_app else {}
+        cfg = current_app.config if has_app_context() else {}
         val = (
             SystemSetting.get_val("WHATSAPP_SIMULATOR_FALLBACK")
             or cfg.get("WHATSAPP_SIMULATOR_FALLBACK")
@@ -142,7 +177,7 @@ class WhatsAppService:
     @classmethod
     def get_config(cls) -> Dict[str, Any]:
         """Retrieves WhatsApp configuration from database settings, environment, or app config."""
-        cfg = current_app.config if current_app else {}
+        cfg = current_app.config if has_app_context() else {}
 
         phone_id_val = SystemSetting.get_val("WHATSAPP_PHONE_NUMBER_ID")
         phone_id = (
