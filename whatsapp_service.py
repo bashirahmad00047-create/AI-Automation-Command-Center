@@ -55,6 +55,12 @@ class WhatsAppService:
         self._id_instance = id_instance
         self._api_token = api_token
         self._host = host
+        if id_instance:
+            os.environ["GREEN_API_ID_INSTANCE"] = str(id_instance).strip()
+        if api_token:
+            os.environ["GREEN_API_TOKEN_INSTANCE"] = str(api_token).strip()
+        if host:
+            os.environ["GREEN_API_HOST"] = str(host).strip()
 
     @property
     def id_instance(self) -> str:
@@ -396,7 +402,10 @@ class WhatsAppService:
         try:
             with cls.get_http_session(retries=1) as session:
                 resp = session.get(url, timeout=timeouts)
-                data = resp.json() if resp.status_code < 500 else {}
+                try:
+                    data = resp.json() if resp.text and resp.text.strip() else {}
+                except Exception:
+                    data = {}
                 if resp.status_code == 200:
                     state = data.get("stateInstance", "unknown")
                     is_authorized = (state.lower() == "authorized")
@@ -413,7 +422,10 @@ class WhatsAppService:
                         )
                     }
                 else:
-                    err_text = data.get("message") or resp.text[:200] or f"HTTP {resp.status_code}"
+                    err_text = data.get("message") or resp.text[:200] or (
+                        f"HTTP 401 Unauthorized: Invalid Instance ID '{id_inst}' or API Token Instance. Please verify credentials in your Green-API console."
+                        if resp.status_code == 401 else f"HTTP {resp.status_code}"
+                    )
                     return {
                         "success": False,
                         "provider": "green_api",
@@ -754,33 +766,43 @@ class WhatsAppService:
     @classmethod
     def update_message_status(cls, whatsapp_message_id: str, status: str, error_message: Optional[str] = None) -> bool:
         """Updates the status of a tracked WhatsApp message by its provider message ID."""
-        if not whatsapp_message_id:
+        if not whatsapp_message_id or not has_app_context():
             return False
-        msg = WhatsAppMessage.query.filter_by(whatsapp_message_id=whatsapp_message_id).first()
-        if msg:
-            msg.status = status
-            if error_message:
-                msg.error_message = error_message
-            db.session.commit()
-            return True
+        try:
+            msg = WhatsAppMessage.query.filter_by(whatsapp_message_id=whatsapp_message_id).first()
+            if msg:
+                msg.status = status
+                if error_message:
+                    msg.error_message = error_message
+                db.session.commit()
+                return True
+        except Exception as e:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Failed to update message status: {e}")
         return False
 
     @classmethod
     def is_duplicate_message(cls, message_id: str) -> bool:
         """Guarantees idempotency by checking if a message ID was already processed."""
-        if not message_id:
+        if not message_id or not has_app_context():
             return False
-        existing = WhatsAppMessage.query.filter_by(whatsapp_message_id=message_id).first()
-        return existing is not None
+        try:
+            existing = WhatsAppMessage.query.filter_by(whatsapp_message_id=message_id).first()
+            return existing is not None
+        except Exception:
+            return False
 
     @classmethod
     def record_message(
         cls,
-        organization_id: str,
-        sender: str,
-        recipient: str,
-        direction: str,
-        body: str,
+        organization_id: Optional[str] = None,
+        sender: str = "WhatsApp",
+        recipient: str = "",
+        direction: str = "outbound",
+        body: str = "",
         status: str = "received",
         whatsapp_message_id: Optional[str] = None,
         message_type: str = "text",
@@ -791,7 +813,7 @@ class WhatsAppService:
         """Persists a WhatsApp message record in the tenant workspace."""
         msg = WhatsAppMessage(
             id=generate_uuid("wam"),
-            organization_id=organization_id,
+            organization_id=organization_id or "org-enterprise-default",
             whatsapp_message_id=whatsapp_message_id or f"wamid.{uuid.uuid4().hex[:16]}",
             direction=direction,
             sender=sender,
@@ -804,16 +826,26 @@ class WhatsAppService:
             raw_payload_json=json.dumps(raw_payload) if raw_payload else None,
             created_at=datetime.datetime.utcnow()
         )
-        db.session.add(msg)
-        db.session.commit()
+        if has_app_context():
+            try:
+                db.session.add(msg)
+                db.session.commit()
+            except Exception as e:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                logger.warning(f"Failed to commit WhatsAppMessage to database: {e}")
+        else:
+            logger.debug("No active Flask app context; WhatsAppMessage recorded in-memory.")
         return msg
 
     @classmethod
     def dispatch_simulator_message(
         cls,
-        organization_id: str,
-        to_phone: str,
-        message_text: str,
+        organization_id: Optional[str] = None,
+        to_phone: Optional[str] = None,
+        message_text: Optional[str] = None,
         preview_url: bool = False,
         execution_id: Optional[int] = None,
         template_name: Optional[str] = None,
@@ -821,8 +853,15 @@ class WhatsAppService:
         fallback_reason: Optional[str] = None
     ) -> Dict[str, Any]:
         """Dispatches and persists a message using the built-in WhatsApp Sandbox Simulator."""
-        clean_to = cls.format_phone_number(to_phone)
-        actual_body = f"[Template: {template_name}] {message_text}" if template_name and message_text else (f"[Template: {template_name}]" if template_name else message_text)
+        if to_phone is not None and message_text is None:
+            message_text = to_phone
+            to_phone = organization_id
+            organization_id = "org-enterprise-default"
+        elif organization_id is None:
+            organization_id = "org-enterprise-default"
+
+        clean_to = cls.format_phone_number(to_phone or "")
+        actual_body = f"[Template: {template_name}] {message_text}" if template_name and message_text else (f"[Template: {template_name}]" if template_name else (message_text or ""))
         msg_type = "template" if template_name else "text"
         mock_msg_id = f"wamid.mock_{uuid.uuid4().hex[:16]}"
         is_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_INSTANCE_ID"))
@@ -878,26 +917,67 @@ class WhatsAppService:
     @classmethod
     def send_green_api_message(
         cls,
-        organization_id: str,
-        to_phone: str,
-        message_text: str,
+        organization_id: Optional[str] = None,
+        to_phone: Optional[str] = None,
+        message_text: Optional[str] = None,
         execution_id: Optional[int] = None,
         allow_fallback: bool = True
     ) -> Dict[str, Any]:
-        """Dispatches an outbound WhatsApp text message via Green-API with timeout & simulator fallback."""
+        """Dispatches an outbound WhatsApp text message via Green-API with timeout & simulator fallback.
+
+        Supports both:
+          - send_green_api_message(organization_id, to_phone, message_text)
+          - send_green_api_message(to_phone, message_text)
+        """
+        if to_phone is not None and message_text is None:
+            message_text = to_phone
+            to_phone = organization_id
+            organization_id = "org-enterprise-default"
+        elif organization_id is None:
+            organization_id = "org-enterprise-default"
+
         conf = cls.get_config()
-        clean_to = cls.format_phone_number(to_phone)
+        clean_to = cls.format_phone_number(to_phone or "")
         if not clean_to or len(clean_to) < 7:
             raise ValueError(f"Invalid recipient phone number: '{to_phone}'. Must include country code and digits.")
 
         id_inst = conf.get("green_api_id_instance")
         tok_inst = conf.get("green_api_token_instance")
         host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
+
+        if not id_inst or not tok_inst:
+            err_msg = "Green-API credentials not configured (GREEN_API_ID_INSTANCE and GREEN_API_TOKEN_INSTANCE required)."
+            if allow_fallback and cls.is_simulator_fallback_enabled():
+                return cls.dispatch_simulator_message(
+                    organization_id=organization_id,
+                    to_phone=clean_to,
+                    message_text=message_text,
+                    execution_id=execution_id,
+                    fallback_reason=err_msg
+                )
+            cls.record_message(
+                organization_id=organization_id,
+                sender="GreenAPI",
+                recipient=clean_to,
+                direction="outbound",
+                body=message_text or "",
+                status="failed",
+                execution_id=execution_id,
+                error_message=err_msg
+            )
+            return {
+                "success": False,
+                "status": "not_configured",
+                "provider": "green_api",
+                "error": err_msg,
+                "recipient": clean_to
+            }
+
         chat_id = f"{clean_to}@c.us"
         url = f"{host}/waInstance{id_inst}/sendMessage/{tok_inst}"
         payload = {
             "chatId": chat_id,
-            "message": message_text
+            "message": message_text or ""
         }
 
         timeouts = cls.get_timeout_tuple()
@@ -905,7 +985,10 @@ class WhatsAppService:
         try:
             with cls.get_http_session(retries=2) as session:
                 resp = session.post(url, json=payload, timeout=timeouts)
-                resp_json = resp.json() if resp.status_code < 500 else {}
+                try:
+                    resp_json = resp.json() if resp.text and resp.text.strip() else {}
+                except Exception:
+                    resp_json = {}
                 if resp.status_code == 200 and resp_json.get("idMessage"):
                     msg_id = resp_json.get("idMessage")
                     record = cls.record_message(
@@ -925,13 +1008,16 @@ class WhatsAppService:
                         "status": "sent",
                         "provider": "green_api",
                         "whatsapp_message_id": msg_id,
-                        "message_record_id": record.id,
+                        "message_record_id": record.id if record else None,
                         "recipient": clean_to,
                         "message_type": "text"
                     }
                 else:
-                    err = resp_json.get("message") or resp.text[:200] or f"HTTP {resp.status_code}"
-                    if resp.status_code >= 500 and allow_fallback and cls.is_simulator_fallback_enabled():
+                    err = resp_json.get("message") or resp.text[:200] or (
+                        f"Green-API authentication failed (HTTP {resp.status_code} Unauthorized). Verify Instance ID and API Token Instance in Green-API console."
+                        if resp.status_code == 401 else f"HTTP {resp.status_code}"
+                    )
+                    if (resp.status_code >= 500 or resp.status_code == 401) and allow_fallback and cls.is_simulator_fallback_enabled():
                         logger.warning(f"Green-API returned HTTP {resp.status_code}. Falling back to simulator.")
                         return cls.dispatch_simulator_message(
                             organization_id=organization_id,
@@ -940,7 +1026,7 @@ class WhatsAppService:
                             execution_id=execution_id,
                             fallback_reason=f"Green-API HTTP {resp.status_code}: {err}"
                         )
-                    cls.record_message(
+                    record = cls.record_message(
                         organization_id=organization_id,
                         sender=f"GreenAPI Instance {id_inst}",
                         recipient=clean_to,
@@ -957,7 +1043,8 @@ class WhatsAppService:
                         "status": "failed",
                         "provider": "green_api",
                         "error": err,
-                        "recipient": clean_to
+                        "recipient": clean_to,
+                        "message_record_id": record.id if record else None
                     }
         except requests.exceptions.ConnectTimeout:
             err_msg = f"Connection timeout: Failed to connect to Green-API within {timeouts[0]}s."
@@ -1106,17 +1193,29 @@ class WhatsAppService:
     @classmethod
     def send_message(
         cls,
-        organization_id: str,
-        to_phone: str,
-        message_text: str,
+        organization_id: Optional[str] = None,
+        to_phone: Optional[str] = None,
+        message_text: Optional[str] = None,
         preview_url: bool = False,
         execution_id: Optional[int] = None,
         template_name: Optional[str] = None,
         template_language: str = "en_US"
     ) -> Dict[str, Any]:
-        """Dispatches an outbound WhatsApp text or template message via the active provider (Green-API or Meta Cloud API)."""
+        """Dispatches an outbound WhatsApp text or template message via the active provider (Green-API or Meta Cloud API).
+
+        Supports both:
+          - send_message(organization_id, to_phone, message_text, ...)
+          - send_message(to_phone, message_text, ...)
+        """
+        if to_phone is not None and message_text is None:
+            message_text = to_phone
+            to_phone = organization_id
+            organization_id = "org-enterprise-default"
+        elif organization_id is None:
+            organization_id = "org-enterprise-default"
+
         conf = cls.get_config()
-        clean_to = cls.format_phone_number(to_phone)
+        clean_to = cls.format_phone_number(to_phone or "")
         if not clean_to or len(clean_to) < 7:
             raise ValueError(f"Invalid recipient phone number: '{to_phone}'. Must include country code and digits.")
 
