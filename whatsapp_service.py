@@ -794,6 +794,139 @@ class WhatsAppService:
         return messages
 
     @classmethod
+    def receive_green_api_notification(cls) -> Optional[Tuple[int, Dict[str, Any]]]:
+        """Fetches a single pending notification from Green-API's receiveNotification queue.
+
+        Returns (receipt_id, body_dict) if a notification is waiting, else None.
+        """
+        conf = cls.get_config()
+        id_inst = conf.get("green_api_id_instance")
+        tok_inst = conf.get("green_api_token_instance")
+        host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
+        if not id_inst or not tok_inst:
+            return None
+
+        url = f"{host}/waInstance{id_inst}/receiveNotification/{tok_inst}"
+        timeouts = cls.get_timeout_tuple()
+        try:
+            with cls.get_http_session(retries=1) as session:
+                resp = session.get(url, timeout=timeouts)
+                if resp.status_code == 200 and resp.text and resp.text.strip():
+                    data = resp.json()
+                    if isinstance(data, dict) and "receiptId" in data and "body" in data:
+                        return (int(data["receiptId"]), data["body"])
+        except Exception as e:
+            logger.debug(f"Green-API receiveNotification probe: {e}")
+        return None
+
+    @classmethod
+    def delete_green_api_notification(cls, receipt_id: int) -> bool:
+        """Confirms and deletes a processed notification from the Green-API receive queue."""
+        conf = cls.get_config()
+        id_inst = conf.get("green_api_id_instance")
+        tok_inst = conf.get("green_api_token_instance")
+        host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
+        if not id_inst or not tok_inst or not receipt_id:
+            return False
+
+        url = f"{host}/waInstance{id_inst}/deleteNotification/{tok_inst}/{receipt_id}"
+        timeouts = cls.get_timeout_tuple()
+        try:
+            with cls.get_http_session(retries=2) as session:
+                resp = session.delete(url, timeout=timeouts)
+                return resp.status_code == 200
+        except Exception as e:
+            logger.warning(f"Failed to delete Green-API notification receiptId={receipt_id}: {e}")
+            return False
+
+    @classmethod
+    def poll_and_process_incoming_notifications(
+        cls,
+        organization_id: Optional[str] = None,
+        max_batch: int = 15
+    ) -> Dict[str, Any]:
+        """Polls Green-API queue for inbound messages without requiring public webhook URLs.
+
+        Fetches each notification, persists inbound messages to the database ledger,
+        triggers automation engine events, and deletes the acknowledged notification.
+        """
+        org_id = organization_id or "org-enterprise-default"
+        processed_count = 0
+        messages_received: List[Dict[str, Any]] = []
+
+        engine = None
+        if has_app_context():
+            engine = current_app.config.get("AUTOMATION_ENGINE")
+
+        for _ in range(max_batch):
+            item = cls.receive_green_api_notification()
+            if not item:
+                break
+
+            receipt_id, body_payload = item
+            messages = cls.parse_green_api_payload(body_payload)
+
+            for msg in messages:
+                msg_id = msg.get("message_id")
+                if msg_id and cls.is_duplicate_message(msg_id):
+                    logger.info(f"Duplicate Green-API polled message ignored: {msg_id}")
+                    continue
+
+                record = cls.record_message(
+                    organization_id=org_id,
+                    sender=msg.get("from_phone", "unknown"),
+                    recipient=msg.get("recipient_phone_id", "system"),
+                    direction="inbound",
+                    body=msg.get("body", ""),
+                    status="received",
+                    whatsapp_message_id=msg_id,
+                    message_type=msg.get("message_type", "text"),
+                    raw_payload=msg
+                )
+                messages_received.append({
+                    "message_id": msg_id,
+                    "from": msg.get("from_phone"),
+                    "body": msg.get("body"),
+                    "record_id": record.id if record else None
+                })
+
+                if engine:
+                    try:
+                        event_data = {
+                            "from": msg.get("from_phone"),
+                            "sender_name": msg.get("sender_name", ""),
+                            "message": msg.get("body", ""),
+                            "text": msg.get("body", ""),
+                            "whatsapp_message_id": msg_id,
+                            "recipient_phone_id": msg.get("recipient_phone_id", ""),
+                            "direction": "inbound",
+                            "record_id": record.id if record else None,
+                            "provider": "green_api",
+                            "polled": True
+                        }
+                        engine.ingest_event(
+                            event_name="whatsapp.message",
+                            payload=event_data,
+                            source="green_api_poller",
+                            dry_run=False,
+                            organization_id=org_id
+                        )
+                    except Exception as eng_err:
+                        logger.error(f"Engine event ingestion failed for polled WhatsApp message: {eng_err}")
+
+                processed_count += 1
+
+            # Acknowledge and delete notification from Green-API queue
+            cls.delete_green_api_notification(receipt_id)
+
+        return {
+            "success": True,
+            "processed": processed_count,
+            "messages": messages_received,
+            "queue_empty": (processed_count < max_batch)
+        }
+
+    @classmethod
     def update_message_status(cls, whatsapp_message_id: str, status: str, error_message: Optional[str] = None) -> bool:
         """Updates the status of a tracked WhatsApp message by its provider message ID."""
         if not whatsapp_message_id or not has_app_context():

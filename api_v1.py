@@ -2543,6 +2543,15 @@ def green_api_webhook_ingress():
     return jsonify({"status": "ok", "provider": "green_api", "processed": processed_count}), 200
 
 
+@api_v1.route("/whatsapp/poll", methods=["GET", "POST"])
+def whatsapp_poll_messages():
+    """Fetches inbound messages from Green-API receive queue without requiring public webhook URLs."""
+    org_id = request.args.get("org_id")
+    batch_size = min(int(request.args.get("batch", 15)), 50)
+    result = WhatsAppService.poll_and_process_incoming_notifications(organization_id=org_id, max_batch=batch_size)
+    return jsonify(result), 200
+
+
 @api_v1.route("/whatsapp/messages/send", methods=["POST"])
 @api_v1.route("/whatsapp/send", methods=["POST"])
 @api_v1.route("/whatsapp/test-message", methods=["POST"])
