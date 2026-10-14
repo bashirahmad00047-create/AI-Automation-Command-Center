@@ -761,6 +761,11 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                             </div>
                         </div>
                         <div id="waActiveChatActions" style="display: flex; align-items: center; gap: 8px;">
+                            <div class="ai-auto-responder-pill" id="waHeaderAiToggle" onclick="toggleWhatsAppAiAutoResponder()" title="Toggle AI Auto-Responder for Active Workspace">
+                                <span class="ai-pill-dot" id="waHeaderAiDot"></span>
+                                <span>AI Auto-Responder</span>
+                                <span id="waHeaderAiStatusText" style="font-weight: 700; font-size: 10px;">OFF</span>
+                            </div>
                             <button type="button" class="wa-icon-btn" title="Simulate Inbound Voice Note" onclick="simulateInboundVoiceNote()">🎙️ Voice Demo</button>
                             <button type="button" class="wa-icon-btn" title="Clear Conversation" onclick="clearCurrentConversation()">🗑️ Clear</button>
                         </div>
@@ -1582,43 +1587,296 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
 
         <!-- TAB 11: SETTINGS -->
         <section id="tab-settings" class="tab-panel">
+            <!-- Header Banner -->
+            <div class="rules-header" style="margin-bottom: 24px;">
+                <div class="rules-header-title">
+                    <h2>ENTERPRISE SAAS SETTINGS &amp; TENANT GATEWAYS</h2>
+                    <p>Manage multi-tenant workspace isolation, WhatsApp Business instance routing, and the Autonomous AI Auto-Responder suite.</p>
+                </div>
+                <div class="rules-header-actions">
+                    <span class="glass-pill emerald">
+                        <span class="ai-pill-dot"></span>
+                        <span>Enterprise Cloud Engine</span>
+                    </span>
+                    <button class="hud-btn outline small" onclick="loadAllSettings()">
+                        <span class="icon">🔄</span> Reload Settings
+                    </button>
+                </div>
+            </div>
+
+            <!-- CARD 1: MULTI-TENANT WORKSPACE & BRAND PROFILE (GLASSMORPHISM) -->
+            <div class="glass-card glass-glow-cyan" style="margin-bottom: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px; margin-bottom: 16px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 24px;">🏢</span>
+                        <div>
+                            <h3 style="margin: 0; font-size: 1.1rem; color: var(--text-primary);">Tenant Workspace Identity &amp; White-Label Isolation</h3>
+                            <span style="font-size: 11px; color: var(--text-secondary);">Tenant-scoped isolation with dedicated webhook ingress and cryptographic API keys</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Active Workspace:</label>
+                        <select id="settingsWorkspaceSelect" class="hud-select glass-input" style="min-width: 220px;" onchange="handleWorkspaceChange(this.value)">
+                            <option value="org-enterprise-default">Acme Enterprise Global</option>
+                            <option value="org-apex-health-tenant">Apex HealthTech</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="tenant-meta-grid">
+                    <div class="tenant-meta-item">
+                        <span class="tenant-meta-key">Organization ID</span>
+                        <span class="tenant-meta-val" id="settingsOrgId">org-enterprise-default</span>
+                    </div>
+                    <div class="tenant-meta-item">
+                        <span class="tenant-meta-key">Workspace Name</span>
+                        <span class="tenant-meta-val" id="settingsOrgName">Acme Enterprise Global</span>
+                    </div>
+                    <div class="tenant-meta-item">
+                        <span class="tenant-meta-key">Subscription Tier</span>
+                        <span class="tenant-meta-val" style="color: #38bdf8;" id="settingsOrgPlan">ENTERPRISE (Active)</span>
+                    </div>
+                    <div class="tenant-meta-item">
+                        <span class="tenant-meta-key">Tenant Isolation Status</span>
+                        <span class="tenant-meta-val" style="color: #34d399;">🛡️ Cryptographically Scoped</span>
+                    </div>
+                </div>
+
+                <div style="margin-top: 16px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 12px 14px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary);">Tenant Inbound Webhook URL (Pre-Scoped)</span>
+                        <span style="font-size: 11px; color: #34d399;">● Auto-Maps to this Workspace</span>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="settingsTenantWebhookUrl" class="hud-input glass-input" readonly value="/api/v1/webhooks/whatsapp?org_id=org-enterprise-default" style="flex: 1; font-family: var(--font-mono); font-size: 12px;">
+                        <button type="button" class="hud-btn small outline" onclick="copySettingsTenantWebhookUrl()">Copy URL</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CARD 2: MULTI-TENANT AI AUTO-RESPONDER SUITE (GLASSMORPHISM) -->
+            <div class="glass-card glass-glow-emerald" style="margin-bottom: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 24px;">🤖</span>
+                        <div>
+                            <h3 style="margin: 0; font-size: 1.1rem; color: #34d399;">Autonomous AI Auto-Responder Suite</h3>
+                            <span style="font-size: 11px; color: var(--text-secondary);">Real-time intent analysis, lead qualification, and immediate WhatsApp customer dispatch</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div class="ai-auto-responder-pill" id="settingsAiMasterBadge" onclick="toggleSettingsAutoResponder()" title="Toggle Master Switch">
+                            <span class="ai-pill-dot" id="settingsAiMasterDot"></span>
+                            <span>Auto-Responder</span>
+                            <span id="settingsAiMasterState" style="font-weight: 700; font-size: 10px;">OFF</span>
+                        </div>
+                    </div>
+                </div>
+
+                <form id="autoResponderConfigForm" onsubmit="handleSaveAutoResponderSettings(event)">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin-bottom: 16px;">
+                        <!-- Mode Selector -->
+                        <div class="form-group">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 6px;">Persona &amp; Operational Mode *</label>
+                            <select id="arConfigMode" class="hud-select glass-input" style="width: 100%;">
+                                <option value="smart_concierge">🚀 Smart Solutions Concierge (Demo, pricing, sales discovery)</option>
+                                <option value="sre_incident">🚨 SRE Incident &amp; Tier-1 Triage (High-urgency outage escalation)</option>
+                                <option value="lead_qualifier">🎯 B2B Lead Qualifier (Budget discovery &amp; immediate CRM sync)</option>
+                                <option value="support_assistant">🔧 Customer Support Specialist (Helpdesk &amp; troubleshooting)</option>
+                            </select>
+                            <span style="font-size: 11px; color: var(--text-muted);">Configures the baseline persona and sentiment handling strategy</span>
+                        </div>
+
+                        <!-- Cooldown Throttle -->
+                        <div class="form-group">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 6px;">Debounce Cooldown (Minutes) *</label>
+                            <input type="number" id="arConfigCooldown" class="hud-input glass-input" min="0" max="120" value="5" style="width: 100%;">
+                            <span style="font-size: 11px; color: var(--text-muted);">Prevents reply loops. Max 1 automated AI response per sender within this window</span>
+                        </div>
+
+                        <!-- Confidence Threshold -->
+                        <div class="form-group">
+                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 6px;">AI Confidence Threshold (0 - 100) *</label>
+                            <input type="number" id="arConfigThreshold" class="hud-input glass-input" min="10" max="100" value="60" style="width: 100%;">
+                            <span style="font-size: 11px; color: var(--text-muted);">Minimum heuristic NLP certainty score required before dispatching</span>
+                        </div>
+
+                        <!-- Auto CRM Lead Ingestion -->
+                        <div class="form-group" style="display: flex; flex-direction: column; justify-content: center;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-primary); margin-top: 14px;">
+                                <input type="checkbox" id="arConfigLeadCapture" checked style="width: 16px; height: 16px; accent-color: #10b981;">
+                                <span>Auto-Capture Inbound Leads to CRM Pipeline</span>
+                            </label>
+                            <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Automatically creates a scored lead in CRM when intent indicates purchase/pricing</span>
+                        </div>
+                    </div>
+
+                    <!-- Custom Instructions & Knowledge Context -->
+                    <div class="form-group" style="margin-bottom: 18px;">
+                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 6px;">Tenant Custom Knowledge Context &amp; Guidance</label>
+                        <textarea id="arConfigSystemPrompt" class="hud-textarea glass-input" rows="3" placeholder="e.g., We provide 24/7 SLA guarantees for Fortune 500 teams. Starter plan starts at $49/mo, Enterprise is custom. Support hotline is +92-300-1234567."></textarea>
+                        <span style="font-size: 11px; color: var(--text-muted);">Custom instructions, SLA promises, and FAQs blended dynamically into generated responses</span>
+                    </div>
+
+                    <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                        <button type="submit" class="hud-btn primary" id="btnSaveAutoResponder">
+                            <span>💾</span> Save Auto-Responder Settings
+                        </button>
+                    </div>
+                </form>
+
+                <!-- INTERACTIVE LIVE AI AUTO-RESPONDER SANDBOX PREVIEW -->
+                <div class="ai-preview-box" style="margin-top: 20px;">
+                    <div class="ai-preview-header">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 18px;">🧪</span>
+                            <strong style="color: #06b6d4; font-size: 13px;">Interactive AI Response Simulator &amp; Sandbox</strong>
+                        </div>
+                        <span class="glass-pill cyan">Real-Time Heuristic Engine</span>
+                    </div>
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Simulate an inbound customer WhatsApp message to instantly test intent detection, lead scoring, and generated reply drafts before live dispatch:
+                    </p>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                        <input type="text" id="arSandboxName" class="hud-input glass-input" placeholder="Customer Name (e.g. Tariq Ahmed)" value="Tariq Ahmed">
+                        <input type="text" id="arSandboxPhone" class="hud-input glass-input" placeholder="Sender Phone (e.g. +923001234567)" value="+923001234567">
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <textarea id="arSandboxMessage" class="hud-textarea glass-input" rows="2" placeholder="e.g. Hi OpsFlow, we want a demo of your automated workflows for our banking operations and need Enterprise pricing.">Hi OpsFlow, we want a demo of your automated workflows for our banking operations and need Enterprise pricing.</textarea>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <button type="button" class="hud-btn small outline" onclick="runArSandboxSimulation()">
+                            <span>⚡</span> Simulate AI Response
+                        </button>
+                        <span id="arSandboxStatus" style="font-size: 11.5px; color: var(--text-muted);">Ready to test</span>
+                    </div>
+
+                    <!-- Output Container -->
+                    <div id="arSandboxOutput" style="display: none; margin-top: 14px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: 8px; padding: 14px;">
+                        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+                            <span class="glass-pill cyan" id="arSandboxIntentPill">Intent: lead_inquiry</span>
+                            <span class="glass-pill emerald" id="arSandboxScorePill">Lead Score: 85/100</span>
+                            <span class="glass-pill purple" id="arSandboxRoutePill">Route: Sales</span>
+                            <span class="glass-pill" id="arSandboxConfidencePill">Confidence: 94%</span>
+                        </div>
+                        <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; margin-bottom: 4px;">Generated WhatsApp Reply Draft:</div>
+                        <pre id="arSandboxReplyText" style="white-space: pre-wrap; font-family: inherit; font-size: 12.5px; color: #e2e8f0; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 12px; margin: 0; line-height: 1.5;"></pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CARD 3: MULTI-TENANT WHATSAPP GATEWAY & INSTANCE ROUTING (GLASSMORPHISM) -->
+            <div class="glass-card glass-glow-purple" style="margin-bottom: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 24px;">💬</span>
+                        <div>
+                            <h3 style="margin: 0; font-size: 1.1rem; color: #c084fc;">Multi-Tenant WhatsApp Gateways &amp; Instance Routing</h3>
+                            <span style="font-size: 11px; color: var(--text-secondary);">Route incoming WhatsApp phone numbers and Green-API instance IDs to dedicated workspaces</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <button type="button" class="hud-btn outline small" onclick="openWhatsAppConnectGuide()">
+                            <span>⚙️</span> Gateway Credentials
+                        </button>
+                        <button type="button" class="hud-btn small primary" onclick="handleTestWhatsAppConnection()">
+                            <span>⚡</span> Test Live Connection
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Instance ID Mapping Table -->
+                <div style="margin-bottom: 18px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label style="font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary);">Active Instance ID &amp; Phone Number Routing Ledger</label>
+                        <button type="button" class="hud-btn small outline" onclick="loadWhatsAppInstanceMappings()">🔄 Refresh Mappings</button>
+                    </div>
+                    <div class="table-container" style="background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px;">
+                        <table class="hud-table">
+                            <thead>
+                                <tr>
+                                    <th>Instance ID / Phone ID</th>
+                                    <th>Routed Workspace (Org ID)</th>
+                                    <th>Provider</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="settingsInstanceMappingsTbody">
+                                <tr><td colspan="4" class="empty-cell">Loading instance mappings...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Add New Instance Mapping Inline Form -->
+                <form id="mapInstanceForm" onsubmit="handleMapInstanceForm(event)" style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 14px;">
+                    <div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 10px;">Register New Instance Routing Rule:</div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: flex-end;">
+                        <div>
+                            <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Instance ID / Phone ID *</label>
+                            <input type="text" id="mapInputInstanceId" class="hud-input glass-input" required placeholder="e.g. 7107888999 or 1092837465" style="width: 100%; font-family: var(--font-mono);">
+                        </div>
+                        <div>
+                            <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Target Workspace *</label>
+                            <select id="mapSelectOrgId" class="hud-select glass-input" style="width: 100%;">
+                                <option value="org-enterprise-default">Acme Enterprise Global</option>
+                                <option value="org-apex-health-tenant">Apex HealthTech</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Provider</label>
+                            <select id="mapSelectProvider" class="hud-select glass-input" style="width: 100%;">
+                                <option value="green_api">Green-API (Instance ID)</option>
+                                <option value="meta">Meta Cloud API (Phone ID)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <button type="submit" class="hud-btn primary" style="width: 100%;">
+                                <span>🔗</span> Map to Workspace
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- CARD 4: DATA, MAINTENANCE & ENGINE RUNTIME (UPGRADED GLASS CARDS) -->
             <div class="settings-grid">
-                <div class="settings-card">
-                    <h3>Data &amp; Rule Management</h3>
-                    <p>Export your configured automation rules or import rule sets from another instance:</p>
+                <div class="glass-card">
+                    <h3 style="margin-top: 0;">Data &amp; Rule Management</h3>
+                    <p style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 14px;">Export your configured automation rules or import rule sets from another instance:</p>
                     <div class="settings-btn-row">
-                        <a href="/api/export" class="hud-btn primary" download="opsflow_rules.json">
+                        <a href="/api/export" class="hud-btn primary small" download="opsflow_rules.json">
                             📥 Export Rules (JSON)
                         </a>
-                        <label class="hud-btn outline file-btn">
+                        <label class="hud-btn outline small file-btn">
                             📤 Import Rules (JSON)
                             <input type="file" id="importFileInput" accept=".json" onchange="importRulesFile(event)">
                         </label>
                     </div>
                 </div>
 
-                <div class="settings-card" style="border-left: 4px solid #ef4444;">
+                <div class="glass-card" style="border-left: 4px solid #ef4444;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <h3 style="color: #f87171; margin: 0;">Database &amp; Logs Maintenance</h3>
                         <span class="status-pill red" style="font-size: 10px;">Destructive Operations</span>
                     </div>
-                    <p style="margin-bottom: 16px;">Purge execution audit trails or reset incident alert queues with safety confirmation prompts:</p>
-                    <div class="settings-btn-row" style="display: flex; gap: 12px; flex-wrap: wrap;">
-                        <button type="button" class="hud-btn destructive-danger" onclick="promptPurgeLogsModal()">
+                    <p style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 14px;">Purge execution audit trails or reset incident alert queues with safety confirmation prompts:</p>
+                    <div class="settings-btn-row" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button type="button" class="hud-btn destructive-danger small" onclick="promptPurgeLogsModal()">
                             <span>🗑️</span> Purge Execution Logs
                         </button>
-                        <button type="button" class="hud-btn destructive-danger" onclick="promptClearAlertsModal()">
+                        <button type="button" class="hud-btn destructive-danger small" onclick="promptClearAlertsModal()">
                             <span>⚠️</span> Clear All Alerts
                         </button>
                     </div>
                 </div>
 
-                <div class="settings-card" style="grid-column: 1 / -1;">
+                <div class="glass-card" style="grid-column: 1 / -1;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <h3 style="margin: 0;">Engine Architecture &amp; Enterprise Runtime Specs</h3>
                         <span class="status-pill green" style="font-size: 11px;">● Verified Operational</span>
                     </div>
-                    <p style="margin-bottom: 0;">Verified runtime capabilities, execution engines, and active subsystems:</p>
+                    <p style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 12px;">Verified runtime capabilities, execution engines, and active subsystems:</p>
                     <div class="engine-specs-grid">
                         <div class="engine-spec-item">
                             <span class="engine-spec-key">Core Runtime</span>

@@ -251,6 +251,8 @@ class NLPEngine:
             "label": "Built-in Local Intelligence Engine (100% Offline / Zero API Key Required)"
         }
 
+    analyze = parse
+
     def _classify_intent(self, tokens: List[str], text: str) -> Tuple[str, float, List[str]]:
         scores: Dict[str, float] = {}
         matched_map: Dict[str, List[str]] = {}

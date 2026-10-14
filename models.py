@@ -792,6 +792,8 @@ class WhatsAppMessage(db.Model):
                         raw.get("audioMessageData", {}).get("duration") or
                         raw.get("duration")
                     )
+                    is_ai_response = bool(raw.get("is_ai_response") or raw.get("is_ai"))
+                    ai_intent = raw.get("ai_intent") or raw.get("intent")
             except Exception:
                 pass
 
@@ -814,6 +816,8 @@ class WhatsAppMessage(db.Model):
             "media_url": media_url,
             "is_audio": is_audio,
             "audio_duration": duration,
+            "is_ai_response": is_ai_response,
+            "ai_intent": ai_intent,
             "status": self.status,
             "execution_id": self.execution_id,
             "error_message": self.error_message,

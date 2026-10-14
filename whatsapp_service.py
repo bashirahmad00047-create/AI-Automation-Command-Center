@@ -388,6 +388,9 @@ class WhatsAppService:
             or os.environ.get("WHATSAPP_PROVIDER", "auto")
         ).strip().lower()
 
+        auto_reply_enabled_str = cls._get_tenant_or_global_setting("AI_AUTO_REPLY_ENABLED", organization_id)
+        auto_reply_enabled = (auto_reply_enabled_str or "").strip().lower() in ("true", "1", "yes", "on")
+
         return {
             "organization_id": organization_id,
             "phone_number_id": phone_id,
@@ -399,6 +402,7 @@ class WhatsAppService:
             "green_api_token_instance": green_api_token,
             "green_api_host": green_api_host,
             "whatsapp_provider": provider,
+            "ai_auto_reply_enabled": auto_reply_enabled,
         }
 
     @classmethod
@@ -413,7 +417,8 @@ class WhatsAppService:
         green_api_id_instance: Optional[str] = None,
         green_api_token_instance: Optional[str] = None,
         green_api_host: Optional[str] = None,
-        whatsapp_provider: Optional[str] = None
+        whatsapp_provider: Optional[str] = None,
+        ai_auto_reply_enabled: Optional[bool] = None
     ) -> Dict[str, Any]:
         """Saves live WhatsApp / Green-API configuration dynamically into tenant-scoped and global database settings."""
         prefix = f"ORG_{organization_id}_" if organization_id and organization_id != "global" else ""
@@ -468,7 +473,288 @@ class WhatsAppService:
             if not prefix:
                 SystemSetting.set_val("WHATSAPP_PROVIDER", whatsapp_provider, is_secret=False)
 
+        if ai_auto_reply_enabled is not None:
+            val = "true" if ai_auto_reply_enabled else "false"
+            SystemSetting.set_val(f"{prefix}AI_AUTO_REPLY_ENABLED", val, is_secret=False, description=f"[{organization_id or 'global'}] AI Auto-Reply Enabled")
+            if not prefix:
+                SystemSetting.set_val("AI_AUTO_REPLY_ENABLED", val, is_secret=False)
+
         return cls.get_config(organization_id=organization_id)
+
+    @classmethod
+    def get_auto_responder_config(cls, organization_id: Optional[str] = None) -> Dict[str, Any]:
+        """Retrieves AI Auto-Responder configuration for an organization."""
+        enabled_str = cls._get_tenant_or_global_setting("AI_AUTO_REPLY_ENABLED", organization_id)
+        enabled = (enabled_str or "").strip().lower() in ("true", "1", "yes", "on")
+
+        mode = cls._get_tenant_or_global_setting("AI_AUTO_REPLY_MODE", organization_id) or "smart_concierge"
+        system_prompt = cls._get_tenant_or_global_setting("AI_SYSTEM_PROMPT", organization_id) or ""
+        cooldown_str = cls._get_tenant_or_global_setting("AI_COOLDOWN_MINUTES", organization_id)
+        try:
+            cooldown_minutes = int(cooldown_str) if cooldown_str else 5
+        except (ValueError, TypeError):
+            cooldown_minutes = 5
+
+        threshold_str = cls._get_tenant_or_global_setting("AI_CONFIDENCE_THRESHOLD", organization_id)
+        try:
+            confidence_threshold = int(threshold_str) if threshold_str else 60
+        except (ValueError, TypeError):
+            confidence_threshold = 60
+
+        capture_str = cls._get_tenant_or_global_setting("AI_AUTO_LEAD_CAPTURE", organization_id)
+        auto_lead_capture = (capture_str or "true").strip().lower() in ("true", "1", "yes", "on")
+
+        greeting = cls._get_tenant_or_global_setting("AI_FALLBACK_GREETING", organization_id) or ""
+
+        return {
+            "organization_id": organization_id,
+            "enabled": enabled,
+            "mode": mode,
+            "system_prompt": system_prompt,
+            "cooldown_minutes": cooldown_minutes,
+            "confidence_threshold": confidence_threshold,
+            "auto_lead_capture": auto_lead_capture,
+            "fallback_greeting": greeting
+        }
+
+    @classmethod
+    def save_auto_responder_config(
+        cls,
+        organization_id: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        mode: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        cooldown_minutes: Optional[int] = None,
+        confidence_threshold: Optional[int] = None,
+        auto_lead_capture: Optional[bool] = None,
+        fallback_greeting: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Saves AI Auto-Responder configuration for a tenant or globally."""
+        prefix = f"ORG_{organization_id}_" if organization_id and organization_id != "global" else ""
+
+        if enabled is not None:
+            val = "true" if enabled else "false"
+            SystemSetting.set_val(f"{prefix}AI_AUTO_REPLY_ENABLED", val, is_secret=False, description=f"[{organization_id or 'global'}] AI Auto-Reply Enabled")
+            if not prefix:
+                SystemSetting.set_val("AI_AUTO_REPLY_ENABLED", val, is_secret=False)
+
+        if mode is not None:
+            SystemSetting.set_val(f"{prefix}AI_AUTO_REPLY_MODE", mode.strip(), is_secret=False, description=f"[{organization_id or 'global'}] AI Auto-Reply Mode")
+            if not prefix:
+                SystemSetting.set_val("AI_AUTO_REPLY_MODE", mode.strip(), is_secret=False)
+
+        if system_prompt is not None:
+            SystemSetting.set_val(f"{prefix}AI_SYSTEM_PROMPT", system_prompt.strip(), is_secret=False, description=f"[{organization_id or 'global'}] AI Auto-Responder Custom System Prompt")
+            if not prefix:
+                SystemSetting.set_val("AI_SYSTEM_PROMPT", system_prompt.strip(), is_secret=False)
+
+        if cooldown_minutes is not None:
+            SystemSetting.set_val(f"{prefix}AI_COOLDOWN_MINUTES", str(cooldown_minutes), is_secret=False, description=f"[{organization_id or 'global'}] Debounce cooldown in minutes")
+            if not prefix:
+                SystemSetting.set_val("AI_COOLDOWN_MINUTES", str(cooldown_minutes), is_secret=False)
+
+        if confidence_threshold is not None:
+            SystemSetting.set_val(f"{prefix}AI_CONFIDENCE_THRESHOLD", str(confidence_threshold), is_secret=False, description=f"[{organization_id or 'global'}] Confidence threshold")
+            if not prefix:
+                SystemSetting.set_val("AI_CONFIDENCE_THRESHOLD", str(confidence_threshold), is_secret=False)
+
+        if auto_lead_capture is not None:
+            val = "true" if auto_lead_capture else "false"
+            SystemSetting.set_val(f"{prefix}AI_AUTO_LEAD_CAPTURE", val, is_secret=False, description=f"[{organization_id or 'global'}] Auto create CRM lead")
+            if not prefix:
+                SystemSetting.set_val("AI_AUTO_LEAD_CAPTURE", val, is_secret=False)
+
+        if fallback_greeting is not None:
+            SystemSetting.set_val(f"{prefix}AI_FALLBACK_GREETING", fallback_greeting.strip(), is_secret=False)
+            if not prefix:
+                SystemSetting.set_val("AI_FALLBACK_GREETING", fallback_greeting.strip(), is_secret=False)
+
+        return cls.get_auto_responder_config(organization_id=organization_id)
+
+    @classmethod
+    def is_auto_reply_enabled(cls, organization_id: Optional[str] = None) -> bool:
+        """Returns True if AI Auto-Responder is enabled for this organization."""
+        conf = cls.get_auto_responder_config(organization_id=organization_id)
+        return conf.get("enabled", False)
+
+    @classmethod
+    def generate_ai_auto_response(
+        cls,
+        organization_id: Optional[str],
+        message_body: str,
+        sender_name: Optional[str] = None,
+        sender_phone: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Analyzes an incoming message and generates a tailored AI auto-response draft."""
+        from nlp_engine import NLPEngine
+        engine = NLPEngine()
+
+        conf = cls.get_auto_responder_config(organization_id=organization_id)
+        mode = conf.get("mode", "smart_concierge")
+        custom_prompt = conf.get("system_prompt", "")
+
+        analysis = engine.parse(message_body)
+        intent = analysis.get("intent", "lead_inquiry")
+        urgency = analysis.get("urgency", 20)
+        lead_score = analysis.get("lead_score", 50)
+        route_dept = analysis.get("recommended_route") or analysis.get("route_department", "Sales")
+        entities = analysis.get("entities", {})
+
+        # Resolve organization brand name
+        org_name = "OpsFlow Cloud"
+        if organization_id and has_app_context():
+            org = db.session.get(Organization, organization_id)
+            if org and org.name:
+                org_name = org.name
+
+        # Mode-based adjustments
+        if mode == "sre_incident":
+            route_dept = "Priority Support" if urgency >= 50 else "Support"
+        elif mode == "lead_qualifier":
+            route_dept = "Sales"
+
+        base_draft = engine.generate_draft_response(
+            name=sender_name or "Valued Customer",
+            company=org_name,
+            intent=intent,
+            lead_score=lead_score,
+            route_department=route_dept,
+            message=message_body
+        )
+
+        final_reply = base_draft
+        if custom_prompt and len(custom_prompt.strip()) > 5:
+            if "disclaimer" in custom_prompt.lower() or "faq" in custom_prompt.lower():
+                final_reply = f"{final_reply}\n\n{custom_prompt.strip()}"
+            else:
+                final_reply = f"{final_reply}\n\n[Note: {custom_prompt.strip()}]"
+
+        return {
+            "reply_body": final_reply,
+            "intent": intent,
+            "urgency": urgency,
+            "lead_score": lead_score,
+            "route_department": route_dept,
+            "entities": entities,
+            "mode": mode,
+            "confidence": min(98, max(65, lead_score + (10 if intent != 'unknown' else 0)))
+        }
+
+    @classmethod
+    def handle_inbound_auto_response(
+        cls,
+        organization_id: Optional[str],
+        sender_phone: str,
+        message_body: str,
+        sender_name: Optional[str] = None,
+        message_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Handles automated AI response to an inbound message if enabled and not debounced."""
+        if not sender_phone or not message_body:
+            return None
+
+        # Ignore group messages and broadcast channels
+        if "@g.us" in str(sender_phone) or str(sender_phone).startswith("120363"):
+            return None
+
+        org_id = organization_id or "org-enterprise-default"
+
+        if not cls.is_auto_reply_enabled(organization_id=org_id):
+            return None
+
+        conf = cls.get_auto_responder_config(organization_id=org_id)
+        cooldown_mins = conf.get("cooldown_minutes", 5)
+
+        # Prevent duplicate reply storm / loop: Check if an outbound message was already sent to this phone recently
+        clean_phone = cls.format_phone_number(sender_phone)
+        if has_app_context() and cooldown_mins > 0:
+            cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=cooldown_mins)
+            recent_outbound = WhatsAppMessage.query.filter(
+                WhatsAppMessage.organization_id == org_id,
+                WhatsAppMessage.recipient.like(f"%{clean_phone[-8:]}%"),
+                WhatsAppMessage.direction == "outbound",
+                WhatsAppMessage.created_at >= cutoff
+            ).first()
+            if recent_outbound:
+                logger.info(f"AI Auto-Reply debounced for {clean_phone} (last outbound at {recent_outbound.created_at})")
+                return None
+
+        # Generate response
+        generated = cls.generate_ai_auto_response(
+            organization_id=org_id,
+            message_body=message_body,
+            sender_name=sender_name,
+            sender_phone=clean_phone
+        )
+        reply_body = generated["reply_body"]
+        intent = generated["intent"]
+        lead_score = generated["lead_score"]
+
+        # If auto_lead_capture is True and intent is lead_inquiry or score >= 50, ensure Lead exists in CRM
+        if conf.get("auto_lead_capture") and has_app_context() and (intent == "lead_inquiry" or lead_score >= 50):
+            try:
+                from models import Lead
+                existing_lead = Lead.query.filter(
+                    Lead.organization_id == org_id,
+                    Lead.phone.like(f"%{clean_phone[-9:]}%")
+                ).first()
+                if not existing_lead:
+                    new_lead = Lead(
+                        organization_id=org_id,
+                        name=sender_name or f"WhatsApp {clean_phone}",
+                        phone=clean_phone,
+                        company="",
+                        message=message_body[:500],
+                        intent=intent,
+                        urgency_score=generated.get("urgency", 0),
+                        lead_score=lead_score,
+                        route_department=generated.get("route_department", "Sales"),
+                        draft_response=reply_body
+                    )
+                    db.session.add(new_lead)
+                    db.session.commit()
+                    logger.info(f"Auto-captured CRM Lead for WhatsApp sender: {clean_phone}")
+            except Exception as lead_err:
+                logger.error(f"Failed to auto-capture CRM Lead: {lead_err}")
+
+        # Dispatch outbound message via WhatsAppService.send_message
+        try:
+            dispatch_res = cls.send_message(
+                organization_id=org_id,
+                to_phone=clean_phone,
+                message_text=reply_body
+            )
+            # Tag the newly recorded outbound message with AI metadata
+            outbound_record_id = dispatch_res.get("record_id") or dispatch_res.get("message_record_id")
+            msg_rec = None
+            if outbound_record_id and has_app_context():
+                msg_rec = db.session.get(WhatsAppMessage, outbound_record_id)
+            if not msg_rec and dispatch_res.get("whatsapp_message_id") and has_app_context():
+                msg_rec = WhatsAppMessage.query.filter_by(whatsapp_message_id=dispatch_res["whatsapp_message_id"]).first()
+
+            if msg_rec:
+                meta = {
+                    "is_ai_response": True,
+                    "ai_intent": intent,
+                    "lead_score": lead_score,
+                    "urgency": generated["urgency"],
+                    "confidence": generated["confidence"],
+                    "triggered_by_message_id": message_id
+                }
+                msg_rec.raw_payload_json = json.dumps(meta)
+                db.session.commit()
+
+            logger.info(f"AI Auto-Reply dispatched to {clean_phone} [Intent: {intent}, Score: {lead_score}]")
+            return {
+                "success": True,
+                "reply_body": reply_body,
+                "intent": intent,
+                "lead_score": lead_score,
+                "dispatch": dispatch_res
+            }
+        except Exception as dispatch_err:
+            logger.error(f"Failed to dispatch AI Auto-Reply to {clean_phone}: {dispatch_err}")
+            return None
 
     @classmethod
     def format_phone_number(cls, phone: str) -> str:
@@ -1078,6 +1364,18 @@ class WhatsAppService:
                 except Exception as eng_err:
                     logger.error(f"Engine event ingestion failed for synced WhatsApp message: {eng_err}")
 
+            # Trigger AI Auto-Responder if configured and active
+            try:
+                cls.handle_inbound_auto_response(
+                    organization_id=org_id,
+                    sender_phone=from_phone,
+                    message_body=body,
+                    sender_name=sender_name,
+                    message_id=msg_id
+                )
+            except Exception as auto_err:
+                logger.error(f"AI Auto-Responder error on synced message: {auto_err}")
+
             processed_count += 1
 
         return {
@@ -1163,6 +1461,18 @@ class WhatsAppService:
                         )
                     except Exception as eng_err:
                         logger.error(f"Engine event ingestion failed for polled WhatsApp message: {eng_err}")
+
+                # Trigger AI Auto-Responder if configured and active
+                try:
+                    cls.handle_inbound_auto_response(
+                        organization_id=org_id,
+                        sender_phone=msg.get("from_phone", "unknown"),
+                        message_body=msg.get("body", ""),
+                        sender_name=msg.get("sender_name", ""),
+                        message_id=msg_id
+                    )
+                except Exception as auto_err:
+                    logger.error(f"AI Auto-Responder error on polled message: {auto_err}")
 
                 processed_count += 1
 
@@ -1921,3 +2231,6 @@ class WhatsAppService:
             template_name=template_name,
             template_language=template_language
         )
+
+    send_text_message = send_message
+

@@ -262,6 +262,7 @@ function switchTab(tabId) {
     if (tabId === 'apikeys') loadApiKeys();
     if (tabId === 'team') loadTeamAndAudits();
     if (tabId === 'billing') loadBillingDashboard();
+    if (tabId === 'settings') loadAllSettings();
 }
 
 // ==========================================
@@ -4724,6 +4725,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                             ${isInbound && m.sender_name ? `<div class="wa-bubble-sender">${escapeHtml(m.sender_name)}</div>` : ''}
                             ${bodyHtml}
                             <div class="wa-bubble-footer">
+                                ${m.is_ai_response ? `<span class="wa-ai-badge" title="AI Auto-Reply [Intent: ${escapeHtml(m.ai_intent || 'auto')}]">🤖 AI Auto-Reply</span>` : ''}
                                 <span>${escapeHtml(timeStr)}</span>
                                 ${isOutbound ? `<span class="wa-ticks">${ticks}</span>` : ''}
                                 <button type="button" class="wa-msg-del-btn" onclick="deleteWhatsAppMsg('${m.id}')" title="Delete message">🗑️</button>
@@ -4862,6 +4864,7 @@ async function loadWhatsAppDashboard() {
             if (urlInput) urlInput.value = conf.meta_webhook_url || conf.webhook_url || '/api/v1/webhooks/whatsapp';
             if (greenUrlInput) greenUrlInput.value = conf.green_api_webhook_url || '/api/v1/webhooks/whatsapp/green-api';
             if (tokenInput) tokenInput.value = conf.verify_token;
+            updateWhatsAppHeaderAiBadge(conf.ai_auto_reply_enabled);
 
             if (activeProvider === 'green_api') {
                 if (idLabel) idLabel.textContent = 'Green-API Instance ID';
@@ -6051,5 +6054,314 @@ async function handlePracticalCheckoutSubmit(e) {
         }
     }
 }
+
+// ==========================================
+// ENTERPRISE MULTI-TENANT SETTINGS & AI AUTO-RESPONDER
+// ==========================================
+
+function updateWhatsAppHeaderAiBadge(enabled) {
+    const toggle = document.getElementById('waHeaderAiToggle');
+    const dot = document.getElementById('waHeaderAiDot');
+    const text = document.getElementById('waHeaderAiStatusText');
+    if (!toggle || !text) return;
+
+    if (enabled) {
+        toggle.classList.remove('disabled');
+        text.textContent = 'ON';
+        text.style.color = '#34d399';
+    } else {
+        toggle.classList.add('disabled');
+        text.textContent = 'OFF';
+        text.style.color = '#94a3b8';
+    }
+}
+
+async function toggleWhatsAppAiAutoResponder() {
+    try {
+        const confRes = await fetch('/api/v1/whatsapp/auto-responder');
+        if (!confRes.ok) return;
+        const conf = await confRes.json();
+        const nextState = !conf.enabled;
+
+        const saveRes = await fetch('/api/v1/whatsapp/auto-responder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: nextState })
+        });
+        if (saveRes.ok) {
+            updateWhatsAppHeaderAiBadge(nextState);
+            const masterState = document.getElementById('settingsAiMasterState');
+            const masterBadge = document.getElementById('settingsAiMasterBadge');
+            if (masterState) masterState.textContent = nextState ? 'ON' : 'OFF';
+            if (masterBadge) {
+                if (nextState) masterBadge.classList.remove('disabled');
+                else masterBadge.classList.add('disabled');
+            }
+            showToast(`AI Auto-Responder ${nextState ? 'Activated' : 'Paused'} for current workspace`, nextState ? 'success' : 'info');
+        }
+    } catch (err) {
+        console.error('Failed to toggle AI Auto-Responder:', err);
+    }
+}
+
+async function loadTenantSettings() {
+    try {
+        const org = state.currentOrg;
+        const orgId = org ? org.id : 'org-enterprise-default';
+        const orgName = org ? org.name : 'Acme Enterprise Global';
+        const plan = (org && org.plan_tier) ? org.plan_tier.toUpperCase() : 'ENTERPRISE';
+
+        const idEl = document.getElementById('settingsOrgId');
+        const nameEl = document.getElementById('settingsOrgName');
+        const planEl = document.getElementById('settingsOrgPlan');
+        const webhookEl = document.getElementById('settingsTenantWebhookUrl');
+        const selectEl = document.getElementById('settingsWorkspaceSelect');
+        const mapSelect = document.getElementById('mapSelectOrgId');
+
+        if (idEl) idEl.textContent = orgId;
+        if (nameEl) nameEl.textContent = orgName;
+        if (planEl) planEl.textContent = `${plan} (Active)`;
+        if (webhookEl) webhookEl.value = `${window.location.origin}/api/v1/webhooks/whatsapp?org_id=${orgId}`;
+
+        if (selectEl && state.organizations && state.organizations.length > 0) {
+            selectEl.innerHTML = state.organizations.map(o => `<option value="${escapeHtml(o.id)}" ${o.id === orgId ? 'selected' : ''}>${escapeHtml(o.name)}</option>`).join('');
+        }
+        if (mapSelect && state.organizations && state.organizations.length > 0) {
+            mapSelect.innerHTML = state.organizations.map(o => `<option value="${escapeHtml(o.id)}" ${o.id === orgId ? 'selected' : ''}>${escapeHtml(o.name)}</option>`).join('');
+        }
+    } catch (err) {
+        console.error('Failed to load tenant settings:', err);
+    }
+}
+
+async function loadAutoResponderSettings() {
+    try {
+        const res = await fetch('/api/v1/whatsapp/auto-responder');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const masterState = document.getElementById('settingsAiMasterState');
+        const masterBadge = document.getElementById('settingsAiMasterBadge');
+        const modeSelect = document.getElementById('arConfigMode');
+        const cooldownInput = document.getElementById('arConfigCooldown');
+        const thresholdInput = document.getElementById('arConfigThreshold');
+        const leadCaptureCheck = document.getElementById('arConfigLeadCapture');
+        const promptArea = document.getElementById('arConfigSystemPrompt');
+
+        if (masterState) masterState.textContent = data.enabled ? 'ON' : 'OFF';
+        if (masterBadge) {
+            if (data.enabled) masterBadge.classList.remove('disabled');
+            else masterBadge.classList.add('disabled');
+        }
+        if (modeSelect && data.mode) modeSelect.value = data.mode;
+        if (cooldownInput && typeof data.cooldown_minutes !== 'undefined') cooldownInput.value = data.cooldown_minutes;
+        if (thresholdInput && typeof data.confidence_threshold !== 'undefined') thresholdInput.value = data.confidence_threshold;
+        if (leadCaptureCheck) leadCaptureCheck.checked = Boolean(data.auto_lead_capture);
+        if (promptArea) promptArea.value = data.system_prompt || '';
+
+        updateWhatsAppHeaderAiBadge(data.enabled);
+    } catch (err) {
+        console.error('Failed to load Auto-Responder settings:', err);
+    }
+}
+
+async function toggleSettingsAutoResponder() {
+    await toggleWhatsAppAiAutoResponder();
+    await loadAutoResponderSettings();
+}
+
+async function handleSaveAutoResponderSettings(e) {
+    if (e) e.preventDefault();
+    const btn = document.getElementById('btnSaveAutoResponder');
+    if (btn) btn.disabled = true;
+
+    try {
+        const mode = document.getElementById('arConfigMode')?.value || 'smart_concierge';
+        const cooldown = parseInt(document.getElementById('arConfigCooldown')?.value, 10) || 5;
+        const threshold = parseInt(document.getElementById('arConfigThreshold')?.value, 10) || 60;
+        const autoLead = document.getElementById('arConfigLeadCapture')?.checked ?? true;
+        const prompt = document.getElementById('arConfigSystemPrompt')?.value || '';
+
+        const res = await fetch('/api/v1/whatsapp/auto-responder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mode: mode,
+                cooldown_minutes: cooldown,
+                confidence_threshold: threshold,
+                auto_lead_capture: autoLead,
+                system_prompt: prompt
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast('AI Auto-Responder settings saved successfully!', 'success');
+        } else {
+            showToast(data.error || 'Failed to save settings', 'error');
+        }
+    } catch (err) {
+        showToast(`Save failed: ${err.message}`, 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function runArSandboxSimulation() {
+    const name = document.getElementById('arSandboxName')?.value || 'Valued Customer';
+    const phone = document.getElementById('arSandboxPhone')?.value || '+923001234567';
+    const msg = document.getElementById('arSandboxMessage')?.value || '';
+    const status = document.getElementById('arSandboxStatus');
+    const outBox = document.getElementById('arSandboxOutput');
+
+    if (!msg.trim()) {
+        showToast('Please enter an inquiry message to simulate', 'error');
+        return;
+    }
+
+    if (status) status.textContent = 'Generating AI draft...';
+    try {
+        const res = await fetch('/api/v1/whatsapp/auto-responder/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: msg,
+                sender_name: name,
+                sender_phone: phone
+            })
+        });
+        const data = await res.json();
+        if (res.ok && data.preview) {
+            const prev = data.preview;
+            const intentPill = document.getElementById('arSandboxIntentPill');
+            const scorePill = document.getElementById('arSandboxScorePill');
+            const routePill = document.getElementById('arSandboxRoutePill');
+            const confPill = document.getElementById('arSandboxConfidencePill');
+            const replyPre = document.getElementById('arSandboxReplyText');
+
+            if (intentPill) intentPill.textContent = `Intent: ${prev.intent}`;
+            if (scorePill) scorePill.textContent = `Lead Score: ${prev.lead_score}/100`;
+            if (routePill) routePill.textContent = `Route: ${prev.route_department}`;
+            if (confPill) confPill.textContent = `Confidence: ${prev.confidence}%`;
+            if (replyPre) replyPre.textContent = prev.reply_body;
+
+            if (outBox) outBox.style.display = 'block';
+            if (status) status.textContent = '✓ Response synthesized';
+        } else {
+            showToast(data.error || 'Simulation failed', 'error');
+            if (status) status.textContent = 'Error';
+        }
+    } catch (err) {
+        showToast(`Simulation error: ${err.message}`, 'error');
+        if (status) status.textContent = 'Error';
+    }
+}
+
+async function loadWhatsAppInstanceMappings() {
+    const tbody = document.getElementById('settingsInstanceMappingsTbody');
+    if (!tbody) return;
+
+    try {
+        const res = await fetch('/api/v1/whatsapp/instances');
+        if (!res.ok) return;
+        const data = await res.json();
+        const mappings = data.mappings || {};
+        const entries = Object.entries(mappings);
+
+        if (entries.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" class="empty-cell">No instance mappings registered yet. Incoming messages route to default workspace.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = entries.map(([instId, orgId]) => `
+            <tr>
+                <td><code>${escapeHtml(instId)}</code></td>
+                <td><span class="glass-pill cyan">${escapeHtml(orgId)}</span></td>
+                <td><span class="status-pill green" style="font-size:10px;">Active Route</span></td>
+                <td>
+                    <button type="button" class="hud-btn danger small" onclick="deleteWhatsAppInstanceMapping('${escapeHtml(instId)}')">
+                        Unmap
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error('Failed to load instance mappings:', err);
+    }
+}
+
+async function handleMapInstanceForm(e) {
+    if (e) e.preventDefault();
+    const instId = document.getElementById('mapInputInstanceId')?.value?.trim();
+    const targetOrg = document.getElementById('mapSelectOrgId')?.value?.trim();
+    const prov = document.getElementById('mapSelectProvider')?.value || 'green_api';
+
+    if (!instId || !targetOrg) {
+        showToast('Instance ID and Target Workspace are required', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/v1/whatsapp/instances/map', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                instance_id: instId,
+                organization_id: targetOrg,
+                provider: prov
+            })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast(`Mapped Instance '${instId}' to '${targetOrg}'`, 'success');
+            const inp = document.getElementById('mapInputInstanceId');
+            if (inp) inp.value = '';
+            loadWhatsAppInstanceMappings();
+        } else {
+            showToast(data.error || 'Mapping failed', 'error');
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
+async function deleteWhatsAppInstanceMapping(instId) {
+    if (!confirm(`Are you sure you want to remove routing for instance '${instId}'?`)) return;
+    try {
+        const res = await fetch(`/api/v1/whatsapp/instances/map/${encodeURIComponent(instId)}`, {
+            method: 'DELETE'
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast(`Instance '${instId}' unmapped successfully`, 'info');
+            loadWhatsAppInstanceMappings();
+        } else {
+            showToast(data.error || 'Failed to unmap', 'error');
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
+function copySettingsTenantWebhookUrl() {
+    const input = document.getElementById('settingsTenantWebhookUrl');
+    if (!input) return;
+    navigator.clipboard.writeText(input.value).then(() => {
+        showToast('Tenant Webhook URL copied to clipboard!', 'success');
+    }).catch(() => {
+        input.select();
+        document.execCommand('copy');
+        showToast('Copied to clipboard!', 'success');
+    });
+}
+
+async function loadAllSettings() {
+    await Promise.allSettled([
+        loadTenantSettings(),
+        loadAutoResponderSettings(),
+        loadWhatsAppInstanceMappings()
+    ]);
+}
+
 
 

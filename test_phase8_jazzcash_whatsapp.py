@@ -20,6 +20,7 @@ from models import (
     User,
     JazzCashTransaction,
     WhatsAppMessage,
+    Lead,
 )
 from jazzcash_service import JazzCashService, PLAN_PRICING_PKR
 from whatsapp_service import WhatsAppService
@@ -494,8 +495,136 @@ class TestPhase8JazzCashWhatsApp(unittest.TestCase):
         self.assertTrue(del_res.get_json().get("success"))
         self.assertIsNone(WhatsAppService.resolve_organization_by_instance("7107888999"))
 
+    def test_ai_auto_responder_config_get_and_save(self):
+        """Verifies multi-tenant isolated AI Auto-Responder configuration."""
+        # Check defaults
+        conf = WhatsAppService.get_auto_responder_config(organization_id="org-pk-enterprise")
+        self.assertFalse(conf["enabled"])
+        self.assertEqual(conf["mode"], "smart_concierge")
+
+        # Save tenant configuration via API
+        save_res = self.client.post("/api/v1/whatsapp/auto-responder", json={
+            "enabled": True,
+            "mode": "smart_concierge",
+            "system_prompt": "We are OpsFlow Pakistan. 24/7 Enterprise SLAs.",
+            "cooldown_minutes": 10,
+            "confidence_threshold": 75,
+            "auto_lead_capture": True
+        })
+        self.assertEqual(save_res.status_code, 200)
+        data = save_res.get_json()
+        self.assertTrue(data.get("success"))
+        self.assertTrue(data["config"]["enabled"])
+        self.assertEqual(data["config"]["cooldown_minutes"], 10)
+
+        # Confirm via service
+        updated = WhatsAppService.get_auto_responder_config(organization_id="org-pk-enterprise")
+        self.assertTrue(updated["enabled"])
+        self.assertEqual(updated["system_prompt"], "We are OpsFlow Pakistan. 24/7 Enterprise SLAs.")
+        self.assertTrue(WhatsAppService.is_auto_reply_enabled(organization_id="org-pk-enterprise"))
+
+        # Verify another tenant is NOT affected (isolation)
+        tenant_b_conf = WhatsAppService.get_auto_responder_config(organization_id="org-other-tenant")
+        self.assertFalse(tenant_b_conf["enabled"])
+
+    def test_ai_auto_responder_preview_endpoint(self):
+        """Tests live sandbox preview generation for sales inquiries and critical incidents."""
+        # 1. Preview a high-intent sales inquiry
+        res_sales = self.client.post("/api/v1/whatsapp/auto-responder/preview", json={
+            "message": "Hi, I am interested in Enterprise SaaS pricing and scheduling a demo for 500 users.",
+            "sender_name": "Hamza Ali"
+        })
+        self.assertEqual(res_sales.status_code, 200)
+        prev_sales = res_sales.get_json()["preview"]
+        self.assertEqual(prev_sales["intent"], "lead_inquiry")
+        self.assertGreaterEqual(prev_sales["lead_score"], 60)
+        self.assertIn("Hamza Ali", prev_sales["reply_body"])
+        self.assertIn("discovery call", prev_sales["reply_body"].lower())
+
+        # 2. Preview a critical outage alert
+        res_crit = self.client.post("/api/v1/whatsapp/auto-responder/preview", json={
+            "message": "EMERGENCY: Production database cluster is down and returning 500 fatal errors!",
+            "sender_name": "SRE Lead"
+        })
+        self.assertEqual(res_crit.status_code, 200)
+        prev_crit = res_crit.get_json()["preview"]
+        self.assertEqual(prev_crit["intent"], "critical_incident")
+        self.assertGreaterEqual(prev_crit["urgency"], 70)
+        self.assertIn("critical incident", prev_crit["reply_body"].lower())
+
+    def test_ai_auto_responder_inbound_auto_reply_and_cooldown(self):
+        """Verifies automated dispatch when inbound message arrives and cooldown debounce."""
+        # Enable auto-responder for this tenant
+        WhatsAppService.save_auto_responder_config(
+            organization_id="org-pk-enterprise",
+            enabled=True,
+            cooldown_minutes=5,
+            auto_lead_capture=True
+        )
+
+        # Trigger inbound message simulation
+        result = WhatsAppService.handle_inbound_auto_response(
+            organization_id="org-pk-enterprise",
+            sender_phone="923001239999",
+            message_body="Can you provide pricing details for your automation workflows?",
+            sender_name="Kashif Khan",
+            message_id="wamid.test_inbound_ai_01"
+        )
+        self.assertIsNotNone(result)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["intent"], "lead_inquiry")
+
+        # Verify outbound message was created in database
+        outbound = WhatsAppMessage.query.filter_by(
+            organization_id="org-pk-enterprise",
+            direction="outbound"
+        ).order_by(WhatsAppMessage.created_at.desc()).first()
+        self.assertIsNotNone(outbound)
+        self.assertIn("Kashif Khan", outbound.body)
+
+        # Verify to_dict serialization includes AI metadata
+        msg_dict = outbound.to_dict()
+        self.assertTrue(msg_dict.get("is_ai_response"))
+        self.assertEqual(msg_dict.get("ai_intent"), "lead_inquiry")
+
+        # Test cooldown debounce: immediate second message from same phone should be debounced
+        debounced = WhatsAppService.handle_inbound_auto_response(
+            organization_id="org-pk-enterprise",
+            sender_phone="923001239999",
+            message_body="Also tell me about your SLA",
+            sender_name="Kashif Khan",
+            message_id="wamid.test_inbound_ai_02"
+        )
+        self.assertIsNone(debounced)
+
+    def test_ai_auto_responder_lead_capture(self):
+        """Verifies high-intent WhatsApp inquiries automatically create CRM leads."""
+        WhatsAppService.save_auto_responder_config(
+            organization_id="org-pk-enterprise",
+            enabled=True,
+            cooldown_minutes=0,
+            auto_lead_capture=True
+        )
+
+        WhatsAppService.handle_inbound_auto_response(
+            organization_id="org-pk-enterprise",
+            sender_phone="923337778888",
+            message_body="We need a custom enterprise quote for our software company, budget $50,000",
+            sender_name="CEO TechCorp"
+        )
+
+        lead = Lead.query.filter_by(
+            organization_id="org-pk-enterprise",
+            phone="923337778888"
+        ).first()
+        self.assertIsNotNone(lead)
+        self.assertEqual(lead.name, "CEO TechCorp")
+        self.assertGreaterEqual(lead.lead_score, 60)
+        self.assertEqual(lead.route_department, "Sales")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

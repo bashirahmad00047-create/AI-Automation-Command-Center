@@ -2484,6 +2484,18 @@ def whatsapp_webhook_ingress():
             except Exception as e:
                 logger.error(f"Error triggering engine for WhatsApp message {msg_id}: {e}")
 
+        # Trigger AI Auto-Responder if configured and active
+        try:
+            WhatsAppService.handle_inbound_auto_response(
+                organization_id=target_org.id,
+                sender_phone=msg.get("from_phone", "unknown"),
+                message_body=msg.get("body", ""),
+                sender_name=msg.get("sender_name", ""),
+                message_id=msg_id
+            )
+        except Exception as auto_err:
+            logger.error(f"AI Auto-Responder error in Meta webhook: {auto_err}")
+
         processed_count += 1
 
     return jsonify({"status": "ok", "provider": provider_name, "processed": processed_count}), 200
@@ -2573,6 +2585,18 @@ def green_api_webhook_ingress():
                     )
                 except Exception as e:
                     logger.error(f"Error triggering engine for Green-API message {msg_id}: {e}")
+
+            # Trigger AI Auto-Responder if configured and active
+            try:
+                WhatsAppService.handle_inbound_auto_response(
+                    organization_id=target_org_id,
+                    sender_phone=msg.get("from_phone", "unknown"),
+                    message_body=msg.get("body", ""),
+                    sender_name=msg.get("sender_name", ""),
+                    message_id=msg_id
+                )
+            except Exception as auto_err:
+                logger.error(f"AI Auto-Responder error in Green-API webhook: {auto_err}")
 
             processed_count += 1
         except Exception as item_err:
@@ -2823,6 +2847,8 @@ def get_whatsapp_config():
         "meta_configured": WhatsAppService.is_meta_configured(organization_id=org_id),
         "green_api_configured": WhatsAppService.is_green_api_configured(organization_id=org_id),
         "simulator_fallback_enabled": WhatsAppService.is_simulator_fallback_enabled(),
+        "ai_auto_reply_enabled": WhatsAppService.is_auto_reply_enabled(organization_id=org_id),
+        "auto_responder": WhatsAppService.get_auto_responder_config(organization_id=org_id),
         "timeout_seconds": 30,
         "phone_number_id": masked_phone_id,
         "business_account_id": conf.get("business_account_id") or "Not Configured",
@@ -2854,6 +2880,7 @@ def save_whatsapp_config():
     green_token = data.get("green_api_token_instance")
     green_host = data.get("green_api_host")
     provider = data.get("whatsapp_provider") or data.get("provider")
+    ai_auto_reply = data.get("ai_auto_reply_enabled")
 
     updated = WhatsAppService.save_config(
         organization_id=org_id,
@@ -2865,7 +2892,8 @@ def save_whatsapp_config():
         green_api_id_instance=green_id,
         green_api_token_instance=green_token,
         green_api_host=green_host,
-        whatsapp_provider=provider
+        whatsapp_provider=provider,
+        ai_auto_reply_enabled=ai_auto_reply
     )
     current_user = get_current_user()
     log_audit_event("whatsapp.config_updated", "system", "whatsapp", {
@@ -2957,6 +2985,88 @@ def delete_whatsapp_instance(instance_id: str):
         "message": f"Instance mapping for '{instance_id}' removed.",
         "instance_id": instance_id,
         "deleted": deleted
+    }), 200
+
+
+@api_v1.route("/whatsapp/auto-responder", methods=["GET"])
+@require_auth
+def get_whatsapp_auto_responder():
+    """Returns AI Auto-Responder settings for the current workspace."""
+    org = get_current_org()
+    org_id = org.id if org else None
+    config = WhatsAppService.get_auto_responder_config(organization_id=org_id)
+    return jsonify(config), 200
+
+
+@api_v1.route("/whatsapp/auto-responder", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+def save_whatsapp_auto_responder():
+    """Updates AI Auto-Responder configuration for the current workspace."""
+    org = get_current_org()
+    org_id = org.id if org else None
+    data = request.get_json(silent=True) or {}
+
+    enabled = data.get("enabled")
+    if enabled is None and "ai_auto_reply_enabled" in data:
+        enabled = data.get("ai_auto_reply_enabled")
+
+    mode = data.get("mode")
+    system_prompt = data.get("system_prompt")
+    cooldown = data.get("cooldown_minutes")
+    threshold = data.get("confidence_threshold")
+    auto_lead = data.get("auto_lead_capture")
+    greeting = data.get("fallback_greeting")
+
+    updated = WhatsAppService.save_auto_responder_config(
+        organization_id=org_id,
+        enabled=enabled,
+        mode=mode,
+        system_prompt=system_prompt,
+        cooldown_minutes=cooldown,
+        confidence_threshold=threshold,
+        auto_lead_capture=auto_lead,
+        fallback_greeting=greeting
+    )
+
+    current_user = get_current_user()
+    log_audit_event("whatsapp.auto_responder_updated", "system", "auto_responder", {
+        "user_id": current_user.id if current_user else "admin",
+        "organization_id": org_id,
+        "enabled": updated.get("enabled")
+    })
+
+    return jsonify({
+        "success": True,
+        "message": "AI Auto-Responder configuration updated successfully.",
+        "config": updated
+    }), 200
+
+
+@api_v1.route("/whatsapp/auto-responder/preview", methods=["POST"])
+@require_auth
+def preview_whatsapp_auto_responder():
+    """Generates a sandbox preview of how the AI Auto-Responder would respond to an inbound message."""
+    org = get_current_org()
+    org_id = org.id if org else None
+    data = request.get_json(silent=True) or {}
+    message_text = data.get("message") or data.get("text") or ""
+    sender_name = data.get("sender_name") or "Sandbox Customer"
+    sender_phone = data.get("sender_phone") or "+923001234567"
+
+    if not message_text.strip():
+        return jsonify({"error": "'message' is required for AI preview.", "code": "VALIDATION_ERROR"}), 400
+
+    preview = WhatsAppService.generate_ai_auto_response(
+        organization_id=org_id,
+        message_body=message_text,
+        sender_name=sender_name,
+        sender_phone=sender_phone
+    )
+
+    return jsonify({
+        "success": True,
+        "preview": preview
     }), 200
 
 
