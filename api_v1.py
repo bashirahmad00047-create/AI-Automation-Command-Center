@@ -2545,10 +2545,25 @@ def green_api_webhook_ingress():
 
 @api_v1.route("/whatsapp/poll", methods=["GET", "POST"])
 def whatsapp_poll_messages():
-    """Fetches inbound messages from Green-API receive queue without requiring public webhook URLs."""
+    """Fetches inbound messages from Green-API receive queue and message journal."""
     org_id = request.args.get("org_id")
     batch_size = min(int(request.args.get("batch", 15)), 50)
-    result = WhatsAppService.poll_and_process_incoming_notifications(organization_id=org_id, max_batch=batch_size)
+    sync_hist = request.args.get("sync_history", "true").lower() in ("true", "1", "yes")
+    result = WhatsAppService.poll_and_process_incoming_notifications(
+        organization_id=org_id,
+        max_batch=batch_size,
+        sync_incoming_history=sync_hist
+    )
+    return jsonify(result), 200
+
+
+@api_v1.route("/whatsapp/sync-messages", methods=["GET", "POST"])
+def whatsapp_sync_recent_messages():
+    """Synchronizes recent incoming WhatsApp messages from lastIncomingMessages journal."""
+    org_id = request.args.get("org_id")
+    mins = int(request.args.get("minutes", 1440))
+    limit = min(int(request.args.get("limit", 50)), 100)
+    result = WhatsAppService.sync_last_incoming_messages(organization_id=org_id, minutes=mins, max_messages=limit)
     return jsonify(result), 200
 
 

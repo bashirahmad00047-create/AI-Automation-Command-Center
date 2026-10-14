@@ -840,15 +840,139 @@ class WhatsAppService:
             return False
 
     @classmethod
+    def fetch_last_incoming_messages(cls, minutes: int = 1440) -> List[Dict[str, Any]]:
+        """Fetches the latest incoming messages directly from Green-API's message journal."""
+        conf = cls.get_config()
+        id_inst = conf.get("green_api_id_instance")
+        tok_inst = conf.get("green_api_token_instance")
+        host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
+        if not id_inst or not tok_inst:
+            return []
+
+        url = f"{host}/waInstance{id_inst}/lastIncomingMessages/{tok_inst}?minutes={minutes}"
+        timeouts = cls.get_timeout_tuple()
+        try:
+            with cls.get_http_session(retries=1) as session:
+                resp = session.get(url, timeout=timeouts)
+                if resp.status_code == 200 and resp.text and resp.text.strip():
+                    data = resp.json()
+                    if isinstance(data, list):
+                        return data
+        except Exception as e:
+            logger.debug(f"Green-API lastIncomingMessages error: {e}")
+        return []
+
+    @classmethod
+    def sync_last_incoming_messages(
+        cls,
+        organization_id: Optional[str] = None,
+        minutes: int = 1440,
+        max_messages: int = 50
+    ) -> Dict[str, Any]:
+        """Synchronizes recent incoming messages into the database and triggers engine rules.
+
+        Guarantees idempotency via is_duplicate_message so already-recorded messages are ignored.
+        """
+        org_id = organization_id or "org-enterprise-default"
+        raw_items = cls.fetch_last_incoming_messages(minutes=minutes)
+        processed_count = 0
+        newly_ingested: List[Dict[str, Any]] = []
+
+        engine = None
+        if has_app_context():
+            engine = current_app.config.get("AUTOMATION_ENGINE")
+
+        for item in raw_items[:max_messages]:
+            msg_id = item.get("idMessage")
+            if not msg_id:
+                continue
+
+            if cls.is_duplicate_message(msg_id):
+                continue
+
+            sender_id = item.get("senderId") or item.get("chatId", "")
+            from_phone = sender_id.replace("@c.us", "").replace("@g.us", "")
+            sender_name = item.get("senderName") or item.get("senderContactName") or from_phone or "WhatsApp Contact"
+            t_msg = item.get("typeMessage", "textMessage")
+
+            body = ""
+            if t_msg == "textMessage":
+                body = item.get("textMessage", "")
+            elif t_msg == "extendedTextMessage":
+                body = item.get("extendedTextMessageData", {}).get("text", "") or item.get("textMessage", "")
+            elif t_msg == "reactionMessage":
+                body = item.get("extendedTextMessageData", {}).get("text", "[Reaction]")
+            elif t_msg in ("imageMessage", "documentMessage", "audioMessage", "videoMessage"):
+                cap = item.get("caption", "")
+                body = f"[{t_msg}] {cap}".strip()
+            else:
+                body = item.get("textMessage") or f"[{t_msg}]"
+
+            record = cls.record_message(
+                organization_id=org_id,
+                sender=from_phone,
+                recipient=item.get("chatId", "system"),
+                direction="inbound",
+                body=body,
+                status="received",
+                whatsapp_message_id=msg_id,
+                message_type=t_msg,
+                raw_payload=item
+            )
+
+            newly_ingested.append({
+                "message_id": msg_id,
+                "from": from_phone,
+                "sender_name": sender_name,
+                "body": body,
+                "record_id": record.id if record else None
+            })
+
+            if engine:
+                try:
+                    event_data = {
+                        "from": from_phone,
+                        "sender_name": sender_name,
+                        "message": body,
+                        "text": body,
+                        "whatsapp_message_id": msg_id,
+                        "recipient_phone_id": item.get("chatId", ""),
+                        "direction": "inbound",
+                        "record_id": record.id if record else None,
+                        "provider": "green_api",
+                        "synced_from_history": True
+                    }
+                    engine.ingest_event(
+                        event_name="whatsapp.message",
+                        payload=event_data,
+                        source="green_api_history_sync",
+                        dry_run=False,
+                        organization_id=org_id
+                    )
+                except Exception as eng_err:
+                    logger.error(f"Engine event ingestion failed for synced WhatsApp message: {eng_err}")
+
+            processed_count += 1
+
+        return {
+            "success": True,
+            "total_fetched": len(raw_items),
+            "new_messages_ingested": processed_count,
+            "messages": newly_ingested
+        }
+
+    @classmethod
     def poll_and_process_incoming_notifications(
         cls,
         organization_id: Optional[str] = None,
-        max_batch: int = 15
+        max_batch: int = 15,
+        sync_incoming_history: bool = True
     ) -> Dict[str, Any]:
-        """Polls Green-API queue for inbound messages without requiring public webhook URLs.
+        """Polls Green-API queue and message journal for inbound messages without requiring public webhook URLs.
 
         Fetches each notification, persists inbound messages to the database ledger,
         triggers automation engine events, and deletes the acknowledged notification.
+        Also syncs latest incoming messages from lastIncomingMessages journal.
         """
         org_id = organization_id or "org-enterprise-default"
         processed_count = 0
@@ -919,9 +1043,19 @@ class WhatsAppService:
             # Acknowledge and delete notification from Green-API queue
             cls.delete_green_api_notification(receipt_id)
 
+        # Also synchronize lastIncomingMessages journal to ensure zero missed messages
+        history_synced = 0
+        if sync_incoming_history:
+            sync_res = cls.sync_last_incoming_messages(organization_id=org_id, minutes=1440, max_messages=max_batch)
+            history_synced = sync_res.get("new_messages_ingested", 0)
+            messages_received.extend(sync_res.get("messages", []))
+            processed_count += history_synced
+
         return {
             "success": True,
             "processed": processed_count,
+            "notifications_processed": (processed_count - history_synced),
+            "history_synced": history_synced,
             "messages": messages_received,
             "queue_empty": (processed_count < max_batch)
         }
