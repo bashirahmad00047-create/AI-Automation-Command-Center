@@ -139,3 +139,8 @@ def is_provider_allowed(plan_tier: str, provider_name: str) -> bool:
     """Checks if an AI provider is allowed in the given plan tier."""
     plan = get_plan(plan_tier)
     return provider_name in plan.get("allowed_ai_providers", [])
+
+
+# 2-Day Free Trial Configuration
+TRIAL_DURATION_HOURS = 48
+

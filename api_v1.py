@@ -344,6 +344,7 @@ def auth_login():
     session.permanent = True
     session.pop("logged_out", None)
     session["user_id"] = user.id
+    session["user_email"] = user.email
     if org_id:
         session["active_org_id"] = org_id
         session["org_id"] = org_id
