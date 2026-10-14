@@ -3221,6 +3221,8 @@ function switchAuthTab(tab) {
     const tabRegister = document.getElementById('authTabRegister');
     const tabForgot = document.getElementById('authTabForgot');
     const title = document.getElementById('authModalTitle');
+    const subtitle = document.getElementById('authModalSubtitle');
+    const tabsContainer = document.getElementById('authTabsContainer');
 
     // Hide error and success banners
     ['loginErrorMessage', 'registerErrorMessage', 'forgotErrorMessage', 'forgotSuccessMessage', 'forgotDevHelper', 'resetErrorMessage', 'resetSuccessMessage'].forEach(id => {
@@ -3232,7 +3234,8 @@ function switchAuthTab(tab) {
     [tabLogin, tabRegister, tabForgot].forEach(t => {
         if (t) {
             t.classList.remove('active');
-            t.style.color = 'var(--text-muted, #888)';
+            t.style.color = 'var(--text-muted, #94a3b8)';
+            t.style.borderBottom = '2px solid transparent';
         }
     });
 
@@ -3242,33 +3245,47 @@ function switchAuthTab(tab) {
     });
 
     if (tab === 'register') {
+        if (tabsContainer) tabsContainer.style.display = 'flex';
         if (registerForm) registerForm.style.display = 'block';
         if (tabRegister) {
             tabRegister.classList.add('active');
             tabRegister.style.color = 'var(--cyan-glow, #00f0ff)';
+            tabRegister.style.borderBottom = '2px solid var(--cyan-glow, #00f0ff)';
         }
         if (title) title.textContent = 'Create New Workspace';
+        if (subtitle) subtitle.textContent = 'Launch your dedicated tenant instance';
     } else if (tab === 'forgot') {
+        if (tabsContainer) tabsContainer.style.display = 'none';
         if (forgotForm) forgotForm.style.display = 'block';
-        if (tabForgot) {
-            tabForgot.classList.add('active');
-            tabForgot.style.color = 'var(--cyan-glow, #00f0ff)';
-        }
-        if (title) title.textContent = 'Forgot Password Recovery';
+        if (title) title.textContent = 'Reset Password';
+        if (subtitle) subtitle.textContent = 'Request a secure single-use recovery token';
     } else if (tab === 'reset') {
+        if (tabsContainer) tabsContainer.style.display = 'none';
         if (resetForm) resetForm.style.display = 'block';
-        if (tabForgot) {
-            tabForgot.classList.add('active');
-            tabForgot.style.color = 'var(--cyan-glow, #00f0ff)';
-        }
-        if (title) title.textContent = 'Configure New Password';
+        if (title) title.textContent = 'Set New Password';
+        if (subtitle) subtitle.textContent = 'Enter verification token & choose password';
     } else {
+        if (tabsContainer) tabsContainer.style.display = 'flex';
         if (loginForm) loginForm.style.display = 'block';
         if (tabLogin) {
             tabLogin.classList.add('active');
             tabLogin.style.color = 'var(--cyan-glow, #00f0ff)';
+            tabLogin.style.borderBottom = '2px solid var(--cyan-glow, #00f0ff)';
         }
         if (title) title.textContent = 'OpsFlow Cloud Authentication';
+        if (subtitle) subtitle.textContent = 'Access enterprise automation workspace';
+    }
+}
+
+function togglePasswordVisibility(inputId, btn) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    if (input.type === 'password') {
+        input.type = 'text';
+        if (btn) btn.textContent = '🙈';
+    } else {
+        input.type = 'password';
+        if (btn) btn.textContent = '👁️';
     }
 }
 
@@ -3303,8 +3320,9 @@ async function handleForgotPassword(e) {
                 succBox.textContent = data.message || 'If an account exists with that email, a password reset link has been dispatched.';
                 succBox.style.display = 'block';
             }
-            if (data.dev_reset_token) {
-                devResetTokenCache = data.dev_reset_token;
+            const resetToken = data.dev_reset_token || data.dev_token;
+            if (resetToken) {
+                devResetTokenCache = resetToken;
                 if (devHelper) devHelper.style.display = 'block';
             }
         } else {
@@ -3331,6 +3349,8 @@ function applyDevResetToken() {
     switchAuthTab('reset');
     const tokenInput = document.getElementById('resetTokenInput');
     if (tokenInput) tokenInput.value = devResetTokenCache;
+    const newPass = document.getElementById('resetNewPassword');
+    if (newPass) setTimeout(() => newPass.focus(), 150);
 }
 
 async function handleResetPassword(e) {
@@ -3500,13 +3520,16 @@ async function handleLogin(e) {
 
 async function handleRegister(e) {
     if (e) e.preventDefault();
-    const full_name = document.getElementById('regFullName').value.trim();
-    const email = document.getElementById('regEmail').value.trim();
-    const password = document.getElementById('regPassword').value;
-    const organization_name = document.getElementById('regOrgName').value.trim();
-    const organization_slug = document.getElementById('regOrgSlug').value.trim();
-    const plan_tier = document.getElementById('regPlanTier').value;
-    const starter_blueprints = document.getElementById('regStarterBlueprints').checked;
+    const full_name = (document.getElementById('regFullName')?.value || '').trim();
+    const email = (document.getElementById('regEmail')?.value || '').trim();
+    const password = document.getElementById('regPassword')?.value || '';
+    const organization_name = (document.getElementById('regOrgName')?.value || '').trim();
+    let organization_slug = (document.getElementById('regOrgSlug')?.value || '').trim();
+    if (!organization_slug && organization_name) {
+        organization_slug = organization_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    }
+    const plan_tier = document.getElementById('regPlanTier')?.value || 'free';
+    const starter_blueprints = document.getElementById('regStarterBlueprints') ? document.getElementById('regStarterBlueprints').checked : true;
     const errBox = document.getElementById('registerErrorMessage');
     const submitBtn = document.getElementById('registerSubmitBtn');
 

@@ -2790,24 +2790,28 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
 
     <!-- AUTHENTICATION MODAL (LOGIN & WORKSPACE REGISTRATION) -->
     <div class="hud-modal-overlay" id="authModal" style="display:none;">
-        <div class="hud-modal" style="max-width: 540px;">
-            <div class="modal-header">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 20px;">⚡</span>
-                    <h3 id="authModalTitle">OpsFlow Cloud Authentication</h3>
+        <div class="hud-modal glass-panel" style="max-width: 520px; width: 100%; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 30px rgba(0, 240, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.12); overflow: hidden; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);">
+            <div class="modal-header" style="padding: 20px 24px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.02); display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(59, 130, 246, 0.2)); border: 1px solid rgba(0, 240, 255, 0.4); display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 0 12px rgba(0, 240, 255, 0.25);">⚡</div>
+                    <div>
+                        <h3 id="authModalTitle" style="margin: 0; font-size: 17px; font-weight: 700; color: #f8fafc; letter-spacing: -0.01em;">OpsFlow Cloud Authentication</h3>
+                        <p id="authModalSubtitle" style="margin: 2px 0 0 0; font-size: 12px; color: var(--text-dim, #94a3b8);">Access enterprise automation workspace</p>
+                    </div>
                 </div>
-                <button class="close-btn" id="authModalCloseBtn" onclick="closeAuthModal()" aria-label="Close" title="Close">&times;</button>
+                <button class="close-btn" id="authModalCloseBtn" onclick="closeAuthModal()" aria-label="Close" title="Close" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); width: 32px; height: 32px; border-radius: 8px; color: #cbd5e1; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 18px; transition: all 0.2s;">&times;</button>
             </div>
 
-            <!-- Auth Tabs -->
-            <div style="display: flex; border-bottom: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.2);">
-                <button type="button" class="hud-tab active" id="authTabLogin" onclick="switchAuthTab('login')" style="flex: 1; padding: 12px; border: none; background: transparent; color: var(--cyan-glow, #00f0ff); cursor: pointer; font-weight: 600; text-align: center;">
+            <!-- Auth Tabs (Clean 2-tab design, Forgot/Reset handled in-flow) -->
+            <div id="authTabsContainer" style="display: flex; border-bottom: 1px solid rgba(255, 255, 255, 0.08); background: rgba(0,0,0,0.25);">
+                <button type="button" class="hud-tab active" id="authTabLogin" onclick="switchAuthTab('login')" style="flex: 1; padding: 13px 16px; border: none; background: transparent; color: var(--cyan-glow, #00f0ff); cursor: pointer; font-weight: 600; font-size: 13px; text-align: center; border-bottom: 2px solid var(--cyan-glow, #00f0ff); transition: all 0.2s;">
                     🔑 Sign In
                 </button>
-                <button type="button" class="hud-tab" id="authTabRegister" onclick="switchAuthTab('register')" style="flex: 1; padding: 12px; border: none; background: transparent; color: var(--text-muted, #888); cursor: pointer; font-weight: 600; text-align: center;">
+                <button type="button" class="hud-tab" id="authTabRegister" onclick="switchAuthTab('register')" style="flex: 1; padding: 13px 16px; border: none; background: transparent; color: var(--text-muted, #94a3b8); cursor: pointer; font-weight: 600; font-size: 13px; text-align: center; border-bottom: 2px solid transparent; transition: all 0.2s;">
                     🏢 Create Workspace
                 </button>
-                <button type="button" class="hud-tab" id="authTabForgot" onclick="switchAuthTab('forgot')" style="flex: 1; padding: 12px; border: none; background: transparent; color: var(--text-muted, #888); cursor: pointer; font-weight: 600; text-align: center;">
+                <!-- Hidden compatibility anchor so existing JS references don't break -->
+                <button type="button" class="hud-tab" id="authTabForgot" onclick="switchAuthTab('forgot')" style="display: none;">
                     🔄 Reset Password
                 </button>
             </div>
@@ -2816,121 +2820,177 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 <!-- SIGN IN FORM -->
                 <form id="loginForm" onsubmit="handleLogin(event)">
                     <div class="form-group" style="margin-bottom: 16px;">
-                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Work Email *</label>
-                        <input type="email" id="loginEmail" class="hud-input" required placeholder="admin@opsflow.io" style="width: 100%;">
+                        <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 7px; font-size: 12.5px; font-weight: 600; color: #e2e8f0;">
+                            <span>✉️</span> Work Email Address <span style="color: #f87171;">*</span>
+                        </label>
+                        <input type="email" id="loginEmail" class="hud-input glass-input" required placeholder="admin@opsflow.io" style="width: 100%; border-radius: 8px; font-size: 13px; padding: 10px 14px;">
                     </div>
-                    <div class="form-group" style="margin-bottom: 18px;">
-                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Password *</label>
-                        <input type="password" id="loginPassword" class="hud-input" required placeholder="••••••••••••" style="width: 100%;">
+                    
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 7px; font-size: 12.5px; font-weight: 600; color: #e2e8f0;">
+                            <span>🔒</span> Password <span style="color: #f87171;">*</span>
+                        </label>
+                        <div style="position: relative; display: flex; align-items: center;">
+                            <input type="password" id="loginPassword" class="hud-input glass-input" required placeholder="••••••••••••" style="width: 100%; border-radius: 8px; font-size: 13px; padding: 10px 42px 10px 14px;">
+                            <button type="button" onclick="togglePasswordVisibility('loginPassword', this)" title="Toggle password visibility" style="position: absolute; right: 10px; background: transparent; border: none; cursor: pointer; font-size: 15px; color: #94a3b8; padding: 4px; display: flex; align-items: center; justify-content: center; transition: color 0.2s;" aria-label="Toggle password">👁️</button>
+                        </div>
                     </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                        <a href="javascript:void(0)" onclick="switchAuthTab('forgot')" style="color: var(--cyan-glow, #00f0ff); font-size: 12px; font-weight: 500;">Forgot password?</a>
-                        <a href="javascript:void(0)" onclick="fillDemoCredentials()" style="color: var(--text-dim, #888); font-size: 12px; text-decoration: underline;">Use Demo Credentials</a>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 12px;">
+                        <a href="javascript:void(0)" onclick="switchAuthTab('forgot')" style="color: var(--cyan-glow, #00f0ff); font-weight: 500; text-decoration: none; transition: opacity 0.2s;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Forgot password?</a>
+                        <button type="button" onclick="fillDemoCredentials()" style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 6px; background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.25); color: var(--cyan-glow, #00f0ff); cursor: pointer; transition: all 0.2s;">
+                            <span>⚡</span> Use Demo Admin
+                        </button>
                     </div>
-                    <div style="text-align: right; margin-bottom: 16px;">
-                        <a href="javascript:void(0)" onclick="switchAuthTab('register')" style="color: var(--text-dim, #888); font-size: 12px;">New here? Create Workspace &rarr;</a>
+
+                    <div id="loginErrorMessage" style="display:none; color: #f87171; font-size: 12.5px; margin-bottom: 16px; padding: 10px 14px; background: rgba(239,68,68,0.12); border-radius: 8px; border: 1px solid rgba(239,68,68,0.25); border-left: 3px solid #ef4444;"></div>
+
+                    <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+                        <button type="button" class="hud-btn outline" onclick="closeAuthModal()" style="width: 28%; padding: 11px; border-radius: 8px; font-weight: 600; font-size: 13px;">Cancel</button>
+                        <button type="submit" class="hud-btn primary" id="loginSubmitBtn" style="flex: 1; padding: 11px; border-radius: 8px; font-weight: 600; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                            <span>Sign In to Workspace</span> <span>&rarr;</span>
+                        </button>
                     </div>
-                    <div id="loginErrorMessage" style="display:none; color: #ef4444; font-size: 13px; margin-bottom: 14px; padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 6px; border-left: 3px solid #ef4444;"></div>
-                    <div style="display: flex; gap: 10px;">
-                        <button type="button" class="hud-btn" onclick="closeAuthModal()" style="width: 30%; padding: 12px; font-weight: 600; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-dim, #888);">Cancel</button>
-                        <button type="submit" class="hud-btn primary" id="loginSubmitBtn" style="flex: 1; padding: 12px; font-weight: 600;">Sign In to Workspace</button>
+
+                    <div style="text-align: center; font-size: 12.5px; color: var(--text-dim, #94a3b8); border-top: 1px solid rgba(255, 255, 255, 0.06); padding-top: 14px;">
+                        Don't have a workspace? 
+                        <a href="javascript:void(0)" onclick="switchAuthTab('register')" style="color: var(--cyan-glow, #00f0ff); font-weight: 600; text-decoration: none; margin-left: 4px;">Create Workspace &rarr;</a>
                     </div>
                 </form>
 
-                <!-- REGISTER / CREATE WORKSPACE FORM -->
+                <!-- REGISTER / CREATE WORKSPACE FORM (Streamlined Minimalist UI) -->
                 <form id="registerForm" onsubmit="handleRegister(event)" style="display:none;">
                     <div class="form-group" style="margin-bottom: 14px;">
-                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Full Name *</label>
-                        <input type="text" id="regFullName" class="hud-input" required placeholder="Alex Mercer" style="width: 100%;">
-                    </div>
-                    <div class="form-group" style="margin-bottom: 14px;">
-                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Work Email Address *</label>
-                        <input type="email" id="regEmail" class="hud-input" required placeholder="alex@quantumcorp.com" style="width: 100%;">
-                    </div>
-                    <div class="form-group" style="margin-bottom: 14px;">
-                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Secure Password * (min 8 chars)</label>
-                        <input type="password" id="regPassword" class="hud-input" required minlength="8" placeholder="••••••••••••" style="width: 100%;">
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 6px;">
-                        <div class="form-group">
-                            <label style="display:block; margin-bottom: 6px; font-weight: 500;">Workspace / Org Name *</label>
-                            <input type="text" id="regOrgName" class="hud-input" required placeholder="Quantum Dynamics" oninput="autoPopulateSlug(this.value)" style="width: 100%;">
-                        </div>
-                        <div class="form-group">
-                            <label style="display:block; margin-bottom: 6px; font-weight: 500;">Workspace Slug *</label>
-                            <input type="text" id="regOrgSlug" class="hud-input" required placeholder="quantum-dynamics" oninput="handleSlugInput(this.value)" style="width: 100%;">
-                        </div>
-                    </div>
-                    <div id="slugFeedback" style="font-size: 11px; margin-bottom: 14px; min-height: 18px; color: var(--text-dim, #888);"></div>
-
-                    <div class="form-group" style="margin-bottom: 14px;">
-                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Select Initial Plan Tier</label>
-                        <select id="regPlanTier" class="hud-input" style="width: 100%;">
-                            <option value="free" selected>Free Community ($0/mo - 3 Rules, 1k Events, 1 Seat)</option>
-                            <option value="starter">Starter ($29/mo - 10 Rules, 5k Events, 2 Seats)</option>
-                            <option value="pro">Professional ($99/mo - 50 Rules, 200k Events, 10 Seats, Gemini AI)</option>
-                            <option value="enterprise">Enterprise ($499/mo - 250 Rules, 1M Events, 100 Seats, Dedicated SLA)</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group" style="margin-bottom: 18px;">
-                        <label style="display:flex; align-items:center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--text-secondary, #aaa);">
-                            <input type="checkbox" id="regStarterBlueprints" checked style="cursor: pointer;">
-                            Deploy turnkey starter automation blueprints (Incident Dispatcher, CRM Enricher, DevOps Monitor)
+                        <label style="display:flex; align-items:center; gap: 6px; margin-bottom: 6px; font-size: 12.5px; font-weight: 600; color: #e2e8f0;">
+                            <span>👤</span> Full Name <span style="color: #f87171;">*</span>
                         </label>
+                        <input type="text" id="regFullName" class="hud-input glass-input" required placeholder="Alex Mercer" style="width: 100%; border-radius: 8px; font-size: 13px; padding: 10px 14px;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display:flex; align-items:center; gap: 6px; margin-bottom: 6px; font-size: 12.5px; font-weight: 600; color: #e2e8f0;">
+                            <span>✉️</span> Work Email Address <span style="color: #f87171;">*</span>
+                        </label>
+                        <input type="email" id="regEmail" class="hud-input glass-input" required placeholder="alex@quantumcorp.com" style="width: 100%; border-radius: 8px; font-size: 13px; padding: 10px 14px;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display:flex; align-items:center; gap: 6px; margin-bottom: 6px; font-size: 12.5px; font-weight: 600; color: #e2e8f0;">
+                            <span>🔒</span> Secure Password <span style="color: #f87171;">*</span> (min 8 chars)
+                        </label>
+                        <div style="position: relative; display: flex; align-items: center;">
+                            <input type="password" id="regPassword" class="hud-input glass-input" required minlength="8" placeholder="••••••••••••" style="width: 100%; border-radius: 8px; font-size: 13px; padding: 10px 42px 10px 14px;">
+                            <button type="button" onclick="togglePasswordVisibility('regPassword', this)" title="Toggle password visibility" style="position: absolute; right: 10px; background: transparent; border: none; cursor: pointer; font-size: 15px; color: #94a3b8; padding: 4px; display: flex; align-items: center; justify-content: center;" aria-label="Toggle password">👁️</button>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 18px;">
+                        <label style="display:flex; align-items:center; gap: 6px; margin-bottom: 6px; font-size: 12.5px; font-weight: 600; color: #e2e8f0;">
+                            <span>🏢</span> Workspace Name <span style="color: #f87171;">*</span>
+                        </label>
+                        <input type="text" id="regOrgName" class="hud-input glass-input" required placeholder="Quantum Dynamics" oninput="autoPopulateSlug(this.value)" style="width: 100%; border-radius: 8px; font-size: 13px; padding: 10px 14px;">
                     </div>
 
-                    <div id="registerErrorMessage" style="display:none; color: #ef4444; font-size: 13px; margin-bottom: 14px; padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 6px; border-left: 3px solid #ef4444;"></div>
-                    <button type="submit" class="hud-btn primary" id="registerSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600;">Launch Workspace &amp; Begin Tour</button>
-                    <div style="text-align: center; margin-top: 14px;">
-                        <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color: var(--text-dim, #888); font-size: 12px;">Already have an account? Sign In &rarr;</a>
+                    <!-- Hidden compatibility defaults so API & existing JS handlers execute seamlessly -->
+                    <input type="hidden" id="regOrgSlug" value="">
+                    <input type="hidden" id="regPlanTier" value="free">
+                    <input type="checkbox" id="regStarterBlueprints" checked style="display:none;">
+                    <div id="slugFeedback" style="display:none;"></div>
+
+                    <div id="registerErrorMessage" style="display:none; color: #f87171; font-size: 12.5px; margin-bottom: 14px; padding: 10px 14px; background: rgba(239,68,68,0.12); border-radius: 8px; border: 1px solid rgba(239,68,68,0.25); border-left: 3px solid #ef4444;"></div>
+                    <button type="submit" class="hud-btn primary" id="registerSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600; font-size: 13px; border-radius: 8px;">Launch Workspace &amp; Begin Tour &rarr;</button>
+                    <div style="text-align: center; margin-top: 14px; font-size: 12.5px; color: var(--text-dim, #94a3b8);">
+                        Already have an account? 
+                        <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color: var(--cyan-glow, #00f0ff); font-weight: 600; text-decoration: none; margin-left: 4px;">Sign In &rarr;</a>
                     </div>
                 </form>
 
                 <!-- FORGOT PASSWORD FORM -->
                 <form id="forgotPasswordForm" onsubmit="handleForgotPassword(event)" style="display:none;">
-                    <p style="font-size: 13px; color: var(--text-secondary, #aaa); margin-bottom: 16px;">
-                        Enter your work email address. We will generate a secure, single-use password reset token with a 1-hour expiration window.
-                    </p>
+                    <div style="margin-bottom: 18px; padding: 12px 14px; background: rgba(0, 240, 255, 0.05); border: 1px solid rgba(0, 240, 255, 0.15); border-radius: 8px; display: flex; align-items: flex-start; gap: 10px;">
+                        <span style="font-size: 16px; margin-top: 1px;">🔐</span>
+                        <div style="font-size: 12.5px; color: var(--text-secondary, #cbd5e1); line-height: 1.5;">
+                            Enter your registered work email. We will generate a secure, single-use password reset token valid for 1 hour.
+                        </div>
+                    </div>
+
                     <div class="form-group" style="margin-bottom: 16px;">
-                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Work Email *</label>
-                        <input type="email" id="forgotEmail" class="hud-input" required placeholder="admin@opsflow.io" style="width: 100%;">
+                        <label style="display:flex; align-items:center; gap: 6px; margin-bottom: 7px; font-size: 12.5px; font-weight: 600; color: #e2e8f0;">
+                            <span>✉️</span> Work Email Address <span style="color: #f87171;">*</span>
+                        </label>
+                        <input type="email" id="forgotEmail" class="hud-input glass-input" required placeholder="admin@opsflow.io" style="width: 100%; border-radius: 8px; font-size: 13px; padding: 10px 14px;">
                     </div>
-                    <div id="forgotErrorMessage" style="display:none; color: #ef4444; font-size: 13px; margin-bottom: 14px; padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 6px; border-left: 3px solid #ef4444;"></div>
-                    <div id="forgotSuccessMessage" style="display:none; color: #10b981; font-size: 13px; margin-bottom: 14px; padding: 10px 12px; background: rgba(16,185,129,0.1); border-radius: 6px; border-left: 3px solid #10b981;"></div>
-                    <div id="forgotDevHelper" style="display:none; margin-bottom: 14px; padding: 10px; background: rgba(0,240,255,0.08); border-radius: 6px; border: 1px dashed var(--cyan-glow, #00f0ff);">
-                        <div style="font-size: 12px; color: var(--cyan-glow, #00f0ff); margin-bottom: 6px;">🛠️ Development Mode Reset Link:</div>
-                        <button type="button" class="hud-btn small cyan" id="forgotDevResetBtn" onclick="applyDevResetToken()" style="width: 100%;">Open Reset Form with Generated Token &rarr;</button>
+
+                    <div id="forgotErrorMessage" style="display:none; color: #f87171; font-size: 12.5px; margin-bottom: 14px; padding: 10px 14px; background: rgba(239,68,68,0.12); border-radius: 8px; border: 1px solid rgba(239,68,68,0.25); border-left: 3px solid #ef4444;"></div>
+                    <div id="forgotSuccessMessage" style="display:none; color: #34d399; font-size: 12.5px; margin-bottom: 14px; padding: 10px 14px; background: rgba(16,185,129,0.12); border-radius: 8px; border: 1px solid rgba(16,185,129,0.25); border-left: 3px solid #10b981;"></div>
+                    
+                    <div id="forgotDevHelper" style="display:none; margin-bottom: 16px; padding: 12px 14px; background: rgba(0,240,255,0.08); border-radius: 8px; border: 1px dashed var(--cyan-glow, #00f0ff);">
+                        <div style="font-size: 12px; color: var(--cyan-glow, #00f0ff); margin-bottom: 8px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                            <span>🛠️</span> Development Mode Reset Token Detected:
+                        </div>
+                        <button type="button" class="hud-btn small cyan" id="forgotDevResetBtn" onclick="applyDevResetToken()" style="width: 100%; padding: 8px; border-radius: 6px; font-size: 12px; font-weight: 600;">
+                            Auto-Fill &amp; Open Reset Form &rarr;
+                        </button>
                     </div>
-                    <button type="submit" class="hud-btn primary" id="forgotSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600;">Request Password Reset Link</button>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px;">
-                        <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color: var(--text-dim, #888); font-size: 12px;">&larr; Return to Sign In</a>
-                        <a href="javascript:void(0)" onclick="switchAuthTab('reset')" style="color: var(--cyan-glow, #00f0ff); font-size: 12px;">Already have a token? &rarr;</a>
+
+                    <button type="submit" class="hud-btn primary" id="forgotSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600; font-size: 13px; border-radius: 8px; margin-bottom: 16px;">
+                        Request Password Reset Link
+                    </button>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; border-top: 1px solid rgba(255, 255, 255, 0.06); padding-top: 14px;">
+                        <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color: var(--text-dim, #94a3b8); text-decoration: none; display: flex; align-items: center; gap: 4px;" onmouseover="this.style.color='#f8fafc'" onmouseout="this.style.color='var(--text-dim, #94a3b8)'">
+                            <span>&larr;</span> Back to Sign In
+                        </a>
+                        <a href="javascript:void(0)" onclick="switchAuthTab('reset')" style="color: var(--cyan-glow, #00f0ff); font-weight: 500; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">
+                            Have a reset token? Enter Token &rarr;
+                        </a>
                     </div>
                 </form>
 
                 <!-- RESET PASSWORD FORM -->
                 <form id="resetPasswordForm" onsubmit="handleResetPassword(event)" style="display:none;">
-                    <p style="font-size: 13px; color: var(--text-secondary, #aaa); margin-bottom: 16px;">
-                        Provide your verified reset token and configure a new password.
-                    </p>
-                    <div class="form-group" style="margin-bottom: 14px;">
-                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Reset Token *</label>
-                        <input type="text" id="resetTokenInput" class="hud-input" required placeholder="Paste reset token here" style="width: 100%; font-family: 'JetBrains Mono', monospace;">
+                    <div style="margin-bottom: 18px; padding: 12px 14px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; display: flex; align-items: flex-start; gap: 10px;">
+                        <span style="font-size: 16px; margin-top: 1px;">🔑</span>
+                        <div style="font-size: 12.5px; color: var(--text-secondary, #cbd5e1); line-height: 1.5;">
+                            Provide your verified reset token and configure your new secure workspace password.
+                        </div>
                     </div>
+
                     <div class="form-group" style="margin-bottom: 14px;">
-                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">New Secure Password * (min 8 chars)</label>
-                        <input type="password" id="resetNewPassword" class="hud-input" required minlength="8" placeholder="••••••••••••" style="width: 100%;">
+                        <label style="display:flex; align-items:center; gap: 6px; margin-bottom: 7px; font-size: 12.5px; font-weight: 600; color: #e2e8f0;">
+                            <span>🎫</span> Reset Token <span style="color: #f87171;">*</span>
+                        </label>
+                        <input type="text" id="resetTokenInput" class="hud-input glass-input" required placeholder="Paste reset token here" style="width: 100%; border-radius: 8px; font-size: 12.5px; padding: 10px 14px; font-family: 'JetBrains Mono', monospace;">
                     </div>
+
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display:flex; align-items:center; gap: 6px; margin-bottom: 7px; font-size: 12.5px; font-weight: 600; color: #e2e8f0;">
+                            <span>🔒</span> New Secure Password <span style="color: #f87171;">*</span> (min 8 chars)
+                        </label>
+                        <div style="position: relative; display: flex; align-items: center;">
+                            <input type="password" id="resetNewPassword" class="hud-input glass-input" required minlength="8" placeholder="••••••••••••" style="width: 100%; border-radius: 8px; font-size: 13px; padding: 10px 42px 10px 14px;">
+                            <button type="button" onclick="togglePasswordVisibility('resetNewPassword', this)" title="Toggle password visibility" style="position: absolute; right: 10px; background: transparent; border: none; cursor: pointer; font-size: 15px; color: #94a3b8; padding: 4px; display: flex; align-items: center; justify-content: center;" aria-label="Toggle password">👁️</button>
+                        </div>
+                    </div>
+
                     <div class="form-group" style="margin-bottom: 16px;">
-                        <label style="display:block; margin-bottom: 6px; font-weight: 500;">Confirm New Password *</label>
-                        <input type="password" id="resetConfirmPassword" class="hud-input" required minlength="8" placeholder="••••••••••••" style="width: 100%;">
+                        <label style="display:flex; align-items:center; gap: 6px; margin-bottom: 7px; font-size: 12.5px; font-weight: 600; color: #e2e8f0;">
+                            <span>🔒</span> Confirm New Password <span style="color: #f87171;">*</span>
+                        </label>
+                        <div style="position: relative; display: flex; align-items: center;">
+                            <input type="password" id="resetConfirmPassword" class="hud-input glass-input" required minlength="8" placeholder="••••••••••••" style="width: 100%; border-radius: 8px; font-size: 13px; padding: 10px 42px 10px 14px;">
+                            <button type="button" onclick="togglePasswordVisibility('resetConfirmPassword', this)" title="Toggle password visibility" style="position: absolute; right: 10px; background: transparent; border: none; cursor: pointer; font-size: 15px; color: #94a3b8; padding: 4px; display: flex; align-items: center; justify-content: center;" aria-label="Toggle password">👁️</button>
+                        </div>
                     </div>
-                    <div id="resetErrorMessage" style="display:none; color: #ef4444; font-size: 13px; margin-bottom: 14px; padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 6px; border-left: 3px solid #ef4444;"></div>
-                    <div id="resetSuccessMessage" style="display:none; color: #10b981; font-size: 13px; margin-bottom: 14px; padding: 10px 12px; background: rgba(16,185,129,0.1); border-radius: 6px; border-left: 3px solid #10b981;"></div>
-                    <button type="submit" class="hud-btn primary" id="resetSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600;">Update Password &amp; Sign In</button>
-                    <div style="text-align: center; margin-top: 14px;">
-                        <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color: var(--text-dim, #888); font-size: 12px;">&larr; Back to Sign In</a>
+
+                    <div id="resetErrorMessage" style="display:none; color: #f87171; font-size: 12.5px; margin-bottom: 14px; padding: 10px 14px; background: rgba(239,68,68,0.12); border-radius: 8px; border: 1px solid rgba(239,68,68,0.25); border-left: 3px solid #ef4444;"></div>
+                    <div id="resetSuccessMessage" style="display:none; color: #34d399; font-size: 12.5px; margin-bottom: 14px; padding: 10px 14px; background: rgba(16,185,129,0.12); border-radius: 8px; border: 1px solid rgba(16,185,129,0.25); border-left: 3px solid #10b981;"></div>
+
+                    <button type="submit" class="hud-btn primary" id="resetSubmitBtn" style="width: 100%; padding: 12px; font-weight: 600; font-size: 13px; border-radius: 8px; margin-bottom: 16px;">
+                        Update Password &amp; Sign In
+                    </button>
+
+                    <div style="text-align: center; font-size: 12px; border-top: 1px solid rgba(255, 255, 255, 0.06); padding-top: 14px;">
+                        <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color: var(--text-dim, #94a3b8); text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" onmouseover="this.style.color='#f8fafc'" onmouseout="this.style.color='var(--text-dim, #94a3b8)'">
+                            <span>&larr;</span> Return to Sign In
+                        </a>
                     </div>
                 </form>
             </div>
