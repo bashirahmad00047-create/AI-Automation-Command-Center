@@ -773,6 +773,34 @@ class WhatsAppMessage(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
 
     def to_dict(self) -> Dict[str, Any]:
+        media_url = None
+        sender_name = None
+        duration = None
+        if self.raw_payload_json:
+            try:
+                raw = json.loads(self.raw_payload_json)
+                if isinstance(raw, dict):
+                    sender_name = raw.get("senderName") or raw.get("senderContactName")
+                    media_url = (
+                        raw.get("downloadUrl") or
+                        raw.get("urlFile") or
+                        raw.get("fileMessageData", {}).get("downloadUrl") or
+                        raw.get("audioMessageData", {}).get("downloadUrl") or
+                        raw.get("media_url")
+                    )
+                    duration = (
+                        raw.get("audioMessageData", {}).get("duration") or
+                        raw.get("duration")
+                    )
+            except Exception:
+                pass
+
+        is_audio = (
+            self.message_type in ("audioMessage", "voiceMessage", "audio", "voice", "ptt") or
+            bool(self.body and ("[audiomessage]" in self.body.lower() or "[voicemessage]" in self.body.lower())) or
+            bool(media_url and any(str(media_url).lower().endswith(ext) for ext in (".ogg", ".mp3", ".wav", ".m4a", ".aac", ".opus")))
+        )
+
         return {
             "id": self.id,
             "organization_id": self.organization_id,
@@ -780,8 +808,12 @@ class WhatsAppMessage(db.Model):
             "direction": self.direction,
             "sender": self.sender,
             "recipient": self.recipient,
+            "sender_name": sender_name,
             "message_type": self.message_type,
             "body": self.body,
+            "media_url": media_url,
+            "is_audio": is_audio,
+            "audio_duration": duration,
             "status": self.status,
             "execution_id": self.execution_id,
             "error_message": self.error_message,

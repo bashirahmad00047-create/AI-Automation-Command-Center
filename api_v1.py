@@ -28,7 +28,7 @@ import re
 import secrets
 import time
 from typing import Any, Dict, List, Optional, Tuple
-from flask import Blueprint, current_app, g, jsonify, request, session
+from flask import Blueprint, current_app, g, jsonify, request, session, Response
 from sqlalchemy import desc
 
 from ai_provider import AIProviderManager, get_ai_provider
@@ -2625,19 +2625,134 @@ def whatsapp_send_message():
 @api_v1.route("/whatsapp/messages", methods=["GET"])
 @require_auth
 def list_whatsapp_messages():
-    """Returns tenant-isolated WhatsApp message history."""
+    """Returns tenant-isolated WhatsApp message history with optional conversation filtering."""
     org = get_current_org()
     if not org:
         return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
 
-    limit = min(int(request.args.get("limit", 50)), 200)
-    messages = WhatsAppMessage.query.filter_by(organization_id=org.id).order_by(WhatsAppMessage.created_at.desc()).limit(limit).all()
+    limit = min(int(request.args.get("limit", 100)), 500)
+    chat_id = request.args.get("chat_id") or request.args.get("contact")
+    query = WhatsAppMessage.query.filter_by(organization_id=org.id)
+
+    if chat_id:
+        clean_contact = chat_id.replace("@c.us", "").replace("@g.us", "").strip()
+        query = query.filter(
+            (WhatsAppMessage.sender == clean_contact) |
+            (WhatsAppMessage.sender == chat_id) |
+            (WhatsAppMessage.recipient == clean_contact) |
+            (WhatsAppMessage.recipient == chat_id)
+        )
+
+    messages = query.order_by(WhatsAppMessage.created_at.desc()).limit(limit).all()
 
     return jsonify({
         "messages": [m.to_dict() for m in messages],
         "count": len(messages),
         "is_configured": WhatsAppService.is_configured()
     }), 200
+
+
+@api_v1.route("/whatsapp/messages/<message_id>", methods=["DELETE", "POST"])
+@require_auth
+@require_role(["owner", "admin", "member"])
+def delete_whatsapp_message(message_id: str):
+    """Deletes a WhatsApp message from the tenant conversation record."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    msg = WhatsAppMessage.query.filter(
+        (WhatsAppMessage.id == message_id) | (WhatsAppMessage.whatsapp_message_id == message_id),
+        WhatsAppMessage.organization_id == org.id
+    ).first()
+
+    if not msg:
+        return jsonify({"error": "Message not found.", "code": "NOT_FOUND"}), 404
+
+    # Attempt remote Green-API deleteMessage if configured
+    try:
+        import requests
+        conf = WhatsAppService.get_effective_config()
+        id_inst = conf.get("green_api_id_instance")
+        tok_inst = conf.get("green_api_api_token_instance")
+        if id_inst and tok_inst and msg.whatsapp_message_id:
+            chat_id = msg.recipient if msg.direction == "outbound" else msg.sender
+            if "@" not in chat_id:
+                chat_id = f"{chat_id}@c.us"
+            host = conf.get("green_api_host_url") or "https://7107.api.greenapi.com"
+            del_url = f"{host}/waInstance{id_inst}/deleteMessage/{tok_inst}"
+            try:
+                requests.post(del_url, json={"chatId": chat_id, "idMessage": msg.whatsapp_message_id}, timeout=3)
+            except Exception as e:
+                logger.debug(f"Remote Green-API deleteMessage notice: {e}")
+    except Exception:
+        pass
+
+    db.session.delete(msg)
+    db.session.commit()
+
+    log_audit_event("whatsapp.message_deleted", "whatsapp", message_id, {
+        "message_id": message_id,
+        "sender": msg.sender,
+        "recipient": msg.recipient
+    })
+
+    return jsonify({"success": True, "message": "Message deleted successfully.", "deleted_id": message_id}), 200
+
+
+@api_v1.route("/whatsapp/conversations/<contact_phone>", methods=["DELETE", "POST"])
+@require_auth
+@require_role(["owner", "admin", "member"])
+def clear_whatsapp_conversation(contact_phone: str):
+    """Clears all messages with a given contact from tenant records."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    clean_phone = contact_phone.replace("@c.us", "").replace("@g.us", "").strip()
+    msgs = WhatsAppMessage.query.filter(
+        WhatsAppMessage.organization_id == org.id,
+        (WhatsAppMessage.sender == clean_phone) |
+        (WhatsAppMessage.sender == contact_phone) |
+        (WhatsAppMessage.recipient == clean_phone) |
+        (WhatsAppMessage.recipient == contact_phone)
+    ).all()
+
+    count = len(msgs)
+    for m in msgs:
+        db.session.delete(m)
+    db.session.commit()
+
+    log_audit_event("whatsapp.conversation_cleared", "whatsapp", contact_phone, {
+        "contact": contact_phone,
+        "deleted_count": count
+    })
+
+    return jsonify({"success": True, "message": f"Cleared {count} messages.", "deleted_count": count}), 200
+
+
+@api_v1.route("/whatsapp/media/proxy", methods=["GET"])
+@require_auth
+def whatsapp_media_proxy():
+    """Proxies WhatsApp media (audio, voice notes, images) to avoid CORS restrictions."""
+    media_url = request.args.get("url")
+    if not media_url:
+        return jsonify({"error": "Missing media url parameter"}), 400
+
+    if not media_url.startswith(("http://", "https://")):
+        return jsonify({"error": "Invalid URL scheme"}), 400
+
+    try:
+        import requests
+        req = requests.get(media_url, stream=True, timeout=12)
+        content_type = req.headers.get("Content-Type", "audio/ogg")
+        response = Response(req.iter_content(chunk_size=8192), content_type=content_type)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Accept-Ranges"] = "bytes"
+        return response
+    except Exception as e:
+        logger.warning(f"Error streaming WhatsApp media: {e}")
+        return jsonify({"error": "Failed to stream media", "detail": str(e)}), 502
 
 
 @api_v1.route("/whatsapp/config", methods=["GET"])

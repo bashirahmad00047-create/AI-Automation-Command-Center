@@ -302,6 +302,80 @@ class TestPhase8JazzCashWhatsApp(unittest.TestCase):
         self.assertIsNotNone(msg)
         self.assertEqual(msg.status, "mock_sent")
 
+    def test_whatsapp_message_deletion_and_conversation_clear(self):
+        """DELETE /api/v1/whatsapp/messages/<id> and /api/v1/whatsapp/conversations/<phone> deletes records."""
+        # 1. Create test message
+        msg = WhatsAppMessage(
+            id="wam_test_del_123",
+            organization_id=self.org.id,
+            whatsapp_message_id="wamid.mock_del_123",
+            direction="inbound",
+            sender="923001112233",
+            recipient="system",
+            body="Test message to delete",
+            status="received"
+        )
+        db.session.add(msg)
+        db.session.commit()
+
+        # Delete single message
+        del_res = self.client.delete(f"/api/v1/whatsapp/messages/{msg.id}")
+        self.assertEqual(del_res.status_code, 200)
+        self.assertTrue(del_res.get_json().get("success"))
+        self.assertIsNone(WhatsAppMessage.query.filter_by(id="wam_test_del_123").first())
+
+        # 2. Add multiple messages for conversation clear test
+        msg1 = WhatsAppMessage(
+            id="wam_conv_1",
+            organization_id=self.org.id,
+            whatsapp_message_id="wamid.conv_1",
+            direction="inbound",
+            sender="923005556677",
+            recipient="system",
+            body="Conv msg 1",
+            status="received"
+        )
+        msg2 = WhatsAppMessage(
+            id="wam_conv_2",
+            organization_id=self.org.id,
+            whatsapp_message_id="wamid.conv_2",
+            direction="outbound",
+            sender="system",
+            recipient="923005556677",
+            body="Conv msg 2",
+            status="sent"
+        )
+        db.session.add_all([msg1, msg2])
+        db.session.commit()
+
+        clear_res = self.client.delete("/api/v1/whatsapp/conversations/923005556677")
+        self.assertEqual(clear_res.status_code, 200)
+        self.assertEqual(clear_res.get_json().get("deleted_count"), 2)
+
+    def test_whatsapp_message_to_dict_media_attributes(self):
+        """Verifies WhatsAppMessage.to_dict() extracts sender_name, media_url, and is_audio correctly."""
+        msg = WhatsAppMessage(
+            id="wam_audio_test",
+            organization_id=self.org.id,
+            whatsapp_message_id="wamid.audio_123",
+            direction="inbound",
+            sender="923209350858",
+            recipient="system",
+            message_type="audioMessage",
+            body="[audioMessage] voice note test",
+            raw_payload_json=json.dumps({
+                "senderName": "Zain",
+                "downloadUrl": "https://media.example.com/audio.ogg",
+                "audioMessageData": {"duration": 12}
+            })
+        )
+        d = msg.to_dict()
+        self.assertTrue(d.get("is_audio"))
+        self.assertEqual(d.get("sender_name"), "Zain")
+        self.assertEqual(d.get("media_url"), "https://media.example.com/audio.ogg")
+        self.assertEqual(d.get("audio_duration"), 12)
+
 
 if __name__ == "__main__":
     unittest.main()
+

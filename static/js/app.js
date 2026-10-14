@@ -4108,6 +4108,47 @@ async function cancelAsyncJob(jobId) {
 // ==========================================
 
 let waPollTimer = null;
+let waActiveChatPartner = null;
+let waAllMessagesCache = [];
+let waChatSearchTerm = '';
+let waCurrentAudio = null;
+let waCurrentAudioMsgId = null;
+let waVoiceProgressInterval = null;
+
+const WA_AVATAR_PALETTE = ['#00a884', '#53bdeb', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#6366f1'];
+
+function getWaAvatarColor(str) {
+    let hash = 0;
+    for (let i = 0; i < (str || '').length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    return WA_AVATAR_PALETTE[Math.abs(hash) % WA_AVATAR_PALETTE.length];
+}
+
+function formatAudioSeconds(sec) {
+    if (!sec || isNaN(sec)) return '0:00';
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function setWhatsAppViewMode(mode) {
+    const btnWeb = document.getElementById('btnViewWaWeb');
+    const btnClassic = document.getElementById('btnViewWaClassic');
+    const webContainer = document.getElementById('waWebViewContainer');
+    const classicContainer = document.getElementById('waClassicViewContainer');
+
+    if (mode === 'web') {
+        if (btnWeb) btnWeb.classList.add('active');
+        if (btnClassic) btnClassic.classList.remove('active');
+        if (webContainer) webContainer.style.display = 'flex';
+        if (classicContainer) classicContainer.style.display = 'none';
+        renderWhatsAppWebUI(waAllMessagesCache);
+    } else {
+        if (btnWeb) btnWeb.classList.remove('active');
+        if (btnClassic) btnClassic.classList.add('active');
+        if (webContainer) webContainer.style.display = 'none';
+        if (classicContainer) classicContainer.style.display = 'flex';
+    }
+}
 
 function startWhatsAppAutoPoll(intervalMs = 20000) {
     stopWhatsAppAutoPoll();
@@ -4133,9 +4174,16 @@ function stopWhatsAppAutoPoll() {
 
 async function syncWhatsAppMessagesNow(silent = false) {
     const syncBtn = document.getElementById('btnSyncWhatsApp');
-    if (syncBtn && !silent) {
-        syncBtn.disabled = true;
-        syncBtn.innerHTML = '🔄 Syncing...';
+    const syncBtnWeb = document.getElementById('btnSyncWhatsAppWeb');
+    if (!silent) {
+        if (syncBtn) {
+            syncBtn.disabled = true;
+            syncBtn.innerHTML = '🔄 Syncing...';
+        }
+        if (syncBtnWeb) {
+            syncBtnWeb.disabled = true;
+            syncBtnWeb.innerHTML = '⌛';
+        }
     }
 
     try {
@@ -4144,9 +4192,10 @@ async function syncWhatsAppMessagesNow(silent = false) {
 
         await loadWhatsAppMessagesOnly();
 
-        if (syncBtn && !silent) {
+        if (!silent) {
             const count = data ? (data.saved_count || data.processed || 0) : 0;
-            syncBtn.innerHTML = count > 0 ? `✓ ${count} new` : '✓ Up to date';
+            if (syncBtn) syncBtn.innerHTML = count > 0 ? `✓ ${count} new` : '✓ Up to date';
+            if (syncBtnWeb) syncBtnWeb.innerHTML = '✓';
             if (count > 0 && typeof showToast === 'function') {
                 showToast(`WhatsApp sync complete: ${count} new message(s) retrieved`, 'success');
             }
@@ -4155,17 +4204,541 @@ async function syncWhatsAppMessagesNow(silent = false) {
                     syncBtn.disabled = false;
                     syncBtn.innerHTML = '🔄 Sync Now';
                 }
+                if (syncBtnWeb) {
+                    syncBtnWeb.disabled = false;
+                    syncBtnWeb.innerHTML = '🔄';
+                }
             }, 2000);
         }
     } catch (err) {
         console.error('WhatsApp sync failed:', err);
-        if (syncBtn && !silent) {
-            syncBtn.disabled = false;
-            syncBtn.innerHTML = '⚠️ Sync Failed';
-            setTimeout(() => {
-                if (syncBtn) syncBtn.innerHTML = '🔄 Sync Now';
-            }, 2500);
+        if (!silent) {
+            if (syncBtn) {
+                syncBtn.disabled = false;
+                syncBtn.innerHTML = '⚠️ Sync Failed';
+                setTimeout(() => {
+                    if (syncBtn) syncBtn.innerHTML = '🔄 Sync Now';
+                }, 2500);
+            }
+            if (syncBtnWeb) {
+                syncBtnWeb.disabled = false;
+                syncBtnWeb.innerHTML = '🔄';
+            }
         }
+    }
+}
+
+function groupWhatsAppConversations(messages) {
+    const map = {};
+    (messages || []).forEach(m => {
+        const isInbound = m.direction === 'inbound';
+        const rawPartner = isInbound ? m.sender : m.recipient;
+        const partner = (rawPartner || '').replace(/@c\.us|@g\.us/g, '').trim() || 'Unknown';
+
+        if (!map[partner]) {
+            map[partner] = {
+                phone: partner,
+                name: (isInbound ? m.sender_name : '') || partner,
+                lastMessage: m.body || (m.is_audio ? '🎙️ Voice note' : '(no text)'),
+                timestamp: m.created_at || '',
+                is_audio: Boolean(m.is_audio),
+                messages: []
+            };
+        }
+        map[partner].messages.push(m);
+        if (m.sender_name && (!map[partner].name || map[partner].name === partner)) {
+            map[partner].name = m.sender_name;
+        }
+    });
+
+    const list = Object.values(map);
+    list.sort((a, b) => {
+        const timeA = a.messages[0]?.created_at || '';
+        const timeB = b.messages[0]?.created_at || '';
+        return timeB.localeCompare(timeA);
+    });
+    return list;
+}
+
+function handleWhatsAppChatSearch(val) {
+    waChatSearchTerm = (val || '').toLowerCase().trim();
+    renderWhatsAppWebUI(waAllMessagesCache, false);
+}
+
+function selectWhatsAppChat(partner) {
+    waActiveChatPartner = partner;
+    renderWhatsAppWebUI(waAllMessagesCache, true);
+}
+
+function promptNewConversation() {
+    const phone = prompt('Enter recipient phone number to message (e.g. +923209350858):');
+    if (!phone) return;
+    const cleanPhone = phone.replace(/[^0-9+]/g, '');
+    if (!cleanPhone) {
+        showToast('Invalid phone number format', 'error');
+        return;
+    }
+    waActiveChatPartner = cleanPhone;
+    renderWhatsAppWebUI(waAllMessagesCache, true);
+    const replyInput = document.getElementById('waReplyInput');
+    if (replyInput) replyInput.focus();
+}
+
+function resetVoicePlayback(id) {
+    if (waVoiceProgressInterval) {
+        clearInterval(waVoiceProgressInterval);
+        waVoiceProgressInterval = null;
+    }
+    if (waCurrentAudio) {
+        try { waCurrentAudio.pause(); } catch(e) {}
+        waCurrentAudio = null;
+    }
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+        try { window.speechSynthesis.cancel(); } catch(e) {}
+    }
+    if (id) {
+        const btn = document.getElementById(`waPlayBtn_${id}`);
+        if (btn) btn.innerHTML = '▶';
+        const prog = document.getElementById(`waAudioProg_${id}`);
+        if (prog) prog.style.width = '0%';
+    }
+    waCurrentAudioMsgId = null;
+}
+
+function fallbackSpeechPlayback(id, textBody) {
+    const btn = document.getElementById(`waPlayBtn_${id}`);
+    const prog = document.getElementById(`waAudioProg_${id}`);
+    const timeEl = document.getElementById(`waAudioTime_${id}`);
+    if (btn) btn.innerHTML = '❚❚';
+
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+        let p = 0;
+        waVoiceProgressInterval = setInterval(() => {
+            p += 10;
+            if (prog) prog.style.width = `${Math.min(p, 100)}%`;
+            if (p >= 100) resetVoicePlayback(id);
+        }, 120);
+        return;
+    }
+
+    window.speechSynthesis.cancel();
+    const cleanText = (textBody || 'Voice note audio playback demo.').replace(/\[.*?\]/g, '').trim() || 'WhatsApp voice message.';
+    const utter = new SpeechSynthesisUtterance(cleanText);
+    utter.rate = 1.0;
+    utter.pitch = 1.0;
+
+    const start = Date.now();
+    const estDuration = Math.max(3000, cleanText.length * 70);
+
+    waVoiceProgressInterval = setInterval(() => {
+        const elapsed = Date.now() - start;
+        const pct = Math.min(100, (elapsed / estDuration) * 100);
+        if (prog) prog.style.width = `${pct}%`;
+        if (timeEl) timeEl.textContent = formatAudioSeconds(elapsed / 1000);
+        if (pct >= 100) {
+            clearInterval(waVoiceProgressInterval);
+            waVoiceProgressInterval = null;
+        }
+    }, 60);
+
+    utter.onend = () => resetVoicePlayback(id);
+    utter.onerror = () => resetVoicePlayback(id);
+    window.speechSynthesis.speak(utter);
+}
+
+function togglePlayVoiceMessage(id, mediaUrl, textBody) {
+    if (waCurrentAudioMsgId === id) {
+        resetVoicePlayback(id);
+        return;
+    }
+    if (waCurrentAudioMsgId) {
+        resetVoicePlayback(waCurrentAudioMsgId);
+    }
+
+    waCurrentAudioMsgId = id;
+    const btn = document.getElementById(`waPlayBtn_${id}`);
+    if (btn) btn.innerHTML = '❚❚';
+
+    if (mediaUrl && (mediaUrl.startsWith('http://') || mediaUrl.startsWith('https://'))) {
+        const proxyUrl = `/api/v1/whatsapp/media/proxy?url=${encodeURIComponent(mediaUrl)}`;
+        const audio = new Audio(proxyUrl);
+        waCurrentAudio = audio;
+
+        audio.ontimeupdate = () => {
+            const prog = document.getElementById(`waAudioProg_${id}`);
+            const timeEl = document.getElementById(`waAudioTime_${id}`);
+            if (audio.duration && !isNaN(audio.duration)) {
+                const pct = (audio.currentTime / audio.duration) * 100;
+                if (prog) prog.style.width = `${pct}%`;
+                if (timeEl) timeEl.textContent = `${formatAudioSeconds(audio.currentTime)} / ${formatAudioSeconds(audio.duration)}`;
+            }
+        };
+        audio.onended = () => resetVoicePlayback(id);
+        audio.onerror = () => fallbackSpeechPlayback(id, textBody);
+        audio.play().catch(e => {
+            console.warn('Audio element play failed, falling back to speech synthesizer:', e);
+            fallbackSpeechPlayback(id, textBody);
+        });
+    } else {
+        fallbackSpeechPlayback(id, textBody);
+    }
+}
+
+async function deleteWhatsAppMsg(msgId) {
+    if (!confirm('Are you sure you want to delete this message from conversation history?')) return;
+    try {
+        const res = await fetch(`/api/v1/whatsapp/messages/${encodeURIComponent(msgId)}`, {
+            method: 'DELETE'
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast('Message deleted successfully', 'success');
+            waAllMessagesCache = waAllMessagesCache.filter(m => m.id !== msgId && m.whatsapp_message_id !== msgId);
+            renderWhatsAppWebUI(waAllMessagesCache, false);
+            loadWhatsAppMessagesOnly();
+        } else {
+            showToast(data.error || 'Failed to delete message', 'error');
+        }
+    } catch (err) {
+        showToast(`Error deleting message: ${err.message}`, 'error');
+    }
+}
+
+async function clearCurrentConversation() {
+    if (!waActiveChatPartner) {
+        showToast('No active conversation selected to clear', 'info');
+        return;
+    }
+    if (!confirm(`Are you sure you want to clear all messages for ${waActiveChatPartner}?`)) return;
+    try {
+        const res = await fetch(`/api/v1/whatsapp/conversations/${encodeURIComponent(waActiveChatPartner)}`, {
+            method: 'DELETE'
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast(`Conversation cleared (${data.deleted_count || 0} messages removed)`, 'success');
+            waAllMessagesCache = waAllMessagesCache.filter(m => {
+                const cleanSender = (m.sender || '').replace(/@c\.us|@g\.us/g, '').trim();
+                const cleanRecipient = (m.recipient || '').replace(/@c\.us|@g\.us/g, '').trim();
+                return cleanSender !== waActiveChatPartner && cleanRecipient !== waActiveChatPartner;
+            });
+            waActiveChatPartner = null;
+            renderWhatsAppWebUI(waAllMessagesCache, true);
+            loadWhatsAppMessagesOnly();
+        } else {
+            showToast(data.error || 'Failed to clear conversation', 'error');
+        }
+    } catch (err) {
+        showToast(`Error clearing conversation: ${err.message}`, 'error');
+    }
+}
+
+function handleWaReplyKeydown(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendWhatsAppReply();
+    }
+}
+
+async function sendWhatsAppReply() {
+    const input = document.getElementById('waReplyInput');
+    if (!input) return;
+    const message = input.value.trim();
+    if (!message) return;
+
+    let recipient = waActiveChatPartner;
+    if (!recipient) {
+        recipient = prompt('Enter recipient phone number (e.g. +923209350858):');
+        if (!recipient) return;
+        waActiveChatPartner = recipient.replace(/[^0-9+]/g, '');
+        recipient = waActiveChatPartner;
+    }
+
+    input.value = '';
+
+    const isVoice = message.startsWith('[voiceMessage]') || message.startsWith('[audioMessage]');
+    const optimisticId = `opt_${Date.now()}`;
+    const optimisticMsg = {
+        id: optimisticId,
+        whatsapp_message_id: 'pending...',
+        direction: 'outbound',
+        sender: 'You',
+        recipient: recipient,
+        body: message,
+        status: 'sending',
+        is_audio: isVoice,
+        created_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    waAllMessagesCache.push(optimisticMsg);
+    renderWhatsAppWebUI(waAllMessagesCache, true);
+
+    const sendBtn = document.getElementById('waReplySendBtn');
+    if (sendBtn) sendBtn.disabled = true;
+
+    try {
+        const res = await fetch('/api/whatsapp/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                to: recipient,
+                message: message
+            })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            optimisticMsg.status = 'sent';
+            optimisticMsg.whatsapp_message_id = data.whatsapp_message_id || 'sent';
+            showToast(`Delivered to ${recipient}`, 'success');
+        } else {
+            optimisticMsg.status = 'failed';
+            optimisticMsg.error_message = data.error || 'Failed';
+            showToast(data.error || 'Failed to dispatch message', 'error');
+        }
+    } catch (err) {
+        optimisticMsg.status = 'failed';
+        showToast(`Network error: ${err.message}`, 'error');
+    } finally {
+        if (sendBtn) sendBtn.disabled = false;
+        renderWhatsAppWebUI(waAllMessagesCache, true);
+        syncWhatsAppMessagesNow(true).catch(e => console.warn(e));
+    }
+}
+
+function toggleEmojiTray() {
+    const tray = document.getElementById('waEmojiTray');
+    if (tray) tray.style.display = tray.style.display === 'none' || !tray.style.display ? 'flex' : 'none';
+}
+
+function insertEmojiIntoReply(emoji) {
+    const input = document.getElementById('waReplyInput');
+    if (input) {
+        input.value = (input.value || '') + emoji;
+        input.focus();
+    }
+    toggleEmojiTray();
+}
+
+function toggleTemplatesTray() {
+    const tray = document.getElementById('waTemplatesTray');
+    if (tray) tray.style.display = tray.style.display === 'none' || !tray.style.display ? 'flex' : 'none';
+}
+
+function insertTemplateReply(text) {
+    const input = document.getElementById('waReplyInput');
+    if (input) {
+        input.value = text;
+        input.focus();
+    }
+    toggleTemplatesTray();
+}
+
+function promptSendVoiceNote() {
+    if (!waActiveChatPartner) {
+        showToast('Please select a conversation from the sidebar first', 'info');
+        return;
+    }
+    const text = prompt(`Enter speech text for outbound Voice Note to ${waActiveChatPartner}:`, 'Incident update: All automated workflow checks completed successfully.');
+    if (!text) return;
+    const input = document.getElementById('waReplyInput');
+    if (input) {
+        input.value = `[voiceMessage] ${text}`;
+        sendWhatsAppReply();
+    }
+}
+
+function simulateInboundVoiceNote() {
+    const partner = waActiveChatPartner || '923209350858';
+    const demoId = `wam_demo_${Date.now()}`;
+    const mockVoice = {
+        id: demoId,
+        whatsapp_message_id: `wamid.voice_${demoId}`,
+        direction: 'inbound',
+        sender: partner,
+        recipient: 'system',
+        sender_name: 'Verified Customer',
+        message_type: 'voiceMessage',
+        is_audio: true,
+        body: '[voiceMessage] Hello, this is an automated voice playback demo on your WhatsApp Web console. Click play to listen.',
+        status: 'received',
+        created_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+    waAllMessagesCache.push(mockVoice);
+    waActiveChatPartner = partner;
+    renderWhatsAppWebUI(waAllMessagesCache, true);
+    showToast('Inbound voice note simulated. Click ▶ to listen to audio playback!', 'info');
+}
+
+function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
+    const convList = document.getElementById('waConversationList');
+    const msgStream = document.getElementById('waMessagesStream');
+    if (!convList || !msgStream) return;
+
+    const conversations = groupWhatsAppConversations(messages);
+
+    // Apply search filter if present
+    const filteredConv = waChatSearchTerm
+        ? conversations.filter(c => c.name.toLowerCase().includes(waChatSearchTerm) || c.phone.toLowerCase().includes(waChatSearchTerm) || c.lastMessage.toLowerCase().includes(waChatSearchTerm))
+        : conversations;
+
+    // Default active chat partner
+    if (!waActiveChatPartner && filteredConv.length > 0) {
+        waActiveChatPartner = filteredConv[0].phone;
+    }
+
+    // Render Conversation List
+    if (filteredConv.length === 0) {
+        convList.innerHTML = `
+            <div style="padding: 40px 20px; text-align: center; color: #8696a0; font-size: 13px;">
+                <div style="font-size: 2.2rem; margin-bottom: 8px;">💬</div>
+                <div style="font-weight: 600; color: #e9edef; margin-bottom: 4px;">No conversations found</div>
+                <p style="font-size: 11.5px; line-height: 1.4;">Click ➕ to start a new chat or sync to retrieve incoming messages.</p>
+                <button type="button" class="hud-btn primary small" onclick="promptNewConversation()" style="margin-top: 10px;">➕ New Chat</button>
+            </div>
+        `;
+    } else {
+        convList.innerHTML = filteredConv.map(c => {
+            const isActive = c.phone === waActiveChatPartner;
+            const avatarColor = getWaAvatarColor(c.phone);
+            const initials = (c.name || c.phone || '?').substring(0, 2).toUpperCase();
+            const previewIcon = c.is_audio ? '🎙️ ' : '';
+
+            return `
+                <div class="wa-chat-item ${isActive ? 'active' : ''}" onclick="selectWhatsAppChat('${escapeHtml(c.phone)}')">
+                    <div class="wa-avatar" style="background-color: ${avatarColor};">
+                        ${escapeHtml(initials)}
+                    </div>
+                    <div class="wa-chat-meta">
+                        <div class="wa-chat-top">
+                            <span class="wa-chat-name" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</span>
+                            <span class="wa-chat-time">${escapeHtml(c.timestamp.substring(11, 16) || c.timestamp)}</span>
+                        </div>
+                        <div class="wa-chat-bottom">
+                            <span class="wa-chat-preview" title="${escapeHtml(c.lastMessage)}">${previewIcon}${escapeHtml(c.lastMessage)}</span>
+                            <span class="wa-unread-badge" style="${c.messages.length > 0 ? '' : 'display:none;'}">${c.messages.length}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // Update active chat header details
+    const activeHeaderName = document.getElementById('waActiveContactName');
+    const activeHeaderPhone = document.getElementById('waActiveContactPhone');
+    const activeHeaderAvatar = document.getElementById('waActiveAvatar');
+    const activeChatActions = document.getElementById('waActiveChatActions');
+
+    if (waActiveChatPartner) {
+        const activeConv = conversations.find(c => c.phone === waActiveChatPartner);
+        const contactName = activeConv ? activeConv.name : waActiveChatPartner;
+        if (activeHeaderName) activeHeaderName.textContent = contactName;
+        if (activeHeaderPhone) activeHeaderPhone.textContent = `+${waActiveChatPartner.replace(/^\+/, '')} · Online`;
+        if (activeHeaderAvatar) {
+            activeHeaderAvatar.style.backgroundColor = getWaAvatarColor(waActiveChatPartner);
+            activeHeaderAvatar.textContent = (contactName || '?').substring(0, 2).toUpperCase();
+        }
+        if (activeChatActions) activeChatActions.style.display = 'flex';
+    } else {
+        if (activeHeaderName) activeHeaderName.textContent = 'Select a Conversation';
+        if (activeHeaderPhone) activeHeaderPhone.textContent = 'Choose a chat from the sidebar or click ➕';
+        if (activeHeaderAvatar) {
+            activeHeaderAvatar.style.backgroundColor = '#53bdeb';
+            activeHeaderAvatar.textContent = '👤';
+        }
+        if (activeChatActions) activeChatActions.style.display = 'none';
+    }
+
+    // Render Active Conversation Messages Stream
+    if (!waActiveChatPartner) {
+        msgStream.innerHTML = `
+            <div style="margin: auto; text-align: center; color: #8696a0; max-width: 360px;">
+                <div style="font-size: 3rem; margin-bottom: 12px; opacity: 0.85;">💬</div>
+                <div style="font-size: 1.2rem; font-weight: 600; color: #e9edef; margin-bottom: 6px;">WhatsApp Web Console</div>
+                <p style="font-size: 12.5px; line-height: 1.5;">
+                    Select an active contact on the sidebar to listen to voice notes, send instant replies, or delete messages.
+                </p>
+                <button type="button" class="hud-btn primary small" onclick="promptNewConversation()" style="margin-top: 10px;">➕ Start New Chat</button>
+            </div>
+        `;
+        return;
+    }
+
+    const partnerMsgs = (messages || []).filter(m => {
+        const cleanSender = (m.sender || '').replace(/@c\.us|@g\.us/g, '').trim();
+        const cleanRecipient = (m.recipient || '').replace(/@c\.us|@g\.us/g, '').trim();
+        return cleanSender === waActiveChatPartner || cleanRecipient === waActiveChatPartner;
+    });
+
+    // Sort chronologically (oldest to newest for chat stream)
+    partnerMsgs.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+
+    if (partnerMsgs.length === 0) {
+        msgStream.innerHTML = `
+            <div class="wa-date-divider">New Conversation</div>
+            <div style="margin: auto; text-align: center; color: #8696a0;">
+                <div style="font-size: 2.2rem; margin-bottom: 8px;">👋</div>
+                <div style="color: #e9edef; font-weight: 600;">No messages yet with +${escapeHtml(waActiveChatPartner)}</div>
+                <p style="font-size: 12px; margin-top: 4px;">Type a message in the box below to start chatting!</p>
+            </div>
+        `;
+    } else {
+        msgStream.innerHTML = `
+            <div class="wa-date-divider">Chat History</div>
+            ${partnerMsgs.map(m => {
+                const isInbound = m.direction === 'inbound';
+                const timeStr = (m.created_at || '').substring(11, 16) || m.created_at || '';
+                const isOutbound = !isInbound;
+                const isSending = m.status === 'sending';
+                const isSent = m.status === 'sent' || m.status === 'received';
+                const ticks = isSending ? '🕒' : (isSent ? '✓✓' : '✓');
+                const isVoice = Boolean(m.is_audio);
+                const safeMediaUrl = m.media_url || '';
+                const safeBody = (m.body || '').replace(/\[.*?\]/g, '').trim();
+
+                let bodyHtml = '';
+                if (isVoice) {
+                    bodyHtml = `
+                        <div class="wa-voice-bubble">
+                            <button type="button" class="wa-play-btn" id="waPlayBtn_${m.id}" onclick="togglePlayVoiceMessage('${m.id}', '${escapeHtml(safeMediaUrl)}', '${escapeHtml(safeBody)}')">
+                                ▶
+                            </button>
+                            <div class="wa-voice-track">
+                                <div class="wa-prog-bar-bg" onclick="togglePlayVoiceMessage('${m.id}', '${escapeHtml(safeMediaUrl)}', '${escapeHtml(safeBody)}')">
+                                    <div class="wa-prog-bar-fill" id="waAudioProg_${m.id}"></div>
+                                </div>
+                                <div class="wa-voice-meta">
+                                    <span id="waAudioTime_${m.id}">0:00</span>
+                                    <span>🎙️ Voice Note</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    bodyHtml = `<div>${escapeHtml(m.body || '(no text)')}</div>`;
+                }
+
+                return `
+                    <div class="wa-bubble-wrap ${isInbound ? 'inbound' : 'outbound'}">
+                        <div class="wa-bubble ${isInbound ? 'inbound' : 'outbound'}">
+                            ${isInbound && m.sender_name ? `<div class="wa-bubble-sender">${escapeHtml(m.sender_name)}</div>` : ''}
+                            ${bodyHtml}
+                            <div class="wa-bubble-footer">
+                                <span>${escapeHtml(timeStr)}</span>
+                                ${isOutbound ? `<span class="wa-ticks">${ticks}</span>` : ''}
+                                <button type="button" class="wa-msg-del-btn" onclick="deleteWhatsAppMsg('${m.id}')" title="Delete message">🗑️</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        `;
+    }
+
+    if (shouldScrollToBottom) {
+        setTimeout(() => {
+            msgStream.scrollTop = msgStream.scrollHeight;
+        }, 50);
     }
 }
 
@@ -4176,16 +4749,22 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
             isConfigured = badge ? !badge.textContent.includes('Simulation') : true;
         }
 
-        const msgRes = await fetch('/api/v1/whatsapp/messages?limit=100');
+        const msgRes = await fetch('/api/v1/whatsapp/messages?limit=150');
         if (!msgRes.ok) return [];
         const msgData = await msgRes.json();
         const messages = msgData.messages || [];
         const countBadge = document.getElementById('waMessageCountBadge');
         const tbody = document.getElementById('waMessagesTableBody');
 
+        waAllMessagesCache = messages;
+
         if (countBadge) countBadge.textContent = `${messages.length} messages`;
         updateNavBadge('tabWhatsAppCount', messages.length);
 
+        // Update WhatsApp Web Replica UI
+        renderWhatsAppWebUI(messages, false);
+
+        // Update Classic Audit Table UI
         if (tbody) {
             if (messages.length === 0) {
                 if (isConfigured) {

@@ -671,14 +671,18 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
         <!-- TAB: WHATSAPP BUSINESS & META CLOUD API -->
         <!-- TAB: WHATSAPP BUSINESS & META CLOUD API -->
         <section id="tab-whatsapp" class="tab-panel">
-            <div class="panel-header">
+            <div class="panel-header" style="align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
                 <div>
-                    <h2>WHATSAPP BUSINESS / META CLOUD API GATEWAY</h2>
+                    <h2>WHATSAPP COMMAND &amp; WEB REPLICA</h2>
                     <p style="color: var(--text-secondary); margin-top: 4px; font-size: 0.9rem;">
-                        Automate inbound incident triage and outbound customer alerts through Meta WhatsApp Cloud API.
+                        Real-time WhatsApp Web console with voice playback, instant reply box, and message lifecycle management.
                     </p>
                 </div>
-                <div style="display: flex; gap: 8px; align-items: center;">
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <div class="hud-btn-group" style="display: inline-flex; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; background: rgba(0,0,0,0.25);">
+                        <button type="button" class="hud-btn small active" id="btnViewWaWeb" onclick="setWhatsAppViewMode('web')" style="border: none; border-radius: 0; padding: 5px 12px; font-size: 11px;">💬 WhatsApp Web</button>
+                        <button type="button" class="hud-btn small" id="btnViewWaClassic" onclick="setWhatsAppViewMode('classic')" style="border: none; border-radius: 0; padding: 5px 12px; font-size: 11px;">⚙️ Gateway &amp; Audit</button>
+                    </div>
                     <span class="status-pill blue" id="whatsappModeBadge">🧪 Simulation</span>
                     <button class="hud-btn outline small" onclick="loadWhatsAppDashboard()">🔄 Refresh</button>
                 </div>
@@ -700,7 +704,121 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 </div>
             </div>
 
-            <div class="dashboard-columns">
+            <!-- VIEW 1: WHATSAPP WEB FULL REPLICA -->
+            <div id="waWebViewContainer" class="wa-web-app" style="margin-bottom: 24px;">
+                <!-- SIDEBAR: CONTACTS & SEARCH -->
+                <div class="wa-sidebar">
+                    <!-- Sidebar Top Bar -->
+                    <div class="wa-sidebar-header">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div style="width: 36px; height: 36px; border-radius: 50%; background: #00a884; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #fff; font-weight: 700; user-select: none;">
+                                💬
+                            </div>
+                            <div>
+                                <div style="font-size: 13.5px; font-weight: 600; color: #e9edef;">WhatsApp Web</div>
+                                <div id="waSidebarStatus" style="font-size: 11px; color: #00a884;">● Live Sync Active</div>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <button type="button" class="wa-icon-btn" title="Sync Inbound Messages" id="btnSyncWhatsAppWeb" onclick="syncWhatsAppMessagesNow()">🔄</button>
+                            <button type="button" class="wa-icon-btn" title="Start New Conversation" onclick="promptNewConversation()">➕</button>
+                            <button type="button" class="wa-icon-btn" title="Configure Gateway" onclick="setWhatsAppViewMode('classic')">⚙️</button>
+                        </div>
+                    </div>
+
+                    <!-- Search / Filter Bar -->
+                    <div style="padding: 8px 12px; background: #111b21; border-bottom: 1px solid #202c33;">
+                        <div style="background: #202c33; border-radius: 8px; display: flex; align-items: center; padding: 6px 12px; gap: 8px;">
+                            <span style="color: #8696a0; font-size: 13px;">🔍</span>
+                            <input type="text" id="waChatSearchInput" placeholder="Search conversations or contacts..." oninput="handleWhatsAppChatSearch(this.value)" style="background: transparent; border: none; outline: none; color: #e9edef; font-size: 12.5px; width: 100%;">
+                        </div>
+                    </div>
+
+                    <!-- Conversations List -->
+                    <div id="waConversationList" style="flex: 1; overflow-y: auto;">
+                        <div style="padding: 40px 20px; text-align: center; color: #8696a0; font-size: 12.5px;">
+                            <div>💬</div>
+                            <div style="margin-top: 6px;">Loading conversations...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MAIN CHAT PANE -->
+                <div class="wa-chat-pane">
+                    <!-- Chat Header -->
+                    <div class="wa-chat-header" id="waActiveChatHeader">
+                        <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                            <div id="waActiveAvatar" class="wa-avatar" style="background-color: #53bdeb; width: 38px; height: 38px; font-size: 14px;">
+                                👤
+                            </div>
+                            <div style="min-width: 0;">
+                                <div id="waActiveContactName" style="font-size: 14px; font-weight: 600; color: #e9edef; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                    Select a Conversation
+                                </div>
+                                <div id="waActiveContactPhone" style="font-size: 11px; color: #8696a0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                    Click any contact from the left list or click ➕ to start
+                                </div>
+                            </div>
+                        </div>
+                        <div id="waActiveChatActions" style="display: flex; align-items: center; gap: 8px;">
+                            <button type="button" class="wa-icon-btn" title="Simulate Inbound Voice Note" onclick="simulateInboundVoiceNote()">🎙️ Voice Demo</button>
+                            <button type="button" class="wa-icon-btn" title="Clear Conversation" onclick="clearCurrentConversation()">🗑️ Clear</button>
+                        </div>
+                    </div>
+
+                    <!-- Message Stream (Wallpaper Background) -->
+                    <div id="waMessagesStream" class="wa-messages-container">
+                        <div style="margin: auto; text-align: center; color: #8696a0; max-width: 380px;">
+                            <div style="font-size: 3rem; margin-bottom: 12px; opacity: 0.8;">📱</div>
+                            <div style="font-size: 1.15rem; font-weight: 600; color: #e9edef; margin-bottom: 6px;">WhatsApp Web Console</div>
+                            <p style="font-size: 12.5px; line-height: 1.5;">
+                                Real-time synchronization active. Listen to voice notes, send direct replies, and delete individual messages with instant audit updates.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Emoji Tray Dropdown (Hidden by default) -->
+                    <div id="waEmojiTray" style="display: none; background: #182229; border-top: 1px solid #222d34; padding: 10px 14px; gap: 10px; flex-wrap: wrap;">
+                        <button type="button" class="hud-btn small outline" onclick="insertEmojiIntoReply('👍')">👍</button>
+                        <button type="button" class="hud-btn small outline" onclick="insertEmojiIntoReply('✅')">✅</button>
+                        <button type="button" class="hud-btn small outline" onclick="insertEmojiIntoReply('👋')">👋</button>
+                        <button type="button" class="hud-btn small outline" onclick="insertEmojiIntoReply('🙏')">🙏</button>
+                        <button type="button" class="hud-btn small outline" onclick="insertEmojiIntoReply('🚨')">🚨</button>
+                        <button type="button" class="hud-btn small outline" onclick="insertEmojiIntoReply('🚀')">🚀</button>
+                        <button type="button" class="hud-btn small outline" onclick="insertEmojiIntoReply('💬')">💬</button>
+                        <button type="button" class="hud-btn small outline" onclick="insertEmojiIntoReply('⚡')">⚡</button>
+                        <button type="button" class="hud-btn small outline" onclick="insertEmojiIntoReply('🎉')">🎉</button>
+                    </div>
+
+                    <!-- Templates Quick Tray (Hidden by default) -->
+                    <div id="waTemplatesTray" style="display: none; background: #182229; border-top: 1px solid #222d34; padding: 10px 14px; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" class="hud-btn small outline" onclick="insertTemplateReply('Hello! Your incident ticket has been created and assigned to triage.')">🎫 Incident Created</button>
+                        <button type="button" class="hud-btn small outline" onclick="insertTemplateReply('Payment confirmed via JazzCash gateway. Receipt has been issued.')">💳 Payment Confirmed</button>
+                        <button type="button" class="hud-btn small outline" onclick="insertTemplateReply('Thank you for reaching out! An engineer is currently looking into your request.')">🔧 Engineer Assigned</button>
+                    </div>
+
+                    <!-- Bottom Reply Bar -->
+                    <div class="wa-reply-bar">
+                        <button type="button" class="wa-icon-btn" id="waEmojiToggleBtn" onclick="toggleEmojiTray()" title="Insert Emoji">😊</button>
+                        <button type="button" class="wa-icon-btn" id="waTemplateToggleBtn" onclick="toggleTemplatesTray()" title="Quick Reply Templates">📎</button>
+
+                        <div style="flex: 1;">
+                            <textarea id="waReplyInput" class="wa-reply-input" rows="1" placeholder="Type a message (Press Enter to send, Shift+Enter for newline)..." onkeydown="handleWaReplyKeydown(event)"></textarea>
+                        </div>
+
+                        <!-- Voice Note Dispatch Button -->
+                        <button type="button" class="wa-icon-btn" id="waVoiceNoteBtn" title="Send Voice Note" onclick="promptSendVoiceNote()" style="color: #00a884; font-size: 18px;">🎙️</button>
+
+                        <!-- Send Button -->
+                        <button type="button" class="wa-reply-send-btn" id="waReplySendBtn" onclick="sendWhatsAppReply()" title="Send Message">
+                            ➤
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 2: CLASSIC GATEWAY CONFIG & RAW AUDIT TABLE -->
+            <div id="waClassicViewContainer" class="dashboard-columns" style="display: none;">
                 <!-- Left: Configuration & Outbound Dispatcher -->
                 <div class="hud-panel flex-1">
                     <div class="panel-header">
