@@ -2365,8 +2365,9 @@ def whatsapp_webhook_verification():
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
+    org_id = request.args.get("org_id")
 
-    valid_challenge = WhatsAppService.verify_webhook_challenge(mode, token, challenge)
+    valid_challenge = WhatsAppService.verify_webhook_challenge(mode, token, challenge, organization_id=org_id)
     if valid_challenge is not None:
         return valid_challenge, 200, {"Content-Type": "text/plain"}
     return jsonify({"error": "Forbidden: invalid verification token or mode"}), 403
@@ -2393,7 +2394,8 @@ def whatsapp_webhook_ingress():
         # Meta Cloud API signature verification
         raw_body = request.get_data()
         sig = request.headers.get("X-Hub-Signature-256")
-        if not WhatsAppService.verify_signature(raw_body, sig):
+        target_org_hint = request.args.get("org_id")
+        if not WhatsAppService.verify_signature(raw_body, sig, organization_id=target_org_hint):
             logger.warning("WhatsApp Meta webhook rejected: HMAC signature verification failed.")
             return jsonify({"error": "Invalid signature", "code": "UNAUTHORIZED"}), 401
         messages = WhatsAppService.parse_webhook_payload(payload)
@@ -2408,6 +2410,30 @@ def whatsapp_webhook_ingress():
     target_org_id = request.args.get("org_id")
     if target_org_id:
         target_org = db.session.get(Organization, target_org_id)
+
+    # Resolve via instance ID or phone ID if not provided via query parameter
+    if not target_org:
+        incoming_instance_id = None
+        if is_green_api:
+            incoming_instance_id = (
+                payload.get("instanceData", {}).get("idInstance")
+                or payload.get("idInstance")
+            )
+        else:
+            entries = payload.get("entry", [])
+            if entries and isinstance(entries, list):
+                changes = entries[0].get("changes", [])
+                if changes and isinstance(changes, list):
+                    incoming_instance_id = changes[0].get("value", {}).get("metadata", {}).get("phone_number_id")
+
+        if not incoming_instance_id and messages:
+            incoming_instance_id = messages[0].get("recipient_phone_id")
+
+        if incoming_instance_id:
+            resolved_org_id = WhatsAppService.resolve_organization_by_instance(incoming_instance_id)
+            if resolved_org_id:
+                target_org = db.session.get(Organization, resolved_org_id)
+
     if not target_org:
         target_org = Organization.query.filter_by(is_active=True).first()
 
@@ -2485,6 +2511,19 @@ def green_api_webhook_ingress():
     target_org_id = request.args.get("org_id")
     if target_org_id:
         target_org = db.session.get(Organization, target_org_id)
+
+    if not target_org:
+        incoming_instance_id = (
+            payload.get("instanceData", {}).get("idInstance")
+            or payload.get("idInstance")
+        )
+        if not incoming_instance_id and messages:
+            incoming_instance_id = messages[0].get("recipient_phone_id")
+        if incoming_instance_id:
+            resolved_org_id = WhatsAppService.resolve_organization_by_instance(incoming_instance_id)
+            if resolved_org_id:
+                target_org = db.session.get(Organization, resolved_org_id)
+
     if not target_org:
         target_org = Organization.query.filter_by(is_active=True).first()
     target_org_id = target_org.id if target_org else (target_org_id or "org-enterprise-default")
@@ -2546,7 +2585,8 @@ def green_api_webhook_ingress():
 @api_v1.route("/whatsapp/poll", methods=["GET", "POST"])
 def whatsapp_poll_messages():
     """Fetches inbound messages from Green-API receive queue and message journal."""
-    org_id = request.args.get("org_id")
+    org = get_current_org()
+    org_id = request.args.get("org_id") or (org.id if org else None)
     batch_size = min(int(request.args.get("batch", 15)), 50)
     sync_hist = request.args.get("sync_history", "true").lower() in ("true", "1", "yes")
     result = WhatsAppService.poll_and_process_incoming_notifications(
@@ -2560,7 +2600,8 @@ def whatsapp_poll_messages():
 @api_v1.route("/whatsapp/sync-messages", methods=["GET", "POST"])
 def whatsapp_sync_recent_messages():
     """Synchronizes recent incoming WhatsApp messages from lastIncomingMessages journal."""
-    org_id = request.args.get("org_id")
+    org = get_current_org()
+    org_id = request.args.get("org_id") or (org.id if org else None)
     mins = int(request.args.get("minutes", 1440))
     limit = min(int(request.args.get("limit", 50)), 100)
     result = WhatsAppService.sync_last_incoming_messages(organization_id=org_id, minutes=mins, max_messages=limit)
@@ -2648,7 +2689,7 @@ def list_whatsapp_messages():
     return jsonify({
         "messages": [m.to_dict() for m in messages],
         "count": len(messages),
-        "is_configured": WhatsAppService.is_configured()
+        "is_configured": WhatsAppService.is_configured(organization_id=org.id if org else None)
     }), 200
 
 
@@ -2672,14 +2713,14 @@ def delete_whatsapp_message(message_id: str):
     # Attempt remote Green-API deleteMessage if configured
     try:
         import requests
-        conf = WhatsAppService.get_effective_config()
+        conf = WhatsAppService.get_config(organization_id=org.id if org else None)
         id_inst = conf.get("green_api_id_instance")
-        tok_inst = conf.get("green_api_api_token_instance")
+        tok_inst = conf.get("green_api_token_instance")
         if id_inst and tok_inst and msg.whatsapp_message_id:
             chat_id = msg.recipient if msg.direction == "outbound" else msg.sender
             if "@" not in chat_id:
                 chat_id = f"{chat_id}@c.us"
-            host = conf.get("green_api_host_url") or "https://7107.api.greenapi.com"
+            host = conf.get("green_api_host") or "https://api.greenapi.com"
             del_url = f"{host}/waInstance{id_inst}/deleteMessage/{tok_inst}"
             try:
                 requests.post(del_url, json={"chatId": chat_id, "idMessage": msg.whatsapp_message_id}, timeout=3)
@@ -2760,7 +2801,8 @@ def whatsapp_media_proxy():
 def get_whatsapp_config():
     """Returns non-sensitive WhatsApp configuration status and webhook URLs for both Meta and Green-API."""
     org = get_current_org()
-    conf = WhatsAppService.get_config()
+    org_id = org.id if org else None
+    conf = WhatsAppService.get_config(organization_id=org_id)
     base_url = request.host_url.rstrip("/")
     meta_webhook_url = f"{base_url}/api/v1/webhooks/whatsapp" + (f"?org_id={org.id}" if org else "")
     green_api_webhook_url = f"{base_url}/api/v1/webhooks/whatsapp/green-api" + (f"?org_id={org.id}" if org else "")
@@ -2771,14 +2813,15 @@ def get_whatsapp_config():
     green_api_id = conf.get("green_api_id_instance", "")
     masked_green_id = green_api_id[:4] + "..." + green_api_id[-3:] if len(green_api_id) > 7 else (green_api_id or "Not Configured")
 
-    active_provider = WhatsAppService.get_active_provider()
+    active_provider = WhatsAppService.get_active_provider(organization_id=org_id)
 
     return jsonify({
-        "is_configured": WhatsAppService.is_configured(),
+        "organization_id": org_id,
+        "is_configured": WhatsAppService.is_configured(organization_id=org_id),
         "active_provider": active_provider,
         "whatsapp_provider": conf.get("whatsapp_provider", "auto"),
-        "meta_configured": WhatsAppService.is_meta_configured(),
-        "green_api_configured": WhatsAppService.is_green_api_configured(),
+        "meta_configured": WhatsAppService.is_meta_configured(organization_id=org_id),
+        "green_api_configured": WhatsAppService.is_green_api_configured(organization_id=org_id),
         "simulator_fallback_enabled": WhatsAppService.is_simulator_fallback_enabled(),
         "timeout_seconds": 30,
         "phone_number_id": masked_phone_id,
@@ -2798,6 +2841,8 @@ def get_whatsapp_config():
 @require_role(["owner", "admin"])
 def save_whatsapp_config():
     """Updates live Meta WhatsApp and Green-API credentials in SystemSetting."""
+    org = get_current_org()
+    org_id = org.id if org else None
     data = request.get_json(silent=True) or {}
     phone_id = data.get("phone_number_id")
     access_token = data.get("access_token")
@@ -2811,6 +2856,7 @@ def save_whatsapp_config():
     provider = data.get("whatsapp_provider") or data.get("provider")
 
     updated = WhatsAppService.save_config(
+        organization_id=org_id,
         phone_number_id=phone_id,
         access_token=access_token,
         business_account_id=waba_id,
@@ -2824,13 +2870,15 @@ def save_whatsapp_config():
     current_user = get_current_user()
     log_audit_event("whatsapp.config_updated", "system", "whatsapp", {
         "user_id": current_user.id if current_user else "admin",
-        "active_provider": WhatsAppService.get_active_provider()
+        "organization_id": org_id,
+        "active_provider": WhatsAppService.get_active_provider(organization_id=org_id)
     })
     return jsonify({
         "success": True,
         "message": "WhatsApp configuration updated successfully.",
-        "is_configured": WhatsAppService.is_configured(),
-        "active_provider": WhatsAppService.get_active_provider()
+        "organization_id": org_id,
+        "is_configured": WhatsAppService.is_configured(organization_id=org_id),
+        "active_provider": WhatsAppService.get_active_provider(organization_id=org_id)
     }), 200
 
 
@@ -2838,11 +2886,78 @@ def save_whatsapp_config():
 @require_auth
 def test_whatsapp_connection():
     """Tests live connection to Meta Graph API or Green-API using current credentials."""
+    org = get_current_org()
+    org_id = org.id if org else None
     data = request.get_json(silent=True) or {}
     provider = data.get("provider")
-    result = WhatsAppService.test_live_connection(provider=provider)
+    result = WhatsAppService.test_live_connection(provider=provider, organization_id=org_id)
     status_code = 200 if result.get("success") else 400
     return jsonify(result), status_code
+
+
+@api_v1.route("/whatsapp/instances", methods=["GET"])
+@require_auth
+def list_whatsapp_instances():
+    """Returns mapping dictionary of Green-API Instance IDs and Meta Phone IDs to Organization IDs."""
+    mappings = WhatsAppService.get_instance_mappings()
+    return jsonify({
+        "mappings": mappings,
+        "count": len(mappings)
+    }), 200
+
+
+@api_v1.route("/whatsapp/instances/map", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+def map_whatsapp_instance():
+    """Maps an Instance ID or Phone Number ID to a specific organization."""
+    data = request.get_json(silent=True) or {}
+    instance_id = data.get("instance_id") or data.get("id_instance") or data.get("phone_number_id")
+    target_org_id = data.get("organization_id") or data.get("org_id")
+    provider = data.get("provider", "green_api")
+
+    if not instance_id:
+        return jsonify({"error": "'instance_id' is required.", "code": "VALIDATION_ERROR"}), 400
+
+    if not target_org_id:
+        current_org = get_current_org()
+        target_org_id = current_org.id if current_org else None
+
+    if not target_org_id:
+        return jsonify({"error": "'organization_id' is required.", "code": "VALIDATION_ERROR"}), 400
+
+    WhatsAppService.register_instance_mapping(str(instance_id), str(target_org_id), provider=provider)
+    log_audit_event("whatsapp.instance_mapped", "system", str(instance_id), {
+        "instance_id": str(instance_id),
+        "organization_id": str(target_org_id),
+        "provider": provider
+    })
+
+    return jsonify({
+        "success": True,
+        "message": f"Successfully mapped instance '{instance_id}' to organization '{target_org_id}'.",
+        "instance_id": str(instance_id),
+        "organization_id": str(target_org_id),
+        "provider": provider
+    }), 200
+
+
+@api_v1.route("/whatsapp/instances/map/<instance_id>", methods=["DELETE"])
+@require_auth
+@require_role(["owner", "admin"])
+def delete_whatsapp_instance(instance_id: str):
+    """Removes an Instance ID or Phone Number ID mapping from multi-tenant routing."""
+    deleted = WhatsAppService.delete_instance_mapping(instance_id)
+    log_audit_event("whatsapp.instance_unmapped", "system", instance_id, {
+        "instance_id": instance_id,
+        "deleted": deleted
+    })
+    return jsonify({
+        "success": True,
+        "message": f"Instance mapping for '{instance_id}' removed.",
+        "instance_id": instance_id,
+        "deleted": deleted
+    }), 200
 
 
 # ==========================================

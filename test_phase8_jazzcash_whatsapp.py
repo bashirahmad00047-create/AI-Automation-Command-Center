@@ -375,7 +375,127 @@ class TestPhase8JazzCashWhatsApp(unittest.TestCase):
         self.assertEqual(d.get("media_url"), "https://media.example.com/audio.ogg")
         self.assertEqual(d.get("audio_duration"), 12)
 
+    def test_multi_tenant_scoped_config(self):
+        """Verifies multi-tenant credential isolation between organizations with fallback."""
+        # Org A config
+        WhatsAppService.save_config(
+            organization_id="org-pk-enterprise",
+            phone_number_id="111222333",
+            green_api_id_instance="710711111111",
+            green_api_token_instance="token_org_a"
+        )
+        # Org B config
+        WhatsAppService.save_config(
+            organization_id="org-pk-tenant-b",
+            phone_number_id="444555666",
+            green_api_id_instance="710722222222",
+            green_api_token_instance="token_org_b"
+        )
+
+        conf_a = WhatsAppService.get_config(organization_id="org-pk-enterprise")
+        conf_b = WhatsAppService.get_config(organization_id="org-pk-tenant-b")
+
+        self.assertEqual(conf_a["phone_number_id"], "111222333")
+        self.assertEqual(conf_a["green_api_id_instance"], "710711111111")
+        self.assertEqual(conf_a["green_api_token_instance"], "token_org_a")
+
+        self.assertEqual(conf_b["phone_number_id"], "444555666")
+        self.assertEqual(conf_b["green_api_id_instance"], "710722222222")
+        self.assertEqual(conf_b["green_api_token_instance"], "token_org_b")
+
+        # Global fallback for unconfigured Org C
+        SystemSetting.set_val("GREEN_API_ID_INSTANCE", "7107global999", is_secret=False)
+        conf_c = WhatsAppService.get_config(organization_id="org-pk-tenant-c")
+        self.assertEqual(conf_c["green_api_id_instance"], "7107global999")
+
+    def test_instance_id_mapping_and_resolution(self):
+        """Verifies registering, resolving, and deleting instance ID mappings."""
+        WhatsAppService.register_instance_mapping("710799988877", "org-pk-enterprise", provider="green_api")
+        resolved = WhatsAppService.resolve_organization_by_instance("710799988877")
+        self.assertEqual(resolved, "org-pk-enterprise")
+
+        mappings = WhatsAppService.get_instance_mappings()
+        self.assertIn("710799988877", mappings)
+        self.assertEqual(mappings["710799988877"], "org-pk-enterprise")
+
+        # Delete mapping
+        deleted = WhatsAppService.delete_instance_mapping("710799988877")
+        self.assertTrue(deleted)
+        self.assertIsNone(WhatsAppService.resolve_organization_by_instance("710799988877"))
+
+    def test_multi_tenant_webhook_routing_via_instance_mapping(self):
+        """Inbound webhook automatically resolves target tenant from instanceData.idInstance."""
+        org_b = Organization(
+            id="org-pk-tenant-b",
+            name="Pak Enterprise Branch B",
+            slug="pak-enterprise-b",
+            plan_tier="starter",
+            is_active=True
+        )
+        db.session.add(org_b)
+        db.session.commit()
+
+        # Map instance 710733344455 -> org-pk-tenant-b
+        WhatsAppService.register_instance_mapping("710733344455", "org-pk-tenant-b", provider="green_api")
+
+        webhook_payload = {
+            "typeWebhook": "incomingMessageReceived",
+            "instanceData": {
+                "idInstance": 710733344455,
+                "wid": "710733344455@c.us"
+            },
+            "timestamp": 1728000000,
+            "idMessage": "wamid.multitenant_test_msg_99",
+            "senderData": {
+                "chatId": "923001239999@c.us",
+                "sender": "923001239999@c.us",
+                "chatName": "Branch B Customer"
+            },
+            "messageData": {
+                "typeMessage": "textMessage",
+                "textMessageData": {
+                    "textMessage": "Hello Branch B!"
+                }
+            }
+        }
+
+        # Post to webhook WITHOUT ?org_id= parameter
+        resp = self.client.post("/api/v1/webhooks/whatsapp/green-api", json=webhook_payload)
+        self.assertEqual(resp.status_code, 200)
+
+        # Verify message was routed to org-pk-tenant-b
+        msg = WhatsAppMessage.query.filter_by(whatsapp_message_id="wamid.multitenant_test_msg_99").first()
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg.organization_id, "org-pk-tenant-b")
+        self.assertEqual(msg.body, "Hello Branch B!")
+
+    def test_multi_tenant_instances_api_endpoints(self):
+        """Tests GET /whatsapp/instances, POST /whatsapp/instances/map, and DELETE /whatsapp/instances/map/<id>."""
+        # 1. Map instance via API
+        map_res = self.client.post("/api/v1/whatsapp/instances/map", json={
+            "instance_id": "7107888999",
+            "organization_id": "org-pk-enterprise"
+        })
+        self.assertEqual(map_res.status_code, 200)
+        self.assertTrue(map_res.get_json().get("success"))
+
+        # Verify resolution
+        self.assertEqual(WhatsAppService.resolve_organization_by_instance("7107888999"), "org-pk-enterprise")
+
+        # 2. List mappings via API
+        list_res = self.client.get("/api/v1/whatsapp/instances")
+        self.assertEqual(list_res.status_code, 200)
+        mappings = list_res.get_json().get("mappings", {})
+        self.assertIn("7107888999", mappings)
+
+        # 3. Delete mapping via API
+        del_res = self.client.delete("/api/v1/whatsapp/instances/map/7107888999")
+        self.assertEqual(del_res.status_code, 200)
+        self.assertTrue(del_res.get_json().get("success"))
+        self.assertIsNone(WhatsAppService.resolve_organization_by_instance("7107888999"))
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

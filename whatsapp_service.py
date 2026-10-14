@@ -65,12 +65,14 @@ class WhatsAppService:
         self,
         id_instance: Optional[str] = None,
         api_token: Optional[str] = None,
-        host: Optional[str] = None
+        host: Optional[str] = None,
+        organization_id: Optional[str] = None
     ) -> None:
         """Initializes WhatsAppService instance with optional instance-level overrides."""
         self._id_instance = id_instance
         self._api_token = api_token
         self._host = host
+        self._organization_id = organization_id
         if id_instance:
             os.environ["GREEN_API_ID_INSTANCE"] = str(id_instance).strip()
         if api_token:
@@ -83,7 +85,7 @@ class WhatsAppService:
         """Returns configured Green-API idInstance or empty string."""
         if self._id_instance:
             return self._id_instance
-        conf = self.get_config()
+        conf = self.get_config(organization_id=self._organization_id)
         return conf.get("green_api_id_instance") or conf.get("phone_number_id") or ""
 
     @property
@@ -91,7 +93,7 @@ class WhatsAppService:
         """Returns configured Green-API apiTokenInstance (or Meta access_token) or empty string."""
         if self._api_token:
             return self._api_token
-        conf = self.get_config()
+        conf = self.get_config(organization_id=self._organization_id)
         return conf.get("green_api_token_instance") or conf.get("access_token") or ""
 
     @property
@@ -99,7 +101,7 @@ class WhatsAppService:
         """Returns configured Green-API host."""
         if self._host:
             return self.normalize_green_api_host(self._host, self.id_instance)
-        conf = self.get_config()
+        conf = self.get_config(organization_id=self._organization_id)
         return conf.get("green_api_host") or self.DEFAULT_GREEN_API_HOST
 
     @classmethod
@@ -197,11 +199,96 @@ class WhatsAppService:
         return raw
 
     @classmethod
-    def get_config(cls) -> Dict[str, Any]:
-        """Retrieves WhatsApp configuration from database settings, environment, or app config."""
+    def _get_tenant_or_global_setting(cls, key: str, organization_id: Optional[str] = None, default: Optional[str] = None) -> Optional[str]:
+        """Resolves setting scoped to tenant first, falling back to global setting."""
+        if organization_id and organization_id != "global":
+            scoped_key = f"ORG_{organization_id}_{key}"
+            val = SystemSetting.get_val(scoped_key)
+            if val is not None and val != "":
+                return val
+        return SystemSetting.get_val(key, default)
+
+    @classmethod
+    def get_instance_mappings(cls) -> Dict[str, str]:
+        """Returns dictionary mapping instance_id / phone_id -> organization_id."""
+        val = SystemSetting.get_val("WHATSAPP_INSTANCE_MAP")
+        if val:
+            try:
+                data = json.loads(val)
+                if isinstance(data, dict):
+                    return data
+            except Exception:
+                pass
+        return {}
+
+    @classmethod
+    def register_instance_mapping(cls, instance_or_phone_id: str, organization_id: str, provider: str = "green_api"):
+        """Registers an Instance ID or Phone Number ID to an organization ID for multi-tenant webhook routing."""
+        clean_id = str(instance_or_phone_id or "").strip()
+        clean_org = str(organization_id or "").strip()
+        if not clean_id or not clean_org:
+            return
+        mappings = cls.get_instance_mappings()
+        mappings[clean_id] = clean_org
+        SystemSetting.set_val(
+            "WHATSAPP_INSTANCE_MAP",
+            json.dumps(mappings, indent=2),
+            is_secret=False,
+            description="Mapping of WhatsApp Instance IDs and Phone IDs to Organization IDs"
+        )
+        SystemSetting.set_val(
+            f"WHATSAPP_MAP_INSTANCE_{clean_id}",
+            clean_org,
+            is_secret=False,
+            description=f"Direct routing map for instance/phone {clean_id} -> {clean_org}"
+        )
+
+    @classmethod
+    def resolve_organization_by_instance(cls, instance_or_phone_id: Optional[str]) -> Optional[str]:
+        """Resolves the organization ID for a given Green-API instance ID or Meta phone number ID."""
+        if not instance_or_phone_id:
+            return None
+        clean_id = str(instance_or_phone_id).strip()
+        direct = SystemSetting.get_val(f"WHATSAPP_MAP_INSTANCE_{clean_id}")
+        if direct:
+            return direct
+        mappings = cls.get_instance_mappings()
+        if clean_id in mappings:
+            return mappings[clean_id]
+        return None
+
+    @classmethod
+    def delete_instance_mapping(cls, instance_or_phone_id: str) -> bool:
+        """Deletes an instance or phone mapping from the registry."""
+        clean_id = str(instance_or_phone_id or "").strip()
+        if not clean_id:
+            return False
+        mappings = cls.get_instance_mappings()
+        deleted = False
+        if clean_id in mappings:
+            del mappings[clean_id]
+            SystemSetting.set_val(
+                "WHATSAPP_INSTANCE_MAP",
+                json.dumps(mappings, indent=2),
+                is_secret=False,
+                description="Mapping of WhatsApp Instance IDs and Phone IDs to Organization IDs"
+            )
+            deleted = True
+        direct_key = f"WHATSAPP_MAP_INSTANCE_{clean_id}"
+        if has_app_context():
+            setting = SystemSetting.query.filter_by(key=direct_key).first()
+            if setting:
+                db.session.delete(setting)
+                db.session.commit()
+                deleted = True
+        return deleted
+
+    @classmethod
+    def get_config(cls, organization_id: Optional[str] = None) -> Dict[str, Any]:
+        """Retrieves WhatsApp configuration from tenant-scoped settings, global database settings, or environment."""
         cfg = current_app.config if has_app_context() else {}
 
-        phone_id_val = SystemSetting.get_val("WHATSAPP_PHONE_NUMBER_ID")
+        phone_id_val = cls._get_tenant_or_global_setting("WHATSAPP_PHONE_NUMBER_ID", organization_id)
         phone_id = (
             phone_id_val
             if phone_id_val is not None
@@ -212,9 +299,9 @@ class WhatsAppService:
             )
         ).strip()
 
-        token_val = SystemSetting.get_val("WHATSAPP_ACCESS_TOKEN")
+        token_val = cls._get_tenant_or_global_setting("WHATSAPP_ACCESS_TOKEN", organization_id)
         if token_val is None:
-            token_val = SystemSetting.get_val("WHATSAPP_TOKEN")
+            token_val = cls._get_tenant_or_global_setting("WHATSAPP_TOKEN", organization_id)
         access_token = (
             token_val
             if token_val is not None
@@ -228,31 +315,31 @@ class WhatsAppService:
         ).strip()
 
         verify_token = (
-            SystemSetting.get_val("WHATSAPP_VERIFY_TOKEN")
+            cls._get_tenant_or_global_setting("WHATSAPP_VERIFY_TOKEN", organization_id)
             or cfg.get("WHATSAPP_VERIFY_TOKEN")
             or os.environ.get("WHATSAPP_VERIFY_TOKEN", cls.DEFAULT_VERIFY_TOKEN)
         ).strip()
 
         business_account_id = (
-            SystemSetting.get_val("WHATSAPP_BUSINESS_ACCOUNT_ID")
+            cls._get_tenant_or_global_setting("WHATSAPP_BUSINESS_ACCOUNT_ID", organization_id)
             or cfg.get("WHATSAPP_BUSINESS_ACCOUNT_ID")
             or os.environ.get("WHATSAPP_BUSINESS_ACCOUNT_ID")
             or os.environ.get("META_WABA_ID", "")
         ).strip()
 
         app_secret = (
-            SystemSetting.get_val("WHATSAPP_APP_SECRET")
+            cls._get_tenant_or_global_setting("WHATSAPP_APP_SECRET", organization_id)
             or cfg.get("WHATSAPP_APP_SECRET")
             or os.environ.get("WHATSAPP_APP_SECRET")
             or os.environ.get("META_APP_SECRET", "")
         ).strip()
 
         # Green-API Parameters
-        green_id_val = SystemSetting.get_val("GREEN_API_ID_INSTANCE")
+        green_id_val = cls._get_tenant_or_global_setting("GREEN_API_ID_INSTANCE", organization_id)
         if green_id_val is None:
-            green_id_val = SystemSetting.get_val("ID_INSTANCE")
+            green_id_val = cls._get_tenant_or_global_setting("ID_INSTANCE", organization_id)
         if green_id_val is None:
-            green_id_val = SystemSetting.get_val("GREEN_API_ID")
+            green_id_val = cls._get_tenant_or_global_setting("GREEN_API_ID", organization_id)
         green_api_id = (
             green_id_val
             if green_id_val is not None
@@ -266,11 +353,11 @@ class WhatsAppService:
             )
         ).strip()
 
-        green_tok_val = SystemSetting.get_val("GREEN_API_TOKEN_INSTANCE")
+        green_tok_val = cls._get_tenant_or_global_setting("GREEN_API_TOKEN_INSTANCE", organization_id)
         if green_tok_val is None:
-            green_tok_val = SystemSetting.get_val("API_TOKEN_INSTANCE")
+            green_tok_val = cls._get_tenant_or_global_setting("API_TOKEN_INSTANCE", organization_id)
         if green_tok_val is None:
-            green_tok_val = SystemSetting.get_val("GREEN_API_TOKEN")
+            green_tok_val = cls._get_tenant_or_global_setting("GREEN_API_TOKEN", organization_id)
         green_api_token = (
             green_tok_val
             if green_tok_val is not None
@@ -284,7 +371,7 @@ class WhatsAppService:
             )
         ).strip()
 
-        green_api_host_val = SystemSetting.get_val("GREEN_API_HOST")
+        green_api_host_val = cls._get_tenant_or_global_setting("GREEN_API_HOST", organization_id)
         green_api_host = (
             green_api_host_val
             if green_api_host_val is not None
@@ -296,12 +383,13 @@ class WhatsAppService:
         green_api_host = cls.normalize_green_api_host(green_api_host, green_api_id)
 
         provider = (
-            SystemSetting.get_val("WHATSAPP_PROVIDER")
+            cls._get_tenant_or_global_setting("WHATSAPP_PROVIDER", organization_id)
             or cfg.get("WHATSAPP_PROVIDER")
             or os.environ.get("WHATSAPP_PROVIDER", "auto")
         ).strip().lower()
 
         return {
+            "organization_id": organization_id,
             "phone_number_id": phone_id,
             "access_token": access_token,
             "verify_token": verify_token,
@@ -316,6 +404,7 @@ class WhatsAppService:
     @classmethod
     def save_config(
         cls,
+        organization_id: Optional[str] = None,
         phone_number_id: Optional[str] = None,
         access_token: Optional[str] = None,
         business_account_id: Optional[str] = None,
@@ -326,29 +415,60 @@ class WhatsAppService:
         green_api_host: Optional[str] = None,
         whatsapp_provider: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Saves live WhatsApp / Green-API configuration dynamically into database settings."""
+        """Saves live WhatsApp / Green-API configuration dynamically into tenant-scoped and global database settings."""
+        prefix = f"ORG_{organization_id}_" if organization_id and organization_id != "global" else ""
+
         if phone_number_id is not None:
-            SystemSetting.set_val("WHATSAPP_PHONE_NUMBER_ID", phone_number_id, is_secret=False, description="Meta Graph Phone Number ID")
+            SystemSetting.set_val(f"{prefix}WHATSAPP_PHONE_NUMBER_ID", phone_number_id, is_secret=False, description=f"[{organization_id or 'global'}] Meta Graph Phone Number ID")
+            if not prefix:
+                SystemSetting.set_val("WHATSAPP_PHONE_NUMBER_ID", phone_number_id, is_secret=False)
+            if organization_id and phone_number_id:
+                cls.register_instance_mapping(phone_number_id, organization_id, provider="meta")
+
         if access_token is not None:
-            SystemSetting.set_val("WHATSAPP_ACCESS_TOKEN", access_token, is_secret=True, description="Meta Graph Access Token")
+            SystemSetting.set_val(f"{prefix}WHATSAPP_ACCESS_TOKEN", access_token, is_secret=True, description=f"[{organization_id or 'global'}] Meta Graph Access Token")
+            if not prefix:
+                SystemSetting.set_val("WHATSAPP_ACCESS_TOKEN", access_token, is_secret=True)
+
         if business_account_id is not None:
-            SystemSetting.set_val("WHATSAPP_BUSINESS_ACCOUNT_ID", business_account_id, is_secret=False, description="WhatsApp Business Account ID")
+            SystemSetting.set_val(f"{prefix}WHATSAPP_BUSINESS_ACCOUNT_ID", business_account_id, is_secret=False, description=f"[{organization_id or 'global'}] WhatsApp Business Account ID")
+            if not prefix:
+                SystemSetting.set_val("WHATSAPP_BUSINESS_ACCOUNT_ID", business_account_id, is_secret=False)
+
         if app_secret is not None:
-            SystemSetting.set_val("WHATSAPP_APP_SECRET", app_secret, is_secret=True, description="Meta App Secret for HMAC webhook verification")
+            SystemSetting.set_val(f"{prefix}WHATSAPP_APP_SECRET", app_secret, is_secret=True, description=f"[{organization_id or 'global'}] Meta App Secret")
+            if not prefix:
+                SystemSetting.set_val("WHATSAPP_APP_SECRET", app_secret, is_secret=True)
+
         if verify_token is not None:
-            SystemSetting.set_val("WHATSAPP_VERIFY_TOKEN", verify_token, is_secret=False, description="Webhook Verify Token")
+            SystemSetting.set_val(f"{prefix}WHATSAPP_VERIFY_TOKEN", verify_token, is_secret=False, description=f"[{organization_id or 'global'}] Webhook Verify Token")
+            if not prefix:
+                SystemSetting.set_val("WHATSAPP_VERIFY_TOKEN", verify_token, is_secret=False)
 
         if green_api_id_instance is not None:
-            SystemSetting.set_val("GREEN_API_ID_INSTANCE", green_api_id_instance, is_secret=False, description="Green-API Instance ID")
-        if green_api_token_instance is not None:
-            SystemSetting.set_val("GREEN_API_TOKEN_INSTANCE", green_api_token_instance, is_secret=True, description="Green-API API Token Instance")
-        if green_api_host is not None:
-            clean_host = cls.normalize_green_api_host(green_api_host)
-            SystemSetting.set_val("GREEN_API_HOST", clean_host, is_secret=False, description="Green-API API Host")
-        if whatsapp_provider is not None:
-            SystemSetting.set_val("WHATSAPP_PROVIDER", whatsapp_provider, is_secret=False, description="Active WhatsApp Provider (auto, meta, green_api)")
+            SystemSetting.set_val(f"{prefix}GREEN_API_ID_INSTANCE", green_api_id_instance, is_secret=False, description=f"[{organization_id or 'global'}] Green-API Instance ID")
+            if not prefix:
+                SystemSetting.set_val("GREEN_API_ID_INSTANCE", green_api_id_instance, is_secret=False)
+            if organization_id and green_api_id_instance:
+                cls.register_instance_mapping(green_api_id_instance, organization_id, provider="green_api")
 
-        return cls.get_config()
+        if green_api_token_instance is not None:
+            SystemSetting.set_val(f"{prefix}GREEN_API_TOKEN_INSTANCE", green_api_token_instance, is_secret=True, description=f"[{organization_id or 'global'}] Green-API API Token Instance")
+            if not prefix:
+                SystemSetting.set_val("GREEN_API_TOKEN_INSTANCE", green_api_token_instance, is_secret=True)
+
+        if green_api_host is not None:
+            clean_host = cls.normalize_green_api_host(green_api_host, green_api_id_instance)
+            SystemSetting.set_val(f"{prefix}GREEN_API_HOST", clean_host, is_secret=False, description=f"[{organization_id or 'global'}] Green-API API Host")
+            if not prefix:
+                SystemSetting.set_val("GREEN_API_HOST", clean_host, is_secret=False)
+
+        if whatsapp_provider is not None:
+            SystemSetting.set_val(f"{prefix}WHATSAPP_PROVIDER", whatsapp_provider, is_secret=False, description=f"[{organization_id or 'global'}] Active WhatsApp Provider")
+            if not prefix:
+                SystemSetting.set_val("WHATSAPP_PROVIDER", whatsapp_provider, is_secret=False)
+
+        return cls.get_config(organization_id=organization_id)
 
     @classmethod
     def format_phone_number(cls, phone: str) -> str:
@@ -362,9 +482,9 @@ class WhatsAppService:
         return clean
 
     @classmethod
-    def is_meta_configured(cls) -> bool:
-        """Returns True if live Meta WhatsApp credentials are configured."""
-        conf = cls.get_config()
+    def is_meta_configured(cls, organization_id: Optional[str] = None) -> bool:
+        """Returns True if live Meta WhatsApp credentials are configured for tenant."""
+        conf = cls.get_config(organization_id=organization_id)
         phone_id = conf["phone_number_id"]
         token = conf["access_token"]
         return bool(
@@ -375,9 +495,9 @@ class WhatsAppService:
         )
 
     @classmethod
-    def is_green_api_configured(cls) -> bool:
-        """Returns True if live Green-API credentials are configured."""
-        conf = cls.get_config()
+    def is_green_api_configured(cls, organization_id: Optional[str] = None) -> bool:
+        """Returns True if live Green-API credentials are configured for tenant."""
+        conf = cls.get_config(organization_id=organization_id)
         id_inst = conf.get("green_api_id_instance", "")
         tok_inst = conf.get("green_api_token_instance", "")
         return bool(
@@ -388,32 +508,32 @@ class WhatsAppService:
         )
 
     @classmethod
-    def get_active_provider(cls) -> str:
-        """Resolves active WhatsApp provider: 'green_api', 'meta', or 'simulator'."""
-        conf = cls.get_config()
+    def get_active_provider(cls, organization_id: Optional[str] = None) -> str:
+        """Resolves active WhatsApp provider for tenant: 'green_api', 'meta', or 'simulator'."""
+        conf = cls.get_config(organization_id=organization_id)
         configured_pref = conf.get("whatsapp_provider", "auto")
 
-        if configured_pref == "green_api" and cls.is_green_api_configured():
+        if configured_pref == "green_api" and cls.is_green_api_configured(organization_id=organization_id):
             return "green_api"
-        if configured_pref == "meta" and cls.is_meta_configured():
+        if configured_pref == "meta" and cls.is_meta_configured(organization_id=organization_id):
             return "meta"
 
         # Auto resolution
-        if cls.is_green_api_configured():
+        if cls.is_green_api_configured(organization_id=organization_id):
             return "green_api"
-        if cls.is_meta_configured():
+        if cls.is_meta_configured(organization_id=organization_id):
             return "meta"
         return "simulator"
 
     @classmethod
-    def is_configured(cls) -> bool:
+    def is_configured(cls, organization_id: Optional[str] = None) -> bool:
         """Returns True if either Meta Cloud API or Green-API credentials are configured."""
-        return cls.is_green_api_configured() or cls.is_meta_configured()
+        return cls.is_green_api_configured(organization_id=organization_id) or cls.is_meta_configured(organization_id=organization_id)
 
     @classmethod
-    def test_green_api_connection(cls) -> Dict[str, Any]:
+    def test_green_api_connection(cls, organization_id: Optional[str] = None) -> Dict[str, Any]:
         """Probes Green-API getStateInstance endpoint with robust timeout and error handling."""
-        conf = cls.get_config()
+        conf = cls.get_config(organization_id=organization_id)
         id_inst = conf.get("green_api_id_instance", "")
         tok_inst = conf.get("green_api_token_instance", "")
         host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
@@ -537,14 +657,14 @@ class WhatsAppService:
             }
 
     @classmethod
-    def test_live_connection(cls, provider: Optional[str] = None) -> Dict[str, Any]:
+    def test_live_connection(cls, provider: Optional[str] = None, organization_id: Optional[str] = None) -> Dict[str, Any]:
         """Probes Meta Cloud API or Green-API with configured credentials and robust timeout handling."""
-        target_provider = provider or cls.get_active_provider()
+        target_provider = provider or cls.get_active_provider(organization_id=organization_id)
         if target_provider == "green_api":
-            return cls.test_green_api_connection()
+            return cls.test_green_api_connection(organization_id=organization_id)
 
         # Meta Cloud API check
-        conf = cls.get_config()
+        conf = cls.get_config(organization_id=organization_id)
         phone_id = conf["phone_number_id"]
         token = conf["access_token"]
 
@@ -638,13 +758,14 @@ class WhatsAppService:
         cls,
         mode: Optional[str],
         token: Optional[str],
-        challenge: Optional[str]
+        challenge: Optional[str],
+        organization_id: Optional[str] = None
     ) -> Optional[str]:
         """Verifies Meta Webhook subscription request.
         
         Returns the challenge string if valid, else None.
         """
-        conf = cls.get_config()
+        conf = cls.get_config(organization_id=organization_id)
         expected_token = conf["verify_token"]
 
         if mode == "subscribe" and token and hmac.compare_digest(token, expected_token):
@@ -652,9 +773,14 @@ class WhatsAppService:
         return None
 
     @classmethod
-    def verify_signature(cls, raw_payload: bytes, signature_header: Optional[str]) -> bool:
+    def verify_signature(
+        cls,
+        raw_payload: bytes,
+        signature_header: Optional[str],
+        organization_id: Optional[str] = None
+    ) -> bool:
         """Validates Meta X-Hub-Signature-256 header using WHATSAPP_APP_SECRET."""
-        conf = cls.get_config()
+        conf = cls.get_config(organization_id=organization_id)
         app_secret = conf["app_secret"]
         if not app_secret:
             # If app secret not configured in dev, pass signature check
@@ -794,12 +920,12 @@ class WhatsAppService:
         return messages
 
     @classmethod
-    def receive_green_api_notification(cls) -> Optional[Tuple[int, Dict[str, Any]]]:
+    def receive_green_api_notification(cls, organization_id: Optional[str] = None) -> Optional[Tuple[int, Dict[str, Any]]]:
         """Fetches a single pending notification from Green-API's receiveNotification queue.
 
         Returns (receipt_id, body_dict) if a notification is waiting, else None.
         """
-        conf = cls.get_config()
+        conf = cls.get_config(organization_id=organization_id)
         id_inst = conf.get("green_api_id_instance")
         tok_inst = conf.get("green_api_token_instance")
         host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
@@ -820,9 +946,9 @@ class WhatsAppService:
         return None
 
     @classmethod
-    def delete_green_api_notification(cls, receipt_id: int) -> bool:
+    def delete_green_api_notification(cls, receipt_id: int, organization_id: Optional[str] = None) -> bool:
         """Confirms and deletes a processed notification from the Green-API receive queue."""
-        conf = cls.get_config()
+        conf = cls.get_config(organization_id=organization_id)
         id_inst = conf.get("green_api_id_instance")
         tok_inst = conf.get("green_api_token_instance")
         host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
@@ -840,9 +966,9 @@ class WhatsAppService:
             return False
 
     @classmethod
-    def fetch_last_incoming_messages(cls, minutes: int = 1440) -> List[Dict[str, Any]]:
+    def fetch_last_incoming_messages(cls, minutes: int = 1440, organization_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Fetches the latest incoming messages directly from Green-API's message journal."""
-        conf = cls.get_config()
+        conf = cls.get_config(organization_id=organization_id)
         id_inst = conf.get("green_api_id_instance")
         tok_inst = conf.get("green_api_token_instance")
         host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
@@ -874,7 +1000,7 @@ class WhatsAppService:
         Guarantees idempotency via is_duplicate_message so already-recorded messages are ignored.
         """
         org_id = organization_id or "org-enterprise-default"
-        raw_items = cls.fetch_last_incoming_messages(minutes=minutes)
+        raw_items = cls.fetch_last_incoming_messages(minutes=minutes, organization_id=org_id)
         processed_count = 0
         newly_ingested: List[Dict[str, Any]] = []
 
@@ -983,7 +1109,7 @@ class WhatsAppService:
             engine = current_app.config.get("AUTOMATION_ENGINE")
 
         for _ in range(max_batch):
-            item = cls.receive_green_api_notification()
+            item = cls.receive_green_api_notification(organization_id=org_id)
             if not item:
                 break
 
@@ -1041,7 +1167,7 @@ class WhatsAppService:
                 processed_count += 1
 
             # Acknowledge and delete notification from Green-API queue
-            cls.delete_green_api_notification(receipt_id)
+            cls.delete_green_api_notification(receipt_id, organization_id=org_id)
 
         # Also synchronize lastIncomingMessages journal to ensure zero missed messages
         history_synced = 0
@@ -1233,7 +1359,7 @@ class WhatsAppService:
         elif organization_id is None:
             organization_id = "org-enterprise-default"
 
-        conf = cls.get_config()
+        conf = cls.get_config(organization_id=organization_id)
         clean_to = cls.format_phone_number(to_phone or "")
         if not clean_to or len(clean_to) < 7:
             raise ValueError(f"Invalid recipient phone number: '{to_phone}'. Must include country code and digits.")
@@ -1517,12 +1643,12 @@ class WhatsAppService:
         elif organization_id is None:
             organization_id = "org-enterprise-default"
 
-        conf = cls.get_config()
+        conf = cls.get_config(organization_id=organization_id)
         clean_to = cls.format_phone_number(to_phone or "")
         if not clean_to or len(clean_to) < 7:
             raise ValueError(f"Invalid recipient phone number: '{to_phone}'. Must include country code and digits.")
 
-        active_provider = cls.get_active_provider()
+        active_provider = cls.get_active_provider(organization_id=organization_id)
 
         # If Green-API is the active configured provider
         if active_provider == "green_api":
