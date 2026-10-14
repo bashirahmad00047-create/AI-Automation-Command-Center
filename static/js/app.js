@@ -251,7 +251,12 @@ function switchTab(tabId) {
     if (tabId === 'rules') loadRules();
     if (tabId === 'leads') loadLeads();
     if (tabId === 'webhooks') loadWebhooks();
-    if (tabId === 'whatsapp') loadWhatsAppDashboard();
+    if (tabId === 'whatsapp') {
+        loadWhatsAppDashboard();
+        startWhatsAppAutoPoll();
+    } else {
+        stopWhatsAppAutoPoll();
+    }
     if (tabId === 'logs') loadExecutionLogs();
     if (tabId === 'incidents') loadIncidents();
     if (tabId === 'apikeys') loadApiKeys();
@@ -4099,8 +4104,160 @@ async function cancelAsyncJob(jobId) {
 }
 
 // ==========================================
-// WHATSAPP BUSINESS / META CLOUD API
+// WHATSAPP BUSINESS / META CLOUD API & GREEN-API
 // ==========================================
+
+let waPollTimer = null;
+
+function startWhatsAppAutoPoll(intervalMs = 20000) {
+    stopWhatsAppAutoPoll();
+    waPollTimer = setInterval(async () => {
+        const activeTab = document.getElementById('tab-whatsapp');
+        if (!activeTab || !activeTab.classList.contains('active')) {
+            stopWhatsAppAutoPoll();
+            return;
+        }
+        if (typeof document !== 'undefined' && document.hidden) {
+            return;
+        }
+        await syncWhatsAppMessagesNow(true);
+    }, intervalMs);
+}
+
+function stopWhatsAppAutoPoll() {
+    if (waPollTimer) {
+        clearInterval(waPollTimer);
+        waPollTimer = null;
+    }
+}
+
+async function syncWhatsAppMessagesNow(silent = false) {
+    const syncBtn = document.getElementById('btnSyncWhatsApp');
+    if (syncBtn && !silent) {
+        syncBtn.disabled = true;
+        syncBtn.innerHTML = '🔄 Syncing...';
+    }
+
+    try {
+        const res = await fetch('/api/v1/whatsapp/poll?sync_history=true&batch=15', { method: 'POST' });
+        const data = res.ok ? await res.json() : null;
+
+        await loadWhatsAppMessagesOnly();
+
+        if (syncBtn && !silent) {
+            const count = data ? (data.saved_count || data.processed || 0) : 0;
+            syncBtn.innerHTML = count > 0 ? `✓ ${count} new` : '✓ Up to date';
+            if (count > 0 && typeof showToast === 'function') {
+                showToast(`WhatsApp sync complete: ${count} new message(s) retrieved`, 'success');
+            }
+            setTimeout(() => {
+                if (syncBtn) {
+                    syncBtn.disabled = false;
+                    syncBtn.innerHTML = '🔄 Sync Now';
+                }
+            }, 2000);
+        }
+    } catch (err) {
+        console.error('WhatsApp sync failed:', err);
+        if (syncBtn && !silent) {
+            syncBtn.disabled = false;
+            syncBtn.innerHTML = '⚠️ Sync Failed';
+            setTimeout(() => {
+                if (syncBtn) syncBtn.innerHTML = '🔄 Sync Now';
+            }, 2500);
+        }
+    }
+}
+
+async function loadWhatsAppMessagesOnly(isConfigured) {
+    try {
+        if (typeof isConfigured === 'undefined') {
+            const badge = document.getElementById('whatsappModeBadge');
+            isConfigured = badge ? !badge.textContent.includes('Simulation') : true;
+        }
+
+        const msgRes = await fetch('/api/v1/whatsapp/messages?limit=100');
+        if (!msgRes.ok) return [];
+        const msgData = await msgRes.json();
+        const messages = msgData.messages || [];
+        const countBadge = document.getElementById('waMessageCountBadge');
+        const tbody = document.getElementById('waMessagesTableBody');
+
+        if (countBadge) countBadge.textContent = `${messages.length} messages`;
+        updateNavBadge('tabWhatsAppCount', messages.length);
+
+        if (tbody) {
+            if (messages.length === 0) {
+                if (isConfigured) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="6" class="text-center" style="padding: 56px 20px; text-align: center;">
+                                <div style="font-size: 2.8rem; margin-bottom: 12px;">💬</div>
+                                <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No WhatsApp messages yet</div>
+                                <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto;">Messages received through your WhatsApp Business connection will appear here.</p>
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="6" class="text-center" style="padding: 56px 20px; text-align: center;">
+                                <div style="font-size: 2.8rem; margin-bottom: 12px;">📱</div>
+                                <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">Connect WhatsApp Business to start receiving messages.</div>
+                                <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Configure your Meta Business Phone Number ID and Access Token in environment variables or test outbound dispatch using the simulation form on the left.</p>
+                                <button type="button" class="hud-btn primary small" onclick="openWhatsAppConnectGuide()">Connect WhatsApp</button>
+                            </td>
+                        </tr>
+                    `;
+                }
+            } else {
+                tbody.innerHTML = messages.map(m => {
+                    const isInbound = m.direction === 'inbound';
+                    const dirBadge = isInbound
+                        ? '<span class="status-pill blue">📥 INBOUND</span>'
+                        : '<span class="status-pill green">📤 OUTBOUND</span>';
+
+                    const st = (m.status || '').toLowerCase();
+                    let statusPillClass = 'paused';
+                    let statusIcon = '●';
+                    if (st === 'sent' || st === 'received') {
+                        statusPillClass = 'active';
+                        statusIcon = '✓';
+                    } else if (st === 'mock_sent') {
+                        statusPillClass = 'simulation';
+                        statusIcon = '🧪';
+                    } else if (st === 'failed') {
+                        statusPillClass = 'failed';
+                        statusIcon = '✕';
+                    }
+
+                    return `
+                        <tr>
+                            <td>${dirBadge}</td>
+                            <td>
+                                <div style="font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 12px;">${isInbound ? escapeHtml(m.sender) : escapeHtml(m.recipient)}</div>
+                                <div style="font-size: 11px; color: var(--text-dim, #888);">${isInbound ? 'To: ' + escapeHtml(m.recipient) : 'From: ' + escapeHtml(m.sender)}</div>
+                            </td>
+                            <td>
+                                <div style="max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px;" title="${escapeHtml(m.body || '')}">
+                                    ${escapeHtml(m.body || '(no text body)')}
+                                </div>
+                                ${m.error_message ? `<div style="font-size: 11px; color: #ef4444;">${escapeHtml(m.error_message)}</div>` : ''}
+                            </td>
+                            <td><span class="status-pill ${statusPillClass}" style="font-size: 10px; padding: 2px 7px;">${statusIcon} ${escapeHtml((m.status || '').toUpperCase())}</span></td>
+                            <td style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim, #888);">${escapeHtml(m.whatsapp_message_id || '—')}</td>
+                            <td style="font-size: 11px; color: var(--text-dim, #888);">${escapeHtml(m.created_at || '—')}</td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+        }
+        return messages;
+    } catch (err) {
+        console.error('Failed to load WhatsApp messages:', err);
+        return [];
+    }
+}
 
 async function loadWhatsAppDashboard() {
     try {
@@ -4204,85 +4361,11 @@ async function loadWhatsAppDashboard() {
             }
         }
 
-        // 2. Load messages
-        const msgRes = await fetch('/api/v1/whatsapp/messages?limit=100');
-        if (msgRes.ok) {
-            const msgData = await msgRes.json();
-            const messages = msgData.messages || [];
-            const countBadge = document.getElementById('waMessageCountBadge');
-            const tabCount = document.getElementById('tabWhatsAppCount');
-            const tbody = document.getElementById('waMessagesTableBody');
+        // 2. Load and render messages
+        await loadWhatsAppMessagesOnly(isConfigured);
 
-            if (countBadge) countBadge.textContent = `${messages.length} messages`;
-            updateNavBadge('tabWhatsAppCount', messages.length);
-
-            if (tbody) {
-                if (messages.length === 0) {
-                    if (isConfigured) {
-                        tbody.innerHTML = `
-                            <tr>
-                                <td colspan="6" class="text-center" style="padding: 56px 20px; text-align: center;">
-                                    <div style="font-size: 2.8rem; margin-bottom: 12px;">💬</div>
-                                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">No WhatsApp messages yet</div>
-                                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto;">Messages received through your WhatsApp Business connection will appear here.</p>
-                                </td>
-                            </tr>
-                        `;
-                    } else {
-                        tbody.innerHTML = `
-                            <tr>
-                                <td colspan="6" class="text-center" style="padding: 56px 20px; text-align: center;">
-                                    <div style="font-size: 2.8rem; margin-bottom: 12px;">📱</div>
-                                    <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">Connect WhatsApp Business to start receiving messages.</div>
-                                    <p style="font-size: 0.88rem; color: #94a3b8; max-width: 440px; margin: 0 auto 18px;">Configure your Meta Business Phone Number ID and Access Token in environment variables or test outbound dispatch using the simulation form on the left.</p>
-                                    <button type="button" class="hud-btn primary small" onclick="openWhatsAppConnectGuide()">Connect WhatsApp</button>
-                                </td>
-                            </tr>
-                        `;
-                    }
-                } else {
-                    tbody.innerHTML = messages.map(m => {
-                        const isInbound = m.direction === 'inbound';
-                        const dirBadge = isInbound
-                            ? '<span class="status-pill blue">📥 INBOUND</span>'
-                            : '<span class="status-pill green">📤 OUTBOUND</span>';
-
-                        const st = (m.status || '').toLowerCase();
-                        let statusPillClass = 'paused';
-                        let statusIcon = '●';
-                        if (st === 'sent' || st === 'received') {
-                            statusPillClass = 'active';
-                            statusIcon = '✓';
-                        } else if (st === 'mock_sent') {
-                            statusPillClass = 'simulation';
-                            statusIcon = '🧪';
-                        } else if (st === 'failed') {
-                            statusPillClass = 'failed';
-                            statusIcon = '✕';
-                        }
-
-                        return `
-                            <tr>
-                                <td>${dirBadge}</td>
-                                <td>
-                                    <div style="font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 12px;">${isInbound ? escapeHtml(m.sender) : escapeHtml(m.recipient)}</div>
-                                    <div style="font-size: 11px; color: var(--text-dim, #888);">${isInbound ? 'To: ' + escapeHtml(m.recipient) : 'From: ' + escapeHtml(m.sender)}</div>
-                                </td>
-                                <td>
-                                    <div style="max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px;" title="${escapeHtml(m.body || '')}">
-                                        ${escapeHtml(m.body || '(no text body)')}
-                                    </div>
-                                    ${m.error_message ? `<div style="font-size: 11px; color: #ef4444;">${escapeHtml(m.error_message)}</div>` : ''}
-                                </td>
-                                <td><span class="status-pill ${statusPillClass}" style="font-size: 10px; padding: 2px 7px;">${statusIcon} ${escapeHtml((m.status || '').toUpperCase())}</span></td>
-                                <td style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim, #888);">${escapeHtml(m.whatsapp_message_id || '—')}</td>
-                                <td style="font-size: 11px; color: var(--text-dim, #888);">${escapeHtml(m.created_at || '—')}</td>
-                            </tr>
-                        `;
-                    }).join('');
-                }
-            }
-        }
+        // 3. Trigger quiet background sync for live updates
+        syncWhatsAppMessagesNow(true).catch(e => console.warn('Quiet WhatsApp sync failed:', e));
     } catch (err) {
         console.error('Failed to load WhatsApp dashboard:', err);
     }
