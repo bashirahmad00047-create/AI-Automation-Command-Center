@@ -251,28 +251,36 @@ class WhatsAppService:
         green_id_val = SystemSetting.get_val("GREEN_API_ID_INSTANCE")
         if green_id_val is None:
             green_id_val = SystemSetting.get_val("ID_INSTANCE")
+        if green_id_val is None:
+            green_id_val = SystemSetting.get_val("GREEN_API_ID")
         green_api_id = (
             green_id_val
             if green_id_val is not None
             else (
                 cfg.get("GREEN_API_ID_INSTANCE")
                 or cfg.get("ID_INSTANCE")
+                or cfg.get("GREEN_API_ID")
                 or os.environ.get("GREEN_API_ID_INSTANCE")
-                or os.environ.get("ID_INSTANCE", "")
+                or os.environ.get("ID_INSTANCE")
+                or os.environ.get("GREEN_API_ID", "")
             )
         ).strip()
 
         green_tok_val = SystemSetting.get_val("GREEN_API_TOKEN_INSTANCE")
         if green_tok_val is None:
             green_tok_val = SystemSetting.get_val("API_TOKEN_INSTANCE")
+        if green_tok_val is None:
+            green_tok_val = SystemSetting.get_val("GREEN_API_TOKEN")
         green_api_token = (
             green_tok_val
             if green_tok_val is not None
             else (
                 cfg.get("GREEN_API_TOKEN_INSTANCE")
                 or cfg.get("API_TOKEN_INSTANCE")
+                or cfg.get("GREEN_API_TOKEN")
                 or os.environ.get("GREEN_API_TOKEN_INSTANCE")
-                or os.environ.get("API_TOKEN_INSTANCE", "")
+                or os.environ.get("API_TOKEN_INSTANCE")
+                or os.environ.get("GREEN_API_TOKEN", "")
             )
         ).strip()
 
