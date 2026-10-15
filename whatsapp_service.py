@@ -623,7 +623,9 @@ class WhatsAppService:
                 import google.generativeai as genai
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel('gemini-1.5-flash')
-                prompt = f"""You are an expert AI logistics and trucking call center assistant for Bashir's business. You negotiate freight rates, extract pickup/drop-off locations and weight, and respond professionally in Urdu or English depending on the customer's language. Keep replies crisp and helpful.\n\nCustomer Message: {message_body}"""
+                # Dynamic prompt building based on incoming message content
+                user_msg_text = message_body.get('text', '') if isinstance(message_body, dict) else str(message_body)
+                prompt = f"""You are an intelligent, helpful, and polite AI assistant for our business. A customer has sent the following message: '{user_msg_text}'. Please provide a direct, helpful, and natural response specifically addressing their question or need. Do not give a generic canned reply unless appropriate, but tailor your answer directly to what they are asking."""
                 response = model.generate_content(prompt)
                 gem_resp = response.text
                 if gem_resp:

@@ -449,6 +449,16 @@ class NLPEngine:
         salutation = f"Hello {name.strip() if name else 'Valued Customer'},"
         org_phrase = f" for {company.strip()}" if company else ""
 
+        # Tailor directly to customer query if provided
+        user_msg = (message or "").strip()
+        if user_msg:
+            body = (
+                f"Thank you for contacting us regarding: \"{user_msg}\".\n\n"
+                f"We have received your inquiry and our team is actively reviewing the details to provide you with the exact assistance, rates, and solutions you need."
+            )
+            signoff = "Best regards,\nCustomer Support Team"
+            return f"{salutation}\n\n{body}\n\n{signoff}"
+
         if route_department == "Sales" or intent == "lead_inquiry":
             body = (
                 f"Thank you for contacting OpsFlow Enterprise regarding your automated solution{org_phrase}.\n\n"

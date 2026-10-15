@@ -120,7 +120,9 @@ def get_gemini_ai_response(user_message):
         genai.configure(api_key=api_key)
         # Using gemini-1.5-flash for fast and free zero-cost responses
         model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"""You are an expert AI logistics and trucking call center assistant for Bashir's business. You negotiate freight rates, extract pickup/drop-off locations and weight, and respond professionally in Urdu or English depending on the customer's language. Keep replies crisp and helpful.\n\nCustomer Message: {user_message}"""
+        # Dynamic prompt building based on incoming message content
+        user_msg_text = user_message.get('text', '') if isinstance(user_message, dict) else str(user_message)
+        prompt = f"""You are an intelligent, helpful, and polite AI assistant for our business. A customer has sent the following message: '{user_msg_text}'. Please provide a direct, helpful, and natural response specifically addressing their question or need. Do not give a generic canned reply unless appropriate, but tailor your answer directly to what they are asking."""
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
