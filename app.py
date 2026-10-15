@@ -33,6 +33,27 @@ from storage import Storage
 MASTER_ADMIN_EMAIL = os.environ.get("MASTER_ADMIN_EMAIL", "bashirahmad00047@gmail.com")
 
 
+# Auto-seed sample audit logs on startup if empty
+def seed_initial_logs():
+    try:
+        from database import db
+        from models import AuditLog, Organization
+        if AuditLog.query.count() == 0:
+            org = Organization.query.first()
+            org_id = org.id if org else "org-enterprise-default"
+            sample = AuditLog(
+                organization_id=org_id,
+                action='workflow.execute',
+                resource_type='automation_rule',
+                resource_id='rule-init-001',
+                details_json='{"status": "success", "latency": "35ms", "executed": true}',
+                ip_address='127.0.0.1'
+            )
+            db.session.add(sample)
+            db.session.commit()
+    except Exception as e:
+        print('Seeding note:', e)
+
 
 def create_app(config_name: Optional[str] = None) -> Flask:
     """Application factory for OpsFlow SaaS."""
@@ -66,6 +87,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     init_and_seed_database()
             except Exception as _seed_err:
                 application.logger.warning(f"Database auto-seed check: {_seed_err}")
+
+            # Auto-seed sample audit logs on startup if empty
+            try:
+                seed_initial_logs()
+            except Exception as _seed_log_err:
+                application.logger.warning(f"Audit log auto-seed check: {_seed_log_err}")
 
         storage_instance = Storage(init_db=not is_cli_migration)
         engine_instance = AutomationEngine(storage=storage_instance)
