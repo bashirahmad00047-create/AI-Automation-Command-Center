@@ -485,7 +485,8 @@ class WhatsAppService:
     def get_auto_responder_config(cls, organization_id: Optional[str] = None) -> Dict[str, Any]:
         """Retrieves AI Auto-Responder configuration for an organization."""
         enabled_str = cls._get_tenant_or_global_setting("AI_AUTO_REPLY_ENABLED", organization_id)
-        enabled = (enabled_str or "").strip().lower() in ("true", "1", "yes", "on")
+        has_gemini = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+        enabled = has_gemini or ((enabled_str or "").strip().lower() in ("true", "1", "yes", "on"))
 
         mode = cls._get_tenant_or_global_setting("AI_AUTO_REPLY_MODE", organization_id) or "smart_concierge"
         system_prompt = cls._get_tenant_or_global_setting("AI_SYSTEM_PROMPT", organization_id) or ""
@@ -574,6 +575,8 @@ class WhatsAppService:
     @classmethod
     def is_auto_reply_enabled(cls, organization_id: Optional[str] = None) -> bool:
         """Returns True if AI Auto-Responder is enabled for this organization."""
+        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+            return True
         conf = cls.get_auto_responder_config(organization_id=organization_id)
         return conf.get("enabled", False)
 
@@ -682,11 +685,11 @@ class WhatsAppService:
             return None
 
         org_id = organization_id or "org-enterprise-default"
-
-        if not cls.is_auto_reply_enabled(organization_id=org_id):
-            return None
-
         conf = cls.get_auto_responder_config(organization_id=org_id)
+
+        # Force enabled if GEMINI_API_KEY exists
+        if not conf.get("enabled") and not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
+            return None
         cooldown_mins = conf.get("cooldown_minutes", 5)
 
         # Prevent duplicate reply storm / loop: Check if an outbound message was already sent to this phone recently
