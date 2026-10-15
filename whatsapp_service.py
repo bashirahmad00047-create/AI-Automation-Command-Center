@@ -690,21 +690,26 @@ class WhatsAppService:
         # Force enabled if GEMINI_API_KEY exists
         if not conf.get("enabled") and not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
             return None
+
+        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+            print("Forcing Gemini AI auto-responder execution for inbound WhatsApp message...")
+
         cooldown_mins = conf.get("cooldown_minutes", 5)
 
         # Prevent duplicate reply storm / loop: Check if an outbound message was already sent to this phone recently
         clean_phone = cls.format_phone_number(sender_phone)
-        if has_app_context() and cooldown_mins > 0:
-            cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=cooldown_mins)
-            recent_outbound = WhatsAppMessage.query.filter(
-                WhatsAppMessage.organization_id == org_id,
-                WhatsAppMessage.recipient.like(f"%{clean_phone[-8:]}%"),
-                WhatsAppMessage.direction == "outbound",
-                WhatsAppMessage.created_at >= cutoff
-            ).first()
-            if recent_outbound:
-                logger.info(f"AI Auto-Reply debounced for {clean_phone} (last outbound at {recent_outbound.created_at})")
-                return None
+        if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
+            if has_app_context() and cooldown_mins > 0:
+                cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=cooldown_mins)
+                recent_outbound = WhatsAppMessage.query.filter(
+                    WhatsAppMessage.organization_id == org_id,
+                    WhatsAppMessage.recipient.like(f"%{clean_phone[-8:]}%"),
+                    WhatsAppMessage.direction == "outbound",
+                    WhatsAppMessage.created_at >= cutoff
+                ).first()
+                if recent_outbound:
+                    logger.info(f"AI Auto-Reply debounced for {clean_phone} (last outbound at {recent_outbound.created_at})")
+                    return None
 
         # Generate response
         generated = cls.generate_ai_auto_response(
