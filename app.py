@@ -29,6 +29,10 @@ from models import Membership, Organization, User
 from presets import PRESET_BLUEPRINTS
 from storage import Storage
 
+# Official Master Demo & Admin Account Configuration
+MASTER_ADMIN_EMAIL = os.environ.get("MASTER_ADMIN_EMAIL", "bashirahmad00047@gmail.com")
+
+
 
 def create_app(config_name: Optional[str] = None) -> Flask:
     """Application factory for OpsFlow SaaS."""
@@ -83,7 +87,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     session["user_email"] = u.email
             except Exception:
                 pass
-        if user_email and user_email.lower() == "bashirahmad00047@gmail.com".lower():
+        if user_email and user_email.lower() == MASTER_ADMIN_EMAIL.lower():
             session["is_enterprise_bypass"] = True
             session["plan"] = "enterprise"
 

@@ -3252,8 +3252,8 @@ function switchAuthTab(tab) {
             tabRegister.style.color = 'var(--cyan-glow, #00f0ff)';
             tabRegister.style.borderBottom = '2px solid var(--cyan-glow, #00f0ff)';
         }
-        if (title) title.textContent = 'Create New Workspace';
-        if (subtitle) subtitle.textContent = 'Launch your dedicated tenant instance';
+        if (title) title.textContent = 'Create Free Account';
+        if (subtitle) subtitle.textContent = 'Get started with intelligent automation in seconds';
     } else if (tab === 'forgot') {
         if (tabsContainer) tabsContainer.style.display = 'none';
         if (forgotForm) forgotForm.style.display = 'block';
@@ -3523,7 +3523,10 @@ async function handleRegister(e) {
     const full_name = (document.getElementById('regFullName')?.value || '').trim();
     const email = (document.getElementById('regEmail')?.value || '').trim();
     const password = document.getElementById('regPassword')?.value || '';
-    const organization_name = (document.getElementById('regOrgName')?.value || '').trim();
+    let organization_name = (document.getElementById('regOrgName')?.value || '').trim();
+    if (!organization_name) {
+        organization_name = full_name ? `${full_name}'s Workspace` : 'Primary Workspace';
+    }
     let organization_slug = (document.getElementById('regOrgSlug')?.value || '').trim();
     if (!organization_slug && organization_name) {
         organization_slug = organization_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -3545,7 +3548,7 @@ async function handleRegister(e) {
 
     if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.textContent = 'Provisioning Workspace...';
+        submitBtn.textContent = 'Creating Account...';
     }
 
     try {
@@ -3568,14 +3571,14 @@ async function handleRegister(e) {
         const data = await res.json();
         if (res.ok) {
             closeAuthModal(true);
-            showToast(`Workspace '${data.organization ? data.organization.name : organization_name}' created!`, 'success');
+            showToast(`Account created successfully! Welcome, ${full_name || 'Operator'}!`, 'success');
             await initAuthAndTenancy();
             refreshAllData();
             // Launch the 5-step onboarding wizard
             openOnboardingWizard(data);
         } else {
             if (errBox) {
-                errBox.textContent = data.error || 'Failed to register workspace.';
+                errBox.textContent = data.error || 'Failed to register account.';
                 errBox.style.display = 'block';
             }
         }
@@ -3587,7 +3590,7 @@ async function handleRegister(e) {
     } finally {
         if (submitBtn) {
             submitBtn.disabled = false;
-            submitBtn.textContent = 'Launch Workspace & Begin Tour';
+            submitBtn.textContent = 'Create Free Account \u2192';
         }
     }
 }
