@@ -55,6 +55,47 @@ def seed_initial_logs():
         print('Seeding note:', e)
 
 
+# Auto-sync admin user from environment variables on startup
+def sync_admin_user():
+    try:
+        from database import db
+        from models import User, Organization, Membership, generate_uuid
+        from werkzeug.security import generate_password_hash
+        import os
+        admin_email = os.environ.get('ADMIN_EMAIL') or os.environ.get('MASTER_ADMIN_EMAIL')
+        admin_pass = os.environ.get('ADMIN_PASSWORD')
+        if admin_email:
+            user = User.query.filter_by(email=admin_email).first()
+            if not user:
+                user = User(
+                    id=generate_uuid("usr"),
+                    email=admin_email,
+                    password_hash=generate_password_hash(admin_pass if admin_pass else '12345678'),
+                    full_name='System Administrator',
+                    is_superuser=True,
+                    is_active=True
+                )
+                db.session.add(user)
+                db.session.flush()
+                org = Organization.query.first()
+                if org:
+                    mem = Membership(
+                        id=generate_uuid("mem"),
+                        user_id=user.id,
+                        organization_id=org.id,
+                        role="owner"
+                    )
+                    db.session.add(mem)
+                db.session.commit()
+                print('Admin user auto-synced from environment variables.')
+            else:
+                if not user.is_superuser:
+                    user.is_superuser = True
+                    db.session.commit()
+    except Exception as e:
+        print('Admin sync note:', e)
+
+
 def create_app(config_name: Optional[str] = None) -> Flask:
     """Application factory for OpsFlow SaaS."""
     application = Flask(__name__)
@@ -93,6 +134,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 seed_initial_logs()
             except Exception as _seed_log_err:
                 application.logger.warning(f"Audit log auto-seed check: {_seed_log_err}")
+
+            # Auto-sync admin user from environment variables on startup
+            try:
+                sync_admin_user()
+            except Exception as _sync_admin_err:
+                application.logger.warning(f"Admin sync check: {_sync_admin_err}")
 
         storage_instance = Storage(init_db=not is_cli_migration)
         engine_instance = AutomationEngine(storage=storage_instance)
