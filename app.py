@@ -283,6 +283,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         eng = application.config.get("AUTOMATION_ENGINE")
         return jsonify(eng.telemetry.get_metrics() if eng else {})
 
+    @application.route("/api/audit", methods=["GET"])
+    @application.route("/api/audit-trail", methods=["GET"])
+    @require_auth
+    def legacy_audit_trail():
+        from api_v1 import get_audit_trail
+        return get_audit_trail()
+
     @application.route("/api/rules", methods=["GET"])
     @application.route("/api/workflows", methods=["GET"])
     @require_auth
