@@ -29,6 +29,18 @@ from models import Membership, Organization, User
 from presets import PRESET_BLUEPRINTS
 from storage import Storage
 
+# SQLite Foreign Key Fix for Render deployment
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+import sqlite3
+
+@event.listens_for(Engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.close()
+
 # Official Master Demo & Admin Account Configuration
 MASTER_ADMIN_EMAIL = os.environ.get("MASTER_ADMIN_EMAIL", "bashirahmad00047@gmail.com")
 
