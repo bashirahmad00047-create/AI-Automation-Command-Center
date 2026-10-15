@@ -17,7 +17,7 @@ import json
 import os
 import sys
 from typing import Any, Dict, Optional
-from flask import Flask, Response, g, jsonify, render_template, request, session
+from flask import Flask, Response, g, jsonify, render_template, request, session, url_for
 
 from api_v1 import api_v1
 from auth import log_audit_event, require_auth
@@ -211,16 +211,39 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     # Frontend Dashboard View
     @application.route("/")
+    @application.route("/dashboard")
     def index():
         id_inst = os.environ.get("ID_INSTANCE", "710722761603")
         api_tok = os.environ.get("API_TOKEN_INSTANCE", "99a87a7e1eb542c28e5cbf8ea4fff03bee0d631fa544e75b1")
         jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
         return render_template("index.html", id_instance=id_inst, api_token=api_tok, jazzcash_number=jc_num)
 
+    @application.route("/dashboard", endpoint="dashboard")
+    def dashboard():
+        return index()
+
     # Top-Level Authentication Endpoints
     @application.route("/login", methods=["GET", "POST"])
     def top_level_login():
         if request.method == "POST":
+            # Direct Master Admin Login Override
+            import os
+            data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
+            email = (data.get("email") or "").strip()
+            password = (data.get("password") or "").strip()
+            admin_email_env = os.environ.get('ADMIN_EMAIL', 'Bashirahmad00047@gmail.com')
+            admin_pass_env = os.environ.get('ADMIN_PASSWORD', 'bashir@12.')
+            if email.lower() == admin_email_env.lower() and password == admin_pass_env:
+                session.permanent = True
+                session.pop("logged_out", None)
+                session['user_id'] = 99999
+                session['user_email'] = admin_email_env
+                session['role'] = 'admin'
+                session['is_super_admin'] = True
+                session['is_enterprise_bypass'] = True
+                session['plan'] = 'enterprise'
+                return jsonify({'status': 'success', 'redirect': url_for('dashboard')})
+
             from api_v1 import auth_login
             return auth_login()
         return render_template("index.html")
