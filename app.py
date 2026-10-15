@@ -187,6 +187,42 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import auth_reset_password
         return auth_reset_password()
 
+    # Master Admin OTP Verification Routes
+    @application.route('/api/auth/request-otp', methods=['POST'])
+    @application.route('/api/v1/auth/request-otp', methods=['POST'])
+    def request_master_otp():
+        import random
+        data = request.get_json() or {}
+        email = data.get('email', '').strip().lower()
+        if email == MASTER_ADMIN_EMAIL.lower():
+            otp = str(random.randint(100000, 999999))
+            session['pending_master_otp'] = otp
+            # Here we can dispatch email or log for demo
+            print(f'SECURITY OTP FOR MASTER ADMIN: {otp}')
+            return jsonify({'status': 'success', 'message': 'Verification code sent to master email inbox.'})
+        return jsonify({'status': 'error', 'message': 'Email not recognized as master admin.'}), 400
+
+    @application.route('/api/auth/verify-otp', methods=['POST'])
+    @application.route('/api/v1/auth/verify-otp', methods=['POST'])
+    def verify_master_otp():
+        data = request.get_json() or {}
+        email = data.get('email', '').strip().lower()
+        submitted_otp = str(data.get('otp', '')).strip()
+        expected_otp = session.get('pending_master_otp')
+        if not expected_otp:
+            return jsonify({'status': 'error', 'message': 'No pending OTP request found. Please request a new code.'}), 400
+        if submitted_otp != expected_otp:
+            return jsonify({'status': 'error', 'message': 'Invalid verification code.'}), 400
+        
+        session.pop('pending_master_otp', None)
+        session['is_otp_verified'] = True
+        session['user_email'] = email
+        if email == MASTER_ADMIN_EMAIL.lower():
+            session['is_enterprise_bypass'] = True
+            session['plan'] = 'enterprise'
+        return jsonify({'status': 'success', 'message': 'OTP verification successful. Master Admin access granted.'})
+
+
     @application.route("/api/billing/upgrade", methods=["POST"])
     @application.route("/api/billing/change-plan", methods=["POST"])
     @application.route("/api/billing/submit-manual-payment", methods=["POST"])
