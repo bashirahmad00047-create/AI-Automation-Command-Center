@@ -436,6 +436,12 @@ class NLPEngine:
         # Filter out empty lists for compact output
         return {k: v for k, v in entities.items() if v}
 
+    def generate_response(self, user_msg: Any, customer_name: str = "Customer") -> str:
+        """Returns pure raw message/response without any static templates or wrappers."""
+        if isinstance(user_msg, dict):
+            return str(user_msg.get('text', '')).strip()
+        return str(user_msg or '').strip()
+
     def generate_draft_response(
         self,
         name: Optional[str] = None,
@@ -445,43 +451,23 @@ class NLPEngine:
         route_department: str = "Sales",
         message: Optional[str] = None
     ) -> str:
-        """Generates a contextual, safe automated response draft."""
-        salutation = f"Hello {name.strip() if name else 'Valued Customer'},"
-        org_phrase = f" for {company.strip()}" if company else ""
-
-        # Tailor directly to customer query if provided
-        user_msg = (message or "").strip()
+        """Generates a pure automated response draft without static wrappers or canned templates."""
+        user_msg = (message or "").strip() if isinstance(message, str) else (message.get('text', '').strip() if isinstance(message, dict) else "")
         if user_msg:
-            body = (
-                f"AI Response: \"{user_msg}\".\n\n"
-                f"We have received your inquiry and our team is actively reviewing the details to provide you with the exact assistance, rates, and solutions you need."
-            )
-            signoff = "Best regards,\nCustomer Support Team"
-            return f"{salutation}\n\n{body}\n\n{signoff}"
+            return self.generate_response(user_msg, name or "Customer")
 
         if route_department == "Sales" or intent == "lead_inquiry":
-            body = (
-                f"Thank you for contacting OpsFlow Enterprise regarding your automated solution{org_phrase}.\n\n"
-                f"Our Senior Solutions Architecture team in {route_department} has reviewed your inquiry (Lead Score: {lead_score}/100) "
-                f"and would like to schedule a tailored discovery call to discuss your specifications, technical requirements, and rollout timeline.\n\n"
-                f"A specialist will follow up directly within one business day."
-            )
+            return "Thank you for your inquiry. A solutions specialist will review your requirements and follow up with tailored details."
         elif route_department in ("Priority Support", "Security Operations") or intent in ("critical_incident", "security_threat"):
-            body = (
-                f"We have registered your critical incident ticket with highest operational priority.\n\n"
-                f"Our Site Reliability & Tier-1 Support engineers have been dispatched. "
-                f"We are monitoring the event logs and diagnostic traces and will provide a status update within 15 minutes."
-            )
+            return "Your incident ticket has been registered with highest priority. Engineering has been dispatched and is investigating."
         elif route_department == "Support" or intent == "support_request":
-            body = (
-                f"Thank you for reaching out to OpsFlow Support.\n\n"
-                f"A technical support specialist has been assigned to your ticket and will assist you shortly with troubleshooting."
-            )
-        else:
-            body = (
-                f"Thank you for reaching out to OpsFlow.\n\n"
-                f"Your inquiry has been routed to our {route_department} queue. Our team will review your message and get back to you shortly."
-            )
+            return "A technical support specialist has been assigned to your ticket and will assist you shortly."
+        return "Thank you for reaching out. We have received your message and will get back to you shortly."
 
-        signoff = "Sincerely,\nOpsFlow Intelligent Automation Team\nhttps://opsflow.io"
-        return f"{salutation}\n\n{body}\n\n{signoff}"
+
+def generate_response(user_msg, customer_name="Customer"):
+    """Returns pure raw message without any static templates or wrappers."""
+    if isinstance(user_msg, dict):
+        return str(user_msg.get('text', '')).strip()
+    return str(user_msg).strip()
+
