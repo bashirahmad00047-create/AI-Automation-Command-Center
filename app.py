@@ -96,6 +96,25 @@ def sync_admin_user():
         print('Admin sync note:', e)
 
 
+# Gemini AI Auto-Responder Integration for WhatsApp
+import os
+
+def get_gemini_ai_response(user_message):
+    try:
+        import google.generativeai as genai
+        api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+        if not api_key:
+            return 'AI Auto-Responder note: Gemini API Key is missing in environment variables.'
+        genai.configure(api_key=api_key)
+        # Using gemini-1.5-flash for fast and free zero-cost responses
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"""You are an expert AI logistics and trucking call center assistant for Bashir's business. You negotiate freight rates, extract pickup/drop-off locations and weight, and respond professionally in Urdu or English depending on the customer's language. Keep replies crisp and helpful.\n\nCustomer Message: {user_message}"""
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f'AI Error: {str(e)}'
+
+
 def create_app(config_name: Optional[str] = None) -> Flask:
     """Application factory for OpsFlow SaaS."""
     application = Flask(__name__)
@@ -334,6 +353,14 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     def legacy_whatsapp_send():
         from api_v1 import whatsapp_send_message
         return whatsapp_send_message()
+
+    @application.route("/api/whatsapp/ai-response", methods=["POST"])
+    @application.route("/api/v1/whatsapp/ai-response", methods=["POST"])
+    def route_gemini_ai_response():
+        data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
+        msg = data.get("message") or data.get("user_message") or data.get("text") or ""
+        reply = get_gemini_ai_response(msg)
+        return jsonify({"status": "success", "response": reply, "user_message": msg}), 200
 
     @application.route("/api/v1/billing/jazzcash", methods=["POST"])
     def jazzcash_checkout():

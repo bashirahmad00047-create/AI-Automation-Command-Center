@@ -613,6 +613,30 @@ class WhatsAppService:
         elif mode == "lead_qualifier":
             route_dept = "Sales"
 
+        # Check if Gemini AI key is configured
+        api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+        if api_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                prompt = f"""You are an expert AI logistics and trucking call center assistant for Bashir's business. You negotiate freight rates, extract pickup/drop-off locations and weight, and respond professionally in Urdu or English depending on the customer's language. Keep replies crisp and helpful.\n\nCustomer Message: {message_body}"""
+                response = model.generate_content(prompt)
+                gem_resp = response.text
+                if gem_resp:
+                    return {
+                        "reply_body": gem_resp,
+                        "intent": intent,
+                        "urgency": urgency,
+                        "lead_score": lead_score,
+                        "route_department": route_dept,
+                        "entities": entities,
+                        "mode": "gemini_logistics_ai",
+                        "confidence": 98
+                    }
+            except Exception as _gem_err:
+                logger.warning(f"Gemini auto-responder fallback: {_gem_err}")
+
         base_draft = engine.generate_draft_response(
             name=sender_name or "Valued Customer",
             company=org_name,
