@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -581,6 +581,37 @@ class WhatsAppService:
         return conf.get("enabled", False)
 
     @classmethod
+    def call_gemini_ai(
+        cls,
+        user_message: Union[str, Dict[str, Any]],
+        system_prompt: Optional[str] = None
+    ) -> Optional[str]:
+        """Calls Google Gemini AI (gemini-1.5-flash) to generate a pure, natural response directly tailored to customer inquiries."""
+        api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+        if not api_key:
+            return None
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            user_msg_text = user_message.get('text', '') if isinstance(user_message, dict) else str(user_message)
+            if not user_msg_text.strip():
+                return None
+            sys_instruct = f"\nAdditional Context / Business Instructions: {system_prompt.strip()}" if system_prompt and len(system_prompt.strip()) > 3 else ""
+            prompt = (
+                f"You are an intelligent, polite, and direct AI assistant for our business.{sys_instruct}\n"
+                f"A customer has sent the following message: '{user_msg_text.strip()}'.\n"
+                f"Please provide a direct, helpful, and natural response specifically addressing their question or need. "
+                f"Do not include generic canned boilerplate or static disclaimers unless necessary, but tailor your answer directly to what they are asking."
+            )
+            response = model.generate_content(prompt)
+            if response and response.text:
+                return response.text.strip()
+        except Exception as _gem_err:
+            logger.warning(f"Direct Gemini AI generation failed: {_gem_err}")
+        return None
+
+    @classmethod
     def generate_ai_auto_response(
         cls,
         organization_id: Optional[str],
@@ -588,7 +619,7 @@ class WhatsAppService:
         sender_name: Optional[str] = None,
         sender_phone: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Analyzes an incoming message and generates a tailored AI auto-response draft."""
+        """Analyzes an incoming message and generates a tailored AI auto-response draft via direct Gemini AI or smart engine."""
         from nlp_engine import NLPEngine
         engine = NLPEngine()
 
@@ -616,47 +647,36 @@ class WhatsAppService:
         elif mode == "lead_qualifier":
             route_dept = "Sales"
 
-        # Check if Gemini AI key is configured
-        api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
-        if api_key:
-            try:
-                import google.generativeai as genai
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                # Dynamic prompt building based on incoming message content
-                user_msg_text = message_body.get('text', '') if isinstance(message_body, dict) else str(message_body)
-                prompt = f"""You are an intelligent, helpful, and polite AI assistant for our business. A customer has sent the following message: '{user_msg_text}'. Please provide a direct, helpful, and natural response specifically addressing their question or need. Do not give a generic canned reply unless appropriate, but tailor your answer directly to what they are asking."""
-                response = model.generate_content(prompt)
-                gem_resp = response.text
-                if gem_resp:
-                    return {
-                        "reply_body": gem_resp,
-                        "intent": intent,
-                        "urgency": urgency,
-                        "lead_score": lead_score,
-                        "route_department": route_dept,
-                        "entities": entities,
-                        "mode": "gemini_logistics_ai",
-                        "confidence": 98
-                    }
-            except Exception as _gem_err:
-                logger.warning(f"Gemini auto-responder fallback: {_gem_err}")
+        user_msg_text = message_body.get('text', '') if isinstance(message_body, dict) else str(message_body)
+        user_msg_clean = user_msg_text.strip()
 
-        base_draft = engine.generate_draft_response(
-            name=sender_name or "Valued Customer",
-            company=org_name,
-            intent=intent,
-            lead_score=lead_score,
-            route_department=route_dept,
-            message=message_body
-        )
+        # 1. Direct Gemini AI Generation
+        ai_reply = cls.call_gemini_ai(message_body, system_prompt=custom_prompt)
+        if ai_reply:
+            return {
+                "reply_body": ai_reply,
+                "intent": intent,
+                "urgency": urgency,
+                "lead_score": lead_score,
+                "route_department": route_dept,
+                "entities": entities,
+                "mode": "gemini_ai",
+                "confidence": 98
+            }
 
-        final_reply = base_draft
+        # 2. Smart dynamic fallback (replaces raw echo and static templates)
+        if intent == "lead_inquiry" or route_dept == "Sales":
+            final_reply = f"Thank you for your interest in {org_name}. We have received your inquiry regarding '{user_msg_clean}' and our solutions team is reviewing your requirements to provide full details and pricing." if user_msg_clean else f"Thank you for reaching out to {org_name}. How can our team assist you today?"
+        elif intent in ("critical_incident", "security_threat") or route_dept in ("Priority Support", "Security Operations"):
+            final_reply = f"Your urgent operational inquiry regarding '{user_msg_clean}' has been escalated to our engineering team with highest priority." if user_msg_clean else f"Your critical incident has been registered with highest priority."
+        elif intent in ("support_request", "incident_ticket") or route_dept == "Support":
+            final_reply = f"We have received your support request regarding '{user_msg_clean}'. A technical specialist has been assigned and will assist you shortly." if user_msg_clean else "A technical support specialist has been assigned to your ticket and will assist you shortly."
+        else:
+            final_reply = f"We have received your message regarding '{user_msg_clean}' and our team will get back to you shortly." if user_msg_clean else f"Thank you for contacting {org_name}. How can we assist you today?"
+
         if custom_prompt and len(custom_prompt.strip()) > 5:
             if "disclaimer" in custom_prompt.lower() or "faq" in custom_prompt.lower():
                 final_reply = f"{final_reply}\n\n{custom_prompt.strip()}"
-            else:
-                final_reply = f"{final_reply}\n\n[Note: {custom_prompt.strip()}]"
 
         return {
             "reply_body": final_reply,
