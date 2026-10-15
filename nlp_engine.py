@@ -453,7 +453,7 @@ class NLPEngine:
         user_msg = (message or "").strip()
         if user_msg:
             body = (
-                f"Thank you for contacting us regarding: \"{user_msg}\".\n\n"
+                f"AI Response: \"{user_msg}\".\n\n"
                 f"We have received your inquiry and our team is actively reviewing the details to provide you with the exact assistance, rates, and solutions you need."
             )
             signoff = "Best regards,\nCustomer Support Team"
