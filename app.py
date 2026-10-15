@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 from flask import Flask, Response, g, jsonify, render_template, request, session
 
 from api_v1 import api_v1
-from auth import require_auth
+from auth import log_audit_event, require_auth
 from automation_engine import AutomationEngine
 from config import config_by_name
 from database import db, migrate
@@ -391,6 +391,15 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             result = eng.execute_rule_manually(rule_id, custom_payload, dry_run=dry_run)
             if isinstance(result, dict) and result.get("status") == "error":
                 return jsonify(result), 404
+        try:
+            log_audit_event(
+                "workflow.execute",
+                "automation_rule",
+                rule_id,
+                {"status": "success", "latency": "35ms", "executed": True, "dry_run": dry_run}
+            )
+        except Exception:
+            pass
         return jsonify({"status": "success", "message": "Workflow executed successfully!", "latency": "35ms", "executed": True})
 
     @application.route("/api/events/dispatch", methods=["POST"])
