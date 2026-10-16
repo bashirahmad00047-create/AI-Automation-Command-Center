@@ -767,6 +767,10 @@ class WhatsAppService:
                 logger.error(f"[WhatsApp AI Auto-Responder] Network/HTTP error calling Gemini API for model '{clean_m}': {http_err}")
                 continue
 
+        logger.warning(
+            f"[WhatsApp AI Auto-Responder] Gemini AI generation returned no response or failed across all models "
+            f"for organization '{organization_id or 'global'}'. Falling back to non-AI response."
+        )
         return None
 
     @classmethod
@@ -816,10 +820,15 @@ class WhatsAppService:
                 "route_department": route_dept,
                 "entities": entities,
                 "mode": "gemini_ai",
+                "is_gemini": True,
                 "confidence": 98
             }
 
         # 2. Clean fallback when AI provider is offline (NO echoing of user message, NO canned wrapper templates)
+        logger.warning(
+            f"[WhatsApp AI Auto-Responder] Gemini AI generation was unavailable or failed for inbound message: "
+            f"'{message_body[:60]}'. Falling back to non-AI response rather than presenting as Gemini answer."
+        )
         if intent == "lead_inquiry" or route_dept == "Sales":
             final_reply = "A solutions specialist is reviewing your inquiry and will follow up with tailored details and pricing."
         elif intent in ("critical_incident", "security_threat") or route_dept in ("Priority Support", "Security Operations"):
@@ -837,6 +846,7 @@ class WhatsAppService:
             "route_department": route_dept,
             "entities": entities,
             "mode": mode,
+            "is_gemini": False,
             "confidence": min(98, max(65, lead_score + (10 if intent != 'unknown' else 0)))
         }
 
@@ -939,8 +949,11 @@ class WhatsAppService:
                 msg_rec = WhatsAppMessage.query.filter_by(whatsapp_message_id=dispatch_res["whatsapp_message_id"]).first()
 
             if msg_rec:
+                is_gemini = (generated.get("mode") == "gemini_ai") or bool(generated.get("is_gemini"))
                 meta = {
                     "is_ai_response": True,
+                    "is_gemini_response": is_gemini,
+                    "response_source": "gemini_ai" if is_gemini else "system_fallback",
                     "ai_intent": intent,
                     "lead_score": lead_score,
                     "urgency": generated["urgency"],
@@ -950,7 +963,13 @@ class WhatsAppService:
                 msg_rec.raw_payload_json = json.dumps(meta)
                 db.session.commit()
 
-            logger.info(f"AI Auto-Reply dispatched to {clean_phone} [Intent: {intent}, Score: {lead_score}]")
+            if generated.get("mode") == "gemini_ai" or generated.get("is_gemini"):
+                logger.info(f"Gemini AI response successfully dispatched to {clean_phone} [Intent: {intent}, Score: {lead_score}]")
+            else:
+                logger.warning(
+                    f"[WhatsApp AI Auto-Responder] System fallback response dispatched to {clean_phone} "
+                    f"because Gemini AI was unavailable or failed. [Intent: {intent}, Score: {lead_score}]"
+                )
             return {
                 "success": True,
                 "reply_body": reply_body,
@@ -2246,8 +2265,8 @@ class WhatsAppService:
                         }
                     else:
                         err = resp_json.get("error", {}).get("message") or f"HTTP {resp.status_code}"
-                        if resp.status_code >= 500 and cls.is_simulator_fallback_enabled():
-                            logger.warning(f"Meta Graph API returned HTTP {resp.status_code}. Falling back to simulator.")
+                        if cls.is_simulator_fallback_enabled():
+                            logger.warning(f"Meta Graph API error (HTTP {resp.status_code}: {err}). Falling back to simulator.")
                             return cls.dispatch_simulator_message(
                                 organization_id=organization_id,
                                 to_phone=clean_to,
@@ -2257,7 +2276,7 @@ class WhatsAppService:
                                 template_language=template_language,
                                 fallback_reason=f"Meta Graph API HTTP {resp.status_code}: {err}"
                             )
-                        cls.record_message(
+                        record = cls.record_message(
                             organization_id=organization_id,
                             sender=conf.get("phone_number_id", "System"),
                             recipient=clean_to,
@@ -2274,7 +2293,9 @@ class WhatsAppService:
                             "status": "failed",
                             "provider": "meta",
                             "error": err,
-                            "recipient": clean_to
+                            "recipient": clean_to,
+                            "record_id": record.id if record else None,
+                            "message_record_id": record.id if record else None
                         }
             except requests.exceptions.ConnectTimeout:
                 err_msg = f"Connection timeout: Failed to connect to Meta Graph API within {timeouts[0]}s."

@@ -52,6 +52,7 @@ backups/
 # Ephemeral scratch scripts and dumps
 check_*.py
 test_*.py
+!tests/test_*.py
 cleanup_*.py
 dependency_*.py
 patch_app.py
