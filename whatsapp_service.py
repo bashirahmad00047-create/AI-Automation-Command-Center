@@ -672,7 +672,7 @@ class WhatsAppService:
         elif intent in ("support_request", "incident_ticket") or route_dept == "Support":
             final_reply = f"We have received your support request regarding '{user_msg_clean}'. A technical specialist has been assigned and will assist you shortly." if user_msg_clean else "A technical support specialist has been assigned to your ticket and will assist you shortly."
         else:
-            final_reply = f"We have received your message regarding '{user_msg_clean}' and our team will get back to you shortly." if user_msg_clean else f"Thank you for contacting {org_name}. How can we assist you today?"
+            final_reply = f"AI Answer: '{user_msg_clean}' and our team will get back to you shortly." if user_msg_clean else f"Thank you for contacting {org_name}. How can we assist you today?"
 
         if custom_prompt and len(custom_prompt.strip()) > 5:
             if "disclaimer" in custom_prompt.lower() or "faq" in custom_prompt.lower():
