@@ -581,34 +581,135 @@ class WhatsAppService:
         return conf.get("enabled", False)
 
     @classmethod
+    def get_gemini_api_key(cls, organization_id: Optional[str] = None) -> Optional[str]:
+        """Resolves Gemini API key across environment, database settings, and app config."""
+        api_key = (
+            cls._get_tenant_or_global_setting("GEMINI_API_KEY", organization_id)
+            or cls._get_tenant_or_global_setting("GOOGLE_API_KEY", organization_id)
+            or os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GOOGLE_API_KEY")
+        )
+        if not api_key and has_app_context():
+            api_key = (
+                current_app.config.get("GEMINI_API_KEY")
+                or current_app.config.get("GOOGLE_API_KEY")
+            )
+        if not api_key:
+            try:
+                from ai_provider import get_ai_provider
+                gemini_prov = get_ai_provider("gemini")
+                api_key = getattr(gemini_prov, "api_key", None)
+            except Exception:
+                pass
+        return (api_key or "").strip() or None
+
+    @classmethod
+    def get_gemini_model_name(cls, organization_id: Optional[str] = None) -> str:
+        """Resolves the configured Gemini model name with supported fallback cascade."""
+        model = (
+            cls._get_tenant_or_global_setting("GEMINI_MODEL", organization_id)
+            or os.environ.get("GEMINI_MODEL")
+        )
+        if not model and has_app_context():
+            model = current_app.config.get("GEMINI_MODEL")
+        if not model:
+            try:
+                from ai_provider import get_ai_provider
+                gemini_prov = get_ai_provider("gemini")
+                model = getattr(gemini_prov, "model", None)
+            except Exception:
+                pass
+        return (model or "gemini-1.5-flash").strip()
+
+    @classmethod
     def call_gemini_ai(
         cls,
         user_message: Union[str, Dict[str, Any]],
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        organization_id: Optional[str] = None
     ) -> Optional[str]:
-        """Calls Google Gemini AI (gemini-1.5-flash) to generate a pure, natural response directly tailored to customer inquiries."""
-        api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+        """Calls configured Google Gemini AI provider to generate a pure, natural response directly tailored to customer inquiries."""
+        api_key = cls.get_gemini_api_key(organization_id=organization_id)
         if not api_key:
             return None
+
+        user_msg_text = user_message.get('text', '') if isinstance(user_message, dict) else str(user_message)
+        clean_text = user_msg_text.strip()
+        if not clean_text:
+            return None
+
+        sys_instruct = f"\nAdditional Context / Business Instructions: {system_prompt.strip()}" if system_prompt and len(system_prompt.strip()) > 3 else ""
+        prompt = (
+            f"You are an intelligent, polite, and direct AI assistant for our business.{sys_instruct}\n"
+            f"A customer has sent the following message: '{clean_text}'.\n"
+            f"Please provide a direct, helpful, and natural response specifically addressing their question or need. "
+            f"Do not include generic canned boilerplate, disclaimers, or echoing of their message."
+        )
+
+        configured_model = cls.get_gemini_model_name(organization_id=organization_id)
+        models_to_try = [configured_model]
+        for fallback_m in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-pro"]:
+            if fallback_m not in models_to_try:
+                models_to_try.append(fallback_m)
+
+        # 1. Try google.generativeai if available
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            user_msg_text = user_message.get('text', '') if isinstance(user_message, dict) else str(user_message)
-            if not user_msg_text.strip():
-                return None
-            sys_instruct = f"\nAdditional Context / Business Instructions: {system_prompt.strip()}" if system_prompt and len(system_prompt.strip()) > 3 else ""
-            prompt = (
-                f"You are an intelligent, polite, and direct AI assistant for our business.{sys_instruct}\n"
-                f"A customer has sent the following message: '{user_msg_text.strip()}'.\n"
-                f"Please provide a direct, helpful, and natural response specifically addressing their question or need. "
-                f"Do not include generic canned boilerplate or static disclaimers unless necessary, but tailor your answer directly to what they are asking."
-            )
-            response = model.generate_content(prompt)
-            if response and response.text:
-                return response.text.strip()
-        except Exception as _gem_err:
-            logger.warning(f"Direct Gemini AI generation failed: {_gem_err}")
+            for m_name in models_to_try:
+                try:
+                    model = genai.GenerativeModel(m_name)
+                    response = model.generate_content(prompt)
+                    if response:
+                        text = None
+                        if hasattr(response, "text") and response.text:
+                            text = response.text
+                        elif hasattr(response, "candidates") and response.candidates:
+                            candidate = response.candidates[0]
+                            if hasattr(candidate, "content") and hasattr(candidate.content, "parts"):
+                                parts = candidate.content.parts
+                                if parts and hasattr(parts[0], "text"):
+                                    text = parts[0].text
+                        if text and text.strip():
+                            return text.strip()
+                except Exception as model_err:
+                    err_str = str(model_err).lower()
+                    if "not found" in err_str or "unsupported" in err_str or "404" in err_str:
+                        logger.warning(f"Gemini model '{m_name}' unavailable ({model_err}), trying fallback...")
+                        continue
+                    logger.warning(f"Gemini model '{m_name}' error: {model_err}")
+                    if "quota" in err_str or "429" in err_str:
+                        break
+        except Exception as genai_err:
+            logger.warning(f"google.generativeai call failed: {genai_err}")
+
+        # 2. Direct HTTP REST API fallback (using urllib)
+        import urllib.request
+        for m_name in models_to_try:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m_name}:generateContent?key={api_key}"
+                payload = {
+                    "contents": [{"parts": [{"text": prompt}]}]
+                }
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts and "text" in parts[0]:
+                            text = parts[0]["text"].strip()
+                            if text:
+                                return text
+            except Exception as http_err:
+                logger.warning(f"HTTP Gemini call for model '{m_name}' failed: {http_err}")
+                continue
+
         return None
 
     @classmethod
@@ -619,7 +720,7 @@ class WhatsAppService:
         sender_name: Optional[str] = None,
         sender_phone: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Analyzes an incoming message and generates a tailored AI auto-response draft via direct Gemini AI or smart engine."""
+        """Analyzes an incoming message and generates a tailored AI auto-response draft via direct Gemini AI or clean fallback."""
         from nlp_engine import NLPEngine
         engine = NLPEngine()
 
@@ -647,14 +748,11 @@ class WhatsAppService:
         elif mode == "lead_qualifier":
             route_dept = "Sales"
 
-        user_msg_text = message_body.get('text', '') if isinstance(message_body, dict) else str(message_body)
-        user_msg_clean = user_msg_text.strip()
-
         # 1. Direct Gemini AI Generation
-        ai_reply = cls.call_gemini_ai(message_body, system_prompt=custom_prompt)
+        ai_reply = cls.call_gemini_ai(message_body, system_prompt=custom_prompt, organization_id=organization_id)
         if ai_reply:
             return {
-                "reply_body": ai_reply,
+                "reply_body": ai_reply.strip(),
                 "intent": intent,
                 "urgency": urgency,
                 "lead_score": lead_score,
@@ -664,19 +762,15 @@ class WhatsAppService:
                 "confidence": 98
             }
 
-        # 2. Smart dynamic fallback (replaces raw echo and static templates)
+        # 2. Clean fallback when AI provider is offline (NO echoing of user message, NO canned wrapper templates)
         if intent == "lead_inquiry" or route_dept == "Sales":
-            final_reply = f"Thank you for your interest in {org_name}. We have received your inquiry regarding '{user_msg_clean}' and our solutions team is reviewing your requirements to provide full details and pricing." if user_msg_clean else f"Thank you for reaching out to {org_name}. How can our team assist you today?"
+            final_reply = "A solutions specialist is reviewing your inquiry and will follow up with tailored details and pricing."
         elif intent in ("critical_incident", "security_threat") or route_dept in ("Priority Support", "Security Operations"):
-            final_reply = f"Your urgent operational inquiry regarding '{user_msg_clean}' has been escalated to our engineering team with highest priority." if user_msg_clean else f"Your critical incident has been registered with highest priority."
+            final_reply = "Your critical incident report has been registered with highest priority and routed to our engineering team."
         elif intent in ("support_request", "incident_ticket") or route_dept == "Support":
-            final_reply = f"We have received your support request regarding '{user_msg_clean}'. A technical specialist has been assigned and will assist you shortly." if user_msg_clean else "A technical support specialist has been assigned to your ticket and will assist you shortly."
+            final_reply = "A technical support specialist has been assigned to your request and will assist you shortly."
         else:
-            final_reply = f"AI Answer: '{user_msg_clean}' and our team will get back to you shortly." if user_msg_clean else f"Thank you for contacting {org_name}. How can we assist you today?"
-
-        if custom_prompt and len(custom_prompt.strip()) > 5:
-            if "disclaimer" in custom_prompt.lower() or "faq" in custom_prompt.lower():
-                final_reply = f"{final_reply}\n\n{custom_prompt.strip()}"
+            final_reply = "Thank you for reaching out. Our team has received your inquiry and will follow up shortly."
 
         return {
             "reply_body": final_reply,
@@ -709,18 +803,19 @@ class WhatsAppService:
         org_id = organization_id or "org-enterprise-default"
         conf = cls.get_auto_responder_config(organization_id=org_id)
 
-        # Force enabled if GEMINI_API_KEY exists
-        if not conf.get("enabled") and not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
+        # Force enabled if Gemini API key exists or explicitly enabled
+        has_gemini = bool(cls.get_gemini_api_key(organization_id=org_id))
+        if not conf.get("enabled") and not has_gemini:
             return None
 
-        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-            print("Forcing Gemini AI auto-responder execution for inbound WhatsApp message...")
+        if has_gemini:
+            logger.info("Direct Gemini AI auto-responder enabled for inbound WhatsApp message.")
 
         cooldown_mins = conf.get("cooldown_minutes", 5)
 
         # Prevent duplicate reply storm / loop: Check if an outbound message was already sent to this phone recently
         clean_phone = cls.format_phone_number(sender_phone)
-        if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
+        if not has_gemini:
             if has_app_context() and cooldown_mins > 0:
                 cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=cooldown_mins)
                 recent_outbound = WhatsAppMessage.query.filter(
