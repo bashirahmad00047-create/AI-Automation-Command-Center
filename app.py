@@ -377,7 +377,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "has_key": bool(api_key),
             "key_preview": f"{api_key[:6]}...{api_key[-4:]}" if api_key and len(api_key) > 10 else None,
             "configured_model": WhatsAppService.get_gemini_model_name(),
-            "last_error": last_error
+            "last_error": last_error,
+            "diagnostics": WhatsAppService.get_last_gemini_diagnostics()
         }
         return jsonify({
             "status": "success",
