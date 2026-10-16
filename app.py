@@ -113,18 +113,11 @@ import os
 
 def get_gemini_ai_response(user_message):
     try:
-        import google.generativeai as genai
-        api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
-        if not api_key:
-            return 'AI Auto-Responder note: Gemini API Key is missing in environment variables.'
-        genai.configure(api_key=api_key)
-        # Using gemini-1.5-flash for fast and free zero-cost responses
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        # Dynamic prompt building based on incoming message content
-        user_msg_text = user_message.get('text', '') if isinstance(user_message, dict) else str(user_message)
-        prompt = f"""You are an intelligent, helpful, and polite AI assistant for our business. A customer has sent the following message: '{user_msg_text}'. Please provide a direct, helpful, and natural response specifically addressing their question or need. Do not give a generic canned reply unless appropriate, but tailor your answer directly to what they are asking."""
-        response = model.generate_content(prompt)
-        return response.text
+        from whatsapp_service import WhatsAppService
+        reply = WhatsAppService.call_gemini_ai(user_message)
+        if reply:
+            return reply
+        return 'AI Auto-Responder note: Gemini API Key is missing or model generation failed.'
     except Exception as e:
         return f'AI Error: {str(e)}'
 

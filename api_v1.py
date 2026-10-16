@@ -2930,6 +2930,14 @@ def save_whatsapp_config():
     green_host = data.get("green_api_host")
     provider = data.get("whatsapp_provider") or data.get("provider")
     ai_auto_reply = data.get("ai_auto_reply_enabled")
+    gemini_key = data.get("gemini_api_key") or data.get("google_api_key")
+
+    if gemini_key:
+        clean_k = str(gemini_key).strip().strip("'\" \t\r\n")
+        prefix = f"ORG_{org_id}_" if org_id and org_id != "global" else ""
+        SystemSetting.set_val(f"{prefix}GEMINI_API_KEY", clean_k, is_secret=True, description=f"[{org_id or 'global'}] Google Gemini API Key")
+        if not prefix:
+            SystemSetting.set_val("GEMINI_API_KEY", clean_k, is_secret=True)
 
     updated = WhatsAppService.save_config(
         organization_id=org_id,
@@ -3066,6 +3074,8 @@ def save_whatsapp_auto_responder():
     threshold = data.get("confidence_threshold")
     auto_lead = data.get("auto_lead_capture")
     greeting = data.get("fallback_greeting")
+    gemini_key = data.get("gemini_api_key") or data.get("api_key") or data.get("google_api_key")
+    gemini_model = data.get("gemini_model") or data.get("model")
 
     updated = WhatsAppService.save_auto_responder_config(
         organization_id=org_id,
@@ -3075,7 +3085,9 @@ def save_whatsapp_auto_responder():
         cooldown_minutes=cooldown,
         confidence_threshold=threshold,
         auto_lead_capture=auto_lead,
-        fallback_greeting=greeting
+        fallback_greeting=greeting,
+        gemini_api_key=gemini_key,
+        gemini_model=gemini_model
     )
 
     current_user = get_current_user()

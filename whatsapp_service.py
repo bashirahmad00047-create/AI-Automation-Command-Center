@@ -485,7 +485,9 @@ class WhatsAppService:
     def get_auto_responder_config(cls, organization_id: Optional[str] = None) -> Dict[str, Any]:
         """Retrieves AI Auto-Responder configuration for an organization."""
         enabled_str = cls._get_tenant_or_global_setting("AI_AUTO_REPLY_ENABLED", organization_id)
-        has_gemini = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+        gemini_key = cls.get_gemini_api_key(organization_id=organization_id)
+        gemini_model = cls.get_gemini_model_name(organization_id=organization_id)
+        has_gemini = bool(gemini_key)
         enabled = has_gemini or ((enabled_str or "").strip().lower() in ("true", "1", "yes", "on"))
 
         mode = cls._get_tenant_or_global_setting("AI_AUTO_REPLY_MODE", organization_id) or "smart_concierge"
@@ -510,6 +512,9 @@ class WhatsAppService:
         return {
             "organization_id": organization_id,
             "enabled": enabled,
+            "has_gemini": has_gemini,
+            "gemini_model": gemini_model,
+            "gemini_api_key_configured": bool(gemini_key),
             "mode": mode,
             "system_prompt": system_prompt,
             "cooldown_minutes": cooldown_minutes,
@@ -528,7 +533,9 @@ class WhatsAppService:
         cooldown_minutes: Optional[int] = None,
         confidence_threshold: Optional[int] = None,
         auto_lead_capture: Optional[bool] = None,
-        fallback_greeting: Optional[str] = None
+        fallback_greeting: Optional[str] = None,
+        gemini_api_key: Optional[str] = None,
+        gemini_model: Optional[str] = None
     ) -> Dict[str, Any]:
         """Saves AI Auto-Responder configuration for a tenant or globally."""
         prefix = f"ORG_{organization_id}_" if organization_id and organization_id != "global" else ""
@@ -570,30 +577,57 @@ class WhatsAppService:
             if not prefix:
                 SystemSetting.set_val("AI_FALLBACK_GREETING", fallback_greeting.strip(), is_secret=False)
 
+        if gemini_api_key is not None:
+            clean_k = str(gemini_api_key).strip().strip("'\" \t\r\n")
+            SystemSetting.set_val(f"{prefix}GEMINI_API_KEY", clean_k, is_secret=True, description=f"[{organization_id or 'global'}] Google Gemini API Key")
+            if not prefix:
+                SystemSetting.set_val("GEMINI_API_KEY", clean_k, is_secret=True)
+
+        if gemini_model is not None:
+            clean_m = str(gemini_model).strip()
+            SystemSetting.set_val(f"{prefix}GEMINI_MODEL", clean_m, is_secret=False, description=f"[{organization_id or 'global'}] Google Gemini Model")
+            if not prefix:
+                SystemSetting.set_val("GEMINI_MODEL", clean_m, is_secret=False)
+
         return cls.get_auto_responder_config(organization_id=organization_id)
 
     @classmethod
     def is_auto_reply_enabled(cls, organization_id: Optional[str] = None) -> bool:
         """Returns True if AI Auto-Responder is enabled for this organization."""
-        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-            return True
         conf = cls.get_auto_responder_config(organization_id=organization_id)
         return conf.get("enabled", False)
 
     @classmethod
     def get_gemini_api_key(cls, organization_id: Optional[str] = None) -> Optional[str]:
         """Resolves Gemini API key across environment, database settings, and app config."""
-        api_key = (
-            cls._get_tenant_or_global_setting("GEMINI_API_KEY", organization_id)
-            or cls._get_tenant_or_global_setting("GOOGLE_API_KEY", organization_id)
-            or os.environ.get("GEMINI_API_KEY")
-            or os.environ.get("GOOGLE_API_KEY")
-        )
-        if not api_key and has_app_context():
-            api_key = (
-                current_app.config.get("GEMINI_API_KEY")
-                or current_app.config.get("GOOGLE_API_KEY")
-            )
+        candidates = [
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            "GOOGLE_GENAI_API_KEY",
+            "GEMINI_KEY",
+            "GOOGLE_AI_KEY",
+            "GEMINI_TOKEN",
+            "AI_API_KEY",
+        ]
+        api_key = None
+        for k in candidates:
+            # 1. Tenant or global setting in database
+            val = cls._get_tenant_or_global_setting(k, organization_id)
+            if val and str(val).strip():
+                api_key = str(val).strip()
+                break
+            # 2. Environment variable
+            val = os.environ.get(k)
+            if val and str(val).strip():
+                api_key = str(val).strip()
+                break
+            # 3. Flask app config
+            if has_app_context():
+                val = current_app.config.get(k)
+                if val and str(val).strip():
+                    api_key = str(val).strip()
+                    break
+
         if not api_key:
             try:
                 from ai_provider import get_ai_provider
@@ -601,7 +635,11 @@ class WhatsAppService:
                 api_key = getattr(gemini_prov, "api_key", None)
             except Exception:
                 pass
-        return (api_key or "").strip() or None
+
+        if api_key:
+            api_key = str(api_key).strip().strip("'\" \t\r\n")
+
+        return api_key or None
 
     @classmethod
     def get_gemini_model_name(cls, organization_id: Optional[str] = None) -> str:
@@ -631,6 +669,11 @@ class WhatsAppService:
         """Calls configured Google Gemini AI provider to generate a pure, natural response directly tailored to customer inquiries."""
         api_key = cls.get_gemini_api_key(organization_id=organization_id)
         if not api_key:
+            logger.warning(
+                "[WhatsApp AI Auto-Responder] No Gemini API key found in environment variables "
+                "(GEMINI_API_KEY, GOOGLE_API_KEY), database settings, or app config. "
+                "Returning clean fallback response."
+            )
             return None
 
         user_msg_text = user_message.get('text', '') if isinstance(user_message, dict) else str(user_message)
@@ -657,37 +700,42 @@ class WhatsAppService:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
             for m_name in models_to_try:
+                clean_m = m_name.replace("models/", "")
                 try:
-                    model = genai.GenerativeModel(m_name)
+                    model = genai.GenerativeModel(clean_m)
                     response = model.generate_content(prompt)
                     if response:
                         text = None
-                        if hasattr(response, "text") and response.text:
-                            text = response.text
-                        elif hasattr(response, "candidates") and response.candidates:
+                        try:
+                            if response.text:
+                                text = response.text
+                        except Exception:
+                            pass
+                        if not text and hasattr(response, "candidates") and response.candidates:
                             candidate = response.candidates[0]
                             if hasattr(candidate, "content") and hasattr(candidate.content, "parts"):
                                 parts = candidate.content.parts
                                 if parts and hasattr(parts[0], "text"):
                                     text = parts[0].text
                         if text and text.strip():
+                            logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via Gemini model '{clean_m}' ({len(text)} chars)")
                             return text.strip()
                 except Exception as model_err:
                     err_str = str(model_err).lower()
-                    if "not found" in err_str or "unsupported" in err_str or "404" in err_str:
-                        logger.warning(f"Gemini model '{m_name}' unavailable ({model_err}), trying fallback...")
-                        continue
-                    logger.warning(f"Gemini model '{m_name}' error: {model_err}")
+                    logger.warning(f"[WhatsApp AI Auto-Responder] google.generativeai error with model '{clean_m}': {model_err}")
                     if "quota" in err_str or "429" in err_str:
                         break
+                    continue
         except Exception as genai_err:
-            logger.warning(f"google.generativeai call failed: {genai_err}")
+            logger.warning(f"[WhatsApp AI Auto-Responder] google.generativeai setup failed: {genai_err}")
 
         # 2. Direct HTTP REST API fallback (using urllib)
         import urllib.request
+        import urllib.error
         for m_name in models_to_try:
+            clean_m = m_name.replace("models/", "")
             try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m_name}:generateContent?key={api_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_m}:generateContent?key={api_key}"
                 payload = {
                     "contents": [{"parts": [{"text": prompt}]}]
                 }
@@ -697,7 +745,7 @@ class WhatsAppService:
                     headers={"Content-Type": "application/json"},
                     method="POST"
                 )
-                with urllib.request.urlopen(req, timeout=8) as resp:
+                with urllib.request.urlopen(req, timeout=10) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     candidates = data.get("candidates", [])
                     if candidates:
@@ -705,9 +753,18 @@ class WhatsAppService:
                         if parts and "text" in parts[0]:
                             text = parts[0]["text"].strip()
                             if text:
+                                logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via HTTP REST Gemini model '{clean_m}' ({len(text)} chars)")
                                 return text
+            except urllib.error.HTTPError as http_err:
+                detail = ""
+                try:
+                    detail = http_err.read().decode("utf-8", errors="ignore")[:300]
+                except Exception:
+                    pass
+                logger.error(f"[WhatsApp AI Auto-Responder] HTTP error calling Gemini API for model '{clean_m}': HTTP {http_err.code} {http_err.reason} - {detail}")
+                continue
             except Exception as http_err:
-                logger.warning(f"HTTP Gemini call for model '{m_name}' failed: {http_err}")
+                logger.error(f"[WhatsApp AI Auto-Responder] Network/HTTP error calling Gemini API for model '{clean_m}': {http_err}")
                 continue
 
         return None
