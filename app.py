@@ -117,6 +117,9 @@ def get_gemini_ai_response(user_message):
         reply = WhatsAppService.call_gemini_ai(user_message)
         if reply:
             return reply
+        last_err = WhatsAppService.get_last_gemini_error()
+        if last_err:
+            return f'AI Auto-Responder note: Gemini model generation failed. (Reason: {last_err})'
         return 'AI Auto-Responder note: Gemini API Key is missing or model generation failed.'
     except Exception as e:
         return f'AI Error: {str(e)}'
@@ -367,7 +370,21 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
         msg = data.get("message") or data.get("user_message") or data.get("text") or ""
         reply = get_gemini_ai_response(msg)
-        return jsonify({"status": "success", "response": reply, "user_message": msg}), 200
+        from whatsapp_service import WhatsAppService
+        api_key = WhatsAppService.get_gemini_api_key()
+        last_error = WhatsAppService.get_last_gemini_error()
+        gemini_debug = {
+            "has_key": bool(api_key),
+            "key_preview": f"{api_key[:6]}...{api_key[-4:]}" if api_key and len(api_key) > 10 else None,
+            "configured_model": WhatsAppService.get_gemini_model_name(),
+            "last_error": last_error
+        }
+        return jsonify({
+            "status": "success",
+            "response": reply,
+            "user_message": msg,
+            "gemini_debug": gemini_debug
+        }), 200
 
     @application.route("/api/v1/billing/jazzcash", methods=["POST"])
     def jazzcash_checkout():

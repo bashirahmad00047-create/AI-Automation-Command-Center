@@ -669,11 +669,9 @@ class WhatsAppService:
         """Calls configured Google Gemini AI provider to generate a pure, natural response directly tailored to customer inquiries."""
         api_key = cls.get_gemini_api_key(organization_id=organization_id)
         if not api_key:
-            logger.warning(
-                "[WhatsApp AI Auto-Responder] No Gemini API key found in environment variables "
-                "(GEMINI_API_KEY, GOOGLE_API_KEY), database settings, or app config. "
-                "Returning clean fallback response."
-            )
+            err_msg = "No Gemini API key found in environment variables (GEMINI_API_KEY, GOOGLE_API_KEY), database settings, or app config."
+            cls._last_gemini_error = err_msg
+            logger.warning(f"[WhatsApp AI Auto-Responder] {err_msg} Returning clean fallback response.")
             return None
 
         user_msg_text = user_message.get('text', '') if isinstance(user_message, dict) else str(user_message)
@@ -681,21 +679,38 @@ class WhatsAppService:
         if not clean_text:
             return None
 
-        sys_instruct = f"\nAdditional Context / Business Instructions: {system_prompt.strip()}" if system_prompt and len(system_prompt.strip()) > 3 else ""
+        default_business_context = (
+            "Business Name: OpsFlow Cloud (AI Automation Command Center & IT Operations Platform).\n"
+            "Core Offerings & Services:\n"
+            "- Multi-agent automation engine and real-time IT incident orchestration.\n"
+            "- Two-way WhatsApp Business & Green-API customer routing and intelligent auto-responder.\n"
+            "- Observability, alert routing (PagerDuty, Slack, Email), and automated remediation pipelines.\n"
+            "- Payment gateway support (Stripe internationally, JazzCash for Pakistan).\n"
+            "Pricing & Subscription Tiers:\n"
+            "- 2-Day Free Trial available on all plans.\n"
+            "- Starter: $49/month (PKR 7,500/mo) - up to 10 automated rules, 50,000 monthly events.\n"
+            "- Pro: $149/month (PKR 25,000/mo) - up to 50 rules, 200,000 monthly events, priority alert routing.\n"
+            "- Enterprise: $499/month (PKR 125,000/mo) - unlimited rules, 1,000,000+ events, dedicated SLA, customized integrations."
+        )
+        sys_instruct = (
+            f"\nAdditional Context / Business Instructions:\n{system_prompt.strip()}"
+            if system_prompt and len(system_prompt.strip()) > 3
+            else f"\nBusiness Knowledge Base:\n{default_business_context}"
+        )
         prompt = (
-            f"You are an intelligent, polite, and direct AI assistant for our business.{sys_instruct}\n"
-            f"A customer has sent the following message: '{clean_text}'.\n"
-            f"Please provide a direct, helpful, and natural response specifically addressing their question or need. "
-            f"Do not include generic canned boilerplate, disclaimers, or echoing of their message."
+            f"You are an intelligent, polite, and direct AI assistant for OpsFlow Cloud.{sys_instruct}\n\n"
+            f"A customer has sent the following message: '{clean_text}'.\n\n"
+            f"Please provide a direct, helpful, and natural response specifically addressing their inquiry. "
+            f"Keep your tone professional, concise, and helpful. Do not include robotic canned boilerplate or disclaimers."
         )
 
         configured_model = cls.get_gemini_model_name(organization_id=organization_id)
         models_to_try = [configured_model]
-        for fallback_m in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-pro"]:
+        for fallback_m in ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-pro", "gemini-pro"]:
             if fallback_m not in models_to_try:
                 models_to_try.append(fallback_m)
 
-        # 1. Try google.generativeai if available
+        # 1. Try google.generativeai SDK if available
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
@@ -718,60 +733,75 @@ class WhatsAppService:
                                 if parts and hasattr(parts[0], "text"):
                                     text = parts[0].text
                         if text and text.strip():
+                            cls._last_gemini_error = None
                             logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via Gemini model '{clean_m}' ({len(text)} chars)")
                             return text.strip()
                 except Exception as model_err:
-                    err_str = str(model_err).lower()
+                    err_str = str(model_err)
+                    cls._last_gemini_error = f"google.generativeai error with '{clean_m}': {err_str}"
                     logger.warning(f"[WhatsApp AI Auto-Responder] google.generativeai error with model '{clean_m}': {model_err}")
-                    if "quota" in err_str or "429" in err_str:
+                    if "quota" in err_str.lower() or "429" in err_str:
                         break
                     continue
         except Exception as genai_err:
+            cls._last_gemini_error = f"google.generativeai setup failed: {genai_err}"
             logger.warning(f"[WhatsApp AI Auto-Responder] google.generativeai setup failed: {genai_err}")
 
-        # 2. Direct HTTP REST API fallback (using urllib)
-        import urllib.request
-        import urllib.error
-        for m_name in models_to_try:
-            clean_m = m_name.replace("models/", "")
-            try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_m}:generateContent?key={api_key}"
-                payload = {
-                    "contents": [{"parts": [{"text": prompt}]}]
-                }
-                req = urllib.request.Request(
-                    url,
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts and "text" in parts[0]:
-                            text = parts[0]["text"].strip()
-                            if text:
-                                logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via HTTP REST Gemini model '{clean_m}' ({len(text)} chars)")
-                                return text
-            except urllib.error.HTTPError as http_err:
-                detail = ""
+        # 2. Direct HTTP REST API via requests across v1beta and v1
+        for api_ver in ["v1beta", "v1"]:
+            for m_name in models_to_try:
+                clean_m = m_name.replace("models/", "")
                 try:
-                    detail = http_err.read().decode("utf-8", errors="ignore")[:300]
-                except Exception:
-                    pass
-                logger.error(f"[WhatsApp AI Auto-Responder] HTTP error calling Gemini API for model '{clean_m}': HTTP {http_err.code} {http_err.reason} - {detail}")
-                continue
-            except Exception as http_err:
-                logger.error(f"[WhatsApp AI Auto-Responder] Network/HTTP error calling Gemini API for model '{clean_m}': {http_err}")
-                continue
+                    url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{clean_m}:generateContent"
+                    payload = {
+                        "contents": [{"parts": [{"text": prompt}]}]
+                    }
+                    resp = requests.post(
+                        url,
+                        params={"key": api_key},
+                        json=payload,
+                        headers={
+                            "Content-Type": "application/json",
+                            "User-Agent": "OpsFlow-Cloud/2.4 (WhatsApp-Auto-Responder)"
+                        },
+                        timeout=12
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            if parts and "text" in parts[0]:
+                                text = parts[0]["text"].strip()
+                                if text:
+                                    cls._last_gemini_error = None
+                                    logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via HTTP REST Gemini model '{clean_m}' ({api_ver})")
+                                    return text
+                    else:
+                        detail = ""
+                        try:
+                            detail = resp.text[:300]
+                        except Exception:
+                            pass
+                        err_msg = f"HTTP {resp.status_code} ({api_ver}/{clean_m}): {detail}"
+                        cls._last_gemini_error = err_msg
+                        logger.error(f"[WhatsApp AI Auto-Responder] {err_msg}")
+                except Exception as req_err:
+                    err_msg = f"Network error calling Gemini API ({api_ver}/{clean_m}): {req_err}"
+                    cls._last_gemini_error = err_msg
+                    logger.error(f"[WhatsApp AI Auto-Responder] {err_msg}")
+                    continue
 
         logger.warning(
             f"[WhatsApp AI Auto-Responder] Gemini AI generation returned no response or failed across all models "
-            f"for organization '{organization_id or 'global'}'. Falling back to non-AI response."
+            f"for organization '{organization_id or 'global'}'. Falling back to non-AI response. (Last error: {getattr(cls, '_last_gemini_error', 'None')})"
         )
         return None
+
+    @classmethod
+    def get_last_gemini_error(cls) -> Optional[str]:
+        """Returns the most recent Gemini AI generation error for diagnostic / observability purposes."""
+        return getattr(cls, "_last_gemini_error", None)
 
     @classmethod
     def generate_ai_auto_response(
