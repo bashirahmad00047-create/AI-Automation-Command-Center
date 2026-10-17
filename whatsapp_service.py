@@ -895,7 +895,7 @@ class WhatsAppService:
         elif intent in ("support_request", "incident_ticket") or route_dept == "Support":
             final_reply = "A technical support specialist has been assigned to your request and will assist you shortly."
         else:
-            final_reply = "Thank you for reaching out. Our team has received your inquiry and will follow up shortly."
+            final_reply = "Ji bilkul, main aapki kya madad kar sakta hoon?"
 
         return {
             "reply_body": final_reply,
