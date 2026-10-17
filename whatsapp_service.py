@@ -664,7 +664,8 @@ class WhatsAppService:
         cls,
         user_message: Union[str, Dict[str, Any]],
         system_prompt: Optional[str] = None,
-        organization_id: Optional[str] = None
+        organization_id: Optional[str] = None,
+        customer_name: Optional[str] = None
     ) -> Optional[str]:
         """Calls configured Google Gemini AI provider to generate a pure, natural response directly tailored to customer inquiries."""
         api_key = cls.get_gemini_api_key(organization_id=organization_id)
@@ -697,9 +698,10 @@ class WhatsAppService:
             if system_prompt and len(system_prompt.strip()) > 3
             else f"\nBusiness Knowledge Base:\n{default_business_context}"
         )
+        cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
         prompt = (
             f"You are an intelligent, polite, and direct AI assistant for OpsFlow Cloud.{sys_instruct}\n\n"
-            f"A customer has sent the following message: '{clean_text}'.\n\n"
+            f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
             f"Please provide a direct, helpful, and natural response specifically addressing their inquiry. "
             f"Keep your tone professional, concise, and helpful. Do not include robotic canned boilerplate or disclaimers."
         )
@@ -862,7 +864,12 @@ class WhatsAppService:
             route_dept = "Sales"
 
         # 1. Direct Gemini AI Generation
-        ai_reply = cls.call_gemini_ai(message_body, system_prompt=custom_prompt, organization_id=organization_id)
+        ai_reply = cls.call_gemini_ai(
+            message_body,
+            system_prompt=custom_prompt,
+            organization_id=organization_id,
+            customer_name=sender_name
+        )
         if ai_reply:
             return {
                 "reply_body": ai_reply.strip(),
