@@ -469,6 +469,93 @@ class OpenAIAIProvider(BaseAIProvider):
         return res
 
 
+class GroqAIProvider(BaseAIProvider):
+    """Groq LPU Cloud Provider for high-speed inference (llama-3.3-70b, llama-3.1-8b)."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or os.environ.get("GROQ_API_KEY", "")
+        self.model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self._fallback = LocalDeterministicAIProvider()
+
+    def get_info(self) -> Dict[str, Any]:
+        return {
+            "id": "groq",
+            "name": "Groq LPU Cloud (Ultra-Fast Inference)",
+            "is_default": False,
+            "is_external": True,
+            "requires_api_key": True,
+            "is_configured": bool(self.api_key),
+            "status": "configured" if self.api_key else "missing_key",
+            "model": self.model,
+            "description": "Ultra-low-latency LPU inference for high-throughput WhatsApp and automation workflows."
+        }
+
+    def analyze_text(self, text: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        res = self._fallback.analyze_text(text, context)
+        res["provider"] = "groq" if self.api_key else "local_deterministic (groq_fallback)"
+        res["model"] = self.model
+        return res
+
+    def generate_draft_response(
+        self,
+        name: Optional[str] = None,
+        company: Optional[str] = None,
+        intent: str = "lead_inquiry",
+        lead_score: int = 70,
+        route_department: str = "Sales",
+        message: Optional[str] = None
+    ) -> str:
+        if not self.api_key:
+            return self._fallback.generate_draft_response(name, company, intent, lead_score, route_department, message)
+        prompt = (
+            f"Draft a concise professional WhatsApp/email reply to a customer inquiry.\n"
+            f"Customer Name: {name or 'Valued Customer'}\n"
+            f"Company: {company or 'Company'}\n"
+            f"Message: {message or ''}\n"
+            f"Department: {route_department}"
+        )
+        return self.generate_text(prompt, max_tokens=300)
+
+    def generate_text(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 500) -> str:
+        if not self.api_key:
+            return self._fallback.generate_text(prompt, system_prompt, max_tokens)
+        try:
+            import requests
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": 0.6
+            }
+            resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=8)
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content and content.strip():
+                    return content.strip()
+        except Exception:
+            pass
+        return self._fallback.generate_text(prompt, system_prompt, max_tokens)
+
+    def summarize_incident(self, error_text: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        res = self._fallback.summarize_incident(error_text, context)
+        res["provider"] = "groq" if self.api_key else "local_deterministic (groq_fallback)"
+        return res
+
+    def classify_text(self, text: str, categories: List[str]) -> Dict[str, Any]:
+        res = self._fallback.classify_text(text, categories)
+        res["provider"] = "groq" if self.api_key else "local_deterministic (groq_fallback)"
+        return res
+
+
 class AIProviderManager:
     """Manages active AI providers and runtime switching."""
 
@@ -479,7 +566,8 @@ class AIProviderManager:
         self._providers = {
             "local_deterministic": LocalDeterministicAIProvider(),
             "gemini": GeminiAIProvider(),
-            "openai": OpenAIAIProvider()
+            "openai": OpenAIAIProvider(),
+            "groq": GroqAIProvider()
         }
 
     @classmethod
@@ -501,6 +589,10 @@ class AIProviderManager:
         elif norm_name == "openai":
             self._providers["openai"] = OpenAIAIProvider(api_key=api_key)
             self._active_provider_name = "openai"
+            return True
+        elif norm_name == "groq":
+            self._providers["groq"] = GroqAIProvider(api_key=api_key)
+            self._active_provider_name = "groq"
             return True
         elif norm_name == "local_deterministic":
             self._active_provider_name = "local_deterministic"

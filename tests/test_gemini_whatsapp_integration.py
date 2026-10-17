@@ -299,6 +299,25 @@ class TestGeminiWhatsAppIntegration(unittest.TestCase):
                 self.assertEqual(meta.get("response_source"), "system_fallback")
                 self.assertNotEqual(meta.get("response_source"), "gemini_ai")
 
+    def test_groq_secondary_ai_fallback_when_gemini_unavailable(self):
+        """Verifies that when Gemini AI fails, Groq secondary AI fallback triggers and generates a valid AI response."""
+        groq_mock_reply = "Hello! Groq high-speed assistant is responding to your cloud operations request."
+
+        with patch.object(WhatsAppService, "call_gemini_ai", return_value=None):
+            with patch.object(WhatsAppService, "call_groq_ai", return_value=groq_mock_reply):
+                result = WhatsAppService.generate_ai_auto_response(
+                    organization_id=self.org.id,
+                    message_body="Can you help me setup an alert pipeline?",
+                    sender_name="Kashif",
+                    sender_phone="923004443322"
+                )
+
+                self.assertIsNotNone(result)
+                self.assertEqual(result["reply_body"], groq_mock_reply)
+                self.assertEqual(result["mode"], "groq_ai")
+                self.assertFalse(result["is_gemini"])
+                self.assertTrue(result.get("is_groq"))
+
 
 if __name__ == "__main__":
     unittest.main()

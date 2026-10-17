@@ -828,6 +828,110 @@ class WhatsAppService:
         return getattr(cls, "_last_gemini_diagnostics", [])
 
     @classmethod
+    def get_groq_api_key(cls, organization_id: Optional[str] = None) -> Optional[str]:
+        """Resolves Groq API key across environment, database settings, and app config."""
+        candidates = ["GROQ_API_KEY", "GROQ_KEY"]
+        for k in candidates:
+            val = cls._get_tenant_or_global_setting(k, organization_id)
+            if val and str(val).strip():
+                return str(val).strip()
+            val = os.environ.get(k)
+            if val and str(val).strip():
+                return str(val).strip()
+            if has_app_context():
+                val = current_app.config.get(k)
+                if val and str(val).strip():
+                    return str(val).strip()
+        return None
+
+    @classmethod
+    def call_groq_ai(
+        cls,
+        user_message: Union[str, Dict[str, Any]],
+        system_prompt: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        customer_name: Optional[str] = None
+    ) -> Optional[str]:
+        """Calls Groq LPU Cloud REST API as ultra-fast, high-quality secondary AI fallback."""
+        api_key = cls.get_groq_api_key(organization_id=organization_id)
+        if not api_key:
+            return None
+
+        user_msg_text = user_message.get('text', '') if isinstance(user_message, dict) else str(user_message)
+        clean_text = user_msg_text.strip()
+        if not clean_text:
+            return None
+
+        default_business_context = (
+            "Business Name: OpsFlow Cloud (AI Automation Command Center & IT Operations Platform).\n"
+            "Core Offerings & Services:\n"
+            "- Multi-agent automation engine and real-time IT incident orchestration.\n"
+            "- Two-way WhatsApp Business & Green-API customer routing and intelligent auto-responder.\n"
+            "- Observability, alert routing (PagerDuty, Slack, Email), and automated remediation pipelines.\n"
+            "- Payment gateway support (Stripe internationally, JazzCash for Pakistan).\n"
+            "Pricing & Subscription Tiers:\n"
+            "- 2-Day Free Trial available on all plans.\n"
+            "- Starter: $49/month (PKR 7,500/mo) - up to 10 automated rules, 50,000 monthly events.\n"
+            "- Pro: $149/month (PKR 25,000/mo) - up to 50 rules, 200,000 monthly events, priority alert routing.\n"
+            "- Enterprise: $499/month (PKR 125,000/mo) - unlimited rules, 1,000,000+ events, dedicated SLA, customized integrations."
+        )
+        sys_instruct = (
+            f"\nAdditional Context / Business Instructions:\n{system_prompt.strip()}"
+            if system_prompt and len(system_prompt.strip()) > 3
+            else f"\nBusiness Knowledge Base:\n{default_business_context}"
+        )
+        cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
+        user_prompt = (
+            f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
+            f"Please provide a direct, helpful, and natural response specifically addressing their inquiry. "
+            f"Keep your tone professional, concise, and helpful. Do not include robotic canned boilerplate or disclaimers."
+        )
+
+        models_to_try = [
+            os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+            "llama-3.1-8b-instant",
+            "mixtral-8x7b-32768"
+        ]
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "OpsFlow-Cloud/2.4 (WhatsApp-Auto-Responder-Groq)"
+        }
+
+        for m_name in models_to_try:
+            try:
+                payload = {
+                    "model": m_name,
+                    "messages": [
+                        {"role": "system", "content": f"You are an intelligent, polite, and direct AI assistant for OpsFlow Cloud.{sys_instruct}"},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": 0.6,
+                    "max_tokens": 400
+                }
+                resp = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=8
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    choices = data.get("choices", [])
+                    if choices:
+                        text = choices[0].get("message", {}).get("content", "").strip()
+                        if text:
+                            logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via Groq model '{m_name}' ({len(text)} chars)")
+                            return text
+                else:
+                    logger.warning(f"[WhatsApp AI Auto-Responder] Groq model '{m_name}' returned HTTP {resp.status_code}")
+            except Exception as groq_err:
+                logger.warning(f"[WhatsApp AI Auto-Responder] Groq model '{m_name}' error: {groq_err}")
+                continue
+
+        return None
+
+    @classmethod
     def generate_ai_auto_response(
         cls,
         organization_id: Optional[str],
@@ -880,12 +984,34 @@ class WhatsAppService:
                 "entities": entities,
                 "mode": "gemini_ai",
                 "is_gemini": True,
+                "is_groq": False,
                 "confidence": 98
             }
 
-        # 2. Clean fallback when AI provider is offline (NO echoing of user message, NO canned wrapper templates)
+        # 2. Secondary Groq AI Generation (High-speed LPU fallback)
+        groq_reply = cls.call_groq_ai(
+            message_body,
+            system_prompt=custom_prompt,
+            organization_id=organization_id,
+            customer_name=sender_name
+        )
+        if groq_reply:
+            return {
+                "reply_body": groq_reply.strip(),
+                "intent": intent,
+                "urgency": urgency,
+                "lead_score": lead_score,
+                "route_department": route_dept,
+                "entities": entities,
+                "mode": "groq_ai",
+                "is_gemini": False,
+                "is_groq": True,
+                "confidence": 96
+            }
+
+        # 3. Clean fallback when both AI providers are offline (NO echoing of user message, NO canned wrapper templates)
         logger.warning(
-            f"[WhatsApp AI Auto-Responder] Gemini AI generation was unavailable or failed for inbound message: "
+            f"[WhatsApp AI Auto-Responder] Gemini AI generation was unavailable or failed (Groq fallback also unavailable) for inbound message: "
             f"'{message_body[:60]}'. Falling back to non-AI response rather than presenting as Gemini answer."
         )
         if intent == "lead_inquiry" or route_dept == "Sales":
@@ -1009,10 +1135,13 @@ class WhatsAppService:
 
             if msg_rec:
                 is_gemini = (generated.get("mode") == "gemini_ai") or bool(generated.get("is_gemini"))
+                is_groq = (generated.get("mode") == "groq_ai") or bool(generated.get("is_groq"))
+                source = "gemini_ai" if is_gemini else ("groq_ai" if is_groq else "system_fallback")
                 meta = {
                     "is_ai_response": True,
                     "is_gemini_response": is_gemini,
-                    "response_source": "gemini_ai" if is_gemini else "system_fallback",
+                    "is_groq_response": is_groq,
+                    "response_source": source,
                     "ai_intent": intent,
                     "lead_score": lead_score,
                     "urgency": generated["urgency"],
@@ -1024,6 +1153,8 @@ class WhatsAppService:
 
             if generated.get("mode") == "gemini_ai" or generated.get("is_gemini"):
                 logger.info(f"Gemini AI response successfully dispatched to {clean_phone} [Intent: {intent}, Score: {lead_score}]")
+            elif generated.get("mode") == "groq_ai" or generated.get("is_groq"):
+                logger.info(f"Groq AI response successfully dispatched to {clean_phone} [Intent: {intent}, Score: {lead_score}]")
             else:
                 logger.warning(
                     f"[WhatsApp AI Auto-Responder] System fallback response dispatched to {clean_phone} "
