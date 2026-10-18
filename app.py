@@ -122,8 +122,13 @@ def get_gemini_ai_response(user_message):
         if groq_reply:
             return groq_reply
         last_err = WhatsAppService.get_last_gemini_error()
+        last_groq_err = WhatsAppService.get_last_groq_error()
+        if last_groq_err and last_err:
+            return f'AI Auto-Responder note: Gemini & Groq generation failed. (Gemini: {last_err} | Groq: {last_groq_err})'
         if last_err:
             return f'AI Auto-Responder note: Gemini model generation failed. (Reason: {last_err})'
+        if last_groq_err:
+            return f'AI Auto-Responder note: Groq model generation failed. (Reason: {last_groq_err})'
         return 'AI Auto-Responder note: Gemini/Groq API Key is missing or model generation failed.'
     except Exception as e:
         return f'AI Error: {str(e)}'
@@ -385,7 +390,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "active_ai_provider": "gemini" if bool(api_key) else ("groq" if bool(groq_key) else "none"),
             "configured_model": WhatsAppService.get_gemini_model_name(),
             "last_error": last_error,
-            "diagnostics": WhatsAppService.get_last_gemini_diagnostics()
+            "diagnostics": WhatsAppService.get_last_gemini_diagnostics(),
+            "last_groq_error": WhatsAppService.get_last_groq_error(),
+            "groq_diagnostics": WhatsAppService.get_last_groq_diagnostics()
         }
         return jsonify({
             "status": "success",

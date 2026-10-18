@@ -37,19 +37,39 @@ from models import Organization, SystemSetting, WhatsAppMessage, generate_uuid
 
 logger = logging.getLogger("opsflow.whatsapp")
 
-# Automatically load .env for standalone execution if present
+# Automatically load .env and Render secret files for standalone execution if present
 _base_dir = os.path.abspath(os.path.dirname(__file__))
-_env_file = os.path.join(_base_dir, ".env")
-if os.path.exists(_env_file):
+_env_candidates = [
+    os.path.join(_base_dir, ".env"),
+    "/etc/secrets/.env",
+    "/etc/secrets/secrets.env",
+]
+for _env_candidate in _env_candidates:
+    if os.path.exists(_env_candidate):
+        try:
+            with open(_env_candidate, "r", encoding="utf-8") as _f:
+                for _line in _f:
+                    _line = _line.strip()
+                    if _line and not _line.startswith("#") and "=" in _line:
+                        _k, _v = _line.split("=", 1)
+                        _k, _v = _k.strip(), _v.strip().strip('"').strip("'")
+                        if _k and (_k not in os.environ or not os.environ[_k]):
+                            os.environ[_k] = _v
+        except Exception:
+            pass
+
+if os.path.exists("/etc/secrets") and os.path.isdir("/etc/secrets"):
     try:
-        with open(_env_file, "r", encoding="utf-8") as _f:
-            for _line in _f:
-                _line = _line.strip()
-                if _line and not _line.startswith("#") and "=" in _line:
-                    _k, _v = _line.split("=", 1)
-                    _k, _v = _k.strip(), _v.strip().strip('"').strip("'")
-                    if _k not in os.environ:
-                        os.environ[_k] = _v
+        for _s_name in os.listdir("/etc/secrets"):
+            _s_path = os.path.join("/etc/secrets", _s_name)
+            if os.path.isfile(_s_path) and not _s_name.startswith("."):
+                try:
+                    with open(_s_path, "r", encoding="utf-8") as _sf:
+                        _s_val = _sf.read().strip().strip('"').strip("'")
+                        if _s_val and (_s_name not in os.environ or not os.environ[_s_name]):
+                            os.environ[_s_name] = _s_val
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -690,6 +710,26 @@ class WhatsAppService:
                     break
 
         if not api_key:
+            for secret_dir in ["/etc/secrets", os.path.join(_base_dir, ".secrets")]:
+                if os.path.exists(secret_dir):
+                    for k in candidates:
+                        for filename in (k, k.lower()):
+                            sf_path = os.path.join(secret_dir, filename)
+                            if os.path.isfile(sf_path):
+                                try:
+                                    with open(sf_path, "r", encoding="utf-8") as f:
+                                        content_val = f.read().strip().strip("'" \t\r\n")
+                                        if content_val:
+                                            api_key = content_val
+                                            break
+                                except Exception:
+                                    pass
+                        if api_key:
+                            break
+                if api_key:
+                    break
+
+        if not api_key:
             try:
                 from ai_provider import get_ai_provider
                 gemini_prov = get_ai_provider("gemini")
@@ -826,8 +866,8 @@ class WhatsAppService:
         preferred_candidates = [
             configured_model,
             "gemini-1.5-flash",
+            "gemini-1.5-flash-8b",
             "gemini-2.0-flash",
-            "gemini-2.5-flash",
             "gemini-1.5-pro"
         ]
         for m in preferred_candidates:
@@ -949,23 +989,53 @@ class WhatsAppService:
 
     @classmethod
     def get_groq_api_key(cls, organization_id: Optional[str] = None) -> Optional[str]:
-        """Resolves Groq API key across environment, database settings, and app config."""
-        candidates = ["GROQ_API_KEY", "GROQ_KEY"]
+        """Resolves Groq API key across environment, database settings, app config, and Render secret files."""
+        candidates = ["GROQ_API_KEY", "GROQ_KEY", "GROQ_APIKEY", "GROQ_SECRET_KEY"]
         for k in candidates:
+            # 1. Tenant or global setting in database
             val = cls._get_tenant_or_global_setting(k, organization_id)
             if val and str(val).strip():
                 return str(val).strip().strip("'\" \t\r\n")
+
+            # 2. Direct environment variable lookup
             val = os.environ.get(k)
             if val and str(val).strip():
                 return str(val).strip().strip("'\" \t\r\n")
+
+            # 3. Case-insensitive / trimmed search in os.environ
+            for env_k, env_v in os.environ.items():
+                if env_k.strip().upper() == k and env_v and str(env_v).strip():
+                    return str(env_v).strip().strip("'\" \t\r\n")
+
+            # 4. Flask app config
             if has_app_context():
                 val = current_app.config.get(k)
                 if val and str(val).strip():
                     return str(val).strip().strip("'\" \t\r\n")
+                for cfg_k, cfg_v in current_app.config.items():
+                    if cfg_k.strip().upper() == k and cfg_v and str(cfg_v).strip():
+                        return str(cfg_v).strip().strip("'\" \t\r\n")
+
+        # 5. Render Secret Files (/etc/secrets/<candidate> or /etc/secrets/.env)
+        for secret_dir in ["/etc/secrets", os.path.join(_base_dir, ".secrets")]:
+            if os.path.exists(secret_dir):
+                for k in candidates:
+                    for filename in (k, k.lower()):
+                        sf_path = os.path.join(secret_dir, filename)
+                        if os.path.isfile(sf_path):
+                            try:
+                                with open(sf_path, "r", encoding="utf-8") as f:
+                                    content = f.read().strip().strip("'\" \t\r\n")
+                                    if content:
+                                        return content
+                            except Exception:
+                                pass
+
+        # 6. Fallback to ai_provider
         try:
             from ai_provider import get_ai_provider
             groq_prov = get_ai_provider("groq")
-            val = getattr(groq_prov, "api_key", None)
+            val = getattr(groq_prov, "effective_api_key", getattr(groq_prov, "api_key", None))
             if val and str(val).strip():
                 return str(val).strip().strip("'\" \t\r\n")
         except Exception:
@@ -984,6 +1054,7 @@ class WhatsAppService:
         """Calls Groq LPU Cloud REST API as ultra-fast, high-quality secondary AI fallback."""
         api_key = cls.get_groq_api_key(organization_id=organization_id)
         if not api_key:
+            cls._last_groq_error = "No Groq API key found in environment, database settings, app config, or /etc/secrets."
             return None
 
         user_msg_text = user_message.get('text', '') if isinstance(user_message, dict) else str(user_message)
@@ -1023,7 +1094,7 @@ class WhatsAppService:
         if not configured_groq_model and has_app_context():
             configured_groq_model = current_app.config.get("GROQ_MODEL")
         models_to_try = []
-        for m in [configured_groq_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]:
+        for m in [configured_groq_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama-3.1-70b-versatile"]:
             if m and m not in models_to_try:
                 models_to_try.append(m)
         headers = {
@@ -1043,6 +1114,7 @@ class WhatsAppService:
                     messages.append({"role": role, "content": c})
         messages.append({"role": "user", "content": user_prompt})
 
+        diagnostics: List[str] = []
         for m_name in models_to_try:
             try:
                 payload = {
@@ -1063,15 +1135,38 @@ class WhatsAppService:
                     if choices:
                         text = choices[0].get("message", {}).get("content", "").strip()
                         if text:
+                            cls._last_groq_error = None
+                            cls._last_groq_diagnostics = []
                             logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via Groq model '{m_name}' ({len(text)} chars)")
                             return text
                 else:
-                    logger.warning(f"[WhatsApp AI Auto-Responder] Groq model '{m_name}' returned HTTP {resp.status_code}")
+                    detail = ""
+                    try:
+                        detail = resp.text[:200].replace("\n", " ").strip()
+                    except Exception:
+                        pass
+                    err_msg = f"HTTP {resp.status_code} ({detail})"
+                    diagnostics.append(f"{m_name}: {err_msg}")
+                    logger.warning(f"[WhatsApp AI Auto-Responder] Groq model '{m_name}' returned {err_msg}")
             except Exception as groq_err:
-                logger.warning(f"[WhatsApp AI Auto-Responder] Groq model '{m_name}' error: {groq_err}")
+                err_msg = f"error: {groq_err}"
+                diagnostics.append(f"{m_name}: {err_msg}")
+                logger.warning(f"[WhatsApp AI Auto-Responder] Groq model '{m_name}' {err_msg}")
                 continue
 
+        cls._last_groq_diagnostics = diagnostics
+        cls._last_groq_error = " | ".join(diagnostics[-3:]) if diagnostics else "No response from Groq models"
         return None
+
+    @classmethod
+    def get_last_groq_error(cls) -> Optional[str]:
+        """Returns the most recent Groq AI generation error for diagnostic / observability purposes."""
+        return getattr(cls, "_last_groq_error", None)
+
+    @classmethod
+    def get_last_groq_diagnostics(cls) -> List[str]:
+        """Returns detailed breakdown of all attempted Groq models and endpoints."""
+        return getattr(cls, "_last_groq_diagnostics", [])
 
     @classmethod
     def generate_ai_auto_response(

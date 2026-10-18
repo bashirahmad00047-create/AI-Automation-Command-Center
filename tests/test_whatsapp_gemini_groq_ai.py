@@ -459,6 +459,106 @@ class TestWhatsAppGeminiGroqAI(unittest.TestCase):
                     or "incident" in res["reply_body"]
                 )
 
+    def test_get_groq_api_key_case_and_whitespace_tolerant(self):
+        """Verifies get_groq_api_key resolves key even with lowercase or surrounding whitespace in env."""
+        with patch.dict(os.environ, {"groq_api_key": "gsk_lower_case_123"}, clear=False):
+            key = WhatsAppService.get_groq_api_key()
+            self.assertEqual(key, "gsk_lower_case_123")
+
+        with patch.dict(os.environ, {"GROQ_API_KEY ": "gsk_trailing_space_456"}, clear=False):
+            key = WhatsAppService.get_groq_api_key()
+            self.assertEqual(key, "gsk_trailing_space_456")
+
+    def test_get_groq_api_key_from_render_secret_file(self):
+        """Verifies get_groq_api_key reads from Render secret file mounted at /etc/secrets/GROQ_API_KEY."""
+        orig_exists = os.path.exists
+        orig_isfile = os.path.isfile
+
+        def fake_exists(p):
+            p_norm = os.path.normpath(str(p)).replace("\\", "/")
+            if "etc/secrets" in p_norm:
+                return True
+            return orig_exists(p)
+
+        def fake_isfile(p):
+            p_norm = os.path.normpath(str(p)).replace("\\", "/")
+            if "etc/secrets/GROQ_API_KEY" in p_norm or "etc/secrets/groq_api_key" in p_norm:
+                return True
+            return orig_isfile(p)
+
+        with patch("whatsapp_service.os.path.exists", side_effect=fake_exists):
+            with patch("whatsapp_service.os.path.isfile", side_effect=fake_isfile):
+                with patch("builtins.open", create=True) as mock_open:
+                    mock_open.return_value.__enter__.return_value.read.return_value = "gsk_render_secret_mount_789"
+                    with patch.dict(os.environ, {"GROQ_API_KEY": "", "GROQ_KEY": ""}):
+                        with patch.object(WhatsAppService, "_get_tenant_or_global_setting", return_value=None):
+                            key = WhatsAppService.get_groq_api_key()
+                            self.assertEqual(key, "gsk_render_secret_mount_789")
+
+    def test_end_to_end_groq_http_dispatch_on_gemini_429(self):
+        """Verifies full end-to-end HTTP request reaches https://api.groq.com/openai/v1/chat/completions when Gemini returns 429."""
+        groq_json_response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Live Groq LPU answer delivered via HTTP REST completions endpoint."
+                    }
+                }
+            ]
+        }
+
+        mock_gemini_429 = MagicMock()
+        mock_gemini_429.status_code = 429
+        mock_gemini_429.text = '{"error": {"code": 429, "message": "Resource has been exhausted."}}'
+
+        mock_groq_200 = MagicMock()
+        mock_groq_200.status_code = 200
+        mock_groq_200.json.return_value = groq_json_response
+
+        def mock_post(url, *args, **kwargs):
+            if "generativelanguage" in url:
+                return mock_gemini_429
+            elif "api.groq.com" in url:
+                return mock_groq_200
+            return MagicMock(status_code=404)
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "AIzaMock429", "GROQ_API_KEY": "gsk_valid_live_key"}):
+            with patch("requests.post", side_effect=mock_post) as mock_req:
+                res = WhatsAppService.generate_ai_auto_response(
+                    organization_id=self.org.id,
+                    message_body="Tell me about automated recovery",
+                    sender_name="Hamza",
+                    sender_phone="923009988776"
+                )
+                self.assertIsNotNone(res)
+                self.assertTrue(res["is_groq"])
+                self.assertFalse(res["is_gemini"])
+                self.assertEqual(res["reply_body"], "Live Groq LPU answer delivered via HTTP REST completions endpoint.")
+
+                # Verify actual HTTP call to Groq endpoint was executed
+                groq_calls = [c for c in mock_req.call_args_list if "api.groq.com" in str(c)]
+                self.assertGreaterEqual(len(groq_calls), 1)
+                groq_call = groq_calls[0]
+                self.assertIn("https://api.groq.com/openai/v1/chat/completions", groq_call[0])
+                headers = groq_call[1].get("headers", {})
+                self.assertEqual(headers.get("Authorization"), "Bearer gsk_valid_live_key")
+
+    def test_groq_diagnostics_and_last_error_recorded(self):
+        """Verifies Groq failure records _last_groq_error and diagnostics."""
+        mock_fail = MagicMock()
+        mock_fail.status_code = 503
+        mock_fail.text = "Service Unavailable"
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test_key"}):
+            with patch("requests.post", return_value=mock_fail):
+                res = WhatsAppService.call_groq_ai("test message")
+                self.assertIsNone(res)
+                last_err = WhatsAppService.get_last_groq_error()
+                self.assertIsNotNone(last_err)
+                self.assertIn("503", last_err)
+                diags = WhatsAppService.get_last_groq_diagnostics()
+                self.assertGreater(len(diags), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
