@@ -4255,26 +4255,50 @@ async function syncWhatsAppMessagesNow(silent = false) {
     }
 }
 
+function normalizeWaPhone(phone) {
+    if (!phone) return '';
+    let clean = String(phone).replace(/@c\.us|@g\.us/g, '').replace(/[^0-9]/g, '');
+    if (clean.startsWith('03') && clean.length === 11) {
+        clean = '92' + clean.slice(1);
+    } else if (clean.startsWith('00')) {
+        clean = clean.slice(2);
+    }
+    return clean || String(phone).replace(/@c\.us|@g\.us/g, '').trim();
+}
+
+function isSameWaPhone(p1, p2) {
+    if (!p1 || !p2) return false;
+    const n1 = normalizeWaPhone(p1);
+    const n2 = normalizeWaPhone(p2);
+    if (n1 === n2) return true;
+    if (n1.length >= 8 && n2.length >= 8) {
+        return n1.slice(-8) === n2.slice(-8);
+    }
+    return false;
+}
+
 function groupWhatsAppConversations(messages) {
     const map = {};
     (messages || []).forEach(m => {
         const isInbound = m.direction === 'inbound';
         const rawPartner = isInbound ? m.sender : m.recipient;
-        const partner = (rawPartner || '').replace(/@c\.us|@g\.us/g, '').trim() || 'Unknown';
+        const normKey = normalizeWaPhone(rawPartner) || 'Unknown';
+        const displayPhone = (rawPartner || '').replace(/@c\.us|@g\.us/g, '').trim() || normKey;
 
-        if (!map[partner]) {
-            map[partner] = {
-                phone: partner,
-                name: (isInbound ? m.sender_name : '') || partner,
+        if (!map[normKey]) {
+            map[normKey] = {
+                phone: displayPhone,
+                normalizedPhone: normKey,
+                name: (isInbound ? m.sender_name : '') || displayPhone,
                 lastMessage: m.body || (m.is_audio ? '🎙️ Voice note' : '(no text)'),
                 timestamp: m.created_at || '',
                 is_audio: Boolean(m.is_audio),
                 messages: []
             };
         }
-        map[partner].messages.push(m);
-        if (m.sender_name && (!map[partner].name || map[partner].name === partner)) {
-            map[partner].name = m.sender_name;
+        map[normKey].messages.push(m);
+        if (m.sender_name && (!map[normKey].name || map[normKey].name === displayPhone || map[normKey].name === normKey)) {
+            map[normKey].name = m.sender_name;
         }
     });
 
@@ -4294,7 +4318,22 @@ function handleWhatsAppChatSearch(val) {
 
 function selectWhatsAppChat(partner) {
     waActiveChatPartner = partner;
+    if (Array.isArray(waAllMessagesCache)) {
+        waAllMessagesCache.forEach(m => {
+            const mPartner = (m.direction === 'inbound' ? m.sender : m.recipient) || '';
+            if (isSameWaPhone(mPartner, partner) && m.direction === 'inbound') {
+                m.status = 'read';
+            }
+        });
+    }
     renderWhatsAppWebUI(waAllMessagesCache, true);
+    if (partner) {
+        const norm = normalizeWaPhone(partner) || partner;
+        fetch(`/api/v1/whatsapp/conversations/${encodeURIComponent(norm)}/read`, {
+            method: 'POST',
+            headers: typeof getAuthHeaders === 'function' ? getAuthHeaders() : { 'Content-Type': 'application/json' }
+        }).catch(err => console.debug('Mark chat read notice:', err));
+    }
 }
 
 function promptNewConversation() {
@@ -4412,15 +4451,23 @@ function togglePlayVoiceMessage(id, mediaUrl, textBody) {
 }
 
 async function deleteWhatsAppMsg(msgId) {
-    if (!confirm('Are you sure you want to delete this message from conversation history?')) return;
+    if (!confirm('Are you sure you want to delete this message? If supported by the connected provider (e.g. Green-API), remote deletion will also be requested.')) return;
     try {
+        const headers = typeof getAuthHeaders === 'function' ? getAuthHeaders() : { 'Content-Type': 'application/json' };
         const res = await fetch(`/api/v1/whatsapp/messages/${encodeURIComponent(msgId)}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: headers
         });
         const data = await res.json();
         if (res.ok && data.success) {
-            showToast('Message deleted successfully', 'success');
-            waAllMessagesCache = waAllMessagesCache.filter(m => m.id !== msgId && m.whatsapp_message_id !== msgId);
+            if (data.remote_success) {
+                showToast(`Message deleted locally & on WhatsApp: ${data.remote_detail}`, 'success');
+            } else if (data.remote_detail) {
+                showToast(`Message deleted locally (${data.remote_detail})`, 'info');
+            } else {
+                showToast('Message deleted successfully', 'success');
+            }
+            waAllMessagesCache = (waAllMessagesCache || []).filter(m => m.id !== msgId && m.whatsapp_message_id !== msgId);
             renderWhatsAppWebUI(waAllMessagesCache, false);
             loadWhatsAppMessagesOnly();
         } else {
@@ -4428,6 +4475,96 @@ async function deleteWhatsAppMsg(msgId) {
         }
     } catch (err) {
         showToast(`Error deleting message: ${err.message}`, 'error');
+    }
+}
+
+async function promptForwardWhatsAppMsg(msgId) {
+    const target = (waAllMessagesCache || []).find(m => m.id === msgId || m.whatsapp_message_id === msgId);
+    const snippet = target && target.body ? ` "${target.body.substring(0, 36)}${target.body.length > 36 ? '...' : ''}"` : '';
+    const toPhone = prompt(`Forward message${snippet} to phone number (e.g. +923001234567 or 923001234567):`);
+    if (!toPhone || !toPhone.trim()) return;
+
+    try {
+        const headers = typeof getAuthHeaders === 'function' ? getAuthHeaders() : { 'Content-Type': 'application/json' };
+        const res = await fetch(`/api/v1/whatsapp/messages/${encodeURIComponent(msgId)}/forward`, {
+            method: 'POST',
+            headers: {
+                ...headers,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ to: toPhone.trim() })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            if (data.remote_success) {
+                showToast(`Message forwarded to +${data.recipient} (${data.remote_detail || 'Provider sent'})`, 'success');
+            } else {
+                showToast(`Forward recorded/simulated for +${data.recipient} (${data.remote_detail || 'Simulated'})`, 'info');
+            }
+            loadWhatsAppMessagesOnly();
+        } else {
+            showToast(data.error || 'Failed to forward message', 'error');
+        }
+    } catch (err) {
+        showToast(`Error forwarding message: ${err.message}`, 'error');
+    }
+}
+
+async function markCurrentConversationUnread() {
+    if (!waActiveChatPartner) {
+        showToast('No active conversation selected to mark unread', 'info');
+        return;
+    }
+    const partner = waActiveChatPartner;
+    try {
+        const norm = normalizeWaPhone(partner) || partner;
+        const headers = typeof getAuthHeaders === 'function' ? getAuthHeaders() : { 'Content-Type': 'application/json' };
+        const res = await fetch(`/api/v1/whatsapp/conversations/${encodeURIComponent(norm)}/unread`, {
+            method: 'POST',
+            headers: headers
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast(`Conversation with +${partner.replace(/^\+/, '')} marked as unread`, 'success');
+            if (Array.isArray(waAllMessagesCache)) {
+                waAllMessagesCache.forEach(m => {
+                    const p = (m.direction === 'inbound' ? m.sender : m.recipient) || '';
+                    if (isSameWaPhone(p, partner) && m.direction === 'inbound') {
+                        m.status = 'received';
+                    }
+                });
+            }
+            waActiveChatPartner = null;
+            renderWhatsAppWebUI(waAllMessagesCache, false);
+        } else {
+            showToast(data.error || 'Failed to mark conversation as unread', 'error');
+        }
+    } catch (err) {
+        showToast(`Error marking unread: ${err.message}`, 'error');
+    }
+}
+
+async function markWhatsAppMsgUnread(msgId) {
+    try {
+        const headers = typeof getAuthHeaders === 'function' ? getAuthHeaders() : { 'Content-Type': 'application/json' };
+        const res = await fetch(`/api/v1/whatsapp/messages/${encodeURIComponent(msgId)}/unread`, {
+            method: 'POST',
+            headers: headers
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast('Message marked as unread', 'success');
+            if (Array.isArray(waAllMessagesCache)) {
+                const target = waAllMessagesCache.find(m => m.id === msgId || m.whatsapp_message_id === msgId);
+                if (target) target.status = 'received';
+            }
+            waActiveChatPartner = null;
+            renderWhatsAppWebUI(waAllMessagesCache, false);
+        } else {
+            showToast(data.error || 'Failed to mark message as unread', 'error');
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
     }
 }
 
@@ -4625,10 +4762,11 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
         `;
     } else {
         convList.innerHTML = filteredConv.map(c => {
-            const isActive = c.phone === waActiveChatPartner;
+            const isActive = isSameWaPhone(c.normalizedPhone || c.phone, waActiveChatPartner);
             const avatarColor = getWaAvatarColor(c.phone);
             const initials = (c.name || c.phone || '?').substring(0, 2).toUpperCase();
             const previewIcon = c.is_audio ? '🎙️ ' : '';
+            const unreadCount = (c.messages || []).filter(m => m.direction === 'inbound' && m.status !== 'read').length;
 
             return `
                 <div class="wa-chat-item ${isActive ? 'active' : ''}" onclick="selectWhatsAppChat('${escapeHtml(c.phone)}')">
@@ -4642,7 +4780,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                         </div>
                         <div class="wa-chat-bottom">
                             <span class="wa-chat-preview" title="${escapeHtml(c.lastMessage)}">${previewIcon}${escapeHtml(c.lastMessage)}</span>
-                            <span class="wa-unread-badge" style="${c.messages.length > 0 ? '' : 'display:none;'}">${c.messages.length}</span>
+                            <span class="wa-unread-badge" style="${unreadCount > 0 ? '' : 'display:none;'}">${unreadCount}</span>
                         </div>
                     </div>
                 </div>
@@ -4657,7 +4795,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
     const activeChatActions = document.getElementById('waActiveChatActions');
 
     if (waActiveChatPartner) {
-        const activeConv = conversations.find(c => c.phone === waActiveChatPartner);
+        const activeConv = conversations.find(c => isSameWaPhone(c.normalizedPhone || c.phone, waActiveChatPartner));
         const contactName = activeConv ? activeConv.name : waActiveChatPartner;
         if (activeHeaderName) activeHeaderName.textContent = contactName;
         if (activeHeaderPhone) activeHeaderPhone.textContent = `+${waActiveChatPartner.replace(/^\+/, '')} · Online`;
@@ -4694,7 +4832,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
     const partnerMsgs = (messages || []).filter(m => {
         const cleanSender = (m.sender || '').replace(/@c\.us|@g\.us/g, '').trim();
         const cleanRecipient = (m.recipient || '').replace(/@c\.us|@g\.us/g, '').trim();
-        return cleanSender === waActiveChatPartner || cleanRecipient === waActiveChatPartner;
+        return isSameWaPhone(cleanSender, waActiveChatPartner) || isSameWaPhone(cleanRecipient, waActiveChatPartner);
     });
 
     // Sort chronologically (oldest to newest for chat stream)
@@ -4717,8 +4855,9 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                 const timeStr = (m.created_at || '').substring(11, 16) || m.created_at || '';
                 const isOutbound = !isInbound;
                 const isSending = m.status === 'sending';
-                const isSent = m.status === 'sent' || m.status === 'received';
-                const ticks = isSending ? '🕒' : (isSent ? '✓✓' : '✓');
+                const isRead = m.status === 'read';
+                const isSent = m.status === 'sent' || m.status === 'received' || isRead;
+                const ticks = isSending ? '🕒' : (isRead ? '<span style="color:#53bdeb;font-weight:bold;">✓✓</span>' : (isSent ? '✓✓' : '✓'));
                 const isVoice = Boolean(m.is_audio);
                 const safeMediaUrl = m.media_url || '';
                 const safeBody = (m.body || '').replace(/\[.*?\]/g, '').trim();
@@ -4754,6 +4893,8 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                                 ${m.is_ai_generated ? `<span class="wa-ai-badge" title="AI Auto-Reply [Source: ${escapeHtml(m.response_source || 'AI')}]">🤖 AI Auto-Reply</span>` : (m.is_ai_response ? `<span class="wa-ai-badge" style="background:#4b5563;color:#e5e7eb;" title="System Auto-Reply [Canned Fallback]">⚙️ Auto-Reply</span>` : '')}
                                 <span>${escapeHtml(timeStr)}</span>
                                 ${isOutbound ? `<span class="wa-ticks">${ticks}</span>` : ''}
+                                <button type="button" class="wa-msg-act-btn" onclick="promptForwardWhatsAppMsg('${m.id}')" title="Forward message">↗️</button>
+                                ${isInbound && m.status === 'read' ? `<button type="button" class="wa-msg-act-btn" onclick="markWhatsAppMsgUnread('${m.id}')" title="Mark as unread">📫</button>` : ''}
                                 <button type="button" class="wa-msg-del-btn" onclick="deleteWhatsAppMsg('${m.id}')" title="Delete message">🗑️</button>
                             </div>
                         </div>
@@ -4785,6 +4926,16 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
         const tbody = document.getElementById('waMessagesTableBody');
 
         waAllMessagesCache = messages;
+
+        // Keep active chat messages marked as read locally so background polling doesn't flip them unread
+        if (waActiveChatPartner && Array.isArray(messages)) {
+            messages.forEach(m => {
+                const p = (m.direction === 'inbound' ? m.sender : m.recipient) || '';
+                if (isSameWaPhone(p, waActiveChatPartner) && m.direction === 'inbound') {
+                    m.status = 'read';
+                }
+            });
+        }
 
         if (countBadge) countBadge.textContent = `${messages.length} messages`;
         updateNavBadge('tabWhatsAppCount', messages.length);
@@ -4827,9 +4978,9 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
                     const st = (m.status || '').toLowerCase();
                     let statusPillClass = 'paused';
                     let statusIcon = '●';
-                    if (st === 'sent' || st === 'received') {
+                    if (st === 'sent' || st === 'received' || st === 'read') {
                         statusPillClass = 'active';
-                        statusIcon = '✓';
+                        statusIcon = st === 'read' ? '✓✓' : '✓';
                     } else if (st === 'mock_sent') {
                         statusPillClass = 'simulation';
                         statusIcon = '🧪';

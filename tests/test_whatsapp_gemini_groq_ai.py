@@ -560,5 +560,218 @@ class TestWhatsAppGeminiGroqAI(unittest.TestCase):
                 self.assertGreater(len(diags), 0)
 
 
+    def test_in_flight_concurrent_debouncing(self):
+        """Verifies that when an AI response is actively in-flight for a customer, concurrent triggers are debounced."""
+        sender_phone = "923007770001"
+        clean_phone = WhatsAppService.format_phone_number(sender_phone)
+        WhatsAppService.clear_in_flight_phones()
+
+        WhatsAppService.save_auto_responder_config(
+            organization_id=self.org.id,
+            enabled=True,
+            cooldown_minutes=0
+        )
+
+        with WhatsAppService._in_flight_phones_lock:
+            WhatsAppService._in_flight_phones.add(clean_phone)
+
+        try:
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone=sender_phone,
+                message_body="Rapid second message",
+                sender_name="Fast Sender"
+            )
+            self.assertIsNotNone(res)
+            self.assertTrue(res.get("skipped"))
+            self.assertEqual(res.get("reason"), "in_flight_debounce")
+        finally:
+            WhatsAppService.clear_in_flight_phones()
+
+    def test_self_reply_loop_prevention(self):
+        """Verifies messages originating from our own instance WID/phone are safely ignored to avoid loops."""
+        own_wid = "923209350858"
+        with patch.object(WhatsAppService, "get_config", return_value={"green_api_wid": f"{own_wid}@c.us"}):
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone=own_wid,
+                message_body="Echo message from ourselves",
+                sender_name="Self"
+            )
+            self.assertIsNone(res)
+
+    def test_broadcast_and_status_ignored(self):
+        """Verifies status stories, broadcasts, and newsletter messages are safely ignored."""
+        for invalid_sender in ["status@broadcast", "12036300112233@g.us", "newsletter@newsletter"]:
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone=invalid_sender,
+                message_body="Status or broadcast update",
+                sender_name="Broadcast"
+            )
+            self.assertIsNone(res)
+
+    def test_media_message_graceful_handling(self):
+        """Verifies image, document, voice, and sticker messages receive courteous responses without calling LLMs."""
+        with patch.object(WhatsAppService, "call_gemini_ai") as mock_gemini:
+            with patch.object(WhatsAppService, "call_groq_ai") as mock_groq:
+                # 1. Image message
+                res_img = WhatsAppService.generate_ai_auto_response(
+                    organization_id=self.org.id,
+                    message_body="[Image message]",
+                    sender_name="Customer",
+                    sender_phone="923001234567"
+                )
+                self.assertIsNotNone(res_img)
+                self.assertEqual(res_img["mode"], "media_handler")
+                self.assertIn("image receive", res_img["reply_body"].lower())
+
+                # 2. Document message
+                res_doc = WhatsAppService.generate_ai_auto_response(
+                    organization_id=self.org.id,
+                    message_body="[Document: invoice.pdf]",
+                    sender_name="Customer",
+                    sender_phone="923001234567"
+                )
+                self.assertIsNotNone(res_doc)
+                self.assertEqual(res_doc["mode"], "media_handler")
+                self.assertIn("document", res_doc["reply_body"].lower())
+
+                # 3. Voice note
+                res_voice = WhatsAppService.generate_ai_auto_response(
+                    organization_id=self.org.id,
+                    message_body="[voiceMessage]",
+                    sender_name="Customer",
+                    sender_phone="923001234567"
+                )
+                self.assertIsNotNone(res_voice)
+                self.assertEqual(res_voice["mode"], "media_handler")
+                self.assertIn("voice note", res_voice["reply_body"].lower())
+
+                mock_gemini.assert_not_called()
+                mock_groq.assert_not_called()
+
+    def test_multilingual_roman_urdu_fallback(self):
+        """Verifies Roman Urdu fallback matching when both LLMs are offline."""
+        with patch.object(WhatsAppService, "call_gemini_ai", return_value=None):
+            with patch.object(WhatsAppService, "call_groq_ai", return_value=None):
+                res = WhatsAppService.generate_ai_auto_response(
+                    organization_id=self.org.id,
+                    message_body="Ap ki pricing aur service kya hai?",
+                    sender_name="Customer",
+                    sender_phone="923001234567"
+                )
+                self.assertIsNotNone(res)
+                self.assertIn("Shukriya", res["reply_body"])
+
+    def test_verified_business_knowledge_base_grounding(self):
+        """Verifies that get_verified_business_knowledge_base derives facts directly from codebase configuration."""
+        kb = WhatsAppService.get_verified_business_knowledge_base(self.org.id)
+        # Pricing facts
+        self.assertIn("$29/mo", kb)
+        self.assertIn("PKR 7,500/mo", kb)
+        self.assertIn("$99/mo", kb)
+        self.assertIn("PKR 25,000/mo", kb)
+        self.assertIn("$499/mo", kb)
+        self.assertIn("PKR 125,000/mo", kb)
+        # Trial facts
+        self.assertIn("2-Day Free Trial", kb)
+        self.assertIn("48 hours", kb)
+        # Payment gateways
+        self.assertIn("Stripe", kb)
+        self.assertIn("JazzCash", kb)
+        # Integrations
+        self.assertIn("Slack", kb)
+        self.assertIn("Webhooks", kb)
+        # Anti-hallucination guardrails
+        self.assertIn("DO NOT invent numbers", kb)
+        self.assertIn("requires confirmation", kb)
+
+    def test_call_groq_ai_prompt_contains_verified_facts_and_guardrails(self):
+        """Verifies that call_groq_ai injects verified knowledge base and grounding into the system prompt."""
+        captured_messages = []
+
+        def mock_post(url, headers=None, json=None, timeout=None):
+            if "chat/completions" in url:
+                captured_messages.extend(json.get("messages", []))
+                mock_resp = MagicMock()
+                mock_resp.status_code = 200
+                mock_resp.json.return_value = {
+                    "choices": [{"message": {"content": "OpsFlow Cloud automation services."}}]
+                }
+                return mock_resp
+            mock_404 = MagicMock()
+            mock_404.status_code = 404
+            return mock_404
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test_mock_key", "GROQ_MODEL": "llama-3.3-70b-versatile"}):
+            with patch("requests.post", side_effect=mock_post):
+                reply = WhatsAppService.call_groq_ai(
+                    user_message="Tell me about your plans and trial",
+                    organization_id=self.org.id
+                )
+                self.assertIsNotNone(reply)
+                self.assertGreater(len(captured_messages), 0)
+                sys_msg = next((m["content"] for m in captured_messages if m["role"] == "system"), "")
+                self.assertIn("PKR 7,500/mo", sys_msg)
+                self.assertIn("2-Day Free Trial", sys_msg)
+                self.assertIn("JazzCash", sys_msg)
+                self.assertIn("GROUNDING & ANTI-HALLUCINATION GUARDRAILS", sys_msg)
+
+    def test_unknown_pricing_and_unsupported_integrations_guardrails(self):
+        """Verifies guardrails instruct the model to state facts need confirmation for unverified details."""
+        kb = WhatsAppService.get_verified_business_knowledge_base(self.org.id)
+        # Verify unknown pricing guardrail exists
+        self.assertIn("custom enterprise pricing", kb)
+        self.assertIn("requires confirmation from our sales specialist or account team", kb)
+        # Verify unsupported payment method guardrail exists
+        self.assertIn("PayPal, EasyPaisa", kb)
+        self.assertIn("requires confirmation from our billing department", kb)
+        # Verify unsupported integration guardrail exists
+        self.assertIn("Salesforce, HubSpot, Jira, Zapier app, Telegram", kb)
+        self.assertIn("confirm enterprise integration feasibility", kb)
+
+    def test_normal_contextual_replies_multilingual_english_and_roman_urdu(self):
+        """Verifies normal contextual customer inquiries in Roman Urdu and English."""
+        # 1. Normal contextual Roman Urdu reply via mock LLM
+        with patch.object(WhatsAppService, "call_gemini_ai", return_value="Ji bilkul! OpsFlow Cloud aap ke business ki IT workflows automate karta hai."):
+            res_urdu = WhatsAppService.generate_ai_auto_response(
+                organization_id=self.org.id,
+                message_body="Ap kia service da raha hai?",
+                sender_name="Customer Urdu"
+            )
+            self.assertEqual(res_urdu["mode"], "gemini_ai")
+            self.assertIn("OpsFlow Cloud aap ke business", res_urdu["reply_body"])
+
+        # 2. Normal contextual English reply via mock LLM
+        with patch.object(WhatsAppService, "call_gemini_ai", return_value="OpsFlow Cloud provides end-to-end IT incident orchestration and multi-agent automation."):
+            res_en = WhatsAppService.generate_ai_auto_response(
+                organization_id=self.org.id,
+                message_body="What does OpsFlow Cloud do?",
+                sender_name="Customer English"
+            )
+            self.assertEqual(res_en["mode"], "gemini_ai")
+            self.assertIn("IT incident orchestration", res_en["reply_body"])
+
+        # 3. Multilingual clean fallback for general greeting when LLMs are offline
+        with patch.object(WhatsAppService, "call_gemini_ai", return_value=None):
+            with patch.object(WhatsAppService, "call_groq_ai", return_value=None):
+                # English greeting fallback
+                res_fallback_en = WhatsAppService.generate_ai_auto_response(
+                    organization_id=self.org.id,
+                    message_body="Hello, good morning!",
+                    sender_name="Customer English"
+                )
+                self.assertIn("How can I assist you", res_fallback_en["reply_body"])
+
+                # Roman Urdu greeting fallback
+                res_fallback_urdu = WhatsAppService.generate_ai_auto_response(
+                    organization_id=self.org.id,
+                    message_body="Kia hal hai aap ka?",
+                    sender_name="Customer Urdu"
+                )
+                self.assertIn("main aapki kya madad kar sakta hoon", res_fallback_urdu["reply_body"])
+
+
 if __name__ == "__main__":
     unittest.main()

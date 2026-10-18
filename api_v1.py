@@ -2760,12 +2760,31 @@ def list_whatsapp_messages():
 
     if chat_id:
         clean_contact = chat_id.replace("@c.us", "").replace("@g.us", "").strip()
-        query = query.filter(
-            (WhatsAppMessage.sender == clean_contact) |
-            (WhatsAppMessage.sender == chat_id) |
-            (WhatsAppMessage.recipient == clean_contact) |
-            (WhatsAppMessage.recipient == chat_id)
-        )
+        formatted_contact = WhatsAppService.format_phone_number(clean_contact)
+        digits_only = "".join(filter(str.isdigit, str(clean_contact)))
+        last_digits = digits_only[-8:] if len(digits_only) >= 8 else digits_only
+
+        filter_conditions = [
+            WhatsAppMessage.sender == clean_contact,
+            WhatsAppMessage.sender == chat_id,
+            WhatsAppMessage.recipient == clean_contact,
+            WhatsAppMessage.recipient == chat_id,
+        ]
+        if formatted_contact:
+            filter_conditions.extend([
+                WhatsAppMessage.sender == formatted_contact,
+                WhatsAppMessage.sender == f"{formatted_contact}@c.us",
+                WhatsAppMessage.sender == f"+{formatted_contact}",
+                WhatsAppMessage.recipient == formatted_contact,
+                WhatsAppMessage.recipient == f"{formatted_contact}@c.us",
+                WhatsAppMessage.recipient == f"+{formatted_contact}",
+            ])
+        if last_digits:
+            filter_conditions.extend([
+                WhatsAppMessage.sender.like(f"%{last_digits}"),
+                WhatsAppMessage.recipient.like(f"%{last_digits}")
+            ])
+        query = query.filter(db.or_(*filter_conditions))
 
     messages = query.order_by(WhatsAppMessage.created_at.desc()).limit(limit).all()
 
@@ -2778,50 +2797,71 @@ def list_whatsapp_messages():
 
 @api_v1.route("/whatsapp/messages/<message_id>", methods=["DELETE", "POST"])
 @require_auth
-@require_role(["owner", "admin", "member"])
+@require_role(["owner", "admin", "operator", "member"])
 def delete_whatsapp_message(message_id: str):
-    """Deletes a WhatsApp message from the tenant conversation record."""
+    """Deletes a WhatsApp message locally and requests remote provider deletion where supported."""
     org = get_current_org()
     if not org:
         return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
 
-    msg = WhatsAppMessage.query.filter(
-        (WhatsAppMessage.id == message_id) | (WhatsAppMessage.whatsapp_message_id == message_id),
-        WhatsAppMessage.organization_id == org.id
-    ).first()
+    data = request.get_json(silent=True) or {}
+    remote_delete = request.args.get("remote", "").lower() != "false" if "remote" in request.args else data.get("remote_delete", True)
 
-    if not msg:
-        return jsonify({"error": "Message not found.", "code": "NOT_FOUND"}), 404
+    result = WhatsAppService.delete_message(
+        message_id=message_id,
+        organization_id=org.id,
+        remote_delete=bool(remote_delete)
+    )
 
-    # Attempt remote Green-API deleteMessage if configured
-    try:
-        import requests
-        conf = WhatsAppService.get_config(organization_id=org.id if org else None)
-        id_inst = conf.get("green_api_id_instance")
-        tok_inst = conf.get("green_api_token_instance")
-        if id_inst and tok_inst and msg.whatsapp_message_id:
-            chat_id = msg.recipient if msg.direction == "outbound" else msg.sender
-            if "@" not in chat_id:
-                chat_id = f"{chat_id}@c.us"
-            host = conf.get("green_api_host") or "https://api.greenapi.com"
-            del_url = f"{host}/waInstance{id_inst}/deleteMessage/{tok_inst}"
-            try:
-                requests.post(del_url, json={"chatId": chat_id, "idMessage": msg.whatsapp_message_id}, timeout=3)
-            except Exception as e:
-                logger.debug(f"Remote Green-API deleteMessage notice: {e}")
-    except Exception:
-        pass
-
-    db.session.delete(msg)
-    db.session.commit()
+    if not result.get("success") and result.get("code") == "NOT_FOUND":
+        return jsonify(result), 404
+    if not result.get("success") and result.get("code") == "VALIDATION_ERROR":
+        return jsonify(result), 400
 
     log_audit_event("whatsapp.message_deleted", "whatsapp", message_id, {
         "message_id": message_id,
-        "sender": msg.sender,
-        "recipient": msg.recipient
+        "remote_requested": result.get("remote_requested"),
+        "remote_success": result.get("remote_success"),
+        "remote_detail": result.get("remote_detail")
     })
 
-    return jsonify({"success": True, "message": "Message deleted successfully.", "deleted_id": message_id}), 200
+    return jsonify(result), 200
+
+
+@api_v1.route("/whatsapp/messages/<message_id>/forward", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin", "operator", "member"])
+def forward_whatsapp_message(message_id: str):
+    """Forwards a WhatsApp message to a chosen contact."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    to_phone = data.get("to") or data.get("recipient") or data.get("to_phone")
+    if not to_phone:
+        return jsonify({"error": "'to' (recipient phone number) is required to forward.", "code": "VALIDATION_ERROR"}), 400
+
+    result = WhatsAppService.forward_message(
+        message_id=message_id,
+        to_phone=to_phone,
+        organization_id=org.id
+    )
+
+    if not result.get("success") and result.get("code") == "NOT_FOUND":
+        return jsonify(result), 404
+    if not result.get("success") and result.get("code") == "VALIDATION_ERROR":
+        return jsonify(result), 400
+
+    log_audit_event("whatsapp.message_forwarded", "whatsapp", message_id, {
+        "to": to_phone,
+        "status": result.get("status"),
+        "remote_success": result.get("remote_success")
+    })
+
+    status_code = 200 if result.get("success") else 502
+    return jsonify(result), status_code
+
 
 
 @api_v1.route("/whatsapp/conversations/<contact_phone>", methods=["DELETE", "POST"])
@@ -2853,6 +2893,69 @@ def clear_whatsapp_conversation(contact_phone: str):
     })
 
     return jsonify({"success": True, "message": f"Cleared {count} messages.", "deleted_count": count}), 200
+
+
+@api_v1.route("/whatsapp/messages/<message_id>/read", methods=["POST"])
+@require_auth
+def mark_whatsapp_message_read(message_id: str):
+    """Marks a specific WhatsApp message as read."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    result = WhatsAppService.mark_message_as_read(message_id=message_id, organization_id=org.id)
+    return jsonify(result), 200
+
+
+@api_v1.route("/whatsapp/conversations/<contact_phone>/read", methods=["POST"])
+@require_auth
+def mark_whatsapp_conversation_read(contact_phone: str):
+    """Marks all messages with a given contact as read."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    result = WhatsAppService.mark_chat_as_read(chat_id=contact_phone, organization_id=org.id)
+    return jsonify(result), 200
+
+
+@api_v1.route("/whatsapp/messages/<message_id>/unread", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin", "operator", "member"])
+def mark_whatsapp_message_unread(message_id: str):
+    """Marks a specific WhatsApp message as unread."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    result = WhatsAppService.mark_message_as_unread(message_id=message_id, organization_id=org.id)
+    if not result.get("success"):
+        return jsonify(result), 400
+    if result.get("updated_count", 0) == 0:
+        return jsonify({"error": "Message not found in workspace.", "code": "NOT_FOUND"}), 404
+
+    log_audit_event("whatsapp.message_marked_unread", "whatsapp", message_id, {
+        "message_id": message_id,
+        "updated_count": result.get("updated_count")
+    })
+    return jsonify(result), 200
+
+
+@api_v1.route("/whatsapp/conversations/<contact_phone>/unread", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin", "operator", "member"])
+def mark_whatsapp_conversation_unread(contact_phone: str):
+    """Marks all inbound messages with a given contact as unread."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    result = WhatsAppService.mark_chat_as_unread(chat_id=contact_phone, organization_id=org.id)
+    log_audit_event("whatsapp.conversation_marked_unread", "whatsapp", contact_phone, {
+        "contact": contact_phone,
+        "updated_count": result.get("updated_count")
+    })
+    return jsonify(result), 200
 
 
 @api_v1.route("/whatsapp/media/proxy", methods=["GET"])

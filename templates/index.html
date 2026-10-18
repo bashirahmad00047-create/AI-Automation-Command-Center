@@ -767,6 +767,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                                 <span id="waHeaderAiStatusText" style="font-weight: 700; font-size: 10px;">OFF</span>
                             </div>
                             <button type="button" class="wa-icon-btn" title="Simulate Inbound Voice Note" onclick="simulateInboundVoiceNote()">🎙️ Voice Demo</button>
+                            <button type="button" class="wa-icon-btn" id="waBtnMarkUnread" title="Mark Conversation as Unread" onclick="markCurrentConversationUnread()">📫 Mark Unread</button>
                             <button type="button" class="wa-icon-btn" title="Clear Conversation" onclick="clearCurrentConversation()">🗑️ Clear</button>
                         </div>
                     </div>

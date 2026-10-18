@@ -4445,7 +4445,8 @@ html:not(.dark) .engine-spec-val {
     color: #53bdeb;
 }
 
-.wa-msg-del-btn {
+.wa-msg-del-btn,
+.wa-msg-act-btn {
     opacity: 0;
     background: transparent;
     border: none;
@@ -4457,13 +4458,19 @@ html:not(.dark) .engine-spec-val {
     transition: opacity 0.2s ease, color 0.2s ease;
 }
 
-.wa-bubble:hover .wa-msg-del-btn {
+.wa-bubble:hover .wa-msg-del-btn,
+.wa-bubble:hover .wa-msg-act-btn {
     opacity: 0.85;
 }
 
 .wa-msg-del-btn:hover {
     color: #ef4444;
     background: rgba(239, 68, 68, 0.15);
+}
+
+.wa-msg-act-btn:hover {
+    color: #53bdeb;
+    background: rgba(83, 189, 235, 0.15);
 }
 
 /* Voice Note Player */
