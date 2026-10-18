@@ -758,7 +758,7 @@ class WhatsAppService:
                 model = getattr(gemini_prov, "model", None)
             except Exception:
                 pass
-        return (model or "gemini-1.5-flash").strip()
+        return (model or "gemini-3.8-flash").strip()
 
     @classmethod
     def get_conversation_history(
@@ -863,13 +863,29 @@ class WhatsAppService:
 
         configured_model = cls.get_gemini_model_name(organization_id=organization_id)
         models_to_try = []
+
+        dynamic_gemini_models = []
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            for m_info in genai.list_models():
+                supported = getattr(m_info, "supported_generation_methods", [])
+                if "generateContent" in supported:
+                    m_id = getattr(m_info, "name", "").replace("models/", "")
+                    if m_id:
+                        dynamic_gemini_models.append(m_id)
+        except Exception:
+            pass
+
         preferred_candidates = [
             configured_model,
+            "gemini-3.8-flash",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
             "gemini-1.5-flash",
             "gemini-1.5-flash-8b",
-            "gemini-2.0-flash",
             "gemini-1.5-pro"
-        ]
+        ] + dynamic_gemini_models
         for m in preferred_candidates:
             if m and m not in models_to_try:
                 models_to_try.append(m)
@@ -1093,15 +1109,42 @@ class WhatsAppService:
         )
         if not configured_groq_model and has_app_context():
             configured_groq_model = current_app.config.get("GROQ_MODEL")
-        models_to_try = []
-        for m in [configured_groq_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama-3.1-70b-versatile"]:
-            if m and m not in models_to_try:
-                models_to_try.append(m)
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "User-Agent": "OpsFlow-Cloud/2.4 (WhatsApp-Auto-Responder-Groq)"
         }
+
+        # Dynamically discover active Groq models for this API key
+        dynamic_groq_models = []
+        try:
+            m_resp = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers=headers,
+                timeout=4
+            )
+            if m_resp.status_code == 200:
+                m_data = m_resp.json().get("data", [])
+                for item in m_data:
+                    m_id = item.get("id")
+                    if m_id and not any(audio_sub in m_id.lower() for audio_sub in ("whisper", "tts", "speech", "orpheus", "guard", "embed")):
+                        dynamic_groq_models.append(m_id)
+        except Exception:
+            pass
+
+        models_to_try = []
+        candidate_groq_models = [
+            configured_groq_model,
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b",
+            "qwen/qwen3.8-27b",
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant"
+        ] + dynamic_groq_models
+        for m in candidate_groq_models:
+            if m and m not in models_to_try:
+                models_to_try.append(m)
 
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": f"You are an intelligent, polite, and direct AI assistant for OpsFlow Cloud.{sys_instruct}"}
