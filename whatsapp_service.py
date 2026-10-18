@@ -718,7 +718,7 @@ class WhatsAppService:
                             if os.path.isfile(sf_path):
                                 try:
                                     with open(sf_path, "r", encoding="utf-8") as f:
-                                        content_val = f.read().strip().strip("'" \t\r\n")
+                                        content_val = f.read().strip().strip("'\" \t\r\n")
                                         if content_val:
                                             api_key = content_val
                                             break
