@@ -67,6 +67,35 @@ class WhatsAppService:
     _recent_replied_trigger_ids: Dict[str, float] = {}
     _processed_ids_lock = threading.Lock()
 
+    @classmethod
+    def clear_recent_replied_trigger_ids(cls) -> None:
+        """Cleans in-memory tracking of processed message IDs (useful for test isolation)."""
+        with cls._processed_ids_lock:
+            cls._processed_message_ids.clear()
+            cls._recent_replied_trigger_ids.clear()
+
+    @classmethod
+    def engine_dispatched_reply(cls, engine_res: Any) -> bool:
+        """Determines whether an automation engine execution already dispatched a WhatsApp reply."""
+        if not isinstance(engine_res, dict):
+            return False
+        for rule_exec in engine_res.get("executed_rules") or []:
+            if not isinstance(rule_exec, dict):
+                continue
+            for act in rule_exec.get("action_results") or []:
+                if not isinstance(act, dict):
+                    continue
+                act_type = str(act.get("type") or "").lower()
+                if act_type in ("whatsapp_message", "whatsapp_send", "send_whatsapp", "whatsapp"):
+                    out = act.get("output") or {}
+                    is_simulated = isinstance(out, dict) and out.get("simulated") is True
+                    if not is_simulated and (
+                        act.get("status") in ("success", "ok", "dispatched", "sent")
+                        or (act.get("status") != "failed" and bool(out) and not act.get("error"))
+                    ):
+                        return True
+        return False
+
     def __init__(
         self,
         id_instance: Optional[str] = None,
@@ -1166,7 +1195,8 @@ class WhatsAppService:
         sender_phone: str,
         message_body: str,
         sender_name: Optional[str] = None,
-        message_id: Optional[str] = None
+        message_id: Optional[str] = None,
+        engine_res: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
         """Handles automated AI response to an inbound message if enabled and not debounced."""
         if not sender_phone or not message_body:
@@ -1175,6 +1205,11 @@ class WhatsAppService:
         # Ignore group messages and broadcast channels
         if "@g.us" in str(sender_phone) or str(sender_phone).startswith("120363"):
             return None
+
+        # Prevent duplicate reply if an automation rule already dispatched a WhatsApp response
+        if engine_res and cls.engine_dispatched_reply(engine_res):
+            logger.info(f"Skipping auto-response for message {message_id}: automation rule already sent reply.")
+            return {"success": True, "skipped": True, "reason": "rule_replied", "message_id": message_id}
 
         org_id = organization_id or "org-enterprise-default"
         conf = cls.get_auto_responder_config(organization_id=org_id)
@@ -1939,7 +1974,7 @@ class WhatsAppService:
                         "provider": "green_api",
                         "synced_from_history": True
                     }
-                    engine.ingest_event(
+                    engine_res = engine.ingest_event(
                         event_name="whatsapp.message",
                         payload=event_data,
                         source="green_api_history_sync",
@@ -1950,16 +1985,18 @@ class WhatsAppService:
                     logger.error(f"Engine event ingestion failed for synced WhatsApp message: {eng_err}")
 
             # Trigger AI Auto-Responder if configured and active
-            try:
-                cls.handle_inbound_auto_response(
-                    organization_id=org_id,
-                    sender_phone=from_phone,
-                    message_body=body,
-                    sender_name=sender_name,
-                    message_id=msg_id
-                )
-            except Exception as auto_err:
-                logger.error(f"AI Auto-Responder error on synced message: {auto_err}")
+            if not (engine_res and cls.engine_dispatched_reply(engine_res)):
+                try:
+                    cls.handle_inbound_auto_response(
+                        organization_id=org_id,
+                        sender_phone=from_phone,
+                        message_body=body,
+                        sender_name=sender_name,
+                        message_id=msg_id,
+                        engine_res=engine_res
+                    )
+                except Exception as auto_err:
+                    logger.error(f"AI Auto-Responder error on synced message: {auto_err}")
 
             processed_count += 1
 
@@ -2037,7 +2074,7 @@ class WhatsAppService:
                             "provider": "green_api",
                             "polled": True
                         }
-                        engine.ingest_event(
+                        engine_res = engine.ingest_event(
                             event_name="whatsapp.message",
                             payload=event_data,
                             source="green_api_poller",
@@ -2048,16 +2085,18 @@ class WhatsAppService:
                         logger.error(f"Engine event ingestion failed for polled WhatsApp message: {eng_err}")
 
                 # Trigger AI Auto-Responder if configured and active
-                try:
-                    cls.handle_inbound_auto_response(
-                        organization_id=org_id,
-                        sender_phone=msg.get("from_phone", "unknown"),
-                        message_body=msg.get("body", ""),
-                        sender_name=msg.get("sender_name", ""),
-                        message_id=msg_id
-                    )
-                except Exception as auto_err:
-                    logger.error(f"AI Auto-Responder error on polled message: {auto_err}")
+                if not (engine_res and cls.engine_dispatched_reply(engine_res)):
+                    try:
+                        cls.handle_inbound_auto_response(
+                            organization_id=org_id,
+                            sender_phone=msg.get("from_phone", "unknown"),
+                            message_body=msg.get("body", ""),
+                            sender_name=msg.get("sender_name", ""),
+                            message_id=msg_id,
+                            engine_res=engine_res
+                        )
+                    except Exception as auto_err:
+                        logger.error(f"AI Auto-Responder error on polled message: {auto_err}")
 
                 processed_count += 1
 

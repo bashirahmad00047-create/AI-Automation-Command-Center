@@ -75,9 +75,11 @@ class TestWhatsAppGeminiGroqAI(unittest.TestCase):
             "email": "tester@pakcloud.pk",
             "password": "CloudSecret2026!"
         })
+        WhatsAppService.clear_recent_replied_trigger_ids()
         self.assertEqual(login_res.status_code, 200)
 
     def tearDown(self):
+        WhatsAppService.clear_recent_replied_trigger_ids()
         db.session.remove()
         db.drop_all()
         self.ctx.pop()
@@ -328,6 +330,134 @@ class TestWhatsAppGeminiGroqAI(unittest.TestCase):
 
         retrieved = WhatsAppService.get_groq_api_key(organization_id=self.org.id)
         self.assertEqual(retrieved, "gsk_api_endpoint_test_key")
+
+    def test_automation_rule_reply_prevents_duplicate_auto_response(self):
+        """Verifies that an automation rule WhatsApp reply prevents duplicate auto-reply."""
+        engine_res_with_wa = {
+            "status": "completed",
+            "event_name": "whatsapp.message",
+            "executed_rules": [
+                {
+                    "rule_id": "rule-auto-reply-01",
+                    "rule_name": "Welcome Lead WhatsApp",
+                    "matched": True,
+                    "status": "success",
+                    "action_results": [
+                        {
+                            "type": "whatsapp_message",
+                            "status": "success",
+                            "output": {"idMessage": "wamid.rule_sent_01"}
+                        }
+                    ]
+                }
+            ]
+        }
+        self.assertTrue(WhatsAppService.engine_dispatched_reply(engine_res_with_wa))
+
+        # When passed to handle_inbound_auto_response, it skips
+        res = WhatsAppService.handle_inbound_auto_response(
+            organization_id=self.org.id,
+            sender_phone="923001112233",
+            message_body="Pricing please",
+            message_id="wamid.rule_check_01",
+            engine_res=engine_res_with_wa
+        )
+        self.assertIsNotNone(res)
+        self.assertTrue(res.get("skipped"))
+        self.assertEqual(res.get("reason"), "rule_replied")
+
+    def test_automation_rule_without_whatsapp_allows_auto_response(self):
+        """Verifies that non-WhatsApp rule actions do not prevent AI auto-reply."""
+        engine_res_non_wa = {
+            "status": "completed",
+            "event_name": "whatsapp.message",
+            "executed_rules": [
+                {
+                    "rule_id": "rule-log-only",
+                    "rule_name": "Audit Logging",
+                    "matched": True,
+                    "status": "success",
+                    "action_results": [
+                        {
+                            "type": "log_entry",
+                            "status": "success",
+                            "output": {"logged": True}
+                        }
+                    ]
+                }
+            ]
+        }
+        self.assertFalse(WhatsAppService.engine_dispatched_reply(engine_res_non_wa))
+
+    def test_green_api_webhook_skips_auto_responder_when_rule_already_replied(self):
+        """Verifies that Green-API webhook skips handle_inbound_auto_response when engine dispatched a reply."""
+        engine_mock = MagicMock()
+        engine_mock.ingest_event.return_value = {
+            "status": "completed",
+            "event_name": "whatsapp.message",
+            "executed_rules": [
+                {
+                    "rule_id": "rule-wa-01",
+                    "status": "success",
+                    "action_results": [
+                        {
+                            "type": "whatsapp_message",
+                            "status": "success",
+                            "output": {"sent": True}
+                        }
+                    ]
+                }
+            ]
+        }
+
+        webhook_payload = {
+            "typeWebhook": "incomingMessageReceived",
+            "instanceData": {"idInstance": 7103, "wid": "923001234567@c.us"},
+            "timestamp": 1713000000,
+            "idMessage": "wamid.green_rule_guard_01",
+            "senderData": {
+                "chatId": "923009998877@c.us",
+                "chatName": "Zain",
+                "sender": "923009998877@c.us",
+                "senderName": "Zain"
+            },
+            "messageData": {
+                "typeMessage": "textMessage",
+                "textMessageData": {"textMessage": "I need help with my account."}
+            }
+        }
+
+        with patch("api_v1.get_engine", return_value=engine_mock):
+            with patch.object(WhatsAppService, "handle_inbound_auto_response") as mock_auto:
+                resp = self.client.post("/api/v1/webhooks/whatsapp/green-api", json=webhook_payload)
+                self.assertEqual(resp.status_code, 200)
+                mock_auto.assert_not_called()
+
+    def test_both_gemini_and_groq_fail_returns_canned_fallback_with_honest_badges(self):
+        """Verifies that when both Gemini and Groq fail, honest non-AI system fallback metadata is returned."""
+        WhatsAppService.save_auto_responder_config(
+            organization_id=self.org.id,
+            enabled=True,
+            cooldown_minutes=0
+        )
+
+        with patch.object(WhatsAppService, "call_gemini_ai", return_value=None):
+            with patch.object(WhatsAppService, "call_groq_ai", return_value=None):
+                res = WhatsAppService.generate_ai_auto_response(
+                    organization_id=self.org.id,
+                    message_body="Can you help me reset my server configuration?",
+                    sender_name="Ali",
+                    sender_phone="923005556677"
+                )
+                self.assertIsNotNone(res)
+                self.assertFalse(res["is_gemini"])
+                self.assertFalse(res["is_groq"])
+                self.assertFalse(res["is_ai_generated"])
+                self.assertTrue(
+                    "Ji bilkul" in res["reply_body"]
+                    or "specialist" in res["reply_body"]
+                    or "incident" in res["reply_body"]
+                )
 
 
 if __name__ == "__main__":

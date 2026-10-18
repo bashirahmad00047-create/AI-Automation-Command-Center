@@ -2510,6 +2510,7 @@ def whatsapp_webhook_ingress():
             raw_payload=msg
         )
 
+        rule_replied = False
         if engine:
             event_data = {
                 "from": msg.get("from_phone"),
@@ -2523,27 +2524,31 @@ def whatsapp_webhook_ingress():
                 "provider": provider_name
             }
             try:
-                engine.ingest_event(
+                engine_res = engine.ingest_event(
                     event_name="whatsapp.message",
                     payload=event_data,
                     source=f"whatsapp_{provider_name}_webhook",
                     dry_run=False,
                     organization_id=target_org.id
                 )
+                if WhatsAppService.engine_dispatched_reply(engine_res):
+                    rule_replied = True
+                    logger.info(f"Automation rule already dispatched WhatsApp reply for Meta message {msg_id}; skipping auto-responder.")
             except Exception as e:
                 logger.error(f"Error triggering engine for WhatsApp message {msg_id}: {e}")
 
         # Trigger AI Auto-Responder if configured and active
-        try:
-            WhatsAppService.handle_inbound_auto_response(
-                organization_id=target_org.id,
-                sender_phone=msg.get("from_phone", "unknown"),
-                message_body=msg.get("body", ""),
-                sender_name=msg.get("sender_name", ""),
-                message_id=msg_id
-            )
-        except Exception as auto_err:
-            logger.error(f"AI Auto-Responder error in Meta webhook: {auto_err}")
+        if not rule_replied:
+            try:
+                WhatsAppService.handle_inbound_auto_response(
+                    organization_id=target_org.id,
+                    sender_phone=msg.get("from_phone", "unknown"),
+                    message_body=msg.get("body", ""),
+                    sender_name=msg.get("sender_name", ""),
+                    message_id=msg_id
+                )
+            except Exception as auto_err:
+                logger.error(f"AI Auto-Responder error in Meta webhook: {auto_err}")
 
         processed_count += 1
 
@@ -2612,6 +2617,7 @@ def green_api_webhook_ingress():
                 raw_payload=msg
             )
 
+            rule_replied = False
             if engine:
                 event_data = {
                     "from": msg.get("from_phone"),
@@ -2625,27 +2631,31 @@ def green_api_webhook_ingress():
                     "provider": "green_api"
                 }
                 try:
-                    engine.ingest_event(
+                    engine_res = engine.ingest_event(
                         event_name="whatsapp.message",
                         payload=event_data,
                         source="green_api_webhook",
                         dry_run=False,
                         organization_id=target_org_id
                     )
+                    if WhatsAppService.engine_dispatched_reply(engine_res):
+                        rule_replied = True
+                        logger.info(f"Automation rule already dispatched WhatsApp reply for Green-API message {msg_id}; skipping auto-responder.")
                 except Exception as e:
                     logger.error(f"Error triggering engine for Green-API message {msg_id}: {e}")
 
             # Trigger AI Auto-Responder if configured and active
-            try:
-                WhatsAppService.handle_inbound_auto_response(
-                    organization_id=target_org_id,
-                    sender_phone=msg.get("from_phone", "unknown"),
-                    message_body=msg.get("body", ""),
-                    sender_name=msg.get("sender_name", ""),
-                    message_id=msg_id
-                )
-            except Exception as auto_err:
-                logger.error(f"AI Auto-Responder error in Green-API webhook: {auto_err}")
+            if not rule_replied:
+                try:
+                    WhatsAppService.handle_inbound_auto_response(
+                        organization_id=target_org_id,
+                        sender_phone=msg.get("from_phone", "unknown"),
+                        message_body=msg.get("body", ""),
+                        sender_name=msg.get("sender_name", ""),
+                        message_id=msg_id
+                    )
+                except Exception as auto_err:
+                    logger.error(f"AI Auto-Responder error in Green-API webhook: {auto_err}")
 
             processed_count += 1
         except Exception as item_err:

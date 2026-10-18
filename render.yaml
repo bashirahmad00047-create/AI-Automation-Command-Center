@@ -23,6 +23,10 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: "gemini-1.5-flash"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: "llama-3.3-70b-versatile"
       - key: GREEN_API_ID_INSTANCE
         sync: false
       - key: GREEN_API_TOKEN_INSTANCE
