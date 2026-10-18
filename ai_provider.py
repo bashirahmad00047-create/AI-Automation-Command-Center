@@ -12,7 +12,7 @@ import json
 import os
 import urllib.request
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from nlp_engine import NLPEngine
 
@@ -202,6 +202,20 @@ class GeminiAIProvider(BaseAIProvider):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
         self._fallback = LocalDeterministicAIProvider()
 
+    @property
+    def effective_api_key(self) -> str:
+        if self.api_key:
+            return self.api_key
+        raw = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
+        return str(raw).strip().strip("'\" \t\r\n") if raw else ""
+
+    @property
+    def _groq_fallback(self) -> Optional[BaseAIProvider]:
+        try:
+            return AIProviderManager.get_instance().get_provider("groq")
+        except Exception:
+            return None
+
     def get_info(self) -> Dict[str, Any]:
         return {
             "id": "gemini",
@@ -276,10 +290,14 @@ class GeminiAIProvider(BaseAIProvider):
         route_department: str = "Sales",
         message: Optional[str] = None
     ) -> str:
-        if not self.api_key:
+        key = self.effective_api_key
+        if not key:
+            groq = self._groq_fallback
+            if groq and getattr(groq, "effective_api_key", getattr(groq, "api_key", None)):
+                return groq.generate_draft_response(name, company, intent, lead_score, route_department, message)
             return self._fallback.generate_draft_response(name, company, intent, lead_score, route_department, message)
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
             prompt = (
                 f"You are OpsFlow Cloud AI assistant. Draft a concise professional email reply to a customer inquiry.\n"
                 f"Customer Name: {name or 'Valued Customer'}\n"
@@ -302,13 +320,20 @@ class GeminiAIProvider(BaseAIProvider):
                 data = json.loads(resp.read().decode("utf-8"))
                 return data["candidates"][0]["content"]["parts"][0]["text"].strip()
         except Exception:
+            groq = self._groq_fallback
+            if groq and getattr(groq, "effective_api_key", getattr(groq, "api_key", None)):
+                return groq.generate_draft_response(name, company, intent, lead_score, route_department, message)
             return self._fallback.generate_draft_response(name, company, intent, lead_score, route_department, message)
 
     def generate_text(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 500) -> str:
-        if not self.api_key:
+        key = self.effective_api_key
+        if not key:
+            groq = self._groq_fallback
+            if groq and getattr(groq, "effective_api_key", getattr(groq, "api_key", None)):
+                return groq.generate_text(prompt, system_prompt, max_tokens)
             return self._fallback.generate_text(prompt, system_prompt, max_tokens)
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
             full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
             payload = {
                 "contents": [{"parts": [{"text": full_prompt}]}],
@@ -324,6 +349,9 @@ class GeminiAIProvider(BaseAIProvider):
                 data = json.loads(resp.read().decode("utf-8"))
                 return data["candidates"][0]["content"]["parts"][0]["text"].strip()
         except Exception:
+            groq = self._groq_fallback
+            if groq and getattr(groq, "effective_api_key", getattr(groq, "api_key", None)):
+                return groq.generate_text(prompt, system_prompt, max_tokens)
             return self._fallback.generate_text(prompt, system_prompt, max_tokens)
 
     def summarize_incident(self, error_text: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -473,26 +501,35 @@ class GroqAIProvider(BaseAIProvider):
     """Groq LPU Cloud Provider for high-speed inference (llama-3.3-70b, llama-3.1-8b)."""
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.environ.get("GROQ_API_KEY", "")
+        raw_key = api_key or os.environ.get("GROQ_API_KEY", "")
+        self.api_key = str(raw_key).strip().strip("'\" \t\r\n") if raw_key else ""
         self.model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
         self._fallback = LocalDeterministicAIProvider()
 
+    @property
+    def effective_api_key(self) -> str:
+        if self.api_key:
+            return self.api_key
+        raw = os.environ.get("GROQ_API_KEY") or os.environ.get("GROQ_KEY") or ""
+        return str(raw).strip().strip("'\" \t\r\n") if raw else ""
+
     def get_info(self) -> Dict[str, Any]:
+        key = self.effective_api_key
         return {
             "id": "groq",
             "name": "Groq LPU Cloud (Ultra-Fast Inference)",
             "is_default": False,
             "is_external": True,
             "requires_api_key": True,
-            "is_configured": bool(self.api_key),
-            "status": "configured" if self.api_key else "missing_key",
+            "is_configured": bool(key),
+            "status": "configured" if key else "missing_key",
             "model": self.model,
             "description": "Ultra-low-latency LPU inference for high-throughput WhatsApp and automation workflows."
         }
 
     def analyze_text(self, text: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         res = self._fallback.analyze_text(text, context)
-        res["provider"] = "groq" if self.api_key else "local_deterministic (groq_fallback)"
+        res["provider"] = "groq" if self.effective_api_key else "local_deterministic (groq_fallback)"
         res["model"] = self.model
         return res
 
@@ -505,7 +542,7 @@ class GroqAIProvider(BaseAIProvider):
         route_department: str = "Sales",
         message: Optional[str] = None
     ) -> str:
-        if not self.api_key:
+        if not self.effective_api_key:
             return self._fallback.generate_draft_response(name, company, intent, lead_score, route_department, message)
         prompt = (
             f"Draft a concise professional WhatsApp/email reply to a customer inquiry.\n"
@@ -517,12 +554,13 @@ class GroqAIProvider(BaseAIProvider):
         return self.generate_text(prompt, max_tokens=300)
 
     def generate_text(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 500) -> str:
-        if not self.api_key:
+        key = self.effective_api_key
+        if not key:
             return self._fallback.generate_text(prompt, system_prompt, max_tokens)
         try:
             import requests
             headers = {
-                "Authorization": f"Bearer {self.api_key}",
+                "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json"
             }
             messages = []
@@ -611,3 +649,35 @@ class AIProviderManager:
 # Global helper functions
 def get_ai_provider(provider_name: Optional[str] = None) -> BaseAIProvider:
     return AIProviderManager.get_instance().get_provider(provider_name)
+
+
+def call_gemini_ai(
+    message: Union[str, Dict[str, Any]],
+    customer_name: Optional[str] = None,
+    system_prompt: Optional[str] = None,
+    organization_id: Optional[str] = None
+) -> Optional[str]:
+    """Convenience top-level helper to invoke Gemini AI directly."""
+    from whatsapp_service import WhatsAppService
+    return WhatsAppService.call_gemini_ai(
+        user_message=message,
+        system_prompt=system_prompt,
+        organization_id=organization_id,
+        customer_name=customer_name
+    )
+
+
+def call_groq_ai(
+    message: Union[str, Dict[str, Any]],
+    customer_name: Optional[str] = None,
+    system_prompt: Optional[str] = None,
+    organization_id: Optional[str] = None
+) -> Optional[str]:
+    """Convenience top-level helper to invoke Groq AI directly."""
+    from whatsapp_service import WhatsAppService
+    return WhatsAppService.call_groq_ai(
+        user_message=message,
+        system_prompt=system_prompt,
+        organization_id=organization_id,
+        customer_name=customer_name
+    )

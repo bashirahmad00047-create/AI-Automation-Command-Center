@@ -22,6 +22,8 @@ import hmac
 import json
 import logging
 import os
+import threading
+import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -60,6 +62,10 @@ class WhatsAppService:
     DEFAULT_GREEN_API_HOST = "https://api.greenapi.com"
     DEFAULT_CONNECT_TIMEOUT = 30.0
     DEFAULT_READ_TIMEOUT = 30.0
+
+    _processed_message_ids: Dict[str, float] = {}
+    _recent_replied_trigger_ids: Dict[str, float] = {}
+    _processed_ids_lock = threading.Lock()
 
     def __init__(
         self,
@@ -487,8 +493,11 @@ class WhatsAppService:
         enabled_str = cls._get_tenant_or_global_setting("AI_AUTO_REPLY_ENABLED", organization_id)
         gemini_key = cls.get_gemini_api_key(organization_id=organization_id)
         gemini_model = cls.get_gemini_model_name(organization_id=organization_id)
+        groq_key = cls.get_groq_api_key(organization_id=organization_id)
         has_gemini = bool(gemini_key)
-        enabled = has_gemini or ((enabled_str or "").strip().lower() in ("true", "1", "yes", "on"))
+        has_groq = bool(groq_key)
+        has_ai = has_gemini or has_groq
+        enabled = has_ai or ((enabled_str or "").strip().lower() in ("true", "1", "yes", "on"))
 
         mode = cls._get_tenant_or_global_setting("AI_AUTO_REPLY_MODE", organization_id) or "smart_concierge"
         system_prompt = cls._get_tenant_or_global_setting("AI_SYSTEM_PROMPT", organization_id) or ""
@@ -509,12 +518,21 @@ class WhatsAppService:
 
         greeting = cls._get_tenant_or_global_setting("AI_FALLBACK_GREETING", organization_id) or ""
 
+        groq_model = (
+            cls._get_tenant_or_global_setting("GROQ_MODEL", organization_id)
+            or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        )
+
         return {
             "organization_id": organization_id,
             "enabled": enabled,
             "has_gemini": has_gemini,
+            "has_groq": has_groq,
+            "has_ai": has_ai,
             "gemini_model": gemini_model,
+            "groq_model": groq_model,
             "gemini_api_key_configured": bool(gemini_key),
+            "groq_api_key_configured": bool(groq_key),
             "mode": mode,
             "system_prompt": system_prompt,
             "cooldown_minutes": cooldown_minutes,
@@ -535,7 +553,9 @@ class WhatsAppService:
         auto_lead_capture: Optional[bool] = None,
         fallback_greeting: Optional[str] = None,
         gemini_api_key: Optional[str] = None,
-        gemini_model: Optional[str] = None
+        gemini_model: Optional[str] = None,
+        groq_api_key: Optional[str] = None,
+        groq_model: Optional[str] = None
     ) -> Dict[str, Any]:
         """Saves AI Auto-Responder configuration for a tenant or globally."""
         prefix = f"ORG_{organization_id}_" if organization_id and organization_id != "global" else ""
@@ -588,6 +608,18 @@ class WhatsAppService:
             SystemSetting.set_val(f"{prefix}GEMINI_MODEL", clean_m, is_secret=False, description=f"[{organization_id or 'global'}] Google Gemini Model")
             if not prefix:
                 SystemSetting.set_val("GEMINI_MODEL", clean_m, is_secret=False)
+
+        if groq_api_key is not None:
+            clean_k = str(groq_api_key).strip().strip("'\" \t\r\n")
+            SystemSetting.set_val(f"{prefix}GROQ_API_KEY", clean_k, is_secret=True, description=f"[{organization_id or 'global'}] Groq API Key")
+            if not prefix:
+                SystemSetting.set_val("GROQ_API_KEY", clean_k, is_secret=True)
+
+        if groq_model is not None:
+            clean_m = str(groq_model).strip()
+            SystemSetting.set_val(f"{prefix}GROQ_MODEL", clean_m, is_secret=False, description=f"[{organization_id or 'global'}] Groq Model")
+            if not prefix:
+                SystemSetting.set_val("GROQ_MODEL", clean_m, is_secret=False)
 
         return cls.get_auto_responder_config(organization_id=organization_id)
 
@@ -660,12 +692,55 @@ class WhatsAppService:
         return (model or "gemini-1.5-flash").strip()
 
     @classmethod
+    def get_conversation_history(
+        cls,
+        sender_phone: str,
+        organization_id: Optional[str] = None,
+        limit: int = 6
+    ) -> List[Dict[str, str]]:
+        """Retrieves recent conversation turns for this customer to enable multi-turn contextual AI responses."""
+        if not sender_phone or not has_app_context():
+            return []
+
+        org_id = organization_id or "org-enterprise-default"
+        clean_contact = cls.format_phone_number(sender_phone)
+        last_digits = clean_contact[-8:] if len(clean_contact) >= 8 else clean_contact
+
+        try:
+            msgs = WhatsAppMessage.query.filter(
+                WhatsAppMessage.organization_id == org_id,
+                (
+                    (WhatsAppMessage.sender == clean_contact) |
+                    (WhatsAppMessage.sender == sender_phone) |
+                    (WhatsAppMessage.sender.like(f"%{last_digits}")) |
+                    (WhatsAppMessage.recipient == clean_contact) |
+                    (WhatsAppMessage.recipient == sender_phone) |
+                    (WhatsAppMessage.recipient.like(f"%{last_digits}"))
+                )
+            ).order_by(WhatsAppMessage.created_at.desc(), WhatsAppMessage.id.desc()).limit(limit).all()
+
+            history: List[Dict[str, str]] = []
+            for m in reversed(msgs):
+                if not m.body or not m.body.strip():
+                    continue
+                role = "Customer" if m.direction == "inbound" else "Assistant"
+                history.append({
+                    "role": role,
+                    "content": m.body.strip()
+                })
+            return history
+        except Exception as e:
+            logger.debug(f"Failed to fetch conversation history: {e}")
+            return []
+
+    @classmethod
     def call_gemini_ai(
         cls,
         user_message: Union[str, Dict[str, Any]],
         system_prompt: Optional[str] = None,
         organization_id: Optional[str] = None,
-        customer_name: Optional[str] = None
+        customer_name: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> Optional[str]:
         """Calls configured Google Gemini AI provider to generate a pure, natural response directly tailored to customer inquiries."""
         api_key = cls.get_gemini_api_key(organization_id=organization_id)
@@ -698,24 +773,33 @@ class WhatsAppService:
             if system_prompt and len(system_prompt.strip()) > 3
             else f"\nBusiness Knowledge Base:\n{default_business_context}"
         )
+        history_section = ""
+        if conversation_history:
+            history_lines = []
+            for item in conversation_history[-6:]:
+                r = item.get("role", "Customer")
+                c = item.get("content", "").strip()
+                if c:
+                    history_lines.append(f"{r}: {c}")
+            if history_lines:
+                history_section = "\n\nRecent Conversation History:\n" + "\n".join(history_lines)
+
         cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
         prompt = (
-            f"You are an intelligent, polite, and direct AI assistant for OpsFlow Cloud.{sys_instruct}\n\n"
+            f"You are an intelligent, polite, and direct AI assistant for OpsFlow Cloud.{sys_instruct}{history_section}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"Please provide a direct, helpful, and natural response specifically addressing their inquiry. "
+            f"Please provide a direct, helpful, and natural response specifically addressing their inquiry in light of any conversation context above. "
             f"Keep your tone professional, concise, and helpful. Do not include robotic canned boilerplate or disclaimers."
         )
 
         configured_model = cls.get_gemini_model_name(organization_id=organization_id)
         models_to_try = []
         preferred_candidates = [
-            "gemini-3.8-flash",
-            "gemini-3-flash",
-            "gemini-3.8-pro",
             configured_model,
-            "gemini-2.5-flash",
+            "gemini-1.5-flash",
             "gemini-2.0-flash",
-            "gemini-1.5-flash"
+            "gemini-2.5-flash",
+            "gemini-1.5-pro"
         ]
         for m in preferred_candidates:
             if m and m not in models_to_try:
@@ -754,7 +838,7 @@ class WhatsAppService:
                     err_str = str(model_err)
                     diagnostics.append(f"sdk/{clean_m}: {err_str}")
                     logger.warning(f"[WhatsApp AI Auto-Responder] google.generativeai error with model '{clean_m}': {model_err}")
-                    if "quota" in err_str.lower() or "429" in err_str:
+                    if "quota" in err_str.lower() or "429" in err_str or "exhausted" in err_str.lower():
                         break
                     continue
         except Exception as genai_err:
@@ -762,52 +846,59 @@ class WhatsAppService:
             logger.warning(f"[WhatsApp AI Auto-Responder] google.generativeai setup failed: {genai_err}")
 
         # 2. Direct HTTP REST API via requests across v1beta and v1
-        for api_ver in ["v1beta", "v1"]:
-            for m_name in models_to_try:
-                clean_m = m_name.replace("models/", "")
-                try:
-                    url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{clean_m}:generateContent"
-                    payload = {
-                        "contents": [{"parts": [{"text": prompt}]}]
-                    }
-                    headers = {
-                        "Content-Type": "application/json",
-                        "x-goog-api-key": api_key,
-                        "User-Agent": "OpsFlow-Cloud/2.4 (WhatsApp-Auto-Responder)"
-                    }
-                    resp = requests.post(
-                        url,
-                        params={"key": api_key},
-                        json=payload,
-                        headers=headers,
-                        timeout=12
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        candidates = data.get("candidates", [])
-                        if candidates:
-                            parts = candidates[0].get("content", {}).get("parts", [])
-                            if parts and "text" in parts[0]:
-                                text = parts[0]["text"].strip()
-                                if text:
-                                    cls._last_gemini_error = None
-                                    cls._last_gemini_diagnostics = []
-                                    logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via HTTP REST Gemini model '{clean_m}' ({api_ver})")
-                                    return text
-                    else:
-                        detail = ""
-                        try:
-                            detail = resp.text[:250].replace("\n", " ").strip()
-                        except Exception:
-                            pass
-                        err_msg = f"{api_ver}/{clean_m}: HTTP {resp.status_code} ({detail})"
+        quota_exhausted = any("quota" in d.lower() or "429" in d or "exhausted" in d.lower() for d in diagnostics)
+        if not quota_exhausted:
+            for api_ver in ["v1beta", "v1"]:
+                for m_name in models_to_try:
+                    clean_m = m_name.replace("models/", "")
+                    try:
+                        url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{clean_m}:generateContent"
+                        payload = {
+                            "contents": [{"parts": [{"text": prompt}]}]
+                        }
+                        headers = {
+                            "Content-Type": "application/json",
+                            "x-goog-api-key": api_key,
+                            "User-Agent": "OpsFlow-Cloud/2.4 (WhatsApp-Auto-Responder)"
+                        }
+                        resp = requests.post(
+                            url,
+                            params={"key": api_key},
+                            json=payload,
+                            headers=headers,
+                            timeout=8
+                        )
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                if parts and "text" in parts[0]:
+                                    text = parts[0]["text"].strip()
+                                    if text:
+                                        cls._last_gemini_error = None
+                                        cls._last_gemini_diagnostics = []
+                                        logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via HTTP REST Gemini model '{clean_m}' ({api_ver})")
+                                        return text
+                        else:
+                            detail = ""
+                            try:
+                                detail = resp.text[:250].replace("\n", " ").strip()
+                            except Exception:
+                                pass
+                            err_msg = f"{api_ver}/{clean_m}: HTTP {resp.status_code} ({detail})"
+                            diagnostics.append(err_msg)
+                            logger.error(f"[WhatsApp AI Auto-Responder] {err_msg}")
+                            if resp.status_code in (401, 403, 429) or "RESOURCE_EXHAUSTED" in detail or "quota" in detail.lower():
+                                quota_exhausted = True
+                                break
+                    except Exception as req_err:
+                        err_msg = f"{api_ver}/{clean_m}: network error: {req_err}"
                         diagnostics.append(err_msg)
                         logger.error(f"[WhatsApp AI Auto-Responder] {err_msg}")
-                except Exception as req_err:
-                    err_msg = f"{api_ver}/{clean_m}: network error: {req_err}"
-                    diagnostics.append(err_msg)
-                    logger.error(f"[WhatsApp AI Auto-Responder] {err_msg}")
-                    continue
+                        continue
+                if quota_exhausted:
+                    break
 
         cls._last_gemini_diagnostics = diagnostics
         cls._last_gemini_error = " | ".join(diagnostics[-3:]) if diagnostics else "Unknown error"
@@ -834,14 +925,22 @@ class WhatsAppService:
         for k in candidates:
             val = cls._get_tenant_or_global_setting(k, organization_id)
             if val and str(val).strip():
-                return str(val).strip()
+                return str(val).strip().strip("'\" \t\r\n")
             val = os.environ.get(k)
             if val and str(val).strip():
-                return str(val).strip()
+                return str(val).strip().strip("'\" \t\r\n")
             if has_app_context():
                 val = current_app.config.get(k)
                 if val and str(val).strip():
-                    return str(val).strip()
+                    return str(val).strip().strip("'\" \t\r\n")
+        try:
+            from ai_provider import get_ai_provider
+            groq_prov = get_ai_provider("groq")
+            val = getattr(groq_prov, "api_key", None)
+            if val and str(val).strip():
+                return str(val).strip().strip("'\" \t\r\n")
+        except Exception:
+            pass
         return None
 
     @classmethod
@@ -850,7 +949,8 @@ class WhatsAppService:
         user_message: Union[str, Dict[str, Any]],
         system_prompt: Optional[str] = None,
         organization_id: Optional[str] = None,
-        customer_name: Optional[str] = None
+        customer_name: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> Optional[str]:
         """Calls Groq LPU Cloud REST API as ultra-fast, high-quality secondary AI fallback."""
         api_key = cls.get_groq_api_key(organization_id=organization_id)
@@ -883,29 +983,42 @@ class WhatsAppService:
         cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
         user_prompt = (
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"Please provide a direct, helpful, and natural response specifically addressing their inquiry. "
+            f"Please provide a direct, helpful, and natural response specifically addressing their inquiry in light of any previous conversation. "
             f"Keep your tone professional, concise, and helpful. Do not include robotic canned boilerplate or disclaimers."
         )
 
-        models_to_try = [
-            os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
-            "llama-3.1-8b-instant",
-            "mixtral-8x7b-32768"
-        ]
+        configured_groq_model = (
+            cls._get_tenant_or_global_setting("GROQ_MODEL", organization_id)
+            or os.environ.get("GROQ_MODEL")
+        )
+        if not configured_groq_model and has_app_context():
+            configured_groq_model = current_app.config.get("GROQ_MODEL")
+        models_to_try = []
+        for m in [configured_groq_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]:
+            if m and m not in models_to_try:
+                models_to_try.append(m)
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "User-Agent": "OpsFlow-Cloud/2.4 (WhatsApp-Auto-Responder-Groq)"
         }
 
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": f"You are an intelligent, polite, and direct AI assistant for OpsFlow Cloud.{sys_instruct}"}
+        ]
+        if conversation_history:
+            for turn in conversation_history[-6:]:
+                role = "user" if turn.get("role") == "Customer" else "assistant"
+                c = str(turn.get("content", "")).strip()
+                if c:
+                    messages.append({"role": role, "content": c})
+        messages.append({"role": "user", "content": user_prompt})
+
         for m_name in models_to_try:
             try:
                 payload = {
                     "model": m_name,
-                    "messages": [
-                        {"role": "system", "content": f"You are an intelligent, polite, and direct AI assistant for OpsFlow Cloud.{sys_instruct}"},
-                        {"role": "user", "content": user_prompt}
-                    ],
+                    "messages": messages,
                     "temperature": 0.6,
                     "max_tokens": 400
                 }
@@ -967,12 +1080,18 @@ class WhatsAppService:
         elif mode == "lead_qualifier":
             route_dept = "Sales"
 
+        # Multi-turn conversation history for contextual AI generation
+        history = []
+        if sender_phone:
+            history = cls.get_conversation_history(sender_phone, organization_id=organization_id, limit=6)
+
         # 1. Direct Gemini AI Generation
         ai_reply = cls.call_gemini_ai(
             message_body,
             system_prompt=custom_prompt,
             organization_id=organization_id,
-            customer_name=sender_name
+            customer_name=sender_name,
+            conversation_history=history
         )
         if ai_reply:
             return {
@@ -985,6 +1104,7 @@ class WhatsAppService:
                 "mode": "gemini_ai",
                 "is_gemini": True,
                 "is_groq": False,
+                "is_ai_generated": True,
                 "confidence": 98
             }
 
@@ -993,7 +1113,8 @@ class WhatsAppService:
             message_body,
             system_prompt=custom_prompt,
             organization_id=organization_id,
-            customer_name=sender_name
+            customer_name=sender_name,
+            conversation_history=history
         )
         if groq_reply:
             return {
@@ -1006,6 +1127,7 @@ class WhatsAppService:
                 "mode": "groq_ai",
                 "is_gemini": False,
                 "is_groq": True,
+                "is_ai_generated": True,
                 "confidence": 96
             }
 
@@ -1032,6 +1154,8 @@ class WhatsAppService:
             "entities": entities,
             "mode": mode,
             "is_gemini": False,
+            "is_groq": False,
+            "is_ai_generated": False,
             "confidence": min(98, max(65, lead_score + (10 if intent != 'unknown' else 0)))
         }
 
@@ -1055,19 +1179,46 @@ class WhatsAppService:
         org_id = organization_id or "org-enterprise-default"
         conf = cls.get_auto_responder_config(organization_id=org_id)
 
-        # Force enabled if Gemini API key exists or explicitly enabled
+        # Force enabled if Gemini or Groq API key exists or explicitly enabled
         has_gemini = bool(cls.get_gemini_api_key(organization_id=org_id))
-        if not conf.get("enabled") and not has_gemini:
+        has_groq = bool(cls.get_groq_api_key(organization_id=org_id))
+        has_ai = has_gemini or has_groq
+        if not conf.get("enabled") and not has_ai:
             return None
 
         if has_gemini:
             logger.info("Direct Gemini AI auto-responder enabled for inbound WhatsApp message.")
+        elif has_groq:
+            logger.info("Direct Groq AI auto-responder enabled for inbound WhatsApp message.")
 
         cooldown_mins = conf.get("cooldown_minutes", 5)
 
+        # Prevent duplicate auto-replies if the same webhook event is delivered more than once
+        if message_id:
+            with cls._processed_ids_lock:
+                now = time.time()
+                cls._recent_replied_trigger_ids = {k: v for k, v in cls._recent_replied_trigger_ids.items() if v > now - 3600}
+                if message_id in cls._recent_replied_trigger_ids:
+                    logger.info(f"AI Auto-Reply already generated for message {message_id} (in-memory deduplication), skipping duplicate webhook.")
+                    return {"success": True, "duplicate": True, "message_id": message_id}
+            if has_app_context():
+                already_replied = WhatsAppMessage.query.filter(
+                    WhatsAppMessage.organization_id == org_id,
+                    WhatsAppMessage.direction == "outbound",
+                    WhatsAppMessage.raw_payload_json.like(f'%"triggered_by_message_id": "{message_id}"%')
+                ).first()
+                if already_replied:
+                    logger.info(f"AI Auto-Reply already recorded in DB for message {message_id}, skipping duplicate webhook.")
+                    return {
+                        "success": True,
+                        "duplicate": True,
+                        "message_id": message_id,
+                        "reply_body": already_replied.body
+                    }
+
         # Prevent duplicate reply storm / loop: Check if an outbound message was already sent to this phone recently
         clean_phone = cls.format_phone_number(sender_phone)
-        if not has_gemini:
+        if not has_ai:
             if has_app_context() and cooldown_mins > 0:
                 cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=cooldown_mins)
                 recent_outbound = WhatsAppMessage.query.filter(
@@ -1118,6 +1269,11 @@ class WhatsAppService:
             except Exception as lead_err:
                 logger.error(f"Failed to auto-capture CRM Lead: {lead_err}")
 
+        # Register message_id in-memory to prevent concurrent duplicate delivery before DB commit
+        if message_id:
+            with cls._processed_ids_lock:
+                cls._recent_replied_trigger_ids[message_id] = time.time()
+
         # Dispatch outbound message via WhatsAppService.send_message
         try:
             dispatch_res = cls.send_message(
@@ -1136,9 +1292,11 @@ class WhatsAppService:
             if msg_rec:
                 is_gemini = (generated.get("mode") == "gemini_ai") or bool(generated.get("is_gemini"))
                 is_groq = (generated.get("mode") == "groq_ai") or bool(generated.get("is_groq"))
+                is_real_ai = is_gemini or is_groq
                 source = "gemini_ai" if is_gemini else ("groq_ai" if is_groq else "system_fallback")
                 meta = {
                     "is_ai_response": True,
+                    "is_ai_generated": is_real_ai,
                     "is_gemini_response": is_gemini,
                     "is_groq_response": is_groq,
                     "response_source": source,
@@ -1148,7 +1306,14 @@ class WhatsAppService:
                     "confidence": generated["confidence"],
                     "triggered_by_message_id": message_id
                 }
-                msg_rec.raw_payload_json = json.dumps(meta)
+                existing_payload = {}
+                if msg_rec.raw_payload_json:
+                    try:
+                        existing_payload = json.loads(msg_rec.raw_payload_json)
+                    except Exception:
+                        pass
+                existing_payload.update(meta)
+                msg_rec.raw_payload_json = json.dumps(existing_payload)
                 db.session.commit()
 
             if generated.get("mode") == "gemini_ai" or generated.get("is_gemini"):
@@ -1165,6 +1330,11 @@ class WhatsAppService:
                 "reply_body": reply_body,
                 "intent": intent,
                 "lead_score": lead_score,
+                "mode": generated.get("mode"),
+                "is_gemini": is_gemini,
+                "is_groq": is_groq,
+                "is_ai_generated": is_real_ai,
+                "response_source": source,
                 "dispatch": dispatch_res
             }
         except Exception as dispatch_err:
@@ -1935,12 +2105,29 @@ class WhatsAppService:
     @classmethod
     def is_duplicate_message(cls, message_id: str) -> bool:
         """Guarantees idempotency by checking if a message ID was already processed."""
-        if not message_id or not has_app_context():
+        if not message_id:
             return False
-        try:
-            existing = WhatsAppMessage.query.filter_by(whatsapp_message_id=message_id).first()
-            return existing is not None
-        except Exception:
+        clean_id = str(message_id).strip()
+        now = time.time()
+        with cls._processed_ids_lock:
+            cutoff = now - 3600
+            cls._processed_message_ids = {k: v for k, v in cls._processed_message_ids.items() if v > cutoff}
+            if clean_id in cls._processed_message_ids:
+                return True
+
+            if has_app_context():
+                try:
+                    existing = WhatsAppMessage.query.filter(
+                        (WhatsAppMessage.whatsapp_message_id == clean_id) |
+                        (WhatsAppMessage.id == clean_id)
+                    ).first()
+                    if existing is not None:
+                        cls._processed_message_ids[clean_id] = now
+                        return True
+                except Exception:
+                    pass
+
+            cls._processed_message_ids[clean_id] = now
             return False
 
     @classmethod

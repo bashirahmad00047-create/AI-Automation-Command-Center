@@ -4751,7 +4751,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                             ${isInbound && m.sender_name ? `<div class="wa-bubble-sender">${escapeHtml(m.sender_name)}</div>` : ''}
                             ${bodyHtml}
                             <div class="wa-bubble-footer">
-                                ${m.is_ai_response ? `<span class="wa-ai-badge" title="AI Auto-Reply [Intent: ${escapeHtml(m.ai_intent || 'auto')}]">🤖 AI Auto-Reply</span>` : ''}
+                                ${m.is_ai_generated ? `<span class="wa-ai-badge" title="AI Auto-Reply [Source: ${escapeHtml(m.response_source || 'AI')}]">🤖 AI Auto-Reply</span>` : (m.is_ai_response ? `<span class="wa-ai-badge" style="background:#4b5563;color:#e5e7eb;" title="System Auto-Reply [Canned Fallback]">⚙️ Auto-Reply</span>` : '')}
                                 <span>${escapeHtml(timeStr)}</span>
                                 ${isOutbound ? `<span class="wa-ticks">${ticks}</span>` : ''}
                                 <button type="button" class="wa-msg-del-btn" onclick="deleteWhatsAppMsg('${m.id}')" title="Delete message">🗑️</button>

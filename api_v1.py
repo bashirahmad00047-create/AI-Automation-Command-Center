@@ -3076,6 +3076,8 @@ def save_whatsapp_auto_responder():
     greeting = data.get("fallback_greeting")
     gemini_key = data.get("gemini_api_key") or data.get("api_key") or data.get("google_api_key")
     gemini_model = data.get("gemini_model") or data.get("model")
+    groq_key = data.get("groq_api_key") or data.get("groq_key")
+    groq_model = data.get("groq_model")
 
     updated = WhatsAppService.save_auto_responder_config(
         organization_id=org_id,
@@ -3087,7 +3089,9 @@ def save_whatsapp_auto_responder():
         auto_lead_capture=auto_lead,
         fallback_greeting=greeting,
         gemini_api_key=gemini_key,
-        gemini_model=gemini_model
+        gemini_model=gemini_model,
+        groq_api_key=groq_key,
+        groq_model=groq_model
     )
 
     current_user = get_current_user()

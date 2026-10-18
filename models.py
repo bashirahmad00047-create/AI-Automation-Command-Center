@@ -776,6 +776,10 @@ class WhatsAppMessage(db.Model):
         media_url = None
         sender_name = None
         duration = None
+        is_ai_response = False
+        is_ai_generated = False
+        ai_intent = None
+        response_source = None
         if self.raw_payload_json:
             try:
                 raw = json.loads(self.raw_payload_json)
@@ -793,7 +797,9 @@ class WhatsAppMessage(db.Model):
                         raw.get("duration")
                     )
                     is_ai_response = bool(raw.get("is_ai_response") or raw.get("is_ai"))
+                    is_ai_generated = bool(raw.get("is_ai_generated"))
                     ai_intent = raw.get("ai_intent") or raw.get("intent")
+                    response_source = raw.get("response_source")
             except Exception:
                 pass
 
@@ -817,6 +823,8 @@ class WhatsAppMessage(db.Model):
             "is_audio": is_audio,
             "audio_duration": duration,
             "is_ai_response": is_ai_response,
+            "is_ai_generated": is_ai_generated,
+            "response_source": response_source,
             "ai_intent": ai_intent,
             "status": self.status,
             "execution_id": self.execution_id,
