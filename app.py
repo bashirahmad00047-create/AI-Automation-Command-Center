@@ -30,18 +30,6 @@ from models import Membership, Organization, User
 from presets import PRESET_BLUEPRINTS
 from storage import Storage
 
-# SQLite Foreign Key Fix for Render deployment
-from sqlalchemy import event
-from sqlalchemy.engine import Engine
-import sqlite3
-
-@event.listens_for(Engine, "connect")
-def set_sqlite_pragma(dbapi_connection, connection_record):
-    if isinstance(dbapi_connection, sqlite3.Connection):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=OFF")
-        cursor.close()
-
 # Official Master Demo & Admin Account Configuration
 MASTER_ADMIN_EMAIL = os.environ.get("MASTER_ADMIN_EMAIL", "bashirahmad00047@gmail.com")
 
@@ -193,27 +181,66 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 run_database_migrations(application)
             except Exception as _mig_err:
                 application.logger.warning(f"Auto-migration notice: {_mig_err}; falling back to db.create_all()")
+
+            # Ensure schema integrity and create any tables from newly registered models
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            try:
                 db.create_all()
+            except Exception as _create_err:
+                application.logger.warning(f"db.create_all() notice: {_create_err}")
+
+            # Ensure newly introduced model columns exist on existing production tables
+            try:
+                from sqlalchemy import inspect as _sa_inspect, text as _sa_text
+                _insp = _sa_inspect(db.engine)
+                if "users" in _insp.get_table_names():
+                    _user_cols = {c["name"] for c in _insp.get_columns("users")}
+                    with db.engine.connect() as _c_conn:
+                        if "phone" not in _user_cols:
+                            _c_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN phone VARCHAR(64);"))
+                        if "department" not in _user_cols:
+                            _c_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN department VARCHAR(64) DEFAULT 'General';"))
+                        _c_conn.commit()
+            except Exception as _col_err:
+                application.logger.warning(f"Runtime column sync notice: {_col_err}")
 
             # Seed initial database if empty on fresh cloud deployment
             try:
+                db.session.rollback()
                 from models import Organization
                 if not Organization.query.first():
                     from init_db import init_and_seed_database
                     init_and_seed_database()
             except Exception as _seed_err:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
                 application.logger.warning(f"Database auto-seed check: {_seed_err}")
 
             # Auto-seed sample audit logs on startup if empty
             try:
+                db.session.rollback()
                 seed_initial_logs()
             except Exception as _seed_log_err:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
                 application.logger.warning(f"Audit log auto-seed check: {_seed_log_err}")
 
             # Auto-sync admin user from environment variables on startup
             try:
+                db.session.rollback()
                 sync_admin_user()
             except Exception as _sync_admin_err:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
                 application.logger.warning(f"Admin sync check: {_sync_admin_err}")
 
         storage_instance = Storage(init_db=not is_cli_migration)

@@ -20,7 +20,10 @@ import json
 import os
 import sys
 
-from app import app
+def _get_app():
+    from migrations_manager import _resolve_app
+    return _resolve_app()
+
 from database import db
 from models import (
     ApiKey,
@@ -38,6 +41,10 @@ from models import (
     WebhookEndpoint,
     WorkflowExecution,
     WorkflowStep,
+    CompanyChannel,
+    CompanyMessage,
+    BroadcastCampaign,
+    MessageTemplate,
     generate_uuid,
 )
 from presets import PRESET_BLUEPRINTS
@@ -47,7 +54,7 @@ def init_and_seed_database(seed_data: bool = True):
     """Initializes database, applies migrations, and optionally populates with enterprise demo data."""
     print("[*] Initializing OpsFlow Enterprise SaaS Database...")
 
-    with app.app_context():
+    with _get_app().app_context():
         # Execute database migrations
         try:
             from migrations_manager import run_database_migrations
@@ -55,8 +62,16 @@ def init_and_seed_database(seed_data: bool = True):
             print(f"[OK] Database migrations applied successfully (Revision: {mig_result.get('current_revision')}, Action: {mig_result.get('action_taken')}).")
         except Exception as _mig_err:
             print(f"[WARN] Migration runner notice: {_mig_err}; ensuring schema via db.create_all().")
+
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        try:
             db.create_all()
             print("[OK] Database tables verified successfully.")
+        except Exception as _db_err:
+            print(f"[WARN] db.create_all notice: {_db_err}")
 
         if not seed_data:
             print("[OK] Schema initialization complete; skipping demo data seeding.")
@@ -568,7 +583,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.migrate_only:
-        with app.app_context():
+        with _get_app().app_context():
             from migrations_manager import run_database_migrations
             res = run_database_migrations()
             print(f"[OK] Migrations applied: revision {res.get('current_revision')}")

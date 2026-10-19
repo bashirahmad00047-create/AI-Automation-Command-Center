@@ -37,13 +37,22 @@ def get_alembic_config(directory: Optional[str] = None) -> AlembicConfig:
     return config
 
 
+def _resolve_app(app: Optional[Flask] = None) -> Flask:
+    if app:
+        return app
+    if current_app:
+        try:
+            return current_app._get_current_object()
+        except Exception:
+            pass
+    from app import app as default_app
+    return default_app
+
+
 def get_current_revision(app: Optional[Flask] = None) -> Optional[str]:
     """Returns the current database revision ID, or None if not initialized."""
-    target_app = app or (current_app._get_current_object() if current_app else None)
-    if target_app:
-        with target_app.app_context():
-            return _inspect_current_revision()
-    return _inspect_current_revision()
+    with _resolve_app(app).app_context():
+        return _inspect_current_revision()
 
 
 def _inspect_current_revision() -> Optional[str]:
@@ -64,9 +73,7 @@ def get_head_revision(directory: Optional[str] = None) -> Optional[str]:
 
 def get_migration_status(app: Optional[Flask] = None) -> Dict[str, Any]:
     """Returns complete diagnostic status of database migrations."""
-    target_app = app or (current_app._get_current_object() if current_app else None)
-
-    def _collect_status():
+    with _resolve_app(app).app_context():
         inspector = inspect(db.engine)
         tables = inspector.get_table_names()
         current_rev = _inspect_current_revision()
@@ -86,76 +93,63 @@ def get_migration_status(app: Optional[Flask] = None) -> Dict[str, Any]:
             "tables": sorted(tables),
         }
 
-    if target_app:
-        with target_app.app_context():
-            return _collect_status()
-    return _collect_status()
-
 
 def run_database_migrations(app: Optional[Flask] = None) -> Dict[str, Any]:
     """Safely runs pending database migrations or stamps legacy pre-existing databases."""
     import flask_migrate
 
-    target_app = app or (current_app._get_current_object() if current_app else None)
-
-    def _execute():
+    with _resolve_app(app).app_context():
         inspector = inspect(db.engine)
         tables = inspector.get_table_names()
         has_version_table = "alembic_version" in tables
-        has_existing_app_tables = "organizations" in tables
+        has_existing_app_tables = any(t in tables for t in ("organizations", "memberships", "users"))
+        current_rev = _inspect_current_revision()
 
-        if not has_version_table and has_existing_app_tables:
-            # Pre-existing database without Alembic tracking: stamp to head
-            logger.info("Existing database schema detected without alembic_version; stamping to head.")
-            flask_migrate.stamp()
-            action = "stamped"
-        else:
-            # New or version-tracked database: upgrade to latest migration
-            logger.info("Executing database migration upgrade to head...")
-            flask_migrate.upgrade()
-            action = "upgraded"
+        try:
+            if has_existing_app_tables and (not has_version_table or not current_rev):
+                # Pre-existing database without Alembic tracking or unversioned: stamp to head
+                logger.info("Existing database schema detected without alembic version; stamping to head.")
+                flask_migrate.stamp()
+                action = "stamped"
+            else:
+                # New or version-tracked database: upgrade to latest migration
+                logger.info("Executing database migration upgrade to head...")
+                flask_migrate.upgrade()
+                action = "upgraded"
+        except Exception as mig_err:
+            logger.warning(f"Migration runner notice: {mig_err}; ensuring schema via stamp/db.create_all().")
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            try:
+                flask_migrate.stamp()
+            except Exception:
+                pass
+            action = "fallback_stamped"
 
         status = get_migration_status()
         status["action_taken"] = action
         return status
-
-    if target_app:
-        with target_app.app_context():
-            return _execute()
-    return _execute()
 
 
 def downgrade_database(target_revision: str = "base", app: Optional[Flask] = None) -> Dict[str, Any]:
     """Reverts database migrations back to the target revision."""
     import flask_migrate
 
-    target_app = app or (current_app._get_current_object() if current_app else None)
-
-    def _execute():
+    with _resolve_app(app).app_context():
         flask_migrate.downgrade(revision=target_revision)
         status = get_migration_status()
         status["action_taken"] = f"downgraded_to_{target_revision}"
         return status
-
-    if target_app:
-        with target_app.app_context():
-            return _execute()
-    return _execute()
 
 
 def stamp_database(revision: str = "head", app: Optional[Flask] = None) -> Dict[str, Any]:
     """Stamps database with specified revision without running SQL migration scripts."""
     import flask_migrate
 
-    target_app = app or (current_app._get_current_object() if current_app else None)
-
-    def _execute():
+    with _resolve_app(app).app_context():
         flask_migrate.stamp(revision=revision)
         status = get_migration_status()
         status["action_taken"] = f"stamped_{revision}"
         return status
-
-    if target_app:
-        with target_app.app_context():
-            return _execute()
-    return _execute()
