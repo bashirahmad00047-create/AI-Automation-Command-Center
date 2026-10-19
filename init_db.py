@@ -94,6 +94,23 @@ def init_and_seed_database(seed_data: bool = True):
             )
             db.session.add(org_apex)
 
+        # Clearly labeled fictional demo retail business for testing without contacting real customers
+        org_demo = db.session.get(Organization, "org-demo-fictional-retail") or Organization.query.filter_by(slug="demo-aurora-botanicals").first()
+        if not org_demo:
+            org_demo = Organization(
+                id="org-demo-fictional-retail",
+                name="[DEMO] Aurora Artisan Botanicals & Tea",
+                slug="demo-aurora-botanicals",
+                plan_tier="pro",
+                is_active=True,
+                max_rules=50,
+                max_monthly_events=200000
+            )
+            db.session.add(org_demo)
+        else:
+            org_demo.name = "[DEMO] Aurora Artisan Botanicals & Tea"
+            org_demo.slug = "demo-aurora-botanicals"
+
         db.session.flush()
 
         # 2. Users
@@ -116,6 +133,7 @@ def init_and_seed_database(seed_data: bool = True):
         op_user = create_user_if_missing("usr-operator-primary", "operator@opsflow.io", "Alex Rivera (Lead SRE)", "Operator2026!")
         viewer_user = create_user_if_missing("usr-viewer-primary", "viewer@opsflow.io", "Jordan Smith (Auditor)", "Viewer2026!")
         apex_admin = create_user_if_missing("usr-apex-admin", "admin@apexhealth.internal", "Dr. David Vance (CTO)", "HealthTech2026!")
+        demo_curator = create_user_if_missing("usr-demo-tea-curator", "curator@aurorabotanicals.demo", "Elena Rostova (Tea Sommelier)", "AuroraTea2026!")
 
         # 3. Memberships (RBAC)
         def create_membership_if_missing(mem_id, user_id, org_id, role):
@@ -129,6 +147,54 @@ def init_and_seed_database(seed_data: bool = True):
         create_membership_if_missing("mem-acme-operator", op_user.id, org_acme.id, "operator")
         create_membership_if_missing("mem-acme-viewer", viewer_user.id, org_acme.id, "viewer")
         create_membership_if_missing("mem-apex-admin", apex_admin.id, org_apex.id, "owner")
+        create_membership_if_missing("mem-demo-tea-owner", demo_curator.id, org_demo.id, "owner")
+        create_membership_if_missing("mem-demo-admin-access", admin_user.id, org_demo.id, "admin")
+
+        # Seed verified business knowledge profile for Aurora Botanicals
+        try:
+            from whatsapp_service import WhatsAppService
+            demo_kb_payload = {
+                "business_name": "[DEMO] Aurora Artisan Botanicals & Tea",
+                "products_services": (
+                    "- Himalayan Silver Needle White Tea (50g tin)\n"
+                    "- Organic Earl Grey Lavender Blend (100g loose leaf)\n"
+                    "- Jasmine Dragon Pearl Green Tea (75g pouch)\n"
+                    "- Ceremonial Grade Uji Matcha (30g tin)\n"
+                    "- Handcrafted Ceramic Gaiwan & Teapot Set (400ml)\n"
+                    "- Artisan Tea Tasting Masterclass (Virtual 90-min session)"
+                ),
+                "verified_prices": (
+                    "- Himalayan Silver Needle: PKR 2,400\n"
+                    "- Organic Earl Grey Lavender: PKR 1,800\n"
+                    "- Jasmine Dragon Pearl: PKR 2,800\n"
+                    "- Ceremonial Grade Matcha: PKR 3,500\n"
+                    "- Handcrafted Ceramic Teapot Set: PKR 4,500\n"
+                    "- Artisan Tea Tasting Masterclass: PKR 5,000 per person"
+                ),
+                "working_hours": "Monday - Saturday: 10:00 AM - 7:00 PM PKT. Closed on Sundays & National Holidays.",
+                "delivery_return_policies": (
+                    "- Standard Shipping across Pakistan: PKR 250 (2-4 business days).\n"
+                    "- Free Shipping on orders exceeding PKR 3,000.\n"
+                    "- Cash on Delivery (COD) and JazzCash accepted.\n"
+                    "- 14-day return policy for unopened, sealed tea packaging."
+                ),
+                "faqs": (
+                    "Q: Are teas 100% organic?\n"
+                    "A: Yes, our Earl Grey and White teas are certified single-origin organic.\n"
+                    "Q: Can I pay via Cash on Delivery?\n"
+                    "A: Yes, COD is available in all major cities in Pakistan.\n"
+                    "Q: Do you offer custom gift hampers?\n"
+                    "A: Yes! Contact our tea curator for customized corporate and wedding hampers."
+                ),
+                "support_contact": "Curator Helpline: +92 300 555-TEA1 (8321) | Email: hello@aurorabotanicals.demo",
+                "custom_instructions": (
+                    "Always welcome guests with warmth. Highlight our artisanal sourcing. If an item like coffee, food, or electronics is requested, "
+                    "politely explain that Aurora specializes exclusively in fine teas and teaware, and ask if they would like to be notified if seasonal blends are introduced."
+                )
+            }
+            WhatsAppService.save_tenant_business_knowledge("org-demo-fictional-retail", demo_kb_payload)
+        except Exception as _kb_err:
+            print(f"[WARN] Failed to seed demo business knowledge: {_kb_err}")
 
         # 4. Production API Keys
         def create_api_key_if_missing(key_id, org_id, user_id, name, raw_secret, permissions="*"):
@@ -428,6 +494,55 @@ def init_and_seed_database(seed_data: bool = True):
                 details_json=json.dumps({"name": "Acme Production Cloud Connector"}),
                 ip_address="127.0.0.1"
             ))
+
+        # 11. Company Messaging Command Center Default Channels & Operational History
+        try:
+            from company_messaging_service import CompanyMessagingService
+            CompanyMessagingService.ensure_default_channels(org_acme.id)
+            CompanyMessagingService.ensure_default_channels(org_apex.id)
+
+            gen_ch = CompanyChannel.query.filter_by(organization_id=org_acme.id, name="general").first()
+            if gen_ch and not CompanyMessage.query.filter_by(channel_id=gen_ch.id).first():
+                CompanyMessagingService.post_message(
+                    organization_id=org_acme.id,
+                    channel_id=gen_ch.id,
+                    body="👋 Welcome to OpsFlow Company Messaging Command Center! All operations, incident triage, and company announcements are orchestrated here.",
+                    sender_id=admin_user.id,
+                    sender_name="Sarah Lin (VP Ops)",
+                    sender_role="owner",
+                    priority="normal"
+                )
+                CompanyMessagingService.post_message(
+                    organization_id=org_acme.id,
+                    channel_id=gen_ch.id,
+                    body="System initialized. Monitoring infrastructure telemetry and active webhook ingress across clusters.",
+                    sender_id=op_user.id,
+                    sender_name="Alex Rivera (Lead SRE)",
+                    sender_role="operator",
+                    priority="normal"
+                )
+
+            inc_ch = CompanyChannel.query.filter_by(organization_id=org_acme.id, name="incidents").first()
+            if inc_ch and not CompanyMessage.query.filter_by(channel_id=inc_ch.id).first():
+                CompanyMessagingService.post_message(
+                    organization_id=org_acme.id,
+                    channel_id=inc_ch.id,
+                    body="🚨 [AUTONOMOUS INCIDENT DISPATCH] High Memory Utilization detected on cluster-eu-west-02. Remediation workflow executed.",
+                    sender_name="OpsFlow Bot",
+                    sender_role="system",
+                    priority="urgent",
+                    is_system=True
+                )
+        except Exception as _msg_err:
+            print(f"[WARN] Company messaging seeding notice: {_msg_err}")
+
+        # 12. Campaign & Broadcast Templates Seeding
+        try:
+            from campaign_service import CampaignService
+            CampaignService._seed_default_templates(org_acme.id)
+            CampaignService._seed_default_templates(org_apex.id)
+        except Exception as _cmp_err:
+            print(f"[WARN] Campaign seeding notice: {_cmp_err}")
 
         db.session.commit()
         print("[SUCCESS] Database successfully seeded with Enterprise Client Demonstration Data!")

@@ -932,14 +932,30 @@ class AutomationEngine:
                         executed.append({"rule_id": rule["id"], "result": res})
         except Exception:
             pass
+
+        # Evaluate due scheduled broadcast campaigns
+        try:
+            from campaign_service import CampaignService
+            CampaignService.evaluate_scheduled_campaigns(organization_id=organization_id)
+        except Exception:
+            pass
+
         return executed
 
     def _background_loop(self):
-        """Background thread executing periodic health monitoring events."""
+        """Background thread executing periodic health monitoring events and scheduled campaigns."""
         while True:
             time.sleep(15)
             if not self.is_running:
                 continue
+
+            # Check for due scheduled broadcast campaigns
+            try:
+                from campaign_service import CampaignService
+                CampaignService.evaluate_scheduled_campaigns()
+            except Exception:
+                pass
+
             try:
                 metrics = self.telemetry.get_metrics()
                 # If CPU spikes over 85%, dispatch background event automatically

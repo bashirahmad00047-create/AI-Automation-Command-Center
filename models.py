@@ -67,6 +67,15 @@ class Organization(db.Model):
     subscription = db.relationship("Subscription", backref="organization", uselist=False, cascade="all, delete-orphan", lazy="select")
     whatsapp_messages = db.relationship("WhatsAppMessage", backref="organization", cascade="all, delete-orphan", lazy="select")
     jazzcash_transactions = db.relationship("JazzCashTransaction", backref="organization", cascade="all, delete-orphan", lazy="select")
+    company_channels = db.relationship("CompanyChannel", backref="organization", cascade="all, delete-orphan", lazy="select")
+    company_messages = db.relationship("CompanyMessage", backref="organization", cascade="all, delete-orphan", lazy="select")
+    company_broadcasts = db.relationship("CompanyBroadcast", backref="organization", cascade="all, delete-orphan", lazy="select")
+    broadcast_campaigns = db.relationship("BroadcastCampaign", backref="organization", cascade="all, delete-orphan", lazy="select")
+    campaign_recipients = db.relationship("CampaignRecipient", backref="organization", cascade="all, delete-orphan", lazy="select")
+    message_templates = db.relationship("MessageTemplate", backref="organization", cascade="all, delete-orphan", lazy="select")
+    contact_consents = db.relationship("ContactConsent", backref="organization", cascade="all, delete-orphan", lazy="select")
+    products = db.relationship("Product", backref="organization", cascade="all, delete-orphan", lazy="select")
+    business_profile = db.relationship("BusinessProfile", backref="organization", uselist=False, cascade="all, delete-orphan", lazy="select")
 
     def get_subscription(self) -> "Subscription":
         """Get or lazily initialize the tenant subscription record."""
@@ -83,6 +92,21 @@ class Organization(db.Model):
         db.session.flush()
         return sub
 
+    def get_business_profile(self) -> "BusinessProfile":
+        """Get or lazily initialize the tenant business profile record."""
+        if self.business_profile:
+            return self.business_profile
+        prof = BusinessProfile(
+            organization_id=self.id,
+            business_category="online",
+            industry="ecommerce",
+            industry_name="E-Commerce & Online Store",
+            company_name=self.name,
+        )
+        db.session.add(prof)
+        db.session.flush()
+        return prof
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -95,6 +119,7 @@ class Organization(db.Model):
             "stripe_customer_id": self.stripe_customer_id,
             "stripe_subscription_id": self.stripe_subscription_id,
             "subscription": self.subscription.to_dict() if self.subscription else None,
+            "business_profile": self.business_profile.to_dict() if self.business_profile else None,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
         }
 
@@ -115,6 +140,8 @@ class User(db.Model):
     is_mfa_enabled = db.Column(db.Boolean, nullable=False, default=False)
     mfa_backup_codes = db.Column(db.Text, nullable=True)
     
+    phone = db.Column(db.String(64), nullable=True)
+    department = db.Column(db.String(64), nullable=True, default="General")
     last_login_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
 
@@ -134,6 +161,8 @@ class User(db.Model):
             "id": self.id,
             "email": self.email,
             "full_name": self.full_name,
+            "phone": self.phone or "",
+            "department": self.department or "General",
             "is_active": self.is_active,
             "is_superuser": self.is_superuser,
             "is_mfa_enabled": self.is_mfa_enabled,
@@ -568,6 +597,8 @@ class AuditLog(db.Model):
     action = db.Column(db.String(64), nullable=False)
     resource_type = db.Column(db.String(64), nullable=False)
     resource_id = db.Column(db.String(64), nullable=True)
+    target_type = db.synonym("resource_type")
+    target_id = db.synonym("resource_id")
     details_json = db.Column(db.Text, nullable=True)
     ip_address = db.Column(db.String(64), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
@@ -587,6 +618,8 @@ class AuditLog(db.Model):
             "event": self.action,
             "resource_type": self.resource_type,
             "resource_id": self.resource_id,
+            "target_type": self.resource_type,
+            "target_id": self.resource_id,
             "details": details,
             "ip_address": self.ip_address,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
@@ -921,4 +954,510 @@ class JazzCashTransaction(db.Model):
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "completed_at": self.completed_at.strftime("%Y-%m-%d %H:%M:%S") if self.completed_at else None,
         }
+
+
+class CompanyChannel(db.Model):
+    """Multi-tenant Company Messaging Channel (e.g. #general, #incidents, #sre-alerts)."""
+    __tablename__ = "company_channels"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("chn"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = db.Column(db.String(64), nullable=False)  # slug: general, incidents, sre-alerts
+    display_name = db.Column(db.String(128), nullable=False)  # #general, #Incident War Room
+    description = db.Column(db.String(255), nullable=True)
+    channel_type = db.Column(db.String(32), nullable=False, default="public")  # public, announcement, private
+    is_archived = db.Column(db.Boolean, nullable=False, default=False)
+    is_system = db.Column(db.Boolean, nullable=False, default=False)
+    created_by_user_id = db.Column(db.String(64), db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    # Relationships
+    messages = db.relationship("CompanyMessage", backref="channel", cascade="all, delete-orphan", lazy="select")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "name": self.name,
+            "display_name": self.display_name,
+            "description": self.description,
+            "channel_type": self.channel_type,
+            "is_archived": self.is_archived,
+            "is_system": self.is_system,
+            "created_by_user_id": self.created_by_user_id,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+            "message_count": len(self.messages) if self.messages else 0
+        }
+
+
+class CompanyMessage(db.Model):
+    """Multi-tenant internal company message stream."""
+    __tablename__ = "company_messages"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("cmsg"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    channel_id = db.Column(db.String(64), db.ForeignKey("company_channels.id", ondelete="CASCADE"), nullable=False, index=True)
+    sender_id = db.Column(db.String(64), db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    sender_name = db.Column(db.String(128), nullable=False)
+    sender_role = db.Column(db.String(32), nullable=False, default="member")
+    body = db.Column(db.Text, nullable=False)
+    priority = db.Column(db.String(32), nullable=False, default="normal")  # normal, urgent, critical
+    is_system = db.Column(db.Boolean, nullable=False, default=False)
+    parent_message_id = db.Column(db.String(64), db.ForeignKey("company_messages.id", ondelete="SET NULL"), nullable=True, index=True)
+    execution_id = db.Column(db.Integer, db.ForeignKey("workflow_executions.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "channel_id": self.channel_id,
+            "sender_id": self.sender_id,
+            "sender_name": self.sender_name,
+            "sender_role": self.sender_role,
+            "body": self.body,
+            "priority": self.priority,
+            "is_system": self.is_system,
+            "parent_message_id": self.parent_message_id,
+            "execution_id": self.execution_id,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+        }
+
+
+class CompanyBroadcast(db.Model):
+    """Multi-tenant operational announcement / broadcast banner."""
+    __tablename__ = "company_broadcasts"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("bc"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = db.Column(db.String(160), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    severity = db.Column(db.String(32), nullable=False, default="info")  # info, warning, critical, urgent
+    requires_acknowledgment = db.Column(db.Boolean, nullable=False, default=False)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_by_user_id = db.Column(db.String(64), db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_name = db.Column(db.String(128), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    expires_at = db.Column(db.DateTime, nullable=True)
+
+    # Relationships
+    acknowledgments = db.relationship("CompanyBroadcastAck", backref="broadcast", cascade="all, delete-orphan", lazy="select")
+
+    def to_dict(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        is_ack = False
+        if user_id and self.acknowledgments:
+            is_ack = any(a.user_id == user_id for a in self.acknowledgments)
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "title": self.title,
+            "body": self.body,
+            "severity": self.severity,
+            "requires_acknowledgment": self.requires_acknowledgment,
+            "is_active": self.is_active,
+            "created_by_user_id": self.created_by_user_id,
+            "created_by_name": self.created_by_name,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "expires_at": self.expires_at.strftime("%Y-%m-%d %H:%M:%S") if self.expires_at else None,
+            "acknowledgments_count": len(self.acknowledgments) if self.acknowledgments else 0,
+            "is_acknowledged": is_ack
+        }
+
+
+class CompanyBroadcastAck(db.Model):
+    """Audit record for employee acknowledgment of mandatory company broadcasts."""
+    __tablename__ = "company_broadcast_acks"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("back"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    broadcast_id = db.Column(db.String(64), db.ForeignKey("company_broadcasts.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = db.Column(db.String(64), db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_name = db.Column(db.String(128), nullable=False)
+    acknowledged_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("broadcast_id", "user_id", name="uq_broadcast_user_ack"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "broadcast_id": self.broadcast_id,
+            "user_id": self.user_id,
+            "user_name": self.user_name,
+            "acknowledged_at": self.acknowledged_at.strftime("%Y-%m-%d %H:%M:%S") if self.acknowledged_at else None
+        }
+
+
+class MessageTemplate(db.Model):
+    """Reusable message templates for WhatsApp and multi-channel campaigns."""
+    __tablename__ = "message_templates"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("tmpl"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = db.Column(db.String(128), nullable=False)
+    category = db.Column(db.String(64), nullable=False, default="utility")  # utility, marketing, authentication, support
+    language = db.Column(db.String(16), nullable=False, default="en_US")
+    body = db.Column(db.Text, nullable=False)
+    channel = db.Column(db.String(32), nullable=False, default="whatsapp")
+    is_approved_by_meta = db.Column(db.Boolean, nullable=False, default=False)
+    meta_template_id = db.Column(db.String(128), nullable=True)
+    created_by_user_id = db.Column(db.String(64), db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "name": self.name,
+            "category": self.category,
+            "language": self.language,
+            "body": self.body,
+            "channel": self.channel,
+            "is_approved_by_meta": self.is_approved_by_meta,
+            "meta_template_id": self.meta_template_id,
+            "created_by_user_id": self.created_by_user_id,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
+
+
+class ContactConsent(db.Model):
+    """Compliance & opt-out registry to honor recipient consent across WhatsApp and messaging."""
+    __tablename__ = "contact_consents"
+    __table_args__ = (
+        db.UniqueConstraint("organization_id", "phone", "channel", name="uq_org_phone_channel_consent"),
+    )
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("cst"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    phone = db.Column(db.String(64), nullable=False, index=True)
+    status = db.Column(db.String(32), nullable=False, default="opted_in")  # opted_in, opted_out
+    channel = db.Column(db.String(32), nullable=False, default="whatsapp")
+    reason = db.Column(db.String(255), nullable=True)
+    opted_out_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "phone": self.phone,
+            "status": self.status,
+            "channel": self.channel,
+            "reason": self.reason,
+            "opted_out_at": self.opted_out_at.strftime("%Y-%m-%d %H:%M:%S") if self.opted_out_at else None,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+        }
+
+
+class BroadcastCampaign(db.Model):
+    """Multi-audience outbound campaign and broadcast with review, scheduling, and delivery tracking."""
+    __tablename__ = "broadcast_campaigns"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("cmp"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = db.Column(db.String(255), nullable=False)
+    channel = db.Column(db.String(32), nullable=False, default="whatsapp")  # whatsapp, internal, multi
+    audience_type = db.Column(db.String(64), nullable=False, default="customers")  # customers, employees, department, saved_group, manual
+    audience_filter = db.Column(db.Text, nullable=True)  # JSON or filter string
+    template_name = db.Column(db.String(128), nullable=True)
+    raw_template = db.Column(db.Text, nullable=False)
+    rendered_preview = db.Column(db.Text, nullable=True)
+    
+    # Lifecycle status: draft -> pending_approval -> approved -> scheduled -> queued -> processing -> completed / cancelled / failed
+    status = db.Column(db.String(32), nullable=False, default="draft")
+    scheduled_at = db.Column(db.DateTime, nullable=True)
+    
+    approved_by_user_id = db.Column(db.String(64), db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    created_by_user_id = db.Column(db.String(64), db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Aggregate telemetry counters
+    total_recipients = db.Column(db.Integer, nullable=False, default=0)
+    sent_count = db.Column(db.Integer, nullable=False, default=0)
+    delivered_count = db.Column(db.Integer, nullable=False, default=0)
+    read_count = db.Column(db.Integer, nullable=False, default=0)
+    failed_count = db.Column(db.Integer, nullable=False, default=0)
+    opted_out_count = db.Column(db.Integer, nullable=False, default=0)
+    estimated_cost_usd = db.Column(db.Float, nullable=False, default=0.0)
+    execution_notes = db.Column(db.Text, nullable=True)
+
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    # Relationship
+    recipients = db.relationship("CampaignRecipient", backref="campaign", cascade="all, delete-orphan", lazy="select")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "title": self.title,
+            "channel": self.channel,
+            "audience_type": self.audience_type,
+            "audience_filter": self.audience_filter,
+            "template_name": self.template_name,
+            "raw_template": self.raw_template,
+            "rendered_preview": self.rendered_preview,
+            "status": self.status,
+            "scheduled_at": self.scheduled_at.strftime("%Y-%m-%d %H:%M:%S") if self.scheduled_at else None,
+            "approved_by_user_id": self.approved_by_user_id,
+            "approved_at": self.approved_at.strftime("%Y-%m-%d %H:%M:%S") if self.approved_at else None,
+            "created_by_user_id": self.created_by_user_id,
+            "total_recipients": self.total_recipients,
+            "sent_count": self.sent_count,
+            "delivered_count": self.delivered_count,
+            "read_count": self.read_count,
+            "failed_count": self.failed_count,
+            "opted_out_count": self.opted_out_count,
+            "estimated_cost_usd": self.estimated_cost_usd,
+            "execution_notes": self.execution_notes,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
+
+
+class CampaignRecipient(db.Model):
+    """Per-recipient delivery ledger ensuring idempotency and per-recipient delivery tracking."""
+    __tablename__ = "campaign_recipients"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("cmpr"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    campaign_id = db.Column(db.String(64), db.ForeignKey("broadcast_campaigns.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    recipient_type = db.Column(db.String(32), nullable=False, default="customer")  # customer, employee, contact
+    recipient_id = db.Column(db.String(64), nullable=True)
+    name = db.Column(db.String(128), nullable=False)
+    phone = db.Column(db.String(64), nullable=False)
+    email = db.Column(db.String(255), nullable=True)
+    department = db.Column(db.String(64), nullable=True)
+    company = db.Column(db.String(128), nullable=True)
+
+    # Delivery status: pending, queued, sent, delivered, read, failed, opted_out, ineligible
+    status = db.Column(db.String(32), nullable=False, default="pending", index=True)
+    idempotency_key = db.Column(db.String(160), nullable=False, index=True)  # {campaign_id}:{clean_phone}
+    provider_message_id = db.Column(db.String(128), nullable=True, index=True)
+    provider_name = db.Column(db.String(32), nullable=True)
+    personalized_body = db.Column(db.Text, nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    retry_count = db.Column(db.Integer, nullable=False, default=0)
+
+    sent_at = db.Column(db.DateTime, nullable=True)
+    delivered_at = db.Column(db.DateTime, nullable=True)
+    read_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "campaign_id": self.campaign_id,
+            "recipient_type": self.recipient_type,
+            "recipient_id": self.recipient_id,
+            "name": self.name,
+            "phone": self.phone,
+            "email": self.email,
+            "department": self.department,
+            "company": self.company,
+            "status": self.status,
+            "idempotency_key": self.idempotency_key,
+            "provider_message_id": self.provider_message_id,
+            "provider_name": self.provider_name,
+            "personalized_body": self.personalized_body,
+            "error_message": self.error_message,
+            "retry_count": self.retry_count,
+            "sent_at": self.sent_at.strftime("%Y-%m-%d %H:%M:%S") if self.sent_at else None,
+            "delivered_at": self.delivered_at.strftime("%Y-%m-%d %H:%M:%S") if self.delivered_at else None,
+            "read_at": self.read_at.strftime("%Y-%m-%d %H:%M:%S") if self.read_at else None,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+        }
+
+
+class Product(db.Model):
+    """Tenant-scoped product, service, and inventory item for commerce, catalog, and AI auto-response grounding."""
+    __tablename__ = "products"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("prd"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = db.Column(db.String(255), nullable=False, index=True)
+    category = db.Column(db.String(128), nullable=True, index=True, default="General")
+    description = db.Column(db.Text, nullable=True)
+    sku = db.Column(db.String(128), nullable=True, index=True)
+    barcode = db.Column(db.String(128), nullable=True)
+    unit = db.Column(db.String(64), nullable=False, default="piece")
+    price = db.Column(db.Float, nullable=False, default=0.0)
+    currency = db.Column(db.String(10), nullable=False, default="PKR")
+    stock_quantity = db.Column(db.Integer, nullable=False, default=0)
+    stock_status = db.Column(db.String(32), nullable=False, default="in_stock")  # in_stock, low_stock, out_of_stock
+    is_active = db.Column(db.Boolean, nullable=False, default=True)  # True = Active, False = Archived
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    def calculate_stock_status(self) -> str:
+        if self.stock_quantity <= 0:
+            return "out_of_stock"
+        elif self.stock_quantity <= 5:
+            return "low_stock"
+        return "in_stock"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "name": self.name,
+            "category": self.category or "General",
+            "description": self.description or "",
+            "sku": self.sku or "",
+            "barcode": self.barcode or "",
+            "unit": self.unit or "piece",
+            "price": float(self.price),
+            "currency": self.currency or "PKR",
+            "stock_quantity": int(self.stock_quantity),
+            "stock_status": self.stock_status or self.calculate_stock_status(),
+            "is_active": bool(self.is_active),
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
+
+
+class BusinessProfile(db.Model):
+    """Tenant-scoped Business Operating System Profile for Online & Offline businesses."""
+    __tablename__ = "business_profiles"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("bprof"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+
+    # Category: "online" or "offline"
+    business_category = db.Column(db.String(32), nullable=False, default="online")
+
+    # Industry slug: "ecommerce", "agency", "saas", "booking", "leadgen", "retail", "clinic", "restaurant", "warehouse", "services"
+    industry = db.Column(db.String(64), nullable=False, default="ecommerce")
+    industry_name = db.Column(db.String(128), nullable=False, default="E-Commerce & Online Store")
+    company_name = db.Column(db.String(160), nullable=True)
+    tagline = db.Column(db.String(255), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+
+    # JSON-encoded configurations
+    services_json = db.Column(db.Text, nullable=False, default="[]")
+    operating_hours_json = db.Column(db.Text, nullable=False, default="{}")
+    policies_json = db.Column(db.Text, nullable=False, default="{}")
+    channels_config_json = db.Column(db.Text, nullable=False, default="{}")
+    custom_roles_json = db.Column(db.Text, nullable=False, default="[]")
+
+    # AI Grounding Instructions
+    ai_instructions = db.Column(db.Text, nullable=True)
+    ai_guardrails = db.Column(db.Text, nullable=True)
+    ai_tone = db.Column(db.String(32), nullable=False, default="professional")
+
+    is_configured = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    def get_services(self) -> List[Dict[str, Any]]:
+        try:
+            val = json.loads(self.services_json)
+            return val if isinstance(val, list) else []
+        except Exception:
+            return []
+
+    def get_operating_hours(self) -> Dict[str, Any]:
+        try:
+            val = json.loads(self.operating_hours_json)
+            return val if isinstance(val, dict) else {}
+        except Exception:
+            return {}
+
+    def get_policies(self) -> Dict[str, Any]:
+        try:
+            val = json.loads(self.policies_json)
+            return val if isinstance(val, dict) else {}
+        except Exception:
+            return {}
+
+    def get_channels_config(self) -> Dict[str, Any]:
+        try:
+            val = json.loads(self.channels_config_json)
+            return val if isinstance(val, dict) else {}
+        except Exception:
+            return {}
+
+    def get_custom_roles(self) -> List[Dict[str, Any]]:
+        try:
+            val = json.loads(self.custom_roles_json)
+            return val if isinstance(val, list) else []
+        except Exception:
+            return []
+
+    def is_open_now(self, dt: Optional[datetime.datetime] = None) -> Dict[str, Any]:
+        """Calculates whether business is currently open based on operating hours."""
+        now = dt or datetime.datetime.now()
+        day_keys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        current_day_key = day_keys[now.weekday()]
+
+        hours_conf = self.get_operating_hours()
+        if not hours_conf or not hours_conf.get("schedule"):
+            return {"is_open": True, "reason": "Always open / 24-7"}
+
+        schedule = hours_conf.get("schedule", {})
+        day_sched = schedule.get(current_day_key)
+        if not day_sched or day_sched.get("closed"):
+            return {"is_open": False, "reason": f"Closed on {now.strftime('%A')}s"}
+
+        open_str = day_sched.get("open", "09:00")
+        close_str = day_sched.get("close", "18:00")
+
+        try:
+            open_h, open_m = map(int, open_str.split(":"))
+            close_h, close_m = map(int, close_str.split(":"))
+            now_mins = now.hour * 60 + now.minute
+            open_mins = open_h * 60 + open_m
+            close_mins = close_h * 60 + close_m
+
+            if close_mins < open_mins:  # Overnight shift
+                is_open = now_mins >= open_mins or now_mins <= close_mins
+            else:
+                is_open = open_mins <= now_mins <= close_mins
+
+            return {
+                "is_open": is_open,
+                "current_time": now.strftime("%H:%M"),
+                "hours_today": f"{open_str} - {close_str}",
+                "day": now.strftime("%A"),
+                "reason": "Open for business" if is_open else f"Closed outside operating hours ({open_str} - {close_str})"
+            }
+        except Exception as e:
+            return {"is_open": True, "reason": f"Standard hours ({e})"}
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "business_category": self.business_category,
+            "industry": self.industry,
+            "industry_name": self.industry_name,
+            "company_name": self.company_name or "",
+            "tagline": self.tagline or "",
+            "description": self.description or "",
+            "services": self.get_services(),
+            "operating_hours": self.get_operating_hours(),
+            "policies": self.get_policies(),
+            "channels_config": self.get_channels_config(),
+            "custom_roles": self.get_custom_roles(),
+            "ai_instructions": self.ai_instructions or "",
+            "ai_guardrails": self.ai_guardrails or "",
+            "ai_tone": self.ai_tone or "professional",
+            "is_configured": bool(self.is_configured),
+            "is_open_now": self.is_open_now(),
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
+
+
+
 

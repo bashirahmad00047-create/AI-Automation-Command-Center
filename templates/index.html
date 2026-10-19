@@ -4,13 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpsFlow Cloud - Enterprise Intelligent Automation</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=2.5.0">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class'
-        };
-    </script>
+    <link rel="stylesheet" href="/static/css/style.css?v=2.8.5">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -102,6 +96,11 @@
                 <span class="tab-label">WhatsApp Cloud</span>
                 <span class="nav-counter-pill success" id="tabWhatsAppCount" style="display:none;">0</span>
             </button>
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('campaigns')" title="Targeted Campaigns & Broadcasts">
+                <span class="tab-icon">📢</span>
+                <span class="tab-label">Campaigns &amp; Broadcasts</span>
+                <span class="nav-counter-pill" id="tabCampaignsCount" style="display:none;">0</span>
+            </button>
 
             <!-- GROUP 5: OPERATIONS -->
             <div class="nav-category-header text-gray-500 dark:text-slate-400">
@@ -111,6 +110,11 @@
                 <span class="tab-icon">🚨</span>
                 <span class="tab-label">Incidents</span>
                 <span class="nav-counter-pill danger" id="tabIncidentCount" style="display:none;">0</span>
+            </button>
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('company-messaging')" title="Company Messaging Command Center">
+                <span class="tab-icon">📢</span>
+                <span class="tab-label">Company Messaging</span>
+                <span class="nav-counter-pill" id="tabCompanyMsgCount" style="display:none;">0</span>
             </button>
             <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" onclick="switchTab('logs')" title="Forensics & Audits">
                 <span class="tab-icon">📜</span>
@@ -306,7 +310,10 @@
                 <div class="metric-card emerald bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
                         <span class="metric-title text-gray-600 dark:text-slate-400">TOTAL EXECUTIONS</span>
-                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">DISPATCHED</span>
+                        <div class="hud-flex-row hud-gap-xs">
+                            <span class="metric-delta up" title="Throughput status">▲ 100%</span>
+                            <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">DISPATCHED</span>
+                        </div>
                     </div>
                     <div class="metric-val text-gray-900 dark:text-white" id="statTotalExecutions">0</div>
                     <div class="metric-sub text-gray-500 dark:text-slate-400" id="statSuccessExecutions">0 Successful Dispatches</div>
@@ -315,7 +322,10 @@
                 <div class="metric-card purple bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
                         <span class="metric-title text-gray-600 dark:text-slate-400">SUCCESS RATE</span>
-                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">RELIABILITY</span>
+                        <div class="hud-flex-row hud-gap-xs">
+                            <span class="metric-delta up" id="statSuccessRateDelta" title="SLA target">● 99.9%</span>
+                            <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">RELIABILITY</span>
+                        </div>
                     </div>
                     <div class="metric-val text-gray-900 dark:text-white" id="statSuccessRate">—</div>
                     <div class="metric-sub text-gray-500 dark:text-slate-400" id="statSuccessRateSub">Awaiting first execution</div>
@@ -324,7 +334,10 @@
                 <div class="metric-card red bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
                         <span class="metric-title text-gray-600 dark:text-slate-400">FAILED EXECUTIONS</span>
-                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">ERRORS</span>
+                        <div class="hud-flex-row hud-gap-xs">
+                            <span class="metric-delta neutral" id="statFailedDelta" title="Triage health">0.0%</span>
+                            <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">ERRORS</span>
+                        </div>
                     </div>
                     <div class="metric-val text-gray-900 dark:text-white" id="statFailedExecutions">0</div>
                     <div class="metric-sub text-gray-500 dark:text-slate-400" id="statFailedExecutionsSub">0 Unresolved Failures</div>
@@ -333,7 +346,10 @@
                 <div class="metric-card amber bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
                         <span class="metric-title text-gray-600 dark:text-slate-400">OPEN INCIDENTS</span>
-                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">TRIAGE</span>
+                        <div class="hud-flex-row hud-gap-xs">
+                            <span class="metric-delta neutral" id="statIncidentsDelta" title="Incident triage">Triage</span>
+                            <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">TRIAGE</span>
+                        </div>
                     </div>
                     <div class="metric-val text-gray-900 dark:text-white" id="statOpenIncidents">0</div>
                     <div class="metric-sub text-gray-500 dark:text-slate-400" id="statAckIncidents">0 Acknowledged</div>
@@ -342,7 +358,10 @@
                 <div class="metric-card emerald bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
                         <span class="metric-title text-gray-600 dark:text-slate-400">QUALIFIED LEADS</span>
-                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">AI SCORED</span>
+                        <div class="hud-flex-row hud-gap-xs">
+                            <span class="metric-delta up" id="statLeadsDelta" title="Conversion pipeline">▲ High</span>
+                            <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">AI SCORED</span>
+                        </div>
                     </div>
                     <div class="metric-val text-gray-900 dark:text-white" id="statHighPriorityLeads">0</div>
                     <div class="metric-sub text-gray-500 dark:text-slate-400" id="statTotalLeads">0 Total Inquiries</div>
@@ -351,7 +370,10 @@
                 <div class="metric-card cyan bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
                     <div class="metric-header">
                         <span class="metric-title text-gray-600 dark:text-slate-400">ACTIVE WORKFLOWS</span>
-                        <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">RULES</span>
+                        <div class="hud-flex-row hud-gap-xs">
+                            <span class="metric-delta up" id="statRulesDelta" title="Orchestration status">● Active</span>
+                            <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">RULES</span>
+                        </div>
                     </div>
                     <div class="metric-val text-gray-900 dark:text-white" id="statActiveRules">0 / 0</div>
                     <div class="metric-sub text-gray-500 dark:text-slate-400" id="statTotalRules">0 Total Configured</div>
@@ -361,12 +383,12 @@
             <!-- Operational Subsystems & Gateway Bar -->
             <div class="hud-panel op-status-strip" style="margin-bottom: 20px; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; border: 1px solid var(--border-color); border-radius: 8px;">
                 <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap; font-size: 13px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    <div class="hud-flex-row hud-gap-sm">
                         <span style="color: var(--cyan-glow);">🔌</span>
                         <span style="color: var(--text-secondary);">Active Webhooks:</span>
                         <strong id="statActiveWebhooks" style="color: var(--text-primary); font-family: var(--font-mono);">0</strong>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    <div class="hud-flex-row hud-gap-sm">
                         <span style="color: var(--emerald-glow);">⚡</span>
                         <span style="color: var(--text-secondary);">Engine Uptime:</span>
                         <strong id="statUptime" style="color: var(--text-primary); font-family: var(--font-mono);">0s</strong>
@@ -390,7 +412,7 @@
                 <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
                     <div style="font-size: 24px;">💳</div>
                     <div>
-                        <div style="display: flex; align-items: center; gap: 10px;">
+                        <div class="hud-flex-row hud-gap-md">
                             <strong style="font-size: 14px; letter-spacing: 0.5px;">SUBSCRIPTION &amp; QUOTA STATUS:</strong>
                             <span id="dashBannerPlanBadge" class="status-badge active" style="font-size: 11px; padding: 2px 10px;">FREE TIER</span>
                             <span id="dashBannerSubBadge" style="font-size: 11px; color: var(--text-dim);">ACTIVE SUBSCRIPTION</span>
@@ -411,7 +433,7 @@
             <!-- Polished Live Hardware & Cluster Telemetry Widget Cards -->
             <div class="hud-panel telemetry-widget-panel bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-gray-900 dark:text-white" style="margin-bottom: 24px;">
                 <div class="panel-header bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-800 text-gray-900 dark:text-white" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    <div class="hud-flex-row hud-gap-sm">
                         <span style="font-size: 16px;">⚡</span>
                         <h3 class="text-gray-900 dark:text-white" style="font-size: 13px; font-weight: 700; letter-spacing: 0.5px; margin: 0;">LIVE HARDWARE &amp; CLUSTER TELEMETRY</h3>
                     </div>
@@ -420,7 +442,7 @@
                 <div class="telemetry-cards-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding: 20px;">
                     <!-- CPU Utilization Widget Card -->
                     <div class="telemetry-gauge-card bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-gray-900 dark:text-white" style="border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div class="hud-flex-between">
                             <span class="text-gray-700 dark:text-slate-300" style="font-size: 12px; font-weight: 600; letter-spacing: 0.5px;">CPU UTILIZATION</span>
                             <strong class="gauge-val" id="telemCpuVal" style="font-family: var(--font-mono); font-size: 18px; color: var(--cyan-glow);">0%</strong>
                         </div>
@@ -435,7 +457,7 @@
 
                     <!-- RAM Allocation Widget Card -->
                     <div class="telemetry-gauge-card bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-gray-900 dark:text-white" style="border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div class="hud-flex-between">
                             <span class="text-gray-700 dark:text-slate-300" style="font-size: 12px; font-weight: 600; letter-spacing: 0.5px;">RAM ALLOCATION</span>
                             <strong class="gauge-val" id="telemRamVal" style="font-family: var(--font-mono); font-size: 18px; color: var(--purple-glow);">0%</strong>
                         </div>
@@ -450,7 +472,7 @@
 
                     <!-- Disk Occupancy Widget Card -->
                     <div class="telemetry-gauge-card bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-gray-900 dark:text-white" style="border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div class="hud-flex-between">
                             <span class="text-gray-700 dark:text-slate-300" style="font-size: 12px; font-weight: 600; letter-spacing: 0.5px;">DISK OCCUPANCY</span>
                             <strong class="gauge-val" id="telemDiskVal" style="font-family: var(--font-mono); font-size: 18px; color: var(--emerald-glow);">0%</strong>
                         </div>
@@ -480,7 +502,7 @@
                                     <th>Status</th>
                                     <th>Workflow Rule</th>
                                     <th>Trigger Event</th>
-                                    <th>Latency</th>
+                                    <th class="text-right num-cell">Latency</th>
                                     <th>Timestamp</th>
                                 </tr>
                             </thead>
@@ -537,7 +559,7 @@
                 </div>
             </div>
 
-            <!-- Category Filter Toolbar -->
+            <!-- Category Filter Toolbar & View Switcher -->
             <div class="panel-toolbar" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                 <div class="pill-segmented-control" id="wfCategoryPillGroup">
                     <span class="filter-label">Category:</span>
@@ -546,15 +568,26 @@
                     <button type="button" class="pill-toggle filter-chip" onclick="filterRulesCategory('Security', this)">Security</button>
                     <button type="button" class="pill-toggle filter-chip" onclick="filterRulesCategory('DevOps', this)">DevOps</button>
                     <button type="button" class="pill-toggle filter-chip" onclick="filterRulesCategory('NLP', this)">NLP</button>
-                    <button type="button" class="pill-toggle filter-chip" onclick="filterRulesCategory('Data', this)">Data</button>
+                    <button type="button" class="pill-toggle filter-chip" onclick="filterRulesCategory('Sales', this)">Sales</button>
+                    <button type="button" class="pill-toggle filter-chip" onclick="filterRulesCategory('Support', this)">Support</button>
                 </div>
-                <div class="action-group">
-                    <button class="hud-btn outline small" onclick="loadRules()" title="Refresh workflows">🔄 Refresh</button>
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <!-- Dual View Switcher (Table View vs Interactive Visual Graph) -->
+                    <div class="view-switcher-group" role="tablist" aria-label="Workflow Studio view switcher">
+                        <button type="button" class="view-switch-btn active" id="btnViewTable" onclick="setWorkflowView('table')" aria-label="Table View">
+                            <span>📋</span> Table View
+                        </button>
+                        <button type="button" class="view-switch-btn" id="btnViewGraph" onclick="setWorkflowView('graph')" aria-label="Visual Graph View">
+                            <span>🔀</span> Visual Graph
+                        </button>
+                    </div>
+                    <button class="hud-btn outline small" onclick="loadRules()" title="Refresh workflows" aria-label="Refresh workflows">🔄 Refresh</button>
                 </div>
             </div>
 
-            <div class="table-container">
-                <table class="hud-table workflow-table">
+            <!-- VIEW 1: CLASSIC TABLE VIEW (100% Preserved) -->
+            <div class="table-container" id="workflowTableView">
+                <table class="hud-table workflow-table stack-mobile">
                     <thead>
                         <tr>
                             <th style="width: 75px;">Status</th>
@@ -570,6 +603,123 @@
                         <tr><td colspan="7" class="empty-cell">Loading workflow rules...</td></tr>
                     </tbody>
                 </table>
+            </div>
+
+            <!-- VIEW 2: INTERACTIVE VISUAL GRAPH CANVAS -->
+            <div id="workflowGraphView" class="workflow-graph-wrapper" style="display: none;">
+                <!-- Graph Canvas Header & Controls -->
+                <div class="wf-graph-toolbar hud-panel">
+                    <div class="wf-toolbar-left">
+                        <label for="wfGraphRuleSelect" class="wf-toolbar-label">Select Workflow:</label>
+                        <select id="wfGraphRuleSelect" class="hud-input small wf-rule-select" onchange="onWorkflowGraphSelectChange(this.value)">
+                            <option value="">Loading workflows...</option>
+                        </select>
+                        <span id="wfGraphStatusPill" class="status-pill active" style="display: none; font-size: 11px; padding: 2px 8px;">Active</span>
+                        <span id="wfGraphCategoryPill" class="category-chip system" style="display: none; font-size: 11px;">System</span>
+                        <span id="wfGraphStepsPill" class="category-chip steps" style="display: none; font-size: 11px; background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25);">6 Steps</span>
+                    </div>
+
+                    <!-- Interactive Zoom / Pan Controls -->
+                    <div class="wf-toolbar-right">
+                        <div class="wf-zoom-group" role="group" aria-label="Canvas zoom and fit controls">
+                            <button type="button" class="hud-btn small outline wf-ctrl-btn" onclick="wfGraphZoom(0.15)" title="Zoom In (+)" aria-label="Zoom In"><span>＋</span></button>
+                            <span id="wfGraphZoomBadge" class="wf-zoom-badge" title="Current Zoom Level">100%</span>
+                            <button type="button" class="hud-btn small outline wf-ctrl-btn" onclick="wfGraphZoom(-0.15)" title="Zoom Out (-)" aria-label="Zoom Out"><span>－</span></button>
+                            <button type="button" class="hud-btn small outline wf-ctrl-btn" onclick="wfGraphFitView()" title="Fit Workflow to View" aria-label="Fit to View"><span>⛶</span> Fit</button>
+                            <button type="button" class="hud-btn small outline wf-ctrl-btn" onclick="wfGraphResetView()" title="Reset Zoom to 100%" aria-label="Reset to 100%"><span>↺</span> 100%</button>
+                        </div>
+                        <button type="button" class="hud-btn small primary wf-run-btn" onclick="runSelectedGraphWorkflow()" title="Run Selected Workflow Now" aria-label="Run Selected Workflow"><span>▶</span> Run</button>
+                    </div>
+                </div>
+
+                <!-- Color-Coded Node Legend -->
+                <div class="wf-graph-legend">
+                    <span style="color: var(--text-muted); font-weight: 600;">Node Types:</span>
+                    <span style="display: inline-flex; align-items: center; gap: 5px;"><span class="legend-dot" style="width: 10px; height: 10px; border-radius: 50%; background: #3b82f6;"></span> ⚡ Trigger</span>
+                    <span style="display: inline-flex; align-items: center; gap: 5px;"><span class="legend-dot" style="width: 10px; height: 10px; border-radius: 50%; background: #f59e0b;"></span> ⚖️ Condition</span>
+                    <span style="display: inline-flex; align-items: center; gap: 5px;"><span class="legend-dot" style="width: 10px; height: 10px; border-radius: 50%; background: #8b5cf6;"></span> 🧠 AI Action</span>
+                    <span style="display: inline-flex; align-items: center; gap: 5px;"><span class="legend-dot" style="width: 10px; height: 10px; border-radius: 50%; background: #f43f5e;"></span> 🛡️ Approval Gate</span>
+                    <span style="display: inline-flex; align-items: center; gap: 5px;"><span class="legend-dot" style="width: 10px; height: 10px; border-radius: 50%; background: #14b8a6;"></span> 🔌 Action Dispatch</span>
+                    <span style="display: inline-flex; align-items: center; gap: 5px;"><span class="legend-dot" style="width: 10px; height: 10px; border-radius: 50%; background: #10b981;"></span> 🏁 Outcome</span>
+                </div>
+
+                <!-- Graph Canvas Viewport Container (Draggable Pan & Zoomable) -->
+                <div id="wfCanvasViewport" class="wf-canvas-viewport" style="position: relative; width: 100%; height: 500px; min-height: 480px; border-radius: 10px; border: 1px solid var(--border-color); background: radial-gradient(circle, rgba(59,130,246,0.04) 1px, transparent 1px), var(--bg-card); background-size: 24px 24px; overflow: hidden; cursor: grab;">
+                    <!-- Empty State Overlay for Workspaces with 0 Rules -->
+                    <div id="wfGraphEmptyState" class="wf-graph-empty-state" style="display: none; position: absolute; inset: 0; align-items: center; justify-content: center; flex-direction: column; text-align: center; padding: 40px 20px; z-index: 5; background: radial-gradient(circle, rgba(59,130,246,0.03) 1px, transparent 1px);">
+                        <div style="font-size: 38px; margin-bottom: 12px; filter: drop-shadow(0 0 16px rgba(6,182,212,0.4));">⚡</div>
+                        <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px 0;">No Workflows in Active Workspace</h3>
+                        <p style="font-size: 12.5px; color: var(--text-secondary); max-width: 440px; margin: 0 0 16px 0; line-height: 1.5;">
+                            This workspace currently has no automated pipelines configured. Switch to Acme Global Enterprise or create a custom workflow.
+                        </p>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <button type="button" class="hud-btn primary small" onclick="openNewRuleModal()">+ Create Workflow</button>
+                            <button type="button" class="hud-btn outline small" onclick="handleWorkspaceChange('org-enterprise-default')">Switch to Acme Enterprise</button>
+                        </div>
+                    </div>
+
+                    <!-- Scalable World Layer -->
+                    <div id="wfCanvasWorld" class="wf-canvas-world" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0; transition: transform 0.05s ease-out;">
+                        <!-- SVG Layer for Bezier Connector Arrows -->
+                        <svg id="wfGraphSvgLayer" style="position: absolute; top: 0; left: 0; width: 4000px; height: 4000px; pointer-events: none; z-index: 1;">
+                            <defs>
+                                <marker id="wfArrowMarker" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
+                                </marker>
+                                <marker id="wfArrowMarkerSuccess" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981" />
+                                </marker>
+                                <marker id="wfArrowMarkerAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#f59e0b" />
+                                </marker>
+                            </defs>
+                        </svg>
+                        <!-- HTML Nodes Layer -->
+                        <div id="wfGraphNodesLayer" style="position: absolute; top: 0; left: 0; width: 4000px; height: 4000px; z-index: 2; pointer-events: auto;">
+                            <!-- Node cards dynamically rendered by JavaScript -->
+                        </div>
+                    </div>
+
+                    <!-- Canvas Hint / Navigation Helper Overlay (Bottom Left) -->
+                    <div class="wf-canvas-helper-hint" style="position: absolute; bottom: 12px; left: 14px; padding: 6px 12px; border-radius: 6px; font-size: 11px; pointer-events: none; display: flex; align-items: center; gap: 8px;">
+                        <span>🖱️ Drag to pan</span>
+                        <span>•</span>
+                        <span>🔍 Scroll to zoom</span>
+                        <span>•</span>
+                        <span>👆 Click node for details</span>
+                    </div>
+
+                    <!-- Interactive Mini-Map Radar Overlay (Bottom Right) -->
+                    <div id="wfMinimapContainer" class="wf-minimap-container" style="position: absolute; bottom: 12px; right: 14px; z-index: 10; background: rgba(11, 17, 32, 0.90); backdrop-filter: blur(8px); border: 1px solid var(--border-color); border-radius: 8px; padding: 6px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 4px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 2px;">
+                            <span style="font-size: 9.5px; font-family: var(--font-mono); font-weight: 700; color: var(--cyan-glow); letter-spacing: 0.5px; text-transform: uppercase;">Radar Mini-Map</span>
+                            <button type="button" id="btnToggleMinimap" onclick="toggleWfMinimap()" style="background: none; border: none; font-size: 11px; cursor: pointer; color: var(--text-muted); padding: 0 2px; line-height: 1;" title="Collapse/Expand Mini-map">▾</button>
+                        </div>
+                        <div id="wfMinimapWrapper" style="position: relative; width: 160px; height: 90px; border-radius: 4px; overflow: hidden; background: rgba(0, 0, 0, 0.45); border: 1px solid var(--border-subtle); cursor: crosshair;" title="Click radar to jump to location">
+                            <canvas id="wfMinimapCanvas" width="160" height="90" style="display: block; width: 100%; height: 100%;"></canvas>
+                            <div id="wfMinimapViewportRect" style="position: absolute; top: 0; left: 0; width: 40px; height: 30px; border: 1.5px solid var(--cyan-glow); background: rgba(6, 182, 212, 0.12); pointer-events: none; border-radius: 2px; transition: all 0.05s ease-out;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Node Details Modal / Inspection Drawer -->
+                <div id="wfNodeDetailModal" class="hud-modal" style="display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); align-items: center; justify-content: center;">
+                    <div class="hud-panel modal-card" style="width: 540px; max-width: 90vw; background: var(--bg-panel); border: 1px solid var(--border-highlight); border-radius: 12px; padding: 24px; box-shadow: var(--shadow-glow);">
+                        <div class="hud-flex-between hud-mb-lg">
+                            <h3 id="wfModalNodeTitle" style="font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px; margin: 0;">
+                                <span id="wfModalNodeIcon">⚡</span>
+                                <span id="wfModalNodeName">Node Details</span>
+                            </h3>
+                            <button type="button" class="close-btn" onclick="closeWfNodeModal()" style="background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--text-muted);">&times;</button>
+                        </div>
+                        <div id="wfModalNodeBody" style="font-size: 13px; line-height: 1.6; color: var(--text-secondary); max-height: 60vh; overflow-y: auto;">
+                            <!-- Populated dynamically -->
+                        </div>
+                        <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                            <button type="button" class="hud-btn outline small" onclick="closeWfNodeModal()">Close</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -599,9 +749,9 @@
                                     <th>SECURITY</th>
                                     <th>INGESTION ENDPOINT (1-CLICK COPY)</th>
                                     <th>TARGET RULE</th>
-                                    <th>TRAFFIC</th>
+                                    <th class="text-center num-cell">TRAFFIC</th>
                                     <th>LAST RECEIVED</th>
-                                    <th>ACTIONS</th>
+                                    <th class="text-right">ACTIONS</th>
                                 </tr>
                             </thead>
                             <tbody id="webhooksTableBody">
@@ -710,7 +860,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 <div class="wa-sidebar">
                     <!-- Sidebar Top Bar -->
                     <div class="wa-sidebar-header">
-                        <div style="display: flex; align-items: center; gap: 10px;">
+                        <div class="hud-flex-row hud-gap-md">
                             <div style="width: 36px; height: 36px; border-radius: 50%; background: #00a884; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #fff; font-weight: 700; user-select: none;">
                                 💬
                             </div>
@@ -760,7 +910,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                                 </div>
                             </div>
                         </div>
-                        <div id="waActiveChatActions" style="display: flex; align-items: center; gap: 8px;">
+                        <div id="waActiveChatActions" class="hud-flex-row hud-gap-sm">
                             <div class="ai-auto-responder-pill" id="waHeaderAiToggle" onclick="toggleWhatsAppAiAutoResponder()" title="Toggle AI Auto-Responder for Active Workspace">
                                 <span class="ai-pill-dot" id="waHeaderAiDot"></span>
                                 <span>AI Auto-Responder</span>
@@ -903,7 +1053,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label style="font-size: 12px; margin-bottom: 4px; display: block;">Recipient Phone Number *</label>
                             <input type="text" id="waRecipientPhone" class="hud-input" required placeholder="+923001234567 or 03001234567" style="width: 100%;">
-                            <span style="font-size: 11px; color: var(--text-dim, #888);">Supports international E.164 and Pakistani local numbers (03xx auto-converts to +923xx)</span>
+                            <span class="hud-subtext">Supports international E.164 and Pakistani local numbers (03xx auto-converts to +923xx)</span>
                         </div>
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label style="font-size: 12px; margin-bottom: 4px; display: block;">Message Type</label>
@@ -938,13 +1088,13 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 <div class="hud-panel flex-2">
                     <div class="panel-header">
                         <h3>💬 WHATSAPP CONVERSATION &amp; AUDIT LOG</h3>
-                        <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="hud-flex-row hud-gap-sm">
                             <span id="waMessageCountBadge" style="font-size: 12px; color: var(--text-dim, #888);">0 messages</span>
                             <button type="button" class="hud-btn secondary small" id="btnSyncWhatsApp" onclick="syncWhatsAppMessagesNow()" style="padding: 2px 8px; font-size: 11px;">🔄 Sync Now</button>
                         </div>
                     </div>
                     <div class="table-container">
-                        <table class="hud-table">
+                        <table class="hud-table stack-mobile">
                             <thead>
                                 <tr>
                                     <th>Direction</th>
@@ -961,6 +1111,86 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                         </table>
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <!-- TAB: TARGETED OUTBOUND CAMPAIGNS & BROADCASTS -->
+        <section id="tab-campaigns" class="tab-panel">
+            <div class="panel-header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+                <div>
+                    <div class="hud-flex-row hud-gap-md">
+                        <span style="font-size: 24px;">📢</span>
+                        <h2 style="margin: 0; font-size: 20px; font-weight: 700;">Multi-Audience Campaigns &amp; Targeted Broadcasts</h2>
+                    </div>
+                    <p style="color: var(--text-secondary); margin: 4px 0 0 0; font-size: 13px;">
+                        Target customers, team members, or custom departments with personalized WhatsApp announcements, verified opt-outs, and live delivery receipts.
+                    </p>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="hud-btn outline small" onclick="openConsentRegistryModal()">🛡️ Opt-Out Registry</button>
+                    <button class="hud-btn outline small" onclick="openTemplatesModal()">📋 Templates</button>
+                    <button class="hud-btn outline small" onclick="openAiDraftModal()">🤖 AI Draft Assistant</button>
+                    <button class="hud-btn outline small" onclick="loadCampaignsDashboard()">🔄 Refresh</button>
+                    <button class="hud-btn primary small" onclick="openNewCampaignModal()">+ New Campaign</button>
+                </div>
+            </div>
+
+            <!-- Campaign Health & Performance KPI Metrics -->
+            <div class="telemetry-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 22px;">
+                <div class="hud-card" style="padding: 16px;">
+                    <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Total Campaigns</div>
+                    <div style="font-size: 26px; font-weight: 700; color: #fff; margin-top: 4px;" id="cmpStatTotal">0</div>
+                    <div style="font-size: 11.5px; color: var(--cyan-glow, #00f0ff); margin-top: 2px;">Active &amp; completed</div>
+                </div>
+                <div class="hud-card" style="padding: 16px;">
+                    <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Messages Dispatched</div>
+                    <div style="font-size: 26px; font-weight: 700; color: #10b981; margin-top: 4px;" id="cmpStatDispatched">0</div>
+                    <div style="font-size: 11.5px; color: var(--text-dim, #888); margin-top: 2px;">Outbound provider sends</div>
+                </div>
+                <div class="hud-card" style="padding: 16px;">
+                    <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Verified Deliveries</div>
+                    <div style="font-size: 26px; font-weight: 700; color: #3b82f6; margin-top: 4px;" id="cmpStatDelivered">0</div>
+                    <div style="font-size: 11.5px; color: #60a5fa; margin-top: 2px;">Provider receipt confirmed</div>
+                </div>
+                <div class="hud-card" style="padding: 16px;">
+                    <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Opt-Out Suppressions</div>
+                    <div style="font-size: 26px; font-weight: 700; color: #f87171; margin-top: 4px;" id="cmpStatOptOut">0</div>
+                    <div style="font-size: 11.5px; color: #fca5a5; margin-top: 2px;">STOP compliance honored</div>
+                </div>
+            </div>
+
+            <!-- Toolbar & Filter -->
+            <div class="panel-toolbar hud-flex-between hud-mb-lg">
+                <div class="filter-group">
+                    <span class="filter-label">Filter:</span>
+                    <button class="filter-chip active" onclick="filterCampaigns('all', this)">All</button>
+                    <button class="filter-chip" onclick="filterCampaigns('pending_approval', this)">Pending Approval</button>
+                    <button class="filter-chip" onclick="filterCampaigns('scheduled', this)">Scheduled</button>
+                    <button class="filter-chip" onclick="filterCampaigns('processing', this)">Processing</button>
+                    <button class="filter-chip" onclick="filterCampaigns('completed', this)">Completed</button>
+                </div>
+                <div style="width: 260px;">
+                    <input type="text" id="cmpSearchInput" class="hud-input" placeholder="Search campaigns..." oninput="handleCampaignSearch(this.value)" style="width: 100%; font-size: 12px; padding: 6px 12px;">
+                </div>
+            </div>
+
+            <!-- Campaigns Table -->
+            <div class="table-container">
+                <table class="hud-table">
+                    <thead>
+                        <tr>
+                            <th>Campaign Title &amp; Channel</th>
+                            <th>Target Audience</th>
+                            <th>Status</th>
+                            <th>Delivery Progress</th>
+                            <th>Timing / Scheduled</th>
+                            <th style="text-align: right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="campaignsTableBody">
+                        <tr><td colspan="6" class="empty-cell">Loading campaigns...</td></tr>
+                    </tbody>
+                </table>
             </div>
         </section>
 
@@ -1102,16 +1332,16 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 </div>
 
                 <div class="table-container">
-                    <table class="hud-table">
+                    <table class="hud-table stack-mobile">
                         <thead>
                             <tr>
                                 <th>Execution ID</th>
                                 <th>Workflow Rule</th>
                                 <th>Trigger Event</th>
                                 <th>Status</th>
-                                <th>Execution Latency</th>
+                                <th class="text-right num-cell">Execution Latency</th>
                                 <th>Timestamp</th>
-                                <th>Inspect</th>
+                                <th class="text-right">Inspect</th>
                             </tr>
                         </thead>
                         <tbody id="logsTableBody">
@@ -1133,16 +1363,16 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 </div>
 
                 <div class="table-container">
-                    <table class="hud-table">
+                    <table class="hud-table stack-mobile">
                         <thead>
                             <tr>
                                 <th>DLQ ID</th>
                                 <th>Workflow Name</th>
                                 <th>Trigger Event</th>
                                 <th>Error Diagnostics</th>
-                                <th>Retries</th>
+                                <th class="text-center num-cell">Retries</th>
                                 <th>Quarantined At</th>
-                                <th>Actions</th>
+                                <th class="text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="dlqTableBody">
@@ -1164,7 +1394,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 </div>
 
                 <div class="table-container">
-                    <table class="hud-table">
+                    <table class="hud-table stack-mobile">
                         <thead>
                             <tr>
                                 <th>Job ID</th>
@@ -1173,7 +1403,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                                 <th>Step Progress</th>
                                 <th>Started At</th>
                                 <th>Completed At</th>
-                                <th>Actions</th>
+                                <th class="text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="jobsTableBody">
@@ -1204,6 +1434,139 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
             </div>
         </section>
 
+        <!-- TAB: COMPANY MESSAGING COMMAND CENTER -->
+        <section id="tab-company-messaging" class="tab-panel">
+            <!-- Priority Operational Broadcast Banner (Conditional / Dynamic) -->
+            <div id="cmBroadcastBannerContainer" style="display: none; margin-bottom: 16px;">
+                <div class="cm-broadcast-banner" id="cmBroadcastBannerCard">
+                    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
+                        <div style="display: flex; align-items: flex-start; gap: 12px; flex: 1;">
+                            <div class="cm-broadcast-icon" id="cmBroadcastIcon" style="font-size: 26px;">🚨</div>
+                            <div style="flex: 1;">
+                                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;">
+                                    <span class="status-pill red" id="cmBroadcastSeverityBadge" style="font-size: 11px;">CRITICAL BROADCAST</span>
+                                    <span style="font-weight: 700; font-size: 14px; color: #fff;" id="cmBroadcastTitleText">Title</span>
+                                    <span class="hud-subtext" id="cmBroadcastSenderText">by Admin • 5m ago</span>
+                                </div>
+                                <div style="font-size: 13px; color: var(--text-secondary, #cbd5e1); line-height: 1.4;" id="cmBroadcastBodyText">Message</div>
+                            </div>
+                        </div>
+                        <div id="cmBroadcastAckContainer" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                            <button type="button" class="hud-btn primary small" id="cmBtnAckBroadcast" onclick="acknowledgeActiveBroadcast()">
+                                ✍️ Acknowledge Broadcast
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Command Center Dual Pane Interface -->
+            <div class="cm-container" style="display: flex; height: calc(100vh - 210px); min-height: 600px; border-radius: 10px; border: 1px solid var(--border-color, #2a2e3d); background: #0b0f17; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.4);">
+                <!-- LEFT SIDEBAR: Channels & Overview -->
+                <div class="cm-sidebar" style="width: 320px; border-right: 1px solid var(--border-color, #2a2e3d); background: #0f1422; display: flex; flex-direction: column;">
+                    <!-- Sidebar Top Header -->
+                    <div style="padding: 14px 16px; border-bottom: 1px solid var(--border-color, #2a2e3d); display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.02);">
+                        <div class="hud-flex-row hud-gap-md">
+                            <span style="font-size: 20px;">📢</span>
+                            <div>
+                                <div style="font-weight: 700; font-size: 13.5px; color: #fff;">Internal Channels</div>
+                                <div id="cmWorkspaceTenantLabel" style="font-size: 11px; color: var(--cyan-glow, #00f0ff); font-family: var(--font-mono);">Acme Global</div>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <button type="button" class="hud-btn outline small" title="Refresh Channels" onclick="loadCompanyMessagingDashboard()" style="padding: 4px 8px; font-size: 12px;">🔄</button>
+                            <button type="button" class="hud-btn primary small" title="Create Channel" onclick="openCreateChannelModal()" style="padding: 4px 8px; font-size: 12px;">+ Channel</button>
+                        </div>
+                    </div>
+
+                    <!-- Channel Filter / Search Bar -->
+                    <div style="padding: 8px 12px; border-bottom: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.2);">
+                        <div style="background: rgba(255,255,255,0.05); border-radius: 6px; display: flex; align-items: center; padding: 6px 10px; gap: 6px; border: 1px solid var(--border-color, #2a2e3d);">
+                            <span style="color: var(--text-dim, #888); font-size: 12px;">🔍</span>
+                            <input type="text" id="cmChannelSearchInput" placeholder="Filter channels..." oninput="filterCompanyChannels(this.value)" style="background: transparent; border: none; outline: none; color: #fff; font-size: 12px; width: 100%;">
+                        </div>
+                    </div>
+
+                    <!-- Broadcasts Trigger Action -->
+                    <div style="padding: 10px 14px; border-bottom: 1px solid var(--border-color, #2a2e3d); background: rgba(239, 68, 68, 0.04); display: flex; align-items: center; justify-content: space-between;">
+                        <span style="font-size: 11px; font-weight: 600; color: #f87171; text-transform: uppercase; letter-spacing: 0.5px;">Tenant Broadcasts</span>
+                        <button type="button" class="hud-btn small outline" onclick="openCreateBroadcastModal()" style="font-size: 11px; padding: 2px 8px; border-color: rgba(239,68,68,0.4); color: #fca5a5;">+ Dispatch</button>
+                    </div>
+
+                    <!-- Channel List Stream -->
+                    <div id="cmChannelList" style="flex: 1; overflow-y: auto; padding: 8px 0;">
+                        <div style="padding: 30px 16px; text-align: center; color: var(--text-dim, #888); font-size: 12px;">
+                            Loading company channels...
+                        </div>
+                    </div>
+
+                    <!-- Workspace Stats Footer -->
+                    <div style="padding: 12px 14px; border-top: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.25); display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-dim, #888);">
+                        <span id="cmChannelCountText">0 Channels</span>
+                        <span id="cmActiveRoleBadge" class="status-pill blue" style="font-size: 10px; padding: 2px 6px;">Role: operator</span>
+                    </div>
+                </div>
+
+                <!-- RIGHT MAIN CHAT PANE -->
+                <div class="cm-main-pane" style="flex: 1; display: flex; flex-direction: column; background: #0b0f17;">
+                    <!-- Active Channel Header -->
+                    <div id="cmActiveChannelHeader" style="padding: 14px 20px; border-bottom: 1px solid var(--border-color, #2a2e3d); background: #0e1320; display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                            <div style="font-size: 22px; font-weight: bold; color: var(--cyan-glow, #00f0ff);" id="cmActiveChannelIcon">#</div>
+                            <div style="min-width: 0;">
+                                <div class="hud-flex-row hud-gap-sm">
+                                    <span id="cmActiveChannelName" style="font-size: 15px; font-weight: 700; color: #fff;">#general</span>
+                                    <span id="cmActiveChannelTypeBadge" class="status-pill green" style="font-size: 10px;">PUBLIC</span>
+                                </div>
+                                <div id="cmActiveChannelDesc" style="font-size: 11.5px; color: var(--text-dim, #888); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;">
+                                    General company-wide discussion and team announcements.
+                                </div>
+                            </div>
+                        </div>
+                        <div id="cmActiveChannelActions" class="hud-flex-row hud-gap-sm">
+                            <button type="button" class="hud-btn outline small" id="cmBtnArchiveChannel" onclick="archiveCurrentChannel()" title="Archive Channel (Admin only)" style="display: none; border-color: rgba(239,68,68,0.4); color: #fca5a5;">
+                                📦 Archive Channel
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Messages Stream Container -->
+                    <div id="cmMessageStream" style="flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; background: radial-gradient(circle at 50% 0%, rgba(16, 185, 129, 0.02), transparent 70%);">
+                        <div style="padding: 60px 20px; text-align: center; color: var(--text-dim, #888); font-size: 13px;">
+                            Select a channel from the left to start messaging.
+                        </div>
+                    </div>
+
+                    <!-- Composer Toolbar & Input Area -->
+                    <div id="cmComposerArea" style="padding: 12px 18px; border-top: 1px solid var(--border-color, #2a2e3d); background: #0e1320;">
+                        <!-- Input Control Sub-bar -->
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                            <div class="hud-flex-row hud-gap-sm">
+                                <label style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600;">Priority:</label>
+                                <select id="cmMessagePrioritySelect" class="hud-select" style="font-size: 11.5px; padding: 3px 8px; width: auto; height: 26px;">
+                                    <option value="normal">Normal</option>
+                                    <option value="urgent">🔥 Urgent</option>
+                                    <option value="critical">🚨 Critical (War-Room)</option>
+                                </select>
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-dim, #64748b);">
+                                Enter to send &bull; Shift+Enter for newline
+                            </div>
+                        </div>
+
+                        <!-- Textarea & Send Button -->
+                        <div style="display: flex; gap: 10px; align-items: flex-end;">
+                            <textarea id="cmMessageInput" class="hud-input" rows="2" placeholder="Message #general..." onkeydown="handleCmMessageKeydown(event)" style="flex: 1; resize: none; font-size: 13px; line-height: 1.4; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color, #2a2e3d); color: #fff;"></textarea>
+                            <button type="button" class="hud-btn primary" id="cmBtnSendMessage" onclick="sendCompanyMessage()" style="padding: 12px 18px; height: 100%; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <span>Send</span>
+                                <span>➤</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- TAB 8: API KEYS & SECURITY -->
         <section id="tab-apikeys" class="tab-panel">
             <div class="panel-header">
@@ -1224,7 +1587,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                             <th>Permissions</th>
                             <th>Created At</th>
                             <th>Last Used</th>
-                            <th>Action</th>
+                            <th class="text-right">Action</th>
                         </tr>
                     </thead>
                     <tbody id="apiKeysTableBody">
@@ -1269,7 +1632,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                                 <th>Email</th>
                                 <th>Role</th>
                                 <th>Created</th>
-                                <th>Actions</th>
+                                <th class="text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="teamMembersTableBody">
@@ -1336,7 +1699,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
 
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; background: rgba(255,255,255,0.02); border-radius: 8px; flex-wrap: wrap; gap: 14px;">
                         <div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
+                            <div class="hud-flex-row hud-gap-sm">
                                 <strong style="font-size: 14px;" id="billingPlanName">Current Plan: Enterprise ($499/mo)</strong>
                                 <span id="billingStatusBadge" class="status-badge active" style="font-size: 10px;">ACTIVE SUBSCRIPTION</span>
                             </div>
@@ -1608,14 +1971,14 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
             <!-- CARD 1: MULTI-TENANT WORKSPACE & BRAND PROFILE (GLASSMORPHISM) -->
             <div class="glass-card glass-glow-cyan" style="margin-bottom: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px; margin-bottom: 16px;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
+                    <div class="hud-flex-row hud-gap-md">
                         <span style="font-size: 24px;">🏢</span>
                         <div>
                             <h3 style="margin: 0; font-size: 1.1rem; color: var(--text-primary);">Tenant Workspace Identity &amp; White-Label Isolation</h3>
                             <span style="font-size: 11px; color: var(--text-secondary);">Tenant-scoped isolation with dedicated webhook ingress and cryptographic API keys</span>
                         </div>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 10px;">
+                    <div class="hud-flex-row hud-gap-md">
                         <label style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Active Workspace:</label>
                         <select id="settingsWorkspaceSelect" class="hud-select glass-input" style="min-width: 220px;" onchange="handleWorkspaceChange(this.value)">
                             <option value="org-enterprise-default">Acme Enterprise Global</option>
@@ -1658,7 +2021,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
             <!-- CARD 2: MULTI-TENANT AI AUTO-RESPONDER SUITE (GLASSMORPHISM) -->
             <div class="glass-card glass-glow-emerald" style="margin-bottom: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
+                    <div class="hud-flex-row hud-gap-md">
                         <span style="font-size: 24px;">🤖</span>
                         <div>
                             <h3 style="margin: 0; font-size: 1.1rem; color: #34d399;">Autonomous AI Auto-Responder Suite</h3>
@@ -1729,7 +2092,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 <!-- INTERACTIVE LIVE AI AUTO-RESPONDER SANDBOX PREVIEW -->
                 <div class="ai-preview-box" style="margin-top: 20px;">
                     <div class="ai-preview-header">
-                        <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="hud-flex-row hud-gap-sm">
                             <span style="font-size: 18px;">🧪</span>
                             <strong style="color: #06b6d4; font-size: 13px;">Interactive AI Response Simulator &amp; Sandbox</strong>
                         </div>
@@ -1745,7 +2108,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                     <div style="margin-bottom: 12px;">
                         <textarea id="arSandboxMessage" class="hud-textarea glass-input" rows="2" placeholder="e.g. Hi OpsFlow, we want a demo of your automated workflows for our banking operations and need Enterprise pricing.">Hi OpsFlow, we want a demo of your automated workflows for our banking operations and need Enterprise pricing.</textarea>
                     </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div class="hud-flex-between">
                         <button type="button" class="hud-btn small outline" onclick="runArSandboxSimulation()">
                             <span>⚡</span> Simulate AI Response
                         </button>
@@ -1769,14 +2132,14 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
             <!-- CARD 3: MULTI-TENANT WHATSAPP GATEWAY & INSTANCE ROUTING (GLASSMORPHISM) -->
             <div class="glass-card glass-glow-purple" style="margin-bottom: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
+                    <div class="hud-flex-row hud-gap-md">
                         <span style="font-size: 24px;">💬</span>
                         <div>
                             <h3 style="margin: 0; font-size: 1.1rem; color: #c084fc;">Multi-Tenant WhatsApp Gateways &amp; Instance Routing</h3>
                             <span style="font-size: 11px; color: var(--text-secondary);">Route incoming WhatsApp phone numbers and Green-API instance IDs to dedicated workspaces</span>
                         </div>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    <div class="hud-flex-row hud-gap-sm">
                         <button type="button" class="hud-btn outline small" onclick="openWhatsAppConnectGuide()">
                             <span>⚙️</span> Gateway Credentials
                         </button>
@@ -1799,7 +2162,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                                     <th>Instance ID / Phone ID</th>
                                     <th>Routed Workspace (Org ID)</th>
                                     <th>Provider</th>
-                                    <th>Actions</th>
+                                    <th class="text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="settingsInstanceMappingsTbody">
@@ -1987,17 +2350,17 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
 
             <!-- Leads Table -->
             <div class="table-container">
-                <table class="hud-table" id="leadsTable">
+                <table class="hud-table stack-mobile" id="leadsTable">
                     <thead>
                         <tr>
                             <th>CONTACT / COMPANY</th>
                             <th>INQUIRY MESSAGE</th>
                             <th>AI INTENT</th>
-                            <th>LEAD SCORE</th>
+                            <th class="text-center num-cell">LEAD SCORE</th>
                             <th>ROUTED DEPT</th>
                             <th>STATUS</th>
                             <th>RECEIVED</th>
-                            <th>ACTIONS</th>
+                            <th class="text-right">ACTIONS</th>
                         </tr>
                     </thead>
                     <tbody id="leadsTableBody">
@@ -2456,7 +2819,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
     <div class="hud-modal-overlay" id="whatsappConnectModal" style="display:none;">
         <div class="hud-modal" style="max-width: 620px;">
             <div class="modal-header">
-                <div style="display: flex; align-items: center; gap: 8px;">
+                <div class="hud-flex-row hud-gap-sm">
                     <span style="font-size: 20px;">💬</span>
                     <h3 id="waConnectModalTitle">WhatsApp Business Gateway Configuration</h3>
                 </div>
@@ -2486,68 +2849,68 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                             <strong>Green-API Fast Setup:</strong> Copy your <code>idInstance</code> and <code>apiTokenInstance</code> from your Green-API console. No Meta app review required!
                         </div>
 
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Instance ID (idInstance) *</label>
-                            <input type="text" id="waConfigGreenId" class="hud-input" placeholder="e.g., 1101820000" style="width: 100%; font-family: var(--font-mono);">
-                            <span style="font-size: 11px; color: var(--text-dim, #888);">Found in Green-API Instance Dashboard</span>
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">Instance ID (idInstance) *</label>
+                            <input type="text" id="waConfigGreenId" class="hud-input hud-mono-text" placeholder="e.g., 1101820000">
+                            <span class="hud-subtext">Found in Green-API Instance Dashboard</span>
                         </div>
 
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">API Token Instance (apiTokenInstance) *</label>
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">API Token Instance (apiTokenInstance) *</label>
                             <div style="display: flex; gap: 6px;">
-                                <input type="password" id="waConfigGreenToken" class="hud-input" placeholder="e.g., d75b3a8c1f9e2..." style="flex: 1; font-family: var(--font-mono);">
+                                <input type="password" id="waConfigGreenToken" class="hud-input hud-mono-text" placeholder="e.g., d75b3a8c1f9e2..." style="flex: 1;">
                                 <button type="button" class="hud-btn small outline" onclick="toggleGreenTokenVisibility()">Show</button>
                             </div>
-                            <span style="font-size: 11px; color: var(--text-dim, #888);">Secret instance API token for outbound messages &amp; webhook authorization</span>
+                            <span class="hud-subtext">Secret instance API token for outbound messages &amp; webhook authorization</span>
                         </div>
 
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">API Host URL</label>
-                            <input type="text" id="waConfigGreenHost" class="hud-input" value="https://api.greenapi.com" placeholder="https://api.greenapi.com" style="width: 100%; font-family: var(--font-mono);">
-                            <span style="font-size: 11px; color: var(--text-dim, #888);">Default: <code>https://api.greenapi.com</code> (or custom cluster e.g. <code>https://7103.api.greenapi.com</code>)</span>
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">API Host URL</label>
+                            <input type="text" id="waConfigGreenHost" class="hud-input hud-mono-text" value="https://api.greenapi.com" placeholder="https://api.greenapi.com">
+                            <span class="hud-subtext">Default: <code>https://api.greenapi.com</code> (or custom cluster e.g. <code>https://7103.api.greenapi.com</code>)</span>
                         </div>
 
-                        <div class="form-group" style="margin-bottom: 16px;">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Green-API Webhook Callback URL</label>
+                        <div class="form-group hud-mb-lg">
+                            <label class="hud-label">Green-API Webhook Callback URL</label>
                             <div style="display: flex; gap: 6px;">
                                 <input type="text" id="waModalGreenWebhookUrl" class="hud-input" readonly value="/api/v1/webhooks/whatsapp/green-api" style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px; background: rgba(0,0,0,0.25);">
                                 <button type="button" class="hud-btn small outline" onclick="copyModalGreenWebhookUrl()">Copy</button>
                             </div>
-                            <span style="font-size: 11px; color: var(--text-dim, #888);">Paste this URL into your Green-API console under <em>Webhook &gt; Set Webhook</em> to receive real-time chats!</span>
+                            <span class="hud-subtext">Paste this URL into your Green-API console under <em>Webhook &gt; Set Webhook</em> to receive real-time chats!</span>
                         </div>
                     </div>
 
                     <!-- META CLOUD API CONFIGURATION SECTION -->
                     <div id="waMetaConfigSection" style="display: none;">
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Phone Number ID *</label>
-                            <input type="text" id="waConfigPhoneId" class="hud-input" placeholder="e.g., 109283746509876" style="width: 100%; font-family: var(--font-mono);">
-                            <span style="font-size: 11px; color: var(--text-dim, #888);">Found in Meta App Dashboard &gt; WhatsApp &gt; API Setup</span>
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">Phone Number ID *</label>
+                            <input type="text" id="waConfigPhoneId" class="hud-input hud-mono-text" placeholder="e.g., 109283746509876">
+                            <span class="hud-subtext">Found in Meta App Dashboard &gt; WhatsApp &gt; API Setup</span>
                         </div>
 
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">System User Access Token *</label>
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">System User Access Token *</label>
                             <div style="display: flex; gap: 6px;">
-                                <input type="password" id="waConfigAccessToken" class="hud-input" placeholder="EAAG..." style="flex: 1; font-family: var(--font-mono);">
+                                <input type="password" id="waConfigAccessToken" class="hud-input hud-mono-text" placeholder="EAAG..." style="flex: 1;">
                                 <button type="button" class="hud-btn small outline" onclick="toggleWaConfigTokenVisibility()">Show</button>
                             </div>
-                            <span style="font-size: 11px; color: var(--text-dim, #888);">Permanent System User access token with whatsapp_business_messaging permission</span>
+                            <span class="hud-subtext">Permanent System User access token with whatsapp_business_messaging permission</span>
                         </div>
 
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                             <div class="form-group">
-                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">WABA ID (Account ID)</label>
-                                <input type="text" id="waConfigWabaId" class="hud-input" placeholder="e.g., 987654321012345" style="width: 100%; font-family: var(--font-mono);">
+                                <label class="hud-label">WABA ID (Account ID)</label>
+                                <input type="text" id="waConfigWabaId" class="hud-input hud-mono-text" placeholder="e.g., 987654321012345">
                             </div>
                             <div class="form-group">
-                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Meta App Secret</label>
-                                <input type="password" id="waConfigAppSecret" class="hud-input" placeholder="App Secret for Webhook HMAC" style="width: 100%; font-family: var(--font-mono);">
+                                <label class="hud-label">Meta App Secret</label>
+                                <input type="password" id="waConfigAppSecret" class="hud-input hud-mono-text" placeholder="App Secret for Webhook HMAC">
                             </div>
                         </div>
 
-                        <div class="form-group" style="margin-bottom: 16px;">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Webhook Verify Token</label>
-                            <input type="text" id="waConfigVerifyToken" class="hud-input" value="opsflow_whatsapp_verify_2026" style="width: 100%; font-family: var(--font-mono);">
+                        <div class="form-group hud-mb-lg">
+                            <label class="hud-label">Webhook Verify Token</label>
+                            <input type="text" id="waConfigVerifyToken" class="hud-input hud-mono-text" value="opsflow_whatsapp_verify_2026">
                         </div>
                     </div>
 
@@ -2680,7 +3043,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
     <div class="hud-modal-overlay" id="checkoutConfirmationModal" style="display:none;">
         <div class="hud-modal" style="max-width: 520px;">
             <div class="modal-header">
-                <div style="display: flex; align-items: center; gap: 8px;">
+                <div class="hud-flex-row hud-gap-sm">
                     <span style="font-size: 20px;">💳</span>
                     <h3 id="checkoutModalTitle">Complete Workspace Upgrade</h3>
                 </div>
@@ -2709,22 +3072,22 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 <!-- CARD FORM -->
                 <form id="practicalCheckoutForm" onsubmit="handlePracticalCheckoutSubmit(event)">
                     <div id="checkoutCardFields">
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Cardholder Name</label>
-                            <input type="text" id="checkoutCardName" class="hud-input" required placeholder="Alexander Wright" style="width: 100%;">
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">Cardholder Name</label>
+                            <input type="text" id="checkoutCardName" class="hud-input" required placeholder="Alexander Wright">
                         </div>
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Card Number</label>
-                            <input type="text" id="checkoutCardNumber" class="hud-input" required placeholder="•••• •••• •••• 4242" value="4242 •••• •••• 4242" style="width: 100%; font-family: var(--font-mono);">
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">Card Number</label>
+                            <input type="text" id="checkoutCardNumber" class="hud-input hud-mono-text" required placeholder="•••• •••• •••• 4242" value="4242 •••• •••• 4242">
                         </div>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
                             <div class="form-group">
-                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Expiration Date</label>
-                                <input type="text" id="checkoutCardExp" class="hud-input" required placeholder="MM/YY" value="12/28" style="width: 100%; font-family: var(--font-mono);">
+                                <label class="hud-label">Expiration Date</label>
+                                <input type="text" id="checkoutCardExp" class="hud-input hud-mono-text" required placeholder="MM/YY" value="12/28">
                             </div>
                             <div class="form-group">
-                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">CVC / Security Code</label>
-                                <input type="password" id="checkoutCardCvc" class="hud-input" required placeholder="•••" value="123" maxlength="4" style="width: 100%; font-family: var(--font-mono);">
+                                <label class="hud-label">CVC / Security Code</label>
+                                <input type="password" id="checkoutCardCvc" class="hud-input hud-mono-text" required placeholder="•••" value="123" maxlength="4">
                             </div>
                         </div>
                     </div>
@@ -2754,9 +3117,9 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
 
                         <!-- Transaction ID (TID) Input Field -->
                         <div class="form-group" style="margin-bottom: 14px;">
-                            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">JazzCash Transaction ID (TID) / Reference No. *</label>
+                            <label class="hud-label">JazzCash Transaction ID (TID) / Reference No. *</label>
                             <input type="text" id="checkoutJazzCashTid" class="hud-input" placeholder="e.g., 109283746501" style="width: 100%; font-family: var(--font-mono); font-size: 14px; letter-spacing: 0.5px; font-weight: 600;" maxlength="16">
-                            <span style="font-size: 11px; color: var(--text-dim, #888);">Enter the 10 to 12 digit Transaction ID (TID) received in your JazzCash confirmation SMS</span>
+                            <span class="hud-subtext">Enter the 10 to 12 digit Transaction ID (TID) received in your JazzCash confirmation SMS</span>
                         </div>
 
                         <!-- Advanced Direct MPIN / Hosted Portal Option (Accordion / Collapsible) -->
@@ -2997,7 +3360,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
     <div class="hud-modal-overlay" id="onboardingWizardModal" style="display:none;">
         <div class="hud-modal" style="max-width: 680px;">
             <div class="modal-header" style="background: linear-gradient(135deg, rgba(16,185,129,0.15), rgba(0,240,255,0.15));">
-                <div style="display: flex; align-items: center; gap: 10px;">
+                <div class="hud-flex-row hud-gap-md">
                     <span style="font-size: 24px;">🚀</span>
                     <div>
                         <h3 id="onboardingWizardTitle" style="color: #10b981; margin: 0;">Welcome to OpsFlow Cloud!</h3>
@@ -3129,7 +3492,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
     <div class="hud-modal-overlay" id="executionConsoleModal" style="display:none;">
         <div class="hud-modal" style="max-width: 760px;">
             <div class="modal-header">
-                <div style="display: flex; align-items: center; gap: 10px;">
+                <div class="hud-flex-row hud-gap-md">
                     <span style="font-size: 20px;">⚡</span>
                     <div>
                         <h3 id="execConsoleTitle" style="margin: 0;">Workflow Execution Console</h3>
@@ -3194,7 +3557,7 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                 <div id="execConsoleResultArea" style="display: none; margin-top: 20px;">
                     <hr style="border: none; border-top: 1px solid var(--border-color, #2a2e3d); margin-bottom: 16px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="hud-flex-row hud-gap-sm">
                             <span id="execConsoleResultBadge" class="status-badge" style="font-size: 12px;">SUCCESS</span>
                             <span id="execConsoleResultDuration" style="font-size: 12px; color: var(--text-dim, #888); font-family: var(--font-mono);">0.0ms</span>
                         </div>
@@ -3245,11 +3608,390 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
     </div>
 
 
+    <!-- ==========================================================================
+         CAMPAIGN & TARGETED BROADCAST MODALS
+         ========================================================================== -->
+
+    <!-- MODAL: NEW CAMPAIGN WIZARD -->
+    <div class="hud-modal-overlay" id="modalNewCampaign" style="display:none;" onclick="if(event.target===this) closeNewCampaignModal()">
+        <div class="hud-modal" style="max-width: 680px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <div class="hud-flex-row hud-gap-md">
+                    <span style="font-size: 22px;">📢</span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 16px;">Create Targeted Outbound Campaign</h3>
+                        <p style="font-size: 11.5px; color: var(--text-dim, #888); margin: 2px 0 0 0;">Multi-audience WhatsApp broadcast with verified personalization &amp; compliance</p>
+                    </div>
+                </div>
+                <button type="button" class="close-btn" onclick="closeNewCampaignModal()">&times;</button>
+            </div>
+
+            <!-- Wizard Step Pills -->
+            <div style="display: flex; justify-content: space-around; padding: 10px 16px; background: rgba(0,0,0,0.25); border-bottom: 1px solid var(--border-color, #2a2e3d); font-size: 12px;">
+                <div id="cmpWizardPill1" class="wizard-step-pill active" style="color: var(--cyan-glow, #00f0ff); font-weight: 600;">1. Target Audience</div>
+                <div id="cmpWizardPill2" class="wizard-step-pill" style="color: var(--text-dim, #888);">2. Compose Message</div>
+                <div id="cmpWizardPill3" class="wizard-step-pill" style="color: var(--text-dim, #888);">3. Explicit Review &amp; Launch</div>
+            </div>
+
+            <div class="modal-body" style="padding: 20px; overflow-y: auto; flex: 1;">
+                <!-- STEP 1: AUDIENCE SELECTION -->
+                <div id="cmpStep1" class="cmp-step-pane">
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label class="hud-label">Campaign Title</label>
+                        <input type="text" id="cmpNewTitle" class="hud-input" required placeholder="e.g. Q4 Platform Upgrade Notice" style="width: 100%;">
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 8px;">Select Target Contact Audience</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <label style="padding: 12px; border-radius: 8px; border: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.2); cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+                                <input type="radio" name="cmpAudienceType" value="customers" checked onchange="handleAudienceTypeChange()" style="margin-top: 3px;">
+                                <div>
+                                    <strong style="color: #fff; font-size: 12.5px;">🎯 Customers (CRM Leads)</strong>
+                                    <div style="font-size: 11px; color: var(--text-dim, #888); margin-top: 2px;">Active customer leads in this tenant workspace.</div>
+                                </div>
+                            </label>
+                            <label style="padding: 12px; border-radius: 8px; border: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.2); cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+                                <input type="radio" name="cmpAudienceType" value="employees" onchange="handleAudienceTypeChange()" style="margin-top: 3px;">
+                                <div>
+                                    <strong style="color: #fff; font-size: 12.5px;">👥 Team Members &amp; Staff</strong>
+                                    <div style="font-size: 11px; color: var(--text-dim, #888); margin-top: 2px;">Verified workspace users and internal employees.</div>
+                                </div>
+                            </label>
+                            <label style="padding: 12px; border-radius: 8px; border: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.2); cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+                                <input type="radio" name="cmpAudienceType" value="department" onchange="handleAudienceTypeChange()" style="margin-top: 3px;">
+                                <div>
+                                    <strong style="color: #fff; font-size: 12.5px;">🏢 Specific Department</strong>
+                                    <div style="font-size: 11px; color: var(--text-dim, #888); margin-top: 2px;">Filtered by department (Sales, Support, SRE).</div>
+                                </div>
+                            </label>
+                            <label style="padding: 12px; border-radius: 8px; border: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.2); cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+                                <input type="radio" name="cmpAudienceType" value="saved_group" onchange="handleAudienceTypeChange()" style="margin-top: 3px;">
+                                <div>
+                                    <strong style="color: #fff; font-size: 12.5px;">⭐ Saved Group / VIPs</strong>
+                                    <div style="font-size: 11px; color: var(--text-dim, #888); margin-top: 2px;">High-value VIPs or qualified contacts.</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Department sub-select (conditional) -->
+                    <div id="cmpDeptSubSelect" style="display: none; margin-bottom: 16px;">
+                        <label class="hud-label">Choose Department</label>
+                        <select id="cmpDeptSelect" class="hud-select" style="width: 100%;" onchange="recalculateAudiencePreview()">
+                            <option value="Support">Support Queue</option>
+                            <option value="Sales">Sales &amp; Enterprise</option>
+                            <option value="Review">Review &amp; Compliance</option>
+                            <option value="General Queue">General Queue</option>
+                        </select>
+                    </div>
+
+                    <!-- Live Audience Counter Box -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color, #2a2e3d); border-radius: 8px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <span style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600; display: block;">Resolved Audience</span>
+                            <div style="font-size: 15px; font-weight: 700; color: #fff; margin-top: 2px;" id="cmpLiveAudienceCount">Loading recipient count...</div>
+                        </div>
+                        <button type="button" class="hud-btn outline small" onclick="recalculateAudiencePreview()">Recalculate</button>
+                    </div>
+                </div>
+
+                <!-- STEP 2: MESSAGE COMPOSER -->
+                <div id="cmpStep2" class="cmp-step-pane" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div>
+                            <label style="font-size: 12px; font-weight: 600;">Load from Reusable Template</label>
+                            <div style="font-size: 11px; color: var(--text-dim, #888);">Select an existing template or write a custom message.</div>
+                        </div>
+                        <button type="button" class="hud-btn outline small" onclick="openAiDraftModal()" style="border-color: rgba(0,240,255,0.4); color: var(--cyan-glow, #00f0ff);">
+                            🤖 Ask AI to Draft
+                        </button>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <select id="cmpTemplateSelect" class="hud-select" style="width: 100%;" onchange="handleTemplateSelectChange(this.value)">
+                            <option value="">-- Custom Message (No Template) --</option>
+                        </select>
+                    </div>
+
+                    <!-- Personalization Variable Chips -->
+                    <div style="margin-bottom: 8px;">
+                        <label style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600; display: block; margin-bottom: 6px;">Insert Verified Contact Fields:</label>
+                        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            <button type="button" class="hud-btn small outline" onclick="insertPlaceholderIntoComposer('{{name}}')" style="font-size: 11px; padding: 2px 8px;">+ {{name}}</button>
+                            <button type="button" class="hud-btn small outline" onclick="insertPlaceholderIntoComposer('{{first_name}}')" style="font-size: 11px; padding: 2px 8px;">+ {{first_name}}</button>
+                            <button type="button" class="hud-btn small outline" onclick="insertPlaceholderIntoComposer('{{company}}')" style="font-size: 11px; padding: 2px 8px;">+ {{company}}</button>
+                            <button type="button" class="hud-btn small outline" onclick="insertPlaceholderIntoComposer('{{department}}')" style="font-size: 11px; padding: 2px 8px;">+ {{department}}</button>
+                            <button type="button" class="hud-btn small outline" onclick="insertPlaceholderIntoComposer('{{phone}}')" style="font-size: 11px; padding: 2px 8px;">+ {{phone}}</button>
+                        </div>
+                    </div>
+
+                    <!-- Message Body Textarea -->
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <textarea id="cmpNewMessageBody" class="hud-input" rows="6" required placeholder="Type your broadcast message here. Use {{name}} to personalize..." style="width: 100%; font-size: 13px; line-height: 1.4; resize: vertical;"></textarea>
+                    </div>
+                </div>
+
+                <!-- STEP 3: EXPLICIT REVIEW & CONFIRMATION -->
+                <div id="cmpStep3" class="cmp-step-pane" style="display: none;">
+                    <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                        <div style="font-weight: 700; color: #60a5fa; margin-bottom: 8px; font-size: 13px;">
+                            📋 Campaign Review Summary
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px;">
+                            <div>
+                                <span style="color: var(--text-dim, #888);">Audience:</span>
+                                <strong id="cmpReviewAudienceText" style="color: #fff; margin-left: 4px;">Customers (5)</strong>
+                            </div>
+                            <div>
+                                <span style="color: var(--text-dim, #888);">Channel:</span>
+                                <strong style="color: #22c55e; margin-left: 4px;">WhatsApp Business</strong>
+                            </div>
+                            <div>
+                                <span style="color: var(--text-dim, #888);">Estimated Cost:</span>
+                                <strong id="cmpReviewCostText" style="color: #fff; margin-left: 4px;">$0.25 USD</strong>
+                            </div>
+                            <div>
+                                <span style="color: var(--text-dim, #888);">Compliance Status:</span>
+                                <span id="cmpReviewComplianceBadge" class="status-pill green" style="font-size: 10px; margin-left: 4px;">Compliant</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Exact Rendered Message Preview Box -->
+                    <div style="margin-bottom: 16px;">
+                        <label class="hud-label">Exact Rendered Sample Message (Sample Contact)</label>
+                        <div id="cmpExactRenderedPreview" style="background: rgba(0,0,0,0.4); border: 1px solid var(--border-color, #2a2e3d); border-radius: 8px; padding: 14px; font-size: 13px; line-height: 1.5; color: #e2e8f0; white-space: pre-wrap; font-family: sans-serif;">
+                            Loading rendered preview...
+                        </div>
+                    </div>
+
+                    <!-- Scheduling Options -->
+                    <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color, #2a2e3d); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 8px;">Dispatch Timing</label>
+                        <div style="display: flex; gap: 14px; margin-bottom: 10px;">
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12.5px;">
+                                <input type="radio" name="cmpTimingMode" value="immediate" checked onchange="handleTimingModeChange()">
+                                <span>⚡ Immediate Dispatch (Queue Now)</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12.5px;">
+                                <input type="radio" name="cmpTimingMode" value="scheduled" onchange="handleTimingModeChange()">
+                                <span>📅 Schedule for Later</span>
+                            </label>
+                        </div>
+                        <div id="cmpScheduleDateTimeContainer" style="display: none;">
+                            <input type="datetime-local" id="cmpScheduleDateTime" class="hud-input" style="font-size: 12px; padding: 6px 10px;">
+                        </div>
+                    </div>
+
+                    <!-- Warnings Box (if any) -->
+                    <div id="cmpReviewWarningsBox" style="display: none; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 11.5px; color: #fde68a;"></div>
+                </div>
+            </div>
+
+            <!-- Modal Footer Navigation Buttons -->
+            <div class="modal-footer" style="padding: 14px 20px; border-top: 1px solid var(--border-color, #2a2e3d); background: rgba(0,0,0,0.2); display: flex; justify-content: space-between; align-items: center;">
+                <button type="button" class="hud-btn outline" id="btnCmpBack" onclick="stepCmpWizard(-1)" style="display: none;">&larr; Back</button>
+                <div style="display: flex; gap: 8px; margin-left: auto;">
+                    <button type="button" class="hud-btn outline" onclick="closeNewCampaignModal()">Cancel</button>
+                    <button type="button" class="hud-btn primary" id="btnCmpNext" onclick="stepCmpWizard(1)">Next: Compose Message &rarr;</button>
+                    <button type="button" class="hud-btn outline" id="btnCmpSaveDraft" onclick="submitCreateCampaign(false)" style="display: none;">Save as Draft</button>
+                    <button type="button" class="hud-btn primary" id="btnCmpApproveLaunch" onclick="submitCreateCampaign(true)" style="display: none; background: linear-gradient(135deg, #10b981, #059669); border: none;">
+                        🚀 Approve &amp; Launch Campaign
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: AI COMMAND DRAFT ASSISTANT -->
+    <div class="hud-modal-overlay" id="modalAiDraft" style="display:none;" onclick="if(event.target===this) closeAiDraftModal()">
+        <div class="hud-modal" style="max-width: 520px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, rgba(0,240,255,0.1), rgba(16,185,129,0.1));">
+                <div class="hud-flex-row hud-gap-md">
+                    <span style="font-size: 22px;">🤖</span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 16px; color: var(--cyan-glow, #00f0ff);">AI Command Draft Assistant</h3>
+                        <p style="font-size: 11.5px; color: var(--text-dim, #888); margin: 2px 0 0 0;">Natural language prompt to drafted announcement</p>
+                    </div>
+                </div>
+                <button type="button" class="close-btn" onclick="closeAiDraftModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <div class="form-group" style="margin-bottom: 14px;">
+                    <label class="hud-label">Describe Intended Announcement</label>
+                    <textarea id="aiDraftPromptInput" class="hud-input" rows="3" placeholder="e.g. Notify all enterprise customers that server cluster 3 will have scheduled maintenance tonight at 11 PM UTC for 15 minutes." style="width: 100%; font-size: 12.5px; line-height: 1.4;"></textarea>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+                    <div>
+                        <label class="hud-label">Tone</label>
+                        <select id="aiDraftToneSelect" class="hud-select" style="width: 100%;">
+                            <option value="professional">Professional &amp; Clear</option>
+                            <option value="urgent">Urgent Operational Alert</option>
+                            <option value="friendly">Friendly &amp; Warm Support</option>
+                            <option value="promotional">Product Feature Announcement</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="hud-label">Target Audience</label>
+                        <select id="aiDraftAudienceSelect" class="hud-select" style="width: 100%;">
+                            <option value="customers">Customers / Leads</option>
+                            <option value="employees">Internal Employees</option>
+                            <option value="department">Engineering / SRE</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="button" class="hud-btn primary" id="btnRunAiDraft" onclick="generateAiDraftFromModal()" style="width: 100%; margin-bottom: 16px;">
+                    ⚡ Generate Draft Announcement
+                </button>
+
+                <!-- AI Draft Output Box -->
+                <div id="aiDraftResultArea" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-size: 11px; font-weight: 600; color: #10b981; text-transform: uppercase;">Generated Draft</span>
+                        <span style="font-size: 10px; color: var(--text-dim, #888);">Draft only &bull; Requires review</span>
+                    </div>
+                    <textarea id="aiDraftOutputBody" class="hud-input" rows="5" style="width: 100%; font-size: 12.5px; line-height: 1.4; margin-bottom: 12px;"></textarea>
+                    <button type="button" class="hud-btn primary" onclick="useAiDraftInComposer()" style="width: 100%;">
+                        ✍️ Insert Draft into Campaign Composer
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: CAMPAIGN DETAILS & DELIVERY LEDGER -->
+    <div class="hud-modal-overlay" id="modalCampaignDetail" style="display:none;" onclick="if(event.target===this) closeCampaignDetailModal()">
+        <div class="hud-modal" style="max-width: 800px; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <div class="hud-flex-row hud-gap-md">
+                    <span style="font-size: 20px;">📊</span>
+                    <div>
+                        <h3 id="cmpDetailTitle" style="margin: 0; font-size: 16px;">Campaign Ledger</h3>
+                        <p id="cmpDetailMeta" style="font-size: 11.5px; color: var(--text-dim, #888); margin: 2px 0 0 0;">Outbound dispatch status</p>
+                    </div>
+                </div>
+                <button type="button" class="close-btn" onclick="closeCampaignDetailModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px; overflow-y: auto; flex: 1;">
+                <!-- Telemetry Counters Bar -->
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px;">
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color, #2a2e3d); border-radius: 6px; padding: 10px; text-align: center;">
+                        <span style="font-size: 10.5px; color: var(--text-dim, #888); text-transform: uppercase;">Total</span>
+                        <div id="cmpDetailTotalRecip" style="font-size: 18px; font-weight: 700; color: #fff;">0</div>
+                    </div>
+                    <div style="background: rgba(16,185,129,0.06); border: 1px solid rgba(16,185,129,0.2); border-radius: 6px; padding: 10px; text-align: center;">
+                        <span style="font-size: 10.5px; color: #34d399; text-transform: uppercase;">Sent</span>
+                        <div id="cmpDetailSentCount" style="font-size: 18px; font-weight: 700; color: #10b981;">0</div>
+                    </div>
+                    <div style="background: rgba(59,130,246,0.06); border: 1px solid rgba(59,130,246,0.2); border-radius: 6px; padding: 10px; text-align: center;">
+                        <span style="font-size: 10.5px; color: #60a5fa; text-transform: uppercase;">Delivered</span>
+                        <div id="cmpDetailDeliveredCount" style="font-size: 18px; font-weight: 700; color: #3b82f6;">0</div>
+                    </div>
+                    <div style="background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.2); border-radius: 6px; padding: 10px; text-align: center;">
+                        <span style="font-size: 10.5px; color: #f87171; text-transform: uppercase;">Failed</span>
+                        <div id="cmpDetailFailedCount" style="font-size: 18px; font-weight: 700; color: #ef4444;">0</div>
+                    </div>
+                </div>
+
+                <!-- Recipient Ledger Table -->
+                <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                    <table class="hud-table" style="font-size: 12px;">
+                        <thead>
+                            <tr>
+                                <th>Recipient</th>
+                                <th>Phone Number</th>
+                                <th>Status</th>
+                                <th>Provider Msg ID</th>
+                                <th>Sent At</th>
+                                <th>Delivered At</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cmpDetailRecipientsBody">
+                            <tr><td colspan="6" class="empty-cell">Loading recipients ledger...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 12px 20px; border-top: 1px solid var(--border-color, #2a2e3d); display: flex; justify-content: flex-end;">
+                <button type="button" class="hud-btn outline" onclick="closeCampaignDetailModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: REUSABLE TEMPLATES -->
+    <div class="hud-modal-overlay" id="modalManageTemplates" style="display:none;" onclick="if(event.target===this) closeTemplatesModal()">
+        <div class="hud-modal" style="max-width: 600px;">
+            <div class="modal-header">
+                <div class="hud-flex-row hud-gap-md">
+                    <span style="font-size: 20px;">📋</span>
+                    <h3 style="margin: 0; font-size: 16px;">Reusable Message Templates</h3>
+                </div>
+                <button type="button" class="close-btn" onclick="closeTemplatesModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <div id="templatesListContainer" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; max-height: 280px; overflow-y: auto;">
+                    <div class="empty-cell">Loading templates...</div>
+                </div>
+                <hr style="border: none; border-top: 1px solid var(--border-color, #2a2e3d); margin-bottom: 16px;">
+                <h4 style="font-size: 13px; margin: 0 0 10px 0;">Create New Template</h4>
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <input type="text" id="newTemplateName" class="hud-input" placeholder="Template Name (e.g. system_maintenance)" style="width: 100%;">
+                </div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <textarea id="newTemplateBody" class="hud-input" rows="3" placeholder="Template Body text with {{name}}, {{company}}..." style="width: 100%;"></textarea>
+                </div>
+                <button type="button" class="hud-btn primary" onclick="submitCreateTemplate()" style="width: 100%;">+ Save Template</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: CONSENT & OPT-OUT REGISTRY -->
+    <div class="hud-modal-overlay" id="modalConsentRegistry" style="display:none;" onclick="if(event.target===this) closeConsentRegistryModal()">
+        <div class="hud-modal" style="max-width: 620px;">
+            <div class="modal-header">
+                <div class="hud-flex-row hud-gap-md">
+                    <span style="font-size: 20px;">🛡️</span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 16px;">Contact Opt-Out &amp; Consent Registry</h3>
+                        <p style="font-size: 11.5px; color: var(--text-dim, #888); margin: 2px 0 0 0;">Honors STOP keywords and regulatory messaging compliance</p>
+                    </div>
+                </div>
+                <button type="button" class="close-btn" onclick="closeConsentRegistryModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <!-- Manual Opt-Out Form -->
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color, #2a2e3d); border-radius: 8px; padding: 12px; margin-bottom: 16px; display: flex; gap: 10px; align-items: center;">
+                    <input type="text" id="manualOptOutPhone" class="hud-input" placeholder="+14155551234" style="flex: 1; font-size: 12px;">
+                    <button type="button" class="hud-btn destructive-danger small" onclick="submitManualOptOut()">+ Opt-Out Contact</button>
+                </div>
+
+                <!-- Consent List Table -->
+                <div class="table-container" style="max-height: 260px; overflow-y: auto;">
+                    <table class="hud-table" style="font-size: 12px;">
+                        <thead>
+                            <tr>
+                                <th>Phone Number</th>
+                                <th>Status</th>
+                                <th>Reason</th>
+                                <th>Date</th>
+                                <th class="text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="consentTableBody">
+                            <tr><td colspan="5" class="empty-cell">Loading consent records...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- REUSABLE SAFETY CONFIRMATION MODAL FOR DESTRUCTIVE ACTIONS -->
     <div class="hud-modal-overlay" id="safetyConfirmModal" style="display:none;" onclick="handleSafetyModalOverlayClick(event)">
         <div class="hud-modal" style="max-width: 440px; border: 1px solid rgba(239, 68, 68, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8), 0 0 25px rgba(239, 68, 68, 0.2);">
             <div class="modal-header" style="background: rgba(239, 68, 68, 0.08); border-bottom: 1px solid rgba(239, 68, 68, 0.2);">
-                <div style="display: flex; align-items: center; gap: 10px;">
+                <div class="hud-flex-row hud-gap-md">
                     <span style="font-size: 20px; color: #f87171;">⚠️</span>
                     <h3 id="safetyModalTitle" style="color: #f87171; margin: 0; font-size: 16px;">Confirm Destructive Action</h3>
                 </div>
@@ -3270,6 +4012,6 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
 
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="/static/js/app.js?v=2.5.0"></script>
+    <script src="/static/js/app.js?v=2.8.4"></script>
 </body>
 </html>

@@ -222,6 +222,7 @@ function refreshAllData() {
     loadTeamAndAudits();
     loadBillingStatus();
     pollNotifications();
+    loadCampaignsSummary();
 }
 
 // ==========================================
@@ -248,6 +249,15 @@ function switchTab(tabId) {
         activePanel.classList.add('active');
     }
 
+    if (window.innerWidth <= 992) {
+        const sidebar = document.getElementById('enterpriseSidebar');
+        if (sidebar && sidebar.classList.contains('open')) {
+            sidebar.classList.remove('open');
+            const backdrop = document.getElementById('sidebarBackdrop');
+            if (backdrop) backdrop.classList.remove('active');
+        }
+    }
+
     if (tabId === 'rules') loadRules();
     if (tabId === 'leads') loadLeads();
     if (tabId === 'webhooks') loadWebhooks();
@@ -256,6 +266,15 @@ function switchTab(tabId) {
         startWhatsAppAutoPoll();
     } else {
         stopWhatsAppAutoPoll();
+    }
+    if (tabId === 'campaigns') {
+        if (typeof loadCampaignsDashboard === 'function') loadCampaignsDashboard();
+    }
+    if (tabId === 'company-messaging') {
+        if (typeof loadCompanyMessagingDashboard === 'function') loadCompanyMessagingDashboard();
+        if (typeof startCompanyMessagingAutoPoll === 'function') startCompanyMessagingAutoPoll();
+    } else {
+        if (typeof stopCompanyMessagingAutoPoll === 'function') stopCompanyMessagingAutoPoll();
     }
     if (tabId === 'logs') loadExecutionLogs();
     if (tabId === 'incidents') loadIncidents();
@@ -404,6 +423,10 @@ async function loadRules() {
         if (!res.ok) {
             const tbody = document.getElementById('rulesTableBody');
             if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-cell" style="color: #ef4444;">Failed to load rules: ${res.statusText} (Please Sign In)</td></tr>`;
+            state.rules = [];
+            if (typeof populateWorkflowGraphSelector === 'function') {
+                populateWorkflowGraphSelector();
+            }
             return;
         }
         const data = await res.json();
@@ -411,6 +434,10 @@ async function loadRules() {
         renderRulesTable();
     } catch (e) {
         console.error('Failed to load rules:', e);
+        state.rules = [];
+        if (typeof populateWorkflowGraphSelector === 'function') {
+            populateWorkflowGraphSelector();
+        }
     }
 }
 
@@ -443,6 +470,9 @@ function renderRulesTable() {
             description: 'Automate incident remediation, lead routing, webhook processing, and alert escalation with custom workflows.',
             actionHtml: '<button type="button" class="hud-btn primary small" onclick="openNewRuleModal()"><span>+</span> Create New Workflow</button>'
         });
+        if (typeof populateWorkflowGraphSelector === 'function') {
+            populateWorkflowGraphSelector();
+        }
         return;
     }
 
@@ -469,7 +499,7 @@ function renderRulesTable() {
 
         return `
             <tr class="workflow-row" style="cursor: pointer;" onclick="handleRuleRowClick(event, '${rule.id}')" title="Click row to inspect full workflow details">
-                <td>
+                <td data-label="Status">
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <button type="button" class="toggle-switch ${isEnabled ? 'on' : 'off'}" 
                                 onclick="toggleRuleEnabled('${rule.id}')"
@@ -481,17 +511,17 @@ function renderRulesTable() {
                         </span>
                     </div>
                 </td>
-                <td>
+                <td data-label="Workflow">
                     <div class="wf-title-cell">
                         <strong class="wf-name-text">${escapeHtml(rule.name)}</strong>
                         <div class="wf-desc-sub" title="${escapeHtml(rule.description || '')}">${escapeHtml(rule.description || 'No description provided')}</div>
                     </div>
                 </td>
-                <td><span class="category-chip ${rule.category ? rule.category.toLowerCase() : 'system'}">${rule.category || 'System'}</span></td>
-                <td><code class="trigger-code-pill">${triggerDisplay}</code></td>
-                <td style="text-align: center;"><span style="font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700; color: #f1f5f9;">${runsCount.toLocaleString()}</span></td>
-                <td>${lastRunText}</td>
-                <td style="text-align: right;" onclick="event.stopPropagation()">
+                <td data-label="Category"><span class="category-chip ${rule.category ? rule.category.toLowerCase() : 'system'}">${rule.category || 'System'}</span></td>
+                <td data-label="Trigger"><code class="trigger-code-pill">${triggerDisplay}</code></td>
+                <td data-label="Runs" class="num-cell" style="text-align: center;"><span style="font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700; color: #f1f5f9;">${runsCount.toLocaleString()}</span></td>
+                <td data-label="Last Run">${lastRunText}</td>
+                <td data-label="Actions" class="action-col" style="text-align: right;" onclick="event.stopPropagation()">
                     <div class="action-btn-row" style="justify-content: flex-end; align-items: center; gap: 6px;">
                         <button type="button" class="hud-btn primary small run-primary-btn" onclick="executeRuleDirectly(this, '${rule.id}')" title="Execute Workflow Now">
                             <span>⚡</span> Run
@@ -524,7 +554,739 @@ function renderRulesTable() {
             </tr>
         `;
     }).join('');
+
+    // Sync graph view selector if graph is currently active
+    if (typeof wfGraphState !== 'undefined' && wfGraphState.currentView === 'graph') {
+        populateWorkflowGraphSelector();
+        if (wfGraphState.activeRuleId) {
+            renderWorkflowGraph(wfGraphState.activeRuleId);
+        } else if (state.rules && state.rules.length > 0) {
+            renderWorkflowGraph(state.rules[0].id);
+        }
+    }
 }
+
+// ==========================================================================
+// WORKFLOW STUDIO - DUAL-VIEW SWITCHER & INTERACTIVE GRAPH CANVAS
+// ==========================================================================
+
+const wfGraphState = {
+    currentView: 'table',
+    activeRuleId: null,
+    zoom: 1.0,
+    panX: 60,
+    panY: 80,
+    isPanning: false,
+    startX: 0,
+    startY: 0,
+    initialized: false,
+    minimapInitialized: false,
+    minimapCollapsed: false,
+    minimapScaleX: 160 / 1200,
+    minimapScaleY: 90 / 320,
+    nodeCoords: []
+};
+
+function setWorkflowView(mode) {
+    wfGraphState.currentView = mode;
+    const btnTable = document.getElementById('btnViewTable');
+    const btnGraph = document.getElementById('btnViewGraph');
+    const tableView = document.getElementById('workflowTableView');
+    const graphView = document.getElementById('workflowGraphView');
+
+    if (mode === 'graph') {
+        if (btnTable) {
+            btnTable.classList.remove('active');
+            btnTable.style.background = '';
+            btnTable.style.color = '';
+        }
+        if (btnGraph) {
+            btnGraph.classList.add('active');
+            btnGraph.style.background = '';
+            btnGraph.style.color = '';
+        }
+        if (tableView) tableView.style.display = 'none';
+        if (graphView) graphView.style.display = 'block';
+
+        initWorkflowGraphCanvas();
+        populateWorkflowGraphSelector();
+        if (wfGraphState.activeRuleId) {
+            renderWorkflowGraph(wfGraphState.activeRuleId);
+        } else if (state.rules && state.rules.length > 0) {
+            renderWorkflowGraph(state.rules[0].id);
+        }
+        setTimeout(wfGraphFitView, 60);
+    } else {
+        if (btnGraph) {
+            btnGraph.classList.remove('active');
+            btnGraph.style.background = '';
+            btnGraph.style.color = '';
+        }
+        if (btnTable) {
+            btnTable.classList.add('active');
+            btnTable.style.background = '';
+            btnTable.style.color = '';
+        }
+        if (graphView) graphView.style.display = 'none';
+        if (tableView) tableView.style.display = 'block';
+    }
+}
+
+function initWorkflowGraphCanvas() {
+    if (wfGraphState.initialized) return;
+    const viewport = document.getElementById('wfCanvasViewport');
+    if (!viewport) return;
+
+    // Pan (drag) events
+    viewport.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.wf-graph-node') || e.target.closest('button') || e.target.closest('.wf-minimap-container') || e.target.closest('.wf-graph-empty-state')) return;
+        wfGraphState.isPanning = true;
+        wfGraphState.startX = e.clientX - wfGraphState.panX;
+        wfGraphState.startY = e.clientY - wfGraphState.panY;
+        viewport.style.cursor = 'grabbing';
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!wfGraphState.isPanning) return;
+        wfGraphState.panX = e.clientX - wfGraphState.startX;
+        wfGraphState.panY = e.clientY - wfGraphState.startY;
+        applyWfGraphTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (wfGraphState.isPanning) {
+            wfGraphState.isPanning = false;
+            if (viewport) viewport.style.cursor = 'grab';
+        }
+    });
+
+    // Zoom on mouse wheel
+    viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.12 : -0.12;
+        wfGraphZoom(delta);
+    }, { passive: false });
+
+    // Double-click on viewport background to reset/fit view
+    viewport.addEventListener('dblclick', (e) => {
+        if (e.target.closest('.wf-graph-node') || e.target.closest('button') || e.target.closest('.wf-minimap-container') || e.target.closest('.wf-graph-empty-state')) return;
+        wfGraphFitView();
+    });
+
+    // Debounced safe window resize handler
+    let wfResizeTimer = null;
+    window.addEventListener('resize', () => {
+        if (wfGraphState.currentView !== 'graph') return;
+        clearTimeout(wfResizeTimer);
+        wfResizeTimer = setTimeout(() => {
+            wfGraphFitView();
+        }, 120);
+    });
+
+    initWfMinimap();
+    wfGraphState.initialized = true;
+    applyWfGraphTransform();
+}
+
+function applyWfGraphTransform() {
+    const world = document.getElementById('wfCanvasWorld');
+    const badge = document.getElementById('wfGraphZoomBadge');
+    if (world) {
+        world.style.transform = `translate(${wfGraphState.panX}px, ${wfGraphState.panY}px) scale(${wfGraphState.zoom})`;
+    }
+    if (badge) {
+        badge.textContent = `${Math.round(wfGraphState.zoom * 100)}%`;
+    }
+    updateWfMinimapViewport();
+}
+
+function wfGraphZoom(delta) {
+    const newZoom = Math.max(0.30, Math.min(2.2, wfGraphState.zoom + delta));
+    wfGraphState.zoom = Math.round(newZoom * 100) / 100;
+    applyWfGraphTransform();
+}
+
+function wfGraphFitView() {
+    const viewport = document.getElementById('wfCanvasViewport');
+    if (!viewport) return;
+    const nodes = document.querySelectorAll('.wf-graph-node');
+    if (nodes.length === 0) {
+        wfGraphState.zoom = 1.0;
+        wfGraphState.panX = 40;
+        wfGraphState.panY = 70;
+        applyWfGraphTransform();
+        return;
+    }
+
+    const vpWidth = viewport.clientWidth > 200 ? viewport.clientWidth : 1000;
+    const count = nodes.length;
+
+    // Node layout geometry: nodeWidth = 220px, gapX = 64px (pitch = 284px), leftOffset = 40px
+    const pitch = 284;
+    const nodeWidth = 220;
+    const totalContentWidth = (count - 1) * pitch + nodeWidth + 40;
+
+    // Calculate zoom to fit total content width inside viewport (leaving 80px horizontal margin)
+    const availableWidth = Math.max(200, vpWidth - 80);
+    let targetZoom = availableWidth / totalContentWidth;
+    targetZoom = Math.max(0.35, Math.min(1.0, targetZoom));
+    targetZoom = Math.round(targetZoom * 100) / 100;
+
+    // Center horizontally if content fits within viewport, otherwise align nicely from left
+    const renderedWidth = totalContentWidth * targetZoom;
+    let panX = 40;
+    if (renderedWidth < vpWidth) {
+        panX = Math.round((vpWidth - renderedWidth) / 2);
+    }
+    panX = Math.max(20, panX);
+    const panY = 70;
+
+    wfGraphState.zoom = targetZoom;
+    wfGraphState.panX = panX;
+    wfGraphState.panY = panY;
+    applyWfGraphTransform();
+}
+
+function wfGraphResetView() {
+    wfGraphState.zoom = 1.0;
+    wfGraphState.panX = 40;
+    wfGraphState.panY = 70;
+    applyWfGraphTransform();
+}
+
+function populateWorkflowGraphSelector() {
+    const select = document.getElementById('wfGraphRuleSelect');
+    const emptyState = document.getElementById('wfGraphEmptyState');
+    const world = document.getElementById('wfCanvasWorld');
+    const minimap = document.getElementById('wfMinimapContainer');
+    const statusPill = document.getElementById('wfGraphStatusPill');
+    const catPill = document.getElementById('wfGraphCategoryPill');
+    const stepsPill = document.getElementById('wfGraphStepsPill');
+
+    if (!select) return;
+
+    if (!state.rules || state.rules.length === 0) {
+        select.innerHTML = '<option value="">No workflows in active workspace</option>';
+        wfGraphState.activeRuleId = null;
+        if (statusPill) statusPill.style.display = 'none';
+        if (catPill) catPill.style.display = 'none';
+        if (stepsPill) stepsPill.style.display = 'none';
+        if (emptyState) emptyState.style.display = 'flex';
+        if (world) world.style.display = 'none';
+        if (minimap) minimap.style.display = 'none';
+        return;
+    }
+
+    if (emptyState) emptyState.style.display = 'none';
+    if (world) world.style.display = 'block';
+    if (minimap && !wfGraphState.minimapCollapsed) minimap.style.display = 'flex';
+
+    select.innerHTML = state.rules.map(r => `
+        <option value="${r.id}" ${r.id === wfGraphState.activeRuleId ? 'selected' : ''}>
+            ${escapeHtml(r.name)} (${r.category || 'System'})
+        </option>
+    `).join('');
+
+    if (!wfGraphState.activeRuleId || !state.rules.some(r => r.id === wfGraphState.activeRuleId)) {
+        wfGraphState.activeRuleId = state.rules[0].id;
+        select.value = state.rules[0].id;
+    }
+}
+
+function onWorkflowGraphSelectChange(ruleId) {
+    if (!ruleId) {
+        const statusPill = document.getElementById('wfGraphStatusPill');
+        const catPill = document.getElementById('wfGraphCategoryPill');
+        const stepsPill = document.getElementById('wfGraphStepsPill');
+        if (statusPill) statusPill.style.display = 'none';
+        if (catPill) catPill.style.display = 'none';
+        if (stepsPill) stepsPill.style.display = 'none';
+        return;
+    }
+    wfGraphState.activeRuleId = ruleId;
+    renderWorkflowGraph(ruleId);
+    setTimeout(wfGraphFitView, 40);
+}
+
+function renderWorkflowGraph(ruleId) {
+    const emptyState = document.getElementById('wfGraphEmptyState');
+    const world = document.getElementById('wfCanvasWorld');
+    const minimap = document.getElementById('wfMinimapContainer');
+    const statusPill = document.getElementById('wfGraphStatusPill');
+    const catPill = document.getElementById('wfGraphCategoryPill');
+    const stepsPill = document.getElementById('wfGraphStepsPill');
+
+    if (!state.rules || state.rules.length === 0) {
+        if (statusPill) statusPill.style.display = 'none';
+        if (catPill) catPill.style.display = 'none';
+        if (stepsPill) stepsPill.style.display = 'none';
+        if (emptyState) emptyState.style.display = 'flex';
+        if (world) world.style.display = 'none';
+        if (minimap) minimap.style.display = 'none';
+        return;
+    }
+
+    wfGraphState.activeRuleId = ruleId;
+    const rule = state.rules.find(r => r.id === ruleId);
+    if (!rule) {
+        if (statusPill) statusPill.style.display = 'none';
+        if (catPill) catPill.style.display = 'none';
+        if (stepsPill) stepsPill.style.display = 'none';
+        return;
+    }
+
+    if (emptyState) emptyState.style.display = 'none';
+    if (world) world.style.display = 'block';
+    if (minimap && !wfGraphState.minimapCollapsed) minimap.style.display = 'flex';
+
+    // Update status pills in toolbar and show them
+    if (statusPill) {
+        const isEnabled = rule.enabled === 1 || rule.enabled === true;
+        statusPill.className = `status-pill ${isEnabled ? 'active' : 'paused'}`;
+        statusPill.textContent = isEnabled ? '● Active' : '⏸ Paused';
+        statusPill.style.display = 'inline-flex';
+    }
+    if (catPill) {
+        catPill.className = `category-chip ${(rule.category || 'system').toLowerCase()}`;
+        catPill.textContent = rule.category || 'System';
+        catPill.style.display = 'inline-flex';
+    }
+
+    const nodesLayer = document.getElementById('wfGraphNodesLayer');
+    const svgLayer = document.getElementById('wfGraphSvgLayer');
+    if (!nodesLayer || !svgLayer) return;
+
+    nodesLayer.innerHTML = '';
+
+    // Clear existing SVG connectors without destroying defs markers
+    svgLayer.querySelectorAll('path.wf-connector-path').forEach(p => p.remove());
+
+    // Extract or synthesize steps
+    let steps = [];
+    if (Array.isArray(rule.steps) && rule.steps.length > 0) {
+        steps = rule.steps;
+    } else {
+        const trig = rule.trigger || {};
+        steps.push({
+            type: 'trigger',
+            name: `Trigger: ${trig.event_name || trig.type || 'Event Ingestion'}`,
+            config: trig
+        });
+        const cond = rule.condition || {};
+        if (cond && (cond.conditions || cond.logic)) {
+            steps.push({
+                type: 'condition',
+                name: `Condition: ${cond.logic || 'Rule Logic'} (${(cond.conditions || []).length} rules)`,
+                config: cond
+            });
+        }
+        (rule.actions || []).forEach((act, i) => {
+            steps.push({
+                type: act.type || 'action',
+                name: `Action ${i+1}: ${act.type || 'Dispatch'}`,
+                config: act.params || act.config || {}
+            });
+        });
+        steps.push({
+            type: 'end',
+            name: 'Outcome: Pipeline Complete',
+            config: {}
+        });
+    }
+
+    // Update total steps pill in toolbar and reveal it
+    if (stepsPill) {
+        stepsPill.textContent = `${steps.length} Step${steps.length === 1 ? '' : 's'}`;
+        stepsPill.style.display = 'inline-flex';
+    }
+
+    const nodeWidth = 220;
+    const nodeHeight = 100;
+    const gapX = 64;
+    const nodeCoords = [];
+
+    // Render nodes
+    steps.forEach((step, idx) => {
+        const rawType = (step.type || 'action').toLowerCase();
+        let displayType = 'Action';
+        let icon = '⚡';
+        let cardClass = rawType;
+
+        if (rawType.includes('trigger')) {
+            displayType = 'Trigger';
+            icon = '⚡';
+            cardClass = 'trigger';
+        } else if (rawType.includes('condition') || rawType.includes('urgency') || rawType.includes('threshold') || rawType.includes('check') || rawType.includes('eval')) {
+            displayType = 'Condition';
+            icon = '⚖️';
+            cardClass = 'condition';
+        } else if (rawType.includes('ai') || rawType.includes('nlp')) {
+            displayType = 'AI Action';
+            icon = '🧠';
+            cardClass = 'ai_analysis';
+        } else if (rawType.includes('approval') || rawType.includes('review') || rawType.includes('gate')) {
+            displayType = 'Approval Gate';
+            icon = '🛡️';
+            cardClass = 'approval';
+        } else if (rawType.includes('end') || rawType.includes('outcome') || rawType.includes('complete')) {
+            displayType = 'Outcome';
+            icon = '🏁';
+            cardClass = 'end';
+        } else {
+            displayType = 'Action';
+            icon = '🔌';
+            cardClass = 'action';
+        }
+
+        const posX = idx * (nodeWidth + gapX) + 40;
+        const posY = (idx % 2 === 1 ? 120 : 60); // subtle wave for branch feel
+        nodeCoords.push({ x: posX, y: posY, width: nodeWidth, height: nodeHeight, step, idx });
+
+        const nodeEl = document.createElement('div');
+        nodeEl.className = `wf-graph-node ${cardClass}`;
+        nodeEl.tabIndex = 0;
+        nodeEl.setAttribute('role', 'button');
+        nodeEl.setAttribute('aria-label', `${displayType}: ${step.name || 'Step'}`);
+        nodeEl.style.left = `${posX}px`;
+        nodeEl.style.top = `${posY}px`;
+        nodeEl.setAttribute('data-node-idx', idx);
+
+        nodeEl.innerHTML = `
+            ${idx > 0 ? '<div class="wf-node-port input"></div>' : ''}
+            ${idx < steps.length - 1 ? '<div class="wf-node-port output"></div>' : ''}
+            <div class="wf-node-header">
+                <span class="node-type-pill">${escapeHtml(displayType)}</span>
+                <span style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">Step ${idx + 1}</span>
+            </div>
+            <div class="wf-node-title" title="${escapeHtml(step.name || '')}">
+                <span>${icon}</span>
+                <span>${escapeHtml(step.name || 'Workflow Step')}</span>
+            </div>
+            <div class="wf-node-desc">
+                ${escapeHtml(formatNodeSummary(step))}
+            </div>
+        `;
+
+        const openDetails = (e) => {
+            e.stopPropagation();
+            document.querySelectorAll('.wf-graph-node').forEach(n => n.classList.remove('selected'));
+            nodeEl.classList.add('selected');
+            openWfNodeModal(step, idx, displayType, icon, rule);
+        };
+
+        nodeEl.onclick = openDetails;
+        nodeEl.onkeydown = (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openDetails(e);
+            }
+        };
+
+        nodesLayer.appendChild(nodeEl);
+    });
+
+    // Store node coords for mini-map rendering
+    wfGraphState.nodeCoords = nodeCoords;
+
+    // Render SVG bezier curve connectors
+    for (let i = 0; i < nodeCoords.length - 1; i++) {
+        const from = nodeCoords[i];
+        const to = nodeCoords[i + 1];
+
+        const x1 = from.x + from.width;
+        const y1 = from.y + 42;
+        const x2 = to.x;
+        const y2 = to.y + 42;
+
+        const dx = Math.abs(x2 - x1) * 0.55;
+        const cx1 = x1 + dx;
+        const cy1 = y1;
+        const cx2 = x2 - dx;
+        const cy2 = y2;
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`);
+        path.setAttribute('class', 'wf-connector-path animated');
+        path.setAttribute('marker-end', 'url(#wfArrowMarker)');
+        svgLayer.appendChild(path);
+    }
+
+    // Automatically fit the complete graph into the canvas viewport
+    wfGraphFitView();
+
+    // Render interactive mini-map
+    updateWfMinimap();
+}
+
+function initWfMinimap() {
+    if (wfGraphState.minimapInitialized) return;
+    const wrapper = document.getElementById('wfMinimapWrapper');
+    if (!wrapper) return;
+
+    wrapper.addEventListener('click', (e) => {
+        const viewport = document.getElementById('wfCanvasViewport');
+        if (!viewport) return;
+
+        const bounds = wrapper.getBoundingClientRect();
+        const clickX = e.clientX - bounds.left;
+        const clickY = e.clientY - bounds.top;
+
+        const scaleX = wfGraphState.minimapScaleX || (160 / 1200);
+        const scaleY = wfGraphState.minimapScaleY || (90 / 320);
+
+        const targetWorldX = clickX / scaleX;
+        const targetWorldY = clickY / scaleY;
+
+        wfGraphState.panX = Math.round((viewport.clientWidth / 2) - (targetWorldX * wfGraphState.zoom));
+        wfGraphState.panY = Math.round((viewport.clientHeight / 2) - (targetWorldY * wfGraphState.zoom));
+
+        applyWfGraphTransform();
+    });
+
+    wfGraphState.minimapInitialized = true;
+}
+
+function toggleWfMinimap() {
+    const container = document.getElementById('wfMinimapContainer');
+    const btn = document.getElementById('btnToggleMinimap');
+    if (!container) return;
+
+    wfGraphState.minimapCollapsed = !wfGraphState.minimapCollapsed;
+    if (wfGraphState.minimapCollapsed) {
+        container.classList.add('collapsed');
+        if (btn) btn.textContent = '▴';
+    } else {
+        container.classList.remove('collapsed');
+        if (btn) btn.textContent = '▾';
+        updateWfMinimap();
+    }
+}
+
+function updateWfMinimap() {
+    if (wfGraphState.minimapCollapsed) return;
+    const canvas = document.getElementById('wfMinimapCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const nodes = wfGraphState.nodeCoords || [];
+    if (nodes.length === 0) return;
+
+    // Calculate world bounding box
+    const maxWorldX = Math.max(1000, nodes[nodes.length - 1].x + nodes[nodes.length - 1].width + 80);
+    const maxWorldY = 320;
+
+    const scaleX = canvas.width / maxWorldX;
+    const scaleY = canvas.height / maxWorldY;
+
+    wfGraphState.minimapScaleX = scaleX;
+    wfGraphState.minimapScaleY = scaleY;
+
+    // Draw connecting path
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+    ctx.beginPath();
+    for (let i = 0; i < nodes.length; i++) {
+        const nx = (nodes[i].x + nodes[i].width / 2) * scaleX;
+        const ny = (nodes[i].y + nodes[i].height / 2) * scaleY;
+        if (i === 0) {
+            ctx.moveTo(nx, ny);
+        } else {
+            ctx.lineTo(nx, ny);
+        }
+    }
+    ctx.stroke();
+
+    // Node category colors
+    const typeColors = {
+        trigger: '#3b82f6',
+        condition: '#f59e0b',
+        urgency: '#f59e0b',
+        ai: '#8b5cf6',
+        approval: '#f43f5e',
+        action: '#14b8a6',
+        end: '#10b981'
+    };
+
+    // Draw mini node dots
+    nodes.forEach((n) => {
+        const nx = (n.x + n.width / 2) * scaleX;
+        const ny = (n.y + n.height / 2) * scaleY;
+        const rawType = (n.step?.type || 'action').toLowerCase();
+        let color = '#14b8a6';
+        for (const [key, c] of Object.entries(typeColors)) {
+            if (rawType.includes(key)) {
+                color = c;
+                break;
+            }
+        }
+        ctx.fillStyle = color;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 4;
+        ctx.beginPath();
+        ctx.arc(nx, ny, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+    });
+
+    updateWfMinimapViewport();
+}
+
+function updateWfMinimapViewport() {
+    if (wfGraphState.minimapCollapsed) return;
+    const viewport = document.getElementById('wfCanvasViewport');
+    const rect = document.getElementById('wfMinimapViewportRect');
+    if (!viewport || !rect) return;
+
+    const scaleX = wfGraphState.minimapScaleX || (160 / 1200);
+    const scaleY = wfGraphState.minimapScaleY || (90 / 320);
+
+    const vpW = viewport.clientWidth || 800;
+    const vpH = viewport.clientHeight || 500;
+    const zoom = Math.max(0.1, wfGraphState.zoom || 1.0);
+
+    // Visible region in world coordinates
+    const worldLeft = -wfGraphState.panX / zoom;
+    const worldTop = -wfGraphState.panY / zoom;
+    const worldW = vpW / zoom;
+    const worldH = vpH / zoom;
+
+    const rLeft = Math.round(worldLeft * scaleX);
+    const rTop = Math.round(worldTop * scaleY);
+    const rW = Math.round(worldW * scaleX);
+    const rH = Math.round(worldH * scaleY);
+
+    rect.style.left = `${Math.max(0, Math.min(150, rLeft))}px`;
+    rect.style.top = `${Math.max(0, Math.min(80, rTop))}px`;
+    rect.style.width = `${Math.max(14, Math.min(160, rW))}px`;
+    rect.style.height = `${Math.max(10, Math.min(90, rH))}px`;
+}
+
+function formatNodeSummary(step) {
+    const cfg = step.config || {};
+    if (step.type === 'trigger') {
+        return `Trigger: ${cfg.event_name || cfg.type || 'System Event'}`;
+    }
+    if (step.type === 'condition' || step.type === 'urgency_detection') {
+        if (cfg.min_urgency) return `Urgency threshold: ≥ ${cfg.min_urgency}`;
+        const count = (cfg.conditions || []).length;
+        return `${cfg.logic || 'AND'} Tree (${count} evaluation rule${count === 1 ? '' : 's'})`;
+    }
+    if (cfg.destination) return `Route to: ${cfg.destination}`;
+    if (cfg.severity) return `Severity: ${cfg.severity}`;
+    if (cfg.recipient) return `To: ${cfg.recipient}`;
+    if (cfg.url) return `Webhook: ${cfg.url}`;
+    if (cfg.threshold) return `Lead score threshold: ${cfg.threshold}`;
+    if (cfg.table) return `Persist to: ${cfg.table}`;
+    return JSON.stringify(cfg).substring(0, 48) || 'Configured parameters';
+}
+
+function openWfNodeModal(step, idx, displayType, icon, rule) {
+    const modal = document.getElementById('wfNodeDetailModal');
+    if (!modal) return;
+
+    document.getElementById('wfModalNodeIcon').textContent = icon;
+    document.getElementById('wfModalNodeName').textContent = `${step.name || 'Step'} (Step ${idx + 1})`;
+
+    const body = document.getElementById('wfModalNodeBody');
+    body.innerHTML = `
+        <div style="margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.25); border-radius: 6px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                <span style="font-weight: 600; color: var(--text-primary);">Type:</span>
+                <span class="node-type-pill" style="font-size: 11px;">${escapeHtml(displayType)}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                <span style="font-weight: 600; color: var(--text-primary);">Workflow:</span>
+                <span style="color: var(--cyan-glow); font-weight: 600;">${escapeHtml(rule.name)}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+                <span style="font-weight: 600; color: var(--text-primary);">Execution State:</span>
+                <span style="color: #10b981; font-weight: 600;">● Ready / Verified</span>
+            </div>
+        </div>
+        <div style="font-weight: 600; margin-bottom: 6px; color: var(--text-primary);">Step Configuration:</div>
+        <pre style="background: rgba(0,0,0,0.4); padding: 12px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; color: #a5f3fc; overflow-x: auto; border: 1px solid var(--border-subtle);">${escapeHtml(JSON.stringify(step.config || {}, null, 2))}</pre>
+    `;
+
+    modal.style.display = 'flex';
+}
+
+function closeWfNodeModal() {
+    const modal = document.getElementById('wfNodeDetailModal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function runSelectedGraphWorkflow() {
+    if (!wfGraphState.activeRuleId) return;
+    const ruleId = wfGraphState.activeRuleId;
+    const runBtn = document.querySelector('#workflowGraphView .wf-graph-toolbar button.primary');
+    const originalText = runBtn ? runBtn.innerHTML : '▶ Run';
+    if (runBtn) {
+        runBtn.disabled = true;
+        runBtn.innerHTML = '<span>⏳</span> Running...';
+    }
+
+    // Traversal wave pulse across nodes and SVG paths
+    const nodes = Array.from(document.querySelectorAll('#wfGraphNodesLayer .wf-graph-node'));
+    const paths = Array.from(document.querySelectorAll('#wfGraphSvgLayer path.wf-connector-path'));
+
+    // Sequential traversal animation helper
+    const animateTraversal = async () => {
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+            node.classList.remove('executed');
+            node.classList.add('executing');
+
+            if (i > 0 && paths[i - 1]) {
+                paths[i - 1].classList.add('traversing');
+            }
+
+            await new Promise(r => setTimeout(r, 260));
+
+            node.classList.remove('executing');
+            node.classList.add('executed');
+        }
+    };
+
+    try {
+        const animPromise = animateTraversal();
+
+        const res = await fetch(`/api/v1/rules/${ruleId}/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: false, payload: { test_source: 'graph_studio_ui', timestamp: new Date().toISOString() } })
+        });
+        const data = await res.json();
+        await animPromise;
+
+        if (res.ok) {
+            showToast(`Workflow executed: ${(data.status || 'SUCCESS').toUpperCase()}`, 'success');
+            loadExecutionLogs();
+            loadRules();
+        } else {
+            showToast(data.error || 'Execution failed', 'error');
+        }
+    } catch (e) {
+        showToast(`Execution error: ${e.message}`, 'error');
+    } finally {
+        if (runBtn) {
+            runBtn.disabled = false;
+            runBtn.innerHTML = originalText;
+        }
+        // Cleanup execution classes after 3 seconds
+        setTimeout(() => {
+            nodes.forEach(n => {
+                n.classList.remove('executing', 'executed');
+            });
+            paths.forEach(p => {
+                p.classList.remove('traversing');
+            });
+        }, 3000);
+    }
+}
+
 
 function handleRuleRowClick(event, ruleId) {
     if (event.target.closest('button') || event.target.closest('.toggle-switch') || event.target.closest('input') || event.target.closest('a') || event.target.closest('.action-overflow-wrapper') || event.target.closest('.action-btn-row')) {
@@ -685,10 +1447,12 @@ async function runRuleTest(ruleId) {
 }
 
 async function executeRuleDirectly(btn, ruleId) {
-    const originalText = btn.innerHTML;
+    const originalText = btn ? btn.innerHTML : '';
     try {
-        btn.disabled = true;
-        btn.innerHTML = '<span>⏳</span> Running...';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span>⏳</span> Running...';
+        }
         
         const res = await fetch(`/api/v1/rules/${ruleId}/run`, {
             method: 'POST',
@@ -707,8 +1471,10 @@ async function executeRuleDirectly(btn, ruleId) {
     } catch (e) {
         showToast(`Execution error: ${e.message}`, 'error');
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
     }
 }
 
@@ -1537,13 +2303,13 @@ function renderLogsTable() {
 
         return `
             <tr>
-                <td><code style="font-size:0.8rem; color:var(--text-muted);">${log.id}</code></td>
-                <td><strong>${escapeHtml(log.rule_name || 'System Dispatcher')}</strong></td>
-                <td><code style="color:var(--cyan-glow);">${escapeHtml(log.trigger_event || log.event_name)}</code></td>
-                <td><span class="${badgeClass}">${statusIcon} ${(log.status || 'SUCCESS').toUpperCase()}</span></td>
-                <td><span style="font-family:var(--font-mono);">${log.duration_ms || log.execution_time_ms || 0} ms</span></td>
-                <td style="font-size:0.75rem; color:var(--text-muted);">${log.timestamp || log.executed_at}</td>
-                <td>
+                <td data-label="Execution ID"><code style="font-size:0.8rem; color:var(--text-muted);">${log.id}</code></td>
+                <td data-label="Workflow"><strong>${escapeHtml(log.rule_name || 'System Dispatcher')}</strong></td>
+                <td data-label="Trigger Event"><code style="color:var(--cyan-glow);">${escapeHtml(log.trigger_event || log.event_name)}</code></td>
+                <td data-label="Status"><span class="${badgeClass}">${statusIcon} ${(log.status || 'SUCCESS').toUpperCase()}</span></td>
+                <td data-label="Latency" class="num-cell"><span style="font-family:var(--font-mono);">${log.duration_ms || log.execution_time_ms || 0} ms</span></td>
+                <td data-label="Timestamp" style="font-size:0.75rem; color:var(--text-muted);">${log.timestamp || log.executed_at}</td>
+                <td data-label="Actions">
                     <button class="action-btn cyan-btn" onclick="inspectExecution(${log.id})">🔍 Inspect</button>
                 </td>
             </tr>
@@ -3076,6 +3842,7 @@ function renderLeads(leads) {
             </tr>
         `;
     }).join('');
+    applyMobileTableLabels(tbody.closest('table'));
 }
 
 function filterLeads() {
@@ -4038,6 +4805,7 @@ async function loadDlqItems() {
                 </td>
             </tr>
         `).join('');
+        applyMobileTableLabels(tbody.closest('table'));
     } catch (e) {
         console.error('Failed to load DLQ:', e);
     }
@@ -4110,6 +4878,7 @@ async function loadAsyncJobs() {
                 </tr>
             `;
         }).join('');
+        applyMobileTableLabels(tbody.closest('table'));
     } catch (e) {
         console.error('Failed to load async jobs:', e);
     }
@@ -5008,6 +5777,7 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
                         </tr>
                     `;
                 }).join('');
+                applyMobileTableLabels(tbody.closest('table'));
             }
         }
         return messages;
@@ -5607,9 +6377,52 @@ function initEnterpriseSidebar() {
 function toggleSidebarCollapse() {
     const sidebar = document.getElementById('enterpriseSidebar');
     if (!sidebar) return;
-    const isCollapsed = sidebar.classList.toggle('collapsed');
-    localStorage.setItem('opsflow_sidebar_collapsed', isCollapsed);
-    updateSidebarToggleLabel(isCollapsed);
+    if (window.innerWidth <= 992) {
+        const isOpen = sidebar.classList.toggle('open');
+        updateSidebarBackdrop(isOpen);
+    } else {
+        const isCollapsed = sidebar.classList.toggle('collapsed');
+        localStorage.setItem('opsflow_sidebar_collapsed', isCollapsed);
+        updateSidebarToggleLabel(isCollapsed);
+    }
+}
+
+function updateSidebarBackdrop(isOpen) {
+    let backdrop = document.getElementById('sidebarBackdrop');
+    if (!backdrop) {
+        backdrop = document.createElement('div');
+        backdrop.id = 'sidebarBackdrop';
+        backdrop.className = 'sidebar-backdrop';
+        backdrop.onclick = () => {
+            const sidebar = document.getElementById('enterpriseSidebar');
+            if (sidebar) sidebar.classList.remove('open');
+            backdrop.classList.remove('active');
+        };
+        document.body.appendChild(backdrop);
+    }
+    if (isOpen) {
+        backdrop.classList.add('active');
+    } else {
+        backdrop.classList.remove('active');
+    }
+}
+
+function applyMobileTableLabels(tableEl) {
+    if (!tableEl) {
+        document.querySelectorAll('table.stack-mobile').forEach(t => applyMobileTableLabels(t));
+        return;
+    }
+    const headers = Array.from(tableEl.querySelectorAll('thead th')).map(th => th.textContent.trim());
+    if (headers.length === 0) return;
+    tableEl.querySelectorAll('tbody tr').forEach(tr => {
+        if (tr.querySelector('.empty-cell') || tr.querySelector('.empty-row') || tr.querySelector('.table-empty-row')) return;
+        const cells = tr.querySelectorAll('td');
+        cells.forEach((td, idx) => {
+            if (headers[idx] && !td.getAttribute('data-label')) {
+                td.setAttribute('data-label', headers[idx]);
+            }
+        });
+    });
 }
 
 function updateSidebarToggleLabel(isCollapsed) {
@@ -6540,5 +7353,1205 @@ async function loadAllSettings() {
     ]);
 }
 
+// =========================================================================
+// CAMPAIGNS & TARGETED BROADCASTS CONTROLLER
+// =========================================================================
 
+state.campaigns = [];
+state.campaignsFilter = 'all';
+state.campaignWizardStep = 1;
+state.campaignTemplates = [];
+state.currentPreviewData = null;
 
+async function loadCampaignsSummary() {
+    try {
+        const res = await fetch('/api/v1/campaigns');
+        if (!res.ok) return;
+        const data = await res.json();
+        const activeCount = (data.campaigns || []).filter(c => ['pending_approval', 'scheduled', 'processing'].includes(c.status)).length;
+        updateNavBadge('tabCampaignsCount', activeCount);
+    } catch (e) {
+        // silent background failure
+    }
+}
+
+async function loadCampaignsDashboard() {
+    try {
+        const [cmpRes, audRes] = await Promise.allSettled([
+            fetch('/api/v1/campaigns'),
+            fetch('/api/v1/campaigns/audiences')
+        ]);
+
+        let campaigns = [];
+        if (cmpRes.status === 'fulfilled' && cmpRes.value.ok) {
+            const data = await cmpRes.value.json();
+            campaigns = data.campaigns || [];
+            state.campaigns = campaigns;
+        }
+
+        let audiences = null;
+        if (audRes.status === 'fulfilled' && audRes.value.ok) {
+            const audData = await audRes.value.json();
+            audiences = audData.audiences || {};
+        }
+
+        // Update KPI telemetry cards
+        const total = campaigns.length;
+        const dispatched = campaigns.reduce((acc, c) => acc + (c.sent_count || 0), 0);
+        const delivered = campaigns.reduce((acc, c) => acc + (c.delivered_count || 0), 0);
+        const optOut = audiences ? (audiences.opted_out_count || 0) : 0;
+
+        const elTotal = document.getElementById('cmpStatTotal');
+        const elSent = document.getElementById('cmpStatDispatched');
+        const elDeliv = document.getElementById('cmpStatDelivered');
+        const elOpt = document.getElementById('cmpStatOptOut');
+
+        if (elTotal) elTotal.textContent = total;
+        if (elSent) elSent.textContent = dispatched;
+        if (elDeliv) elDeliv.textContent = delivered;
+        if (elOpt) elOpt.textContent = optOut;
+
+        const activeCount = campaigns.filter(c => ['pending_approval', 'scheduled', 'processing'].includes(c.status)).length;
+        updateNavBadge('tabCampaignsCount', activeCount);
+
+        renderCampaignsTable(campaigns);
+    } catch (err) {
+        console.error('Error loading campaigns:', err);
+        showToast(`Failed to load campaigns: ${err.message}`, 'error');
+    }
+}
+
+function renderCampaignsTable(campaigns) {
+    const tbody = document.getElementById('campaignsTableBody');
+    if (!tbody) return;
+
+    let filtered = campaigns;
+    if (state.campaignsFilter && state.campaignsFilter !== 'all') {
+        filtered = campaigns.filter(c => c.status === state.campaignsFilter);
+    }
+
+    if (!filtered || filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">No campaigns found matching current filter.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(c => {
+        let statusBadge = '<span class="status-pill blue">Draft</span>';
+        if (c.status === 'pending_approval') {
+            statusBadge = '<span class="status-pill yellow">⏳ Pending Review</span>';
+        } else if (c.status === 'scheduled') {
+            statusBadge = '<span class="status-pill purple">📅 Scheduled</span>';
+        } else if (c.status === 'processing') {
+            statusBadge = '<span class="status-pill blue" style="animation: pulse 1.5s infinite;">⚡ Processing</span>';
+        } else if (c.status === 'completed') {
+            statusBadge = '<span class="status-pill green">✓ Completed</span>';
+        } else if (c.status === 'cancelled') {
+            statusBadge = '<span class="status-pill red">✕ Cancelled</span>';
+        } else if (c.status === 'failed') {
+            statusBadge = '<span class="status-pill red">⚠️ Failed</span>';
+        }
+
+        const totalRecip = c.total_recipients || 0;
+        const sent = c.sent_count || 0;
+        const deliv = c.delivered_count || 0;
+        const pctSent = totalRecip > 0 ? Math.round((sent / totalRecip) * 100) : 0;
+
+        let actions = `
+            <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                <button type="button" class="hud-btn outline small" onclick="viewCampaignLedger('${c.id}')" title="View Delivery Ledger">Ledger</button>
+        `;
+
+        const canManage = state.userRole === 'owner' || state.userRole === 'admin';
+        if (canManage && (c.status === 'draft' || c.status === 'pending_approval')) {
+            actions += `<button type="button" class="hud-btn primary small" onclick="approveCampaignDirect('${c.id}')" style="background:#10b981; border-color:#10b981;">Launch</button>`;
+        }
+        if (canManage && (c.status === 'scheduled' || c.status === 'processing')) {
+            actions += `<button type="button" class="hud-btn small outline" onclick="cancelCampaignDirect('${c.id}')" style="color:#f87171; border-color:rgba(239,68,68,0.4);">Cancel</button>`;
+        }
+        actions += `</div>`;
+
+        const audienceLabel = c.audience_type.charAt(0).toUpperCase() + c.audience_type.slice(1);
+
+        return `
+            <tr>
+                <td>
+                    <div style="font-weight: 600; color: #fff;">${escapeHtml(c.title)}</div>
+                    <div style="font-size: 11px; color: var(--text-dim, #888); display: flex; align-items: center; gap: 6px; margin-top: 2px;">
+                        <span>💬 WhatsApp</span>
+                        <span>&bull;</span>
+                        <span>$${(c.estimated_cost_usd || 0).toFixed(2)}</span>
+                    </div>
+                </td>
+                <td>
+                    <span style="font-size: 12.5px; color: #cbd5e1;">${audienceLabel}</span>
+                    <div style="font-size: 11px; color: var(--cyan-glow, #00f0ff);">${totalRecip} recipients</div>
+                </td>
+                <td>${statusBadge}</td>
+                <td>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div style="flex: 1; min-width: 60px; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
+                            <div style="width: ${pctSent}%; height: 100%; background: #10b981;"></div>
+                        </div>
+                        <span style="font-size: 11px; font-family: var(--font-mono); color: var(--text-dim, #888);">${sent}/${totalRecip} (${pctSent}%)</span>
+                    </div>
+                    <div style="font-size: 10.5px; color: #60a5fa; margin-top: 2px;">Delivered: ${deliv}</div>
+                </td>
+                <td style="font-size: 11.5px; color: var(--text-dim, #888);">
+                    ${c.scheduled_at ? `📅 ${c.scheduled_at}` : (c.created_at || 'Just now')}
+                </td>
+                <td style="text-align: right;">${actions}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function filterCampaigns(status, btnEl) {
+    state.campaignsFilter = status;
+    const chips = btnEl?.parentElement?.querySelectorAll('.filter-chip');
+    if (chips) {
+        chips.forEach(c => c.classList.remove('active'));
+        btnEl.classList.add('active');
+    }
+    renderCampaignsTable(state.campaigns);
+}
+
+function handleCampaignSearch(query) {
+    const q = (query || '').toLowerCase().trim();
+    if (!q) {
+        renderCampaignsTable(state.campaigns);
+        return;
+    }
+    const filtered = state.campaigns.filter(c =>
+        c.title.toLowerCase().includes(q) ||
+        (c.audience_type && c.audience_type.toLowerCase().includes(q))
+    );
+    renderCampaignsTable(filtered);
+}
+
+// ------------------------------------------
+// CAMPAIGN WIZARD & MODAL CONTROLS
+// ------------------------------------------
+
+function openNewCampaignModal() {
+    state.campaignWizardStep = 1;
+    document.getElementById('cmpNewTitle').value = '';
+    document.getElementById('cmpNewMessageBody').value = '';
+    document.getElementById('cmpScheduleDateTime').value = '';
+
+    setWizardStepUI(1);
+    loadCampaignTemplates();
+    recalculateAudiencePreview();
+
+    document.getElementById('modalNewCampaign').style.display = 'flex';
+}
+
+function closeNewCampaignModal() {
+    document.getElementById('modalNewCampaign').style.display = 'none';
+}
+
+function handleAudienceTypeChange() {
+    const radios = document.getElementsByName('cmpAudienceType');
+    let sel = 'customers';
+    for (const r of radios) {
+        if (r.checked) sel = r.value;
+    }
+    const deptDiv = document.getElementById('cmpDeptSubSelect');
+    if (deptDiv) {
+        deptDiv.style.display = sel === 'department' ? 'block' : 'none';
+    }
+    recalculateAudiencePreview();
+}
+
+async function recalculateAudiencePreview() {
+    const elCount = document.getElementById('cmpLiveAudienceCount');
+    if (elCount) elCount.textContent = 'Calculating audience...';
+
+    const radios = document.getElementsByName('cmpAudienceType');
+    let sel = 'customers';
+    for (const r of radios) {
+        if (r.checked) sel = r.value;
+    }
+
+    let filter = {};
+    if (sel === 'department') {
+        filter = { department: document.getElementById('cmpDeptSelect')?.value || 'Support' };
+    }
+
+    try {
+        const res = await fetch('/api/v1/campaigns/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                audience_type: sel,
+                audience_filter: filter,
+                raw_template: document.getElementById('cmpNewMessageBody')?.value || 'Hello {{name}}!'
+            })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            state.currentPreviewData = data.preview;
+            if (elCount) {
+                elCount.innerHTML = `<span style="color:#10b981;">${data.preview.total_recipients} eligible contacts</span> <span style="font-size:11.5px; color:#f87171;">(${data.preview.opted_out_count} opted out excluded)</span>`;
+            }
+        } else {
+            if (elCount) elCount.textContent = 'Unable to resolve audience';
+        }
+    } catch (e) {
+        if (elCount) elCount.textContent = 'Ready (live calculation pending)';
+    }
+}
+
+async function stepCmpWizard(direction) {
+    const newStep = state.campaignWizardStep + direction;
+    if (newStep < 1 || newStep > 3) return;
+
+    if (newStep === 2) {
+        const title = document.getElementById('cmpNewTitle')?.value.trim();
+        if (!title) {
+            showToast('Please enter a campaign title first.', 'error');
+            return;
+        }
+    }
+
+    if (newStep === 3) {
+        const body = document.getElementById('cmpNewMessageBody')?.value.trim();
+        if (!body) {
+            showToast('Please compose a message for your broadcast.', 'error');
+            return;
+        }
+
+        // Fetch full preview with exact sample rendering
+        const radios = document.getElementsByName('cmpAudienceType');
+        let sel = 'customers';
+        for (const r of radios) {
+            if (r.checked) sel = r.value;
+        }
+
+        let filter = {};
+        if (sel === 'department') {
+            filter = { department: document.getElementById('cmpDeptSelect')?.value || 'Support' };
+        }
+
+        const previewBox = document.getElementById('cmpExactRenderedPreview');
+        if (previewBox) previewBox.textContent = 'Generating sample preview...';
+
+        try {
+            const res = await fetch('/api/v1/campaigns/preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    audience_type: sel,
+                    audience_filter: filter,
+                    raw_template: body
+                })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                state.currentPreviewData = data.preview;
+                if (previewBox) previewBox.textContent = data.preview.primary_preview;
+
+                const audText = document.getElementById('cmpReviewAudienceText');
+                if (audText) audText.textContent = `${sel.toUpperCase()} (${data.preview.total_recipients} contacts)`;
+
+                const costText = document.getElementById('cmpReviewCostText');
+                if (costText) costText.textContent = `$${data.preview.estimated_cost_usd.toFixed(2)} USD`;
+
+                const badge = document.getElementById('cmpReviewComplianceBadge');
+                if (badge) {
+                    if (data.preview.compliance_status === 'compliant') {
+                        badge.className = 'status-pill green';
+                        badge.textContent = '✓ Verified Compliant';
+                    } else {
+                        badge.className = 'status-pill yellow';
+                        badge.textContent = '⚠️ Template Recommended';
+                    }
+                }
+
+                const warnBox = document.getElementById('cmpReviewWarningsBox');
+                if (warnBox) {
+                    if (data.preview.warnings && data.preview.warnings.length > 0) {
+                        warnBox.style.display = 'block';
+                        warnBox.innerHTML = data.preview.warnings.map(w => `<div>&bull; ${escapeHtml(w)}</div>`).join('');
+                    } else {
+                        warnBox.style.display = 'none';
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Preview error:', e);
+        }
+    }
+
+    state.campaignWizardStep = newStep;
+    setWizardStepUI(newStep);
+}
+
+function setWizardStepUI(step) {
+    document.querySelectorAll('.cmp-step-pane').forEach((pane, idx) => {
+        pane.style.display = (idx + 1) === step ? 'block' : 'none';
+    });
+
+    for (let i = 1; i <= 3; i++) {
+        const pill = document.getElementById(`cmpWizardPill${i}`);
+        if (pill) {
+            if (i === step) {
+                pill.style.color = 'var(--cyan-glow, #00f0ff)';
+                pill.style.fontWeight = '600';
+            } else {
+                pill.style.color = 'var(--text-dim, #888)';
+                pill.style.fontWeight = 'normal';
+            }
+        }
+    }
+
+    const btnBack = document.getElementById('btnCmpBack');
+    const btnNext = document.getElementById('btnCmpNext');
+    const btnDraft = document.getElementById('btnCmpSaveDraft');
+    const btnLaunch = document.getElementById('btnCmpApproveLaunch');
+
+    if (btnBack) btnBack.style.display = step > 1 ? 'inline-flex' : 'none';
+    if (btnNext) {
+        btnNext.style.display = step < 3 ? 'inline-flex' : 'none';
+        btnNext.textContent = step === 1 ? 'Next: Compose Message →' : 'Next: Review & Confirm →';
+    }
+    if (btnDraft) btnDraft.style.display = step === 3 ? 'inline-flex' : 'none';
+    if (btnLaunch) btnLaunch.style.display = step === 3 ? 'inline-flex' : 'none';
+}
+
+function insertPlaceholderIntoComposer(tag) {
+    const textarea = document.getElementById('cmpNewMessageBody');
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    textarea.value = text.substring(0, start) + tag + text.substring(end);
+    textarea.focus();
+    textarea.selectionStart = textarea.selectionEnd = start + tag.length;
+}
+
+function handleTimingModeChange() {
+    const radios = document.getElementsByName('cmpTimingMode');
+    let sel = 'immediate';
+    for (const r of radios) {
+        if (r.checked) sel = r.value;
+    }
+    const container = document.getElementById('cmpScheduleDateTimeContainer');
+    if (container) {
+        container.style.display = sel === 'scheduled' ? 'block' : 'none';
+    }
+}
+
+async function submitCreateCampaign(autoApprove) {
+    const title = document.getElementById('cmpNewTitle')?.value.trim();
+    const rawTemplate = document.getElementById('cmpNewMessageBody')?.value.trim();
+    if (!title || !rawTemplate) {
+        showToast('Campaign title and message are required.', 'error');
+        return;
+    }
+
+    const radios = document.getElementsByName('cmpAudienceType');
+    let audienceType = 'customers';
+    for (const r of radios) {
+        if (r.checked) audienceType = r.value;
+    }
+
+    let filter = {};
+    if (audienceType === 'department') {
+        filter = { department: document.getElementById('cmpDeptSelect')?.value || 'Support' };
+    }
+
+    let scheduledAt = null;
+    const timingRadios = document.getElementsByName('cmpTimingMode');
+    let timing = 'immediate';
+    for (const r of timingRadios) {
+        if (r.checked) timing = r.value;
+    }
+    if (timing === 'scheduled') {
+        const dtVal = document.getElementById('cmpScheduleDateTime')?.value;
+        if (dtVal) scheduledAt = new Date(dtVal).toISOString();
+    }
+
+    try {
+        const payload = {
+            title,
+            raw_template: rawTemplate,
+            audience_type: audienceType,
+            audience_filter: filter,
+            channel: 'whatsapp',
+            scheduled_at: scheduledAt
+        };
+
+        const res = await fetch('/api/v1/campaigns', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            const campId = data.campaign.id;
+            if (autoApprove) {
+                const appRes = await fetch(`/api/v1/campaigns/${campId}/approve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const appData = await appRes.json();
+                if (appRes.ok) {
+                    showToast('Campaign successfully approved and queued for dispatch!', 'success');
+                } else {
+                    showToast(appData.error || 'Campaign saved but failed to launch.', 'warning');
+                }
+            } else {
+                showToast('Campaign saved as draft.', 'success');
+            }
+
+            closeNewCampaignModal();
+            loadCampaignsDashboard();
+        } else {
+            showToast(data.error || 'Failed to create campaign.', 'error');
+        }
+    } catch (err) {
+        showToast(`Error creating campaign: ${err.message}`, 'error');
+    }
+}
+
+async function approveCampaignDirect(campaignId) {
+    if (!confirm('Are you sure you want to approve and launch this campaign?')) return;
+    try {
+        const res = await fetch(`/api/v1/campaigns/${campaignId}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Campaign approved and activated!', 'success');
+            loadCampaignsDashboard();
+        } else {
+            showToast(data.error || 'Approval failed.', 'error');
+        }
+    } catch (err) {
+        showToast(`Approval error: ${err.message}`, 'error');
+    }
+}
+
+async function cancelCampaignDirect(campaignId) {
+    if (!confirm('Are you sure you want to cancel this campaign? Pending recipients will be halted.')) return;
+    try {
+        const res = await fetch(`/api/v1/campaigns/${campaignId}/cancel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Campaign cancelled.', 'info');
+            loadCampaignsDashboard();
+        } else {
+            showToast(data.error || 'Cancellation failed.', 'error');
+        }
+    } catch (err) {
+        showToast(`Cancellation error: ${err.message}`, 'error');
+    }
+}
+
+async function viewCampaignLedger(campaignId) {
+    try {
+        const res = await fetch(`/api/v1/campaigns/${campaignId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const camp = data.campaign;
+
+        document.getElementById('cmpDetailTitle').textContent = camp.title;
+        document.getElementById('cmpDetailMeta').textContent = `Audience: ${camp.audience_type} • Channel: ${camp.channel}`;
+        document.getElementById('cmpDetailTotalRecip').textContent = camp.total_recipients || 0;
+        document.getElementById('cmpDetailSentCount').textContent = camp.sent_count || 0;
+        document.getElementById('cmpDetailDeliveredCount').textContent = camp.delivered_count || 0;
+        document.getElementById('cmpDetailFailedCount').textContent = camp.failed_count || 0;
+
+        const tbody = document.getElementById('cmpDetailRecipientsBody');
+        const recipients = camp.recipients || [];
+
+        if (recipients.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">No recipient ledger entries available.</td></tr>`;
+        } else {
+            tbody.innerHTML = recipients.map(r => {
+                let badge = '<span class="status-pill blue">Pending</span>';
+                if (r.status === 'sent') badge = '<span class="status-pill green">Sent</span>';
+                if (r.status === 'delivered') badge = '<span class="status-pill blue">Delivered</span>';
+                if (r.status === 'read') badge = '<span class="status-pill green">Read</span>';
+                if (r.status === 'opted_out') badge = '<span class="status-pill yellow">Opted Out</span>';
+                if (r.status === 'failed') badge = '<span class="status-pill red">Failed</span>';
+
+                return `
+                    <tr>
+                        <td><strong>${escapeHtml(r.name)}</strong></td>
+                        <td style="font-family: var(--font-mono);">${escapeHtml(r.phone)}</td>
+                        <td>${badge}</td>
+                        <td style="font-family: var(--font-mono); font-size: 11px; color: var(--text-dim, #888);">${r.provider_message_id || '—'}</td>
+                        <td style="font-size: 11px;">${r.sent_at || '—'}</td>
+                        <td style="font-size: 11px;">${r.delivered_at || '—'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        document.getElementById('modalCampaignDetail').style.display = 'flex';
+    } catch (err) {
+        showToast(`Error loading campaign ledger: ${err.message}`, 'error');
+    }
+}
+
+function closeCampaignDetailModal() {
+    document.getElementById('modalCampaignDetail').style.display = 'none';
+}
+
+// ------------------------------------------
+// AI DRAFT ASSISTANT CONTROLS
+// ------------------------------------------
+
+function openAiDraftModal() {
+    document.getElementById('aiDraftPromptInput').value = '';
+    document.getElementById('aiDraftResultArea').style.display = 'none';
+    document.getElementById('modalAiDraft').style.display = 'flex';
+}
+
+function closeAiDraftModal() {
+    document.getElementById('modalAiDraft').style.display = 'none';
+}
+
+async function generateAiDraftFromModal() {
+    const prompt = document.getElementById('aiDraftPromptInput')?.value.trim();
+    if (!prompt) {
+        showToast('Please describe the announcement you want to draft.', 'error');
+        return;
+    }
+    const tone = document.getElementById('aiDraftToneSelect')?.value || 'professional';
+    const aud = document.getElementById('aiDraftAudienceSelect')?.value || 'customers';
+    const btn = document.getElementById('btnRunAiDraft');
+
+    if (btn) btn.textContent = 'Generating Draft...';
+    try {
+        const res = await fetch('/api/v1/campaigns/ai-draft', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, tone, audience_type: aud })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            document.getElementById('aiDraftOutputBody').value = data.suggested_body;
+            document.getElementById('aiDraftResultArea').style.display = 'block';
+            showToast('AI draft generated! Review before inserting into campaign.', 'success');
+        } else {
+            showToast(data.error || 'Failed to generate AI draft.', 'error');
+        }
+    } catch (err) {
+        showToast(`AI draft error: ${err.message}`, 'error');
+    } finally {
+        if (btn) btn.textContent = '⚡ Generate Draft Announcement';
+    }
+}
+
+function useAiDraftInComposer() {
+    const body = document.getElementById('aiDraftOutputBody')?.value;
+    if (body) {
+        const composer = document.getElementById('cmpNewMessageBody');
+        if (composer) composer.value = body;
+    }
+    closeAiDraftModal();
+    const newCampModal = document.getElementById('modalNewCampaign');
+    if (newCampModal && newCampModal.style.display !== 'flex') {
+        openNewCampaignModal();
+        stepCmpWizard(1);
+    }
+}
+
+// ------------------------------------------
+// REUSABLE TEMPLATES CONTROLS
+// ------------------------------------------
+
+async function loadCampaignTemplates() {
+    try {
+        const res = await fetch('/api/v1/campaigns/templates');
+        if (!res.ok) return;
+        const data = await res.json();
+        state.campaignTemplates = data.templates || [];
+
+        const select = document.getElementById('cmpTemplateSelect');
+        if (select) {
+            select.innerHTML = `<option value="">-- Custom Message (No Template) --</option>` +
+                state.campaignTemplates.map(t => `<option value="${t.id}">${escapeHtml(t.name)} (${t.category})</option>`).join('');
+        }
+    } catch (e) {
+        // silent
+    }
+}
+
+function handleTemplateSelectChange(tmplId) {
+    if (!tmplId) return;
+    const tmpl = state.campaignTemplates.find(t => t.id === tmplId);
+    if (tmpl) {
+        const composer = document.getElementById('cmpNewMessageBody');
+        if (composer) composer.value = tmpl.body;
+    }
+}
+
+function openTemplatesModal() {
+    loadTemplatesListInModal();
+    document.getElementById('modalManageTemplates').style.display = 'flex';
+}
+
+function closeTemplatesModal() {
+    document.getElementById('modalManageTemplates').style.display = 'none';
+}
+
+async function loadTemplatesListInModal() {
+    const container = document.getElementById('templatesListContainer');
+    if (!container) return;
+    try {
+        const res = await fetch('/api/v1/campaigns/templates');
+        const data = await res.json();
+        const templates = data.templates || [];
+        if (templates.length === 0) {
+            container.innerHTML = '<div class="empty-cell">No templates available.</div>';
+            return;
+        }
+        container.innerHTML = templates.map(t => `
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color, #2a2e3d); border-radius: 6px; padding: 10px 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <strong style="color: #fff; font-size: 13px;">${escapeHtml(t.name)}</strong>
+                    <span class="status-pill blue" style="font-size: 10px;">${t.category}</span>
+                </div>
+                <div style="font-size: 12px; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(t.body)}</div>
+            </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = '<div class="empty-cell">Failed to load templates.</div>';
+    }
+}
+
+async function submitCreateTemplate() {
+    const name = document.getElementById('newTemplateName')?.value.trim();
+    const body = document.getElementById('newTemplateBody')?.value.trim();
+    if (!name || !body) {
+        showToast('Template name and body are required.', 'error');
+        return;
+    }
+    try {
+        const res = await fetch('/api/v1/campaigns/templates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, body })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Template created successfully!', 'success');
+            document.getElementById('newTemplateName').value = '';
+            document.getElementById('newTemplateBody').value = '';
+            loadTemplatesListInModal();
+            loadCampaignTemplates();
+        } else {
+            showToast(data.error || 'Failed to create template.', 'error');
+        }
+    } catch (err) {
+        showToast(`Template error: ${err.message}`, 'error');
+    }
+}
+
+// ------------------------------------------
+// CONSENT & OPT-OUT REGISTRY CONTROLS
+// ------------------------------------------
+
+function openConsentRegistryModal() {
+    loadConsentRegistry();
+    document.getElementById('modalConsentRegistry').style.display = 'flex';
+}
+
+function closeConsentRegistryModal() {
+    document.getElementById('modalConsentRegistry').style.display = 'none';
+}
+
+async function loadConsentRegistry() {
+    const tbody = document.getElementById('consentTableBody');
+    if (!tbody) return;
+    try {
+        const res = await fetch('/api/v1/campaigns/consent');
+        const data = await res.json();
+        const consents = data.consents || [];
+        if (consents.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">No opt-out records found for this workspace.</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = consents.map(c => `
+            <tr>
+                <td style="font-family: var(--font-mono);">${escapeHtml(c.phone)}</td>
+                <td><span class="status-pill ${c.status === 'opted_out' ? 'red' : 'green'}">${c.status}</span></td>
+                <td style="font-size: 11.5px; color: var(--text-dim, #888);">${escapeHtml(c.reason || 'N/A')}</td>
+                <td style="font-size: 11px;">${c.opted_out_at || c.created_at || '—'}</td>
+                <td>
+                    ${c.status === 'opted_out' ?
+                        `<button type="button" class="hud-btn outline small" onclick="restoreConsentOptIn('${c.phone}')" style="font-size:11px; padding:2px 6px;">Restore (Opt-In)</button>` :
+                        'Active'
+                    }
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">Failed to load consent records.</td></tr>`;
+    }
+}
+
+async function submitManualOptOut() {
+    const phone = document.getElementById('manualOptOutPhone')?.value.trim();
+    if (!phone) {
+        showToast('Please enter a phone number to opt-out.', 'error');
+        return;
+    }
+    try {
+        const res = await fetch('/api/v1/campaigns/consent/opt-out', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone, reason: 'Manual operator opt-out entry' })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`Contact ${phone} registered as opted-out.`, 'success');
+            document.getElementById('manualOptOutPhone').value = '';
+            loadConsentRegistry();
+            loadCampaignsDashboard();
+        } else {
+            showToast(data.error || 'Failed to opt-out contact.', 'error');
+        }
+    } catch (err) {
+        showToast(`Opt-out error: ${err.message}`, 'error');
+    }
+}
+
+async function restoreConsentOptIn(phone) {
+    try {
+        const res = await fetch('/api/v1/campaigns/consent/opt-in', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`Consent restored for ${phone}.`, 'success');
+            loadConsentRegistry();
+            loadCampaignsDashboard();
+        } else {
+            showToast(data.error || 'Failed to restore consent.', 'error');
+        }
+    } catch (err) {
+        showToast(`Consent error: ${err.message}`, 'error');
+    }
+}
+
+// ==========================================
+// COMPANY MESSAGING COMMAND CENTER (SECTION 34)
+// ==========================================
+
+let cmChannels = [];
+let cmActiveChannelId = null;
+let cmAutoPollTimer = null;
+let cmActiveBroadcast = null;
+
+async function loadCompanyMessagingDashboard() {
+    try {
+        const tenantLabel = document.getElementById('cmWorkspaceTenantLabel');
+        if (tenantLabel && state.currentOrg) {
+            tenantLabel.textContent = state.currentOrg.name || 'Enterprise Workspace';
+        }
+        const roleBadge = document.getElementById('cmActiveRoleBadge');
+        if (roleBadge) {
+            roleBadge.textContent = `Role: ${state.userRole || 'member'}`;
+        }
+
+        const res = await fetch('/api/v1/company-messaging/channels');
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        cmChannels = data.channels || [];
+
+        const countEl = document.getElementById('cmChannelCountText');
+        if (countEl) countEl.textContent = `${cmChannels.length} Channels`;
+
+        renderCompanyChannels(cmChannels);
+
+        if (cmChannels.length > 0) {
+            const currentExists = cmChannels.some(c => c.id === cmActiveChannelId);
+            if (!cmActiveChannelId || !currentExists) {
+                selectCompanyChannel(cmChannels[0].id);
+            }
+        } else {
+            const stream = document.getElementById('cmMessageStream');
+            if (stream) stream.innerHTML = '<div style="padding: 60px 20px; text-align: center; color: var(--text-dim, #888); font-size: 13px;">No channels found for this workspace.</div>';
+        }
+
+        loadCompanyBroadcasts();
+    } catch (err) {
+        console.error('Failed to load company messaging channels:', err);
+    }
+}
+
+function renderCompanyChannels(channels) {
+    const listEl = document.getElementById('cmChannelList');
+    if (!listEl) return;
+    if (!channels || channels.length === 0) {
+        listEl.innerHTML = '<div style="padding: 30px 16px; text-align: center; color: var(--text-dim, #888); font-size: 12px;">No channels found.</div>';
+        return;
+    }
+
+    listEl.innerHTML = channels.map(c => {
+        const isActive = c.id === cmActiveChannelId;
+        const icon = c.channel_type === 'announcement' ? '📢' : (c.channel_type === 'private' ? '🔒' : '#');
+        const activeBg = isActive ? 'background: rgba(0, 240, 255, 0.08); border-left: 3px solid var(--cyan-glow, #00f0ff); font-weight: 600; color: #fff;' : 'background: transparent; border-left: 3px solid transparent; color: var(--text-secondary, #cbd5e1);';
+        return `
+            <div class="cm-channel-item" onclick="selectCompanyChannel('${escapeHtml(c.id)}')" style="display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; cursor: pointer; transition: background 0.15s ease; ${activeBg}">
+                <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                    <span style="font-size: 14px; color: var(--cyan-glow, #00f0ff);">${icon}</span>
+                    <span style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(c.name)}</span>
+                </div>
+                ${c.message_count ? `<span class="badge" style="font-size: 10px; background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 10px; color: var(--text-dim, #888);">${c.message_count}</span>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+function selectCompanyChannel(channelId) {
+    cmActiveChannelId = channelId;
+    const c = cmChannels.find(ch => ch.id === channelId);
+    if (c) {
+        const iconEl = document.getElementById('cmActiveChannelIcon');
+        const nameEl = document.getElementById('cmActiveChannelName');
+        const typeEl = document.getElementById('cmActiveChannelTypeBadge');
+        const descEl = document.getElementById('cmActiveChannelDesc');
+        const inputEl = document.getElementById('cmMessageInput');
+        const archiveBtn = document.getElementById('cmBtnArchiveChannel');
+
+        if (iconEl) iconEl.textContent = c.channel_type === 'announcement' ? '📢' : (c.channel_type === 'private' ? '🔒' : '#');
+        if (nameEl) nameEl.textContent = '#' + c.name;
+        if (typeEl) {
+            typeEl.textContent = (c.channel_type || 'public').toUpperCase();
+            typeEl.className = 'status-pill ' + (c.channel_type === 'announcement' ? 'yellow' : (c.channel_type === 'private' ? 'red' : 'green'));
+        }
+        if (descEl) descEl.textContent = c.description || 'Company messaging stream';
+        if (inputEl) inputEl.placeholder = `Message #${c.name}...`;
+        if (archiveBtn) {
+            const canArchive = (state.userRole === 'owner' || state.userRole === 'admin') && !c.is_system;
+            archiveBtn.style.display = canArchive ? 'inline-block' : 'none';
+        }
+    }
+    renderCompanyChannels(cmChannels);
+    loadCompanyChannelMessages(channelId);
+}
+
+function renderMessageItem(msg) {
+    const isCritical = msg.priority === 'critical';
+    const isUrgent = msg.priority === 'urgent';
+    const border = isCritical ? 'border: 1px solid rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.08);' : (isUrgent ? 'border: 1px solid rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.08);' : 'border: 1px solid rgba(255, 255, 255, 0.06); background: rgba(255, 255, 255, 0.03);');
+    const priorityPill = isCritical ? '<span class="status-pill red" style="font-size: 10px; padding: 1px 6px;">CRITICAL</span>' : (isUrgent ? '<span class="status-pill yellow" style="font-size: 10px; padding: 1px 6px;">URGENT</span>' : '');
+    const canDelete = (state.userRole === 'owner' || state.userRole === 'admin' || (state.currentUser && state.currentUser.id === msg.sender_id));
+    const deleteBtn = canDelete ? `<button type="button" class="hud-btn outline small" onclick="deleteCompanyMessage('${escapeHtml(msg.id)}')" title="Delete message" style="padding: 2px 6px; font-size: 10px; border-color: rgba(239,68,68,0.3); color: #fca5a5;">🗑️</button>` : '';
+
+    return `
+        <div class="cm-message-card" style="padding: 10px 14px; border-radius: 8px; ${border} display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-weight: 700; font-size: 13px; color: #fff;">${escapeHtml(msg.sender_name || 'Member')}</span>
+                    <span class="status-pill blue" style="font-size: 10px; padding: 1px 6px;">${escapeHtml(msg.sender_role || 'member')}</span>
+                    ${priorityPill}
+                    <span style="font-size: 11px; color: var(--text-dim, #888); font-family: var(--font-mono);">${escapeHtml(msg.created_at || '')}</span>
+                </div>
+                ${deleteBtn}
+            </div>
+            <div style="font-size: 13px; color: #e2e8f0; line-height: 1.45; white-space: pre-wrap; word-break: break-word;">${escapeHtml(msg.body || '')}</div>
+        </div>
+    `;
+}
+
+async function loadCompanyChannelMessages(channelId, isBackground = false) {
+    if (!channelId) return;
+    const stream = document.getElementById('cmMessageStream');
+    if (!stream) return;
+
+    if (!isBackground && stream.innerHTML.includes('Select a channel')) {
+        stream.innerHTML = '<div style="padding: 60px 20px; text-align: center; color: var(--text-dim, #888); font-size: 13px;">Loading messages...</div>';
+    }
+
+    try {
+        const res = await fetch(`/api/v1/company-messaging/channels/${encodeURIComponent(channelId)}/messages?limit=60`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const messages = data.messages || [];
+
+        if (messages.length === 0) {
+            stream.innerHTML = '<div style="padding: 60px 20px; text-align: center; color: var(--text-dim, #888); font-size: 13px;">No messages yet. Send a message to start the conversation!</div>';
+            return;
+        }
+
+        const wasAtBottom = (stream.scrollHeight - stream.scrollTop - stream.clientHeight) < 60;
+        stream.innerHTML = messages.map(msg => renderMessageItem(msg)).join('');
+
+        if (!isBackground || wasAtBottom) {
+            stream.scrollTop = stream.scrollHeight;
+        }
+    } catch (err) {
+        if (!isBackground) {
+            stream.innerHTML = `<div style="padding: 40px 20px; text-align: center; color: #f87171; font-size: 13px;">Failed to load messages: ${escapeHtml(err.message)}</div>`;
+        }
+    }
+}
+
+async function sendCompanyMessage() {
+    if (!cmActiveChannelId) {
+        showToast('Please select a channel first.', 'warning');
+        return;
+    }
+    const input = document.getElementById('cmMessageInput');
+    const prioritySelect = document.getElementById('cmMessagePrioritySelect');
+    if (!input) return;
+
+    const body = input.value.trim();
+    if (!body) return;
+
+    const priority = prioritySelect ? prioritySelect.value : 'normal';
+    const btn = document.getElementById('cmBtnSendMessage');
+    if (btn) btn.disabled = true;
+
+    try {
+        const res = await fetch(`/api/v1/company-messaging/channels/${encodeURIComponent(cmActiveChannelId)}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body, priority })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            input.value = '';
+            loadCompanyChannelMessages(cmActiveChannelId);
+        } else {
+            showToast(data.error || 'Failed to send message.', 'error');
+        }
+    } catch (err) {
+        showToast(`Send error: ${err.message}`, 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+        input.focus();
+    }
+}
+
+function handleCmMessageKeydown(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendCompanyMessage();
+    }
+}
+
+async function loadCompanyBroadcasts() {
+    const bannerContainer = document.getElementById('cmBroadcastBannerContainer');
+    if (!bannerContainer) return;
+
+    try {
+        const res = await fetch('/api/v1/company-messaging/broadcasts');
+        if (!res.ok) return;
+        const data = await res.json();
+        const broadcasts = data.broadcasts || [];
+
+        const activeBc = broadcasts.find(b => b.requires_acknowledgment && !b.is_acknowledged) || broadcasts[0];
+
+        if (activeBc) {
+            cmActiveBroadcast = activeBc;
+            bannerContainer.style.display = 'block';
+
+            const iconEl = document.getElementById('cmBroadcastIcon');
+            const badgeEl = document.getElementById('cmBroadcastSeverityBadge');
+            const titleEl = document.getElementById('cmBroadcastTitleText');
+            const senderEl = document.getElementById('cmBroadcastSenderText');
+            const bodyEl = document.getElementById('cmBroadcastBodyText');
+            const ackContainer = document.getElementById('cmBroadcastAckContainer');
+
+            if (iconEl) iconEl.textContent = activeBc.severity === 'critical' ? '🚨' : (activeBc.severity === 'warning' ? '⚠️' : '📢');
+            if (badgeEl) {
+                badgeEl.textContent = `${activeBc.severity.toUpperCase()} BROADCAST`;
+                badgeEl.className = 'status-pill ' + (activeBc.severity === 'critical' ? 'red' : (activeBc.severity === 'warning' ? 'yellow' : 'blue'));
+            }
+            if (titleEl) titleEl.textContent = activeBc.title;
+            if (senderEl) senderEl.textContent = `by ${activeBc.created_by_name || 'Admin'} • ${activeBc.created_at || ''}`;
+            if (bodyEl) bodyEl.textContent = activeBc.body;
+
+            if (ackContainer) {
+                ackContainer.style.display = (activeBc.requires_acknowledgment && !activeBc.is_acknowledged) ? 'flex' : 'none';
+            }
+        } else {
+            cmActiveBroadcast = null;
+            bannerContainer.style.display = 'none';
+        }
+    } catch (err) {
+        // Silent catch for background poll
+    }
+}
+
+async function acknowledgeActiveBroadcast() {
+    if (!cmActiveBroadcast) return;
+    try {
+        const res = await fetch(`/api/v1/company-messaging/broadcasts/${encodeURIComponent(cmActiveBroadcast.id)}/ack`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast('Operational broadcast acknowledged.', 'success');
+            loadCompanyBroadcasts();
+        } else {
+            showToast(data.error || 'Failed to acknowledge broadcast.', 'error');
+        }
+    } catch (err) {
+        showToast(`Ack error: ${err.message}`, 'error');
+    }
+}
+
+async function openCreateChannelModal() {
+    const rawName = prompt('Enter new channel name (e.g. dev-team, ops-war-room):');
+    if (!rawName) return;
+    const name = rawName.trim().replace(/^#/, '');
+    if (!name) return;
+
+    const desc = prompt('Enter channel description (optional):', 'Internal team collaboration channel.') || '';
+
+    try {
+        const res = await fetch('/api/v1/company-messaging/channels', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                display_name: '#' + name,
+                description: desc,
+                channel_type: 'public'
+            })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast(`Channel #${name} created successfully.`, 'success');
+            await loadCompanyMessagingDashboard();
+            if (data.channel && data.channel.id) {
+                selectCompanyChannel(data.channel.id);
+            }
+        } else {
+            showToast(data.error || 'Failed to create channel.', 'error');
+        }
+    } catch (err) {
+        showToast(`Channel creation error: ${err.message}`, 'error');
+    }
+}
+
+async function openCreateBroadcastModal() {
+    const title = prompt('Operational Broadcast Title (e.g. Scheduled Maintenance Window):');
+    if (!title || !title.trim()) return;
+
+    const body = prompt('Broadcast Details / Operational Message:');
+    if (!body || !body.trim()) return;
+
+    try {
+        const res = await fetch('/api/v1/company-messaging/broadcasts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: title.trim(),
+                body: body.trim(),
+                severity: 'warning',
+                requires_acknowledgment: true,
+                expires_hours: 48
+            })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast('Operational broadcast dispatched across tenant workspace.', 'success');
+            loadCompanyBroadcasts();
+        } else {
+            showToast(data.error || 'Failed to dispatch broadcast.', 'error');
+        }
+    } catch (err) {
+        showToast(`Broadcast dispatch error: ${err.message}`, 'error');
+    }
+}
+
+async function archiveCurrentChannel() {
+    if (!cmActiveChannelId) return;
+    const c = cmChannels.find(ch => ch.id === cmActiveChannelId);
+    if (!c) return;
+
+    if (c.is_system) {
+        showToast('System default channels cannot be archived.', 'warning');
+        return;
+    }
+
+    if (!confirm(`Are you sure you want to archive #${c.name}? Messages will be retained but the channel will be hidden.`)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/v1/company-messaging/channels/${encodeURIComponent(cmActiveChannelId)}`, {
+            method: 'DELETE'
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast(`Channel #${c.name} archived.`, 'success');
+            cmActiveChannelId = null;
+            loadCompanyMessagingDashboard();
+        } else {
+            showToast(data.error || 'Failed to archive channel.', 'error');
+        }
+    } catch (err) {
+        showToast(`Archive error: ${err.message}`, 'error');
+    }
+}
+
+async function deleteCompanyMessage(messageId) {
+    if (!messageId) return;
+    if (!confirm('Are you sure you want to delete this message?')) return;
+
+    try {
+        const res = await fetch(`/api/v1/company-messaging/messages/${encodeURIComponent(messageId)}`, {
+            method: 'DELETE'
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast('Message deleted.', 'success');
+            if (cmActiveChannelId) loadCompanyChannelMessages(cmActiveChannelId);
+        } else {
+            showToast(data.error || 'Failed to delete message.', 'error');
+        }
+    } catch (err) {
+        showToast(`Delete error: ${err.message}`, 'error');
+    }
+}
+
+function filterCompanyChannels(query) {
+    const q = (query || '').toLowerCase().trim();
+    if (!q) {
+        renderCompanyChannels(cmChannels);
+        return;
+    }
+    const filtered = cmChannels.filter(c => 
+        (c.name && c.name.toLowerCase().includes(q)) || 
+        (c.display_name && c.display_name.toLowerCase().includes(q)) ||
+        (c.description && c.description.toLowerCase().includes(q))
+    );
+    renderCompanyChannels(filtered);
+}
+
+function startCompanyMessagingAutoPoll() {
+    stopCompanyMessagingAutoPoll();
+    cmAutoPollTimer = setInterval(() => {
+        if (cmActiveChannelId) {
+            loadCompanyChannelMessages(cmActiveChannelId, true);
+        }
+        loadCompanyBroadcasts();
+    }, 6000);
+}
+
+function stopCompanyMessagingAutoPoll() {
+    if (cmAutoPollTimer) {
+        clearInterval(cmAutoPollTimer);
+        cmAutoPollTimer = null;
+    }
+}

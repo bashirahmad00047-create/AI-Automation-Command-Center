@@ -59,7 +59,22 @@ def get_current_user() -> Optional[User]:
         if user and user.is_active:
             g.current_user = user
             return user
+        if session.get("is_super_admin") and session.get("user_email"):
+            admin_email = session.get("user_email", "").strip().lower()
+            user = User.query.filter_by(email=admin_email).first()
+            if user and user.is_active:
+                session["user_id"] = user.id
+                g.current_user = user
+                return user
+    elif session.get("is_super_admin") and session.get("user_email"):
+        admin_email = session.get("user_email", "").strip().lower()
+        user = User.query.filter_by(email=admin_email).first()
+        if user and user.is_active:
+            session["user_id"] = user.id
+            g.current_user = user
+            return user
     return None
+
 
 
 def get_current_org() -> Optional[Organization]:
@@ -107,8 +122,8 @@ def get_current_org() -> Optional[Organization]:
         # Authenticated user without valid membership must not inherit random active tenants
         return None
 
-    # 4. Default fallback to first active org for unauthenticated system/CLI tasks
-    default_org = Organization.query.filter_by(is_active=True).first()
+    # 4. Default fallback to enterprise default or first active org for unauthenticated system/CLI tasks
+    default_org = db.session.get(Organization, "org-enterprise-default") or Organization.query.filter_by(is_active=True).first()
     if default_org:
         g.current_org = default_org
         return default_org
@@ -118,6 +133,9 @@ def get_current_org() -> Optional[Organization]:
 
 def get_user_role(user_id: str, org_id: str) -> Optional[str]:
     """Gets the user's role in the specified organization."""
+    user = db.session.get(User, user_id)
+    if user and user.is_superuser:
+        return "owner"
     membership = Membership.query.filter_by(user_id=user_id, organization_id=org_id).first()
     return membership.role if membership else None
 

@@ -57,6 +57,8 @@ from models import (
     ApiKey,
     AuditLog,
     AutomationRule,
+    BusinessProfile,
+    ContactConsent,
     ExecutionStep,
     IncidentAlert,
     Lead,
@@ -77,7 +79,13 @@ from models import (
     WorkflowStep,
     generate_uuid,
 )
+from business_templates import (
+    get_all_templates,
+    get_template_by_id,
+    get_templates_by_category,
+)
 from jazzcash_service import JazzCashService, PLAN_PRICING_PKR
+from company_messaging_service import CompanyMessagingService
 from presets import PRESET_BLUEPRINTS
 from billing_service import (
     BillingError,
@@ -333,29 +341,63 @@ def auth_login():
     if email == admin_email_env.lower() and password == admin_pass_env:
         session.permanent = True
         session.pop("logged_out", None)
-        session['user_id'] = 99999
-        session['user_email'] = admin_email_env
         session['role'] = 'admin'
         session['is_super_admin'] = True
         session['is_enterprise_bypass'] = True
         session['plan'] = 'enterprise'
+        session['user_email'] = admin_email_env
 
+        # 1. Resolve or create canonical enterprise organization for workflows
+        org = Organization.query.filter_by(id="org-enterprise-default").first() or Organization.query.first()
+        if not org:
+            org = Organization(
+                id="org-enterprise-default",
+                name="Acme Enterprise Global",
+                slug="enterprise-corp",
+                plan_tier="enterprise",
+                is_active=True,
+                max_rules=250,
+                max_monthly_events=1000000
+            )
+            db.session.add(org)
+            db.session.flush()
+
+        # 2. Resolve or create persistent Master Admin user
         user = User.query.filter_by(email=admin_email_env.lower()).first()
-        org = Organization.query.first()
-        org_id = org.id if org else None
-        if org_id:
-            session["active_org_id"] = org_id
-            session["org_id"] = org_id
-        if user:
-            session["user_id"] = user.id
-            user_payload = user.to_dict()
+        if not user:
+            user = User(
+                id="usr-master-admin",
+                email=admin_email_env.lower(),
+                full_name="System Administrator",
+                is_superuser=True,
+                is_active=True
+            )
+            user.set_password(admin_pass_env)
+            db.session.add(user)
+            db.session.flush()
         else:
-            user_payload = {
-                "id": 99999,
-                "email": admin_email_env,
-                "full_name": "System Administrator",
-                "is_superuser": True
-            }
+            if not user.is_superuser or not user.is_active:
+                user.is_superuser = True
+                user.is_active = True
+
+        # 3. Ensure active membership in this organization
+        mem = Membership.query.filter_by(user_id=user.id, organization_id=org.id).first()
+        if not mem:
+            mem = Membership(
+                id=f"mem-admin-{org.id[:12]}",
+                user_id=user.id,
+                organization_id=org.id,
+                role="owner"
+            )
+            db.session.add(mem)
+
+        db.session.commit()
+
+        org_id = org.id
+        session["user_id"] = user.id
+        session["active_org_id"] = org_id
+        session["org_id"] = org_id
+        user_payload = user.to_dict()
 
         redirect_url = url_for('dashboard') if 'dashboard' in current_app.view_functions else '/'
         return jsonify({
@@ -2510,6 +2552,30 @@ def whatsapp_webhook_ingress():
             raw_payload=msg
         )
 
+        # Automatic Consent & Opt-Out handling (STOP / UNSUBSCRIBE / START)
+        inbound_body_clean = (msg.get("body") or "").strip().lower()
+        if inbound_body_clean in ("stop", "unsubscribe", "opt out", "optout", "cancel", "halt"):
+            try:
+                from campaign_service import CampaignService
+                CampaignService.handle_opt_out(
+                    organization_id=target_org.id,
+                    phone=msg.get("from_phone", ""),
+                    channel="whatsapp",
+                    reason=f"Inbound trigger: {inbound_body_clean.upper()}"
+                )
+            except Exception as opt_err:
+                logger.warning(f"Failed to record automatic opt-out: {opt_err}")
+        elif inbound_body_clean in ("start", "unstop", "resume"):
+            try:
+                from campaign_service import CampaignService
+                CampaignService.handle_opt_in(
+                    organization_id=target_org.id,
+                    phone=msg.get("from_phone", ""),
+                    channel="whatsapp"
+                )
+            except Exception as opt_err:
+                logger.warning(f"Failed to record automatic opt-in: {opt_err}")
+
         rule_replied = False
         if engine:
             event_data = {
@@ -3158,6 +3224,48 @@ def delete_whatsapp_instance(instance_id: str):
     }), 200
 
 
+@api_v1.route("/whatsapp/business-knowledge", methods=["GET"])
+@require_auth
+def get_whatsapp_business_knowledge():
+    """Returns verified business knowledge base configuration for the current workspace."""
+    org = get_current_org()
+    org_id = org.id if org else None
+    knowledge = WhatsAppService.get_tenant_business_knowledge(organization_id=org_id)
+    return jsonify({
+        "status": "success",
+        "organization_id": org_id,
+        "knowledge": knowledge
+    }), 200
+
+
+@api_v1.route("/whatsapp/business-knowledge", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin", "operator"])
+def save_whatsapp_business_knowledge():
+    """Updates verified business knowledge base for the current workspace."""
+    org = get_current_org()
+    org_id = org.id if org else None
+    data = request.get_json(silent=True) or {}
+
+    updated = WhatsAppService.save_tenant_business_knowledge(
+        organization_id=org_id,
+        data=data
+    )
+
+    current_user = get_current_user()
+    log_audit_event("whatsapp.business_knowledge_updated", "system", "business_knowledge", {
+        "user_id": current_user.id if current_user else "admin",
+        "organization_id": org_id,
+        "business_name": updated.get("business_name")
+    })
+
+    return jsonify({
+        "status": "success",
+        "message": "Business knowledge base updated successfully.",
+        "knowledge": updated
+    }), 200
+
+
 @api_v1.route("/whatsapp/auto-responder", methods=["GET"])
 @require_auth
 def get_whatsapp_auto_responder():
@@ -3165,6 +3273,7 @@ def get_whatsapp_auto_responder():
     org = get_current_org()
     org_id = org.id if org else None
     config = WhatsAppService.get_auto_responder_config(organization_id=org_id)
+    config["business_knowledge"] = WhatsAppService.get_tenant_business_knowledge(organization_id=org_id)
     return jsonify(config), 200
 
 
@@ -3206,6 +3315,20 @@ def save_whatsapp_auto_responder():
         groq_api_key=groq_key,
         groq_model=groq_model
     )
+
+    # Save business knowledge if provided in payload
+    bk_payload = data.get("business_knowledge")
+    if bk_payload is None:
+        # Check for top-level business knowledge keys
+        bk_keys = ["business_name", "products_services", "verified_prices", "working_hours", "delivery_return_policies", "faqs", "support_contact", "custom_instructions"]
+        if any(k in data for k in bk_keys):
+            bk_payload = {k: data[k] for k in bk_keys if k in data}
+
+    if bk_payload and isinstance(bk_payload, dict):
+        saved_kb = WhatsAppService.save_tenant_business_knowledge(organization_id=org_id, data=bk_payload)
+        updated["business_knowledge"] = saved_kb
+    else:
+        updated["business_knowledge"] = WhatsAppService.get_tenant_business_knowledge(organization_id=org_id)
 
     current_user = get_current_user()
     log_audit_event("whatsapp.auto_responder_updated", "system", "auto_responder", {
@@ -3512,4 +3635,764 @@ def auth_demo_login():
     if user:
         session["user_id"] = user.id
     return jsonify({"status": "success", "message": "Demo session initialized as admin@opsflow.io."}), 200
+
+
+# =========================================================================
+# Company Messaging Command Center REST Endpoints
+# =========================================================================
+
+@api_v1.route("/company-messaging/channels", methods=["GET"])
+@require_auth
+def list_company_channels():
+    """Returns active messaging channels for the authenticated organization."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    channels = CompanyMessagingService.list_channels(organization_id=org.id)
+    return jsonify({"success": True, "channels": channels, "count": len(channels)}), 200
+
+
+@api_v1.route("/company-messaging/channels", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin", "operator", "member"])
+def create_company_channel():
+    """Creates a new company messaging channel."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "")
+    display_name = data.get("display_name")
+    description = data.get("description")
+    channel_type = data.get("channel_type", "public")
+
+    result = CompanyMessagingService.create_channel(
+        organization_id=org.id,
+        name=name,
+        display_name=display_name,
+        description=description,
+        channel_type=channel_type,
+        user_id=user.id if user else None
+    )
+
+    status_code = 200 if result.get("success") else (409 if result.get("code") == "CONFLICT" else 400)
+    return jsonify(result), status_code
+
+
+@api_v1.route("/company-messaging/channels/<channel_id>", methods=["DELETE"])
+@require_auth
+@require_role(["owner", "admin"])
+def archive_company_channel(channel_id: str):
+    """Archives a company messaging channel (Admins/Owners only)."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    result = CompanyMessagingService.archive_channel(
+        channel_id=channel_id,
+        organization_id=org.id,
+        user_id=user.id if user else None
+    )
+
+    status_code = 200 if result.get("success") else (404 if result.get("code") == "NOT_FOUND" else 400)
+    return jsonify(result), status_code
+
+
+@api_v1.route("/company-messaging/channels/<channel_id>/messages", methods=["GET"])
+@require_auth
+def list_company_channel_messages(channel_id: str):
+    """Retrieves chronological messages for a company channel."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    limit = min(int(request.args.get("limit", 50)), 100)
+    before_id = request.args.get("before_id")
+    messages = CompanyMessagingService.list_messages(
+        channel_id=channel_id,
+        organization_id=org.id,
+        limit=limit,
+        before_id=before_id
+    )
+    return jsonify({"success": True, "messages": messages, "count": len(messages)}), 200
+
+
+@api_v1.route("/company-messaging/channels/<channel_id>/messages", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin", "operator", "member"])
+def post_company_channel_message(channel_id: str):
+    """Posts a message to a company channel (Viewers are forbidden with 403)."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    role = get_user_role(user.id, org.id) if user and org else "member"
+    data = request.get_json(silent=True) or {}
+    body = data.get("body") or data.get("message")
+    priority = data.get("priority", "normal")
+    parent_id = data.get("parent_message_id")
+
+    result = CompanyMessagingService.post_message(
+        organization_id=org.id,
+        channel_id=channel_id,
+        body=body,
+        sender_id=user.id if user else None,
+        sender_name=user.full_name if user else "Member",
+        sender_role=role,
+        priority=priority,
+        parent_message_id=parent_id
+    )
+
+    status_code = 200 if result.get("success") else (404 if result.get("code") == "NOT_FOUND" else (403 if result.get("code") == "PERMISSION_DENIED" else 400))
+    return jsonify(result), status_code
+
+
+@api_v1.route("/company-messaging/messages/<message_id>", methods=["DELETE"])
+@require_auth
+@require_role(["owner", "admin", "operator", "member"])
+def delete_company_message(message_id: str):
+    """Deletes an internal company message."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    role = get_user_role(user.id, org.id) if user and org else "member"
+    result = CompanyMessagingService.delete_message(
+        message_id=message_id,
+        organization_id=org.id,
+        user_id=user.id if user else None,
+        user_role=role
+    )
+
+    status_code = 200 if result.get("success") else (404 if result.get("code") == "NOT_FOUND" else (403 if result.get("code") == "FORBIDDEN" else 400))
+    return jsonify(result), status_code
+
+
+@api_v1.route("/company-messaging/broadcasts", methods=["GET"])
+@require_auth
+def list_company_broadcasts():
+    """Lists active company operational announcements."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    broadcasts = CompanyMessagingService.list_broadcasts(
+        organization_id=org.id,
+        active_only=True,
+        user_id=user.id if user else None
+    )
+    return jsonify({"success": True, "broadcasts": broadcasts, "count": len(broadcasts)}), 200
+
+
+@api_v1.route("/company-messaging/broadcasts", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+def create_company_broadcast():
+    """Dispatches a company-wide priority announcement (Admins/Owners only)."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+    title = data.get("title")
+    body = data.get("body") or data.get("message")
+    severity = data.get("severity", "info")
+    requires_ack = bool(data.get("requires_acknowledgment", False))
+    expires_hours = int(data.get("expires_hours", 48))
+
+    result = CompanyMessagingService.create_broadcast(
+        organization_id=org.id,
+        title=title,
+        body=body,
+        severity=severity,
+        requires_acknowledgment=requires_ack,
+        created_by_user_id=user.id if user else None,
+        created_by_name=user.full_name if user else "Admin",
+        expires_hours=expires_hours
+    )
+
+    status_code = 200 if result.get("success") else 400
+    return jsonify(result), status_code
+
+
+@api_v1.route("/company-messaging/broadcasts/<broadcast_id>/ack", methods=["POST"])
+@require_auth
+def acknowledge_company_broadcast(broadcast_id: str):
+    """Records employee acknowledgment of an operational broadcast."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "User identity required to acknowledge broadcast.", "code": "UNAUTHORIZED"}), 401
+
+    result = CompanyMessagingService.acknowledge_broadcast(
+        broadcast_id=broadcast_id,
+        organization_id=org.id,
+        user_id=user.id,
+        user_name=user.full_name or user.email
+    )
+
+    status_code = 200 if result.get("success") else (404 if result.get("code") == "NOT_FOUND" else 400)
+    return jsonify(result), status_code
+
+
+@api_v1.route("/company-messaging/summary", methods=["GET"])
+@require_auth
+def get_company_messaging_summary():
+    """Returns unread badges, active broadcasts, and critical alerts for Command Center navigation."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    summary = CompanyMessagingService.get_summary(organization_id=org.id, user_id=user.id if user else None)
+    return jsonify({"success": True, "summary": summary}), 200
+
+
+# =========================================================================
+# Multi-Audience Campaigns & Targeted Broadcasts API
+# =========================================================================
+
+from campaign_service import CampaignService
+
+
+@api_v1.route("/campaigns/audiences", methods=["GET"])
+@require_auth
+def get_campaign_audiences():
+    """Returns summary counts of available audience groups for the active workspace."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    leads_count = Lead.query.filter_by(organization_id=org.id).count()
+    members_count = Membership.query.filter_by(organization_id=org.id).count()
+    opted_out_count = ContactConsent.query.filter_by(
+        organization_id=org.id,
+        status="opted_out",
+        channel="whatsapp"
+    ).count()
+
+    # Distinct departments from leads
+    distinct_depts = [
+        d[0] for d in db.session.query(Lead.route_department)
+        .filter(Lead.organization_id == org.id, Lead.route_department.isnot(None))
+        .distinct().all()
+    ]
+
+    return jsonify({
+        "success": True,
+        "audiences": {
+            "customers": {"label": "Customers (CRM Leads)", "count": leads_count},
+            "employees": {"label": "Workspace Members & Employees", "count": members_count},
+            "departments": distinct_depts or ["Sales", "Support", "General Queue", "Review"],
+            "saved_groups": [
+                {"id": "qualified", "label": "Qualified / Converted Leads"},
+                {"id": "vip", "label": "High-Value VIP Contacts (Score >= 80)"},
+                {"id": "all", "label": "All Tenant Contacts"}
+            ],
+            "opted_out_count": opted_out_count
+        }
+    }), 200
+
+
+@api_v1.route("/campaigns/preview", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin", "operator"])
+def preview_campaign_endpoint():
+    """Renders exact sample messages, recipient counts, estimated costs, and compliance warnings."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    audience_type = data.get("audience_type", "customers")
+    audience_filter = data.get("audience_filter")
+    raw_template = data.get("raw_template") or data.get("message") or ""
+    template_name = data.get("template_name")
+    manual_contacts = data.get("manual_contacts")
+
+    preview_res = CampaignService.preview_campaign(
+        organization_id=org.id,
+        audience_type=audience_type,
+        audience_filter=audience_filter,
+        raw_template=raw_template,
+        template_name=template_name,
+        manual_contacts=manual_contacts,
+    )
+
+    return jsonify({"success": True, "preview": preview_res}), 200
+
+
+@api_v1.route("/campaigns/ai-draft", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin", "operator"])
+def draft_campaign_ai():
+    """Command-assisted composition: drafts an announcement using AI. Never sends or activates automatically."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    prompt = data.get("prompt") or data.get("description") or ""
+    audience_type = data.get("audience_type", "customers")
+    tone = data.get("tone", "professional")
+
+    result = CampaignService.generate_ai_draft(
+        organization_id=org.id,
+        prompt=prompt,
+        audience_type=audience_type,
+        tone=tone,
+    )
+
+    status_code = 200 if result.get("success") else 400
+    return jsonify(result), status_code
+
+
+@api_v1.route("/campaigns/templates", methods=["GET"])
+@require_auth
+def list_campaign_templates():
+    """Lists reusable message templates for the organization."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    templates = CampaignService.list_templates(organization_id=org.id)
+    return jsonify({"success": True, "templates": templates, "count": len(templates)}), 200
+
+
+@api_v1.route("/campaigns/templates", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+def create_campaign_template():
+    """Creates a reusable message template."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+    name = data.get("name")
+    body = data.get("body")
+    category = data.get("category", "utility")
+    language = data.get("language", "en_US")
+
+    result = CampaignService.create_template(
+        organization_id=org.id,
+        name=name,
+        body=body,
+        category=category,
+        language=language,
+        user_id=user.id if user else None,
+    )
+
+    status_code = 200 if result.get("success") else 400
+    return jsonify(result), status_code
+
+
+@api_v1.route("/campaigns", methods=["GET"])
+@require_auth
+def list_campaigns_endpoint():
+    """Lists campaigns for the authenticated tenant."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    status = request.args.get("status")
+    limit = min(int(request.args.get("limit", 50)), 100)
+    campaigns = CampaignService.list_campaigns(organization_id=org.id, limit=limit, status=status)
+    return jsonify({"success": True, "campaigns": campaigns, "count": len(campaigns)}), 200
+
+
+@api_v1.route("/campaigns", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+def create_campaign_endpoint():
+    """Creates a campaign in draft/pending_approval status with recipient ledger."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+    title = data.get("title")
+    raw_template = data.get("raw_template") or data.get("message")
+    channel = data.get("channel", "whatsapp")
+    audience_type = data.get("audience_type", "customers")
+    audience_filter = data.get("audience_filter")
+    template_name = data.get("template_name")
+    manual_contacts = data.get("manual_contacts")
+
+    scheduled_at = None
+    scheduled_str = data.get("scheduled_at")
+    if scheduled_str:
+        try:
+            scheduled_at = datetime.datetime.fromisoformat(str(scheduled_str).replace("Z", "+00:00"))
+        except Exception:
+            pass
+
+    result = CampaignService.create_campaign(
+        organization_id=org.id,
+        title=title,
+        raw_template=raw_template,
+        channel=channel,
+        audience_type=audience_type,
+        audience_filter=audience_filter,
+        template_name=template_name,
+        scheduled_at=scheduled_at,
+        created_by_user_id=user.id if user else None,
+        manual_contacts=manual_contacts,
+    )
+
+    status_code = 200 if result.get("success") else 400
+    return jsonify(result), status_code
+
+
+@api_v1.route("/campaigns/<campaign_id>", methods=["GET"])
+@require_auth
+def get_campaign_detail_endpoint(campaign_id: str):
+    """Retrieves full campaign details including per-recipient status breakdown."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    detail = CampaignService.get_campaign_detail(campaign_id=campaign_id, organization_id=org.id)
+    if not detail:
+        return jsonify({"error": f"Campaign '{campaign_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    return jsonify({"success": True, "campaign": detail}), 200
+
+
+@api_v1.route("/campaigns/<campaign_id>/approve", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+def approve_campaign_endpoint(campaign_id: str):
+    """Explicit review confirmation & activation of a campaign (Owner/Admin only)."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    result = CampaignService.approve_and_activate(
+        campaign_id=campaign_id,
+        organization_id=org.id,
+        approved_by_user_id=user.id if user else None
+    )
+
+    status_code = 200 if result.get("success") else (404 if result.get("code") == "NOT_FOUND" else 400)
+    return jsonify(result), status_code
+
+
+@api_v1.route("/campaigns/<campaign_id>/cancel", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+def cancel_campaign_endpoint(campaign_id: str):
+    """Cancels a scheduled or active campaign."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    result = CampaignService.cancel_campaign(
+        campaign_id=campaign_id,
+        organization_id=org.id,
+        user_id=user.id if user else None
+    )
+
+    status_code = 200 if result.get("success") else (404 if result.get("code") == "NOT_FOUND" else 400)
+    return jsonify(result), status_code
+
+
+@api_v1.route("/campaigns/consent", methods=["GET"])
+@require_auth
+def list_consents_endpoint():
+    """Lists compliance opt-outs and consent status for contacts."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    status = request.args.get("status")
+    consents = CampaignService.list_consents(organization_id=org.id, status=status)
+    return jsonify({"success": True, "consents": consents, "count": len(consents)}), 200
+
+
+@api_v1.route("/campaigns/consent/opt-out", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin", "operator"])
+def manual_opt_out_endpoint():
+    """Manually registers an opt-out for compliance."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+    phone = data.get("phone")
+    channel = data.get("channel", "whatsapp")
+    reason = data.get("reason", "Manual opt-out by operator")
+
+    result = CampaignService.handle_opt_out(
+        organization_id=org.id,
+        phone=phone,
+        channel=channel,
+        reason=reason,
+        user_id=user.id if user else None
+    )
+
+    status_code = 200 if result.get("success") else 400
+    return jsonify(result), status_code
+
+
+@api_v1.route("/campaigns/consent/opt-in", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin", "operator"])
+def manual_opt_in_endpoint():
+    """Restores contact consent when requested."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+    phone = data.get("phone")
+    channel = data.get("channel", "whatsapp")
+
+    result = CampaignService.handle_opt_in(
+        organization_id=org.id,
+        phone=phone,
+        channel=channel,
+        user_id=user.id if user else None
+    )
+
+    status_code = 200 if result.get("success") else 400
+    return jsonify(result), status_code
+
+
+# =========================================================================
+# BUSINESS OPERATING SYSTEM (ONLINE & OFFLINE CONFIGURATIONS)
+# =========================================================================
+
+@api_v1.route("/business/catalog", methods=["GET"])
+def get_business_catalog():
+    """Returns directory of modular online & offline business templates."""
+    category = request.args.get("category", "").strip().lower()
+    if category in ("online", "offline"):
+        templates = get_templates_by_category(category)
+    else:
+        templates = get_all_templates()
+
+    all_templates = get_all_templates()
+    online_count = len([t for t in all_templates if t.get("category") == "online"])
+    offline_count = len([t for t in all_templates if t.get("category") == "offline"])
+
+    return jsonify({
+        "status": "success",
+        "total_templates": len(templates),
+        "online_count": online_count,
+        "offline_count": offline_count,
+        "templates": templates
+    }), 200
+
+
+@api_v1.route("/business/profile", methods=["GET"])
+@require_auth
+def get_business_profile_endpoint():
+    """Retrieves current workspace business profile configuration."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    profile = org.get_business_profile()
+    return jsonify({
+        "status": "success",
+        "organization_id": org.id,
+        "profile": profile.to_dict()
+    }), 200
+
+
+@api_v1.route("/business/profile", methods=["PUT", "POST"])
+@require_auth
+@require_role(["owner", "admin", "operator"])
+def update_business_profile_endpoint():
+    """Updates current workspace business profile configuration."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    profile = org.get_business_profile()
+
+    if "business_category" in data:
+        cat = str(data["business_category"]).strip().lower()
+        if cat in ("online", "offline"):
+            profile.business_category = cat
+    if "industry" in data:
+        profile.industry = str(data["industry"]).strip()
+    if "industry_name" in data:
+        profile.industry_name = str(data["industry_name"]).strip()
+    if "company_name" in data:
+        profile.company_name = str(data["company_name"]).strip()
+    if "tagline" in data:
+        profile.tagline = str(data["tagline"]).strip()
+    if "description" in data:
+        profile.description = str(data["description"]).strip()
+
+    if "services" in data:
+        val = data["services"]
+        profile.services_json = json.dumps(val) if isinstance(val, (list, dict)) else str(val)
+    if "operating_hours" in data:
+        val = data["operating_hours"]
+        profile.operating_hours_json = json.dumps(val) if isinstance(val, dict) else str(val)
+    if "policies" in data:
+        val = data["policies"]
+        profile.policies_json = json.dumps(val) if isinstance(val, dict) else str(val)
+    if "channels_config" in data:
+        val = data["channels_config"]
+        profile.channels_config_json = json.dumps(val) if isinstance(val, dict) else str(val)
+    if "custom_roles" in data:
+        val = data["custom_roles"]
+        profile.custom_roles_json = json.dumps(val) if isinstance(val, list) else str(val)
+
+    if "ai_instructions" in data:
+        profile.ai_instructions = str(data["ai_instructions"]).strip()
+    if "ai_guardrails" in data:
+        profile.ai_guardrails = str(data["ai_guardrails"]).strip()
+    if "ai_tone" in data:
+        profile.ai_tone = str(data["ai_tone"]).strip()
+
+    profile.is_configured = True
+    profile.updated_at = datetime.datetime.utcnow()
+    db.session.commit()
+
+    # Synchronize with WhatsApp verified knowledge base for seamless auto-responder integration
+    try:
+        from whatsapp_service import WhatsAppService
+        services_text = ", ".join([s.get("name", "") for s in profile.get_services() if isinstance(s, dict)])
+        WhatsAppService.save_tenant_business_knowledge(org.id, {
+            "business_name": profile.company_name or org.name,
+            "products_services": services_text,
+            "working_hours": str(profile.get_operating_hours().get("schedule", "")),
+            "custom_instructions": profile.ai_instructions or "",
+        })
+    except Exception as _sync_err:
+        logger.warning(f"Business profile sync to WhatsApp note: {_sync_err}")
+
+    user = get_current_user()
+    log_audit_event("business.profile_updated", "business_profile", profile.id, {
+        "user_id": user.id if user else "system",
+        "category": profile.business_category,
+        "industry": profile.industry,
+    })
+
+    return jsonify({
+        "status": "success",
+        "message": "Business profile updated successfully.",
+        "profile": profile.to_dict()
+    }), 200
+
+
+@api_v1.route("/business/apply-template", methods=["POST"])
+@require_auth
+@require_role(["owner", "admin"])
+def apply_business_template_endpoint():
+    """Applies a chosen online/offline business template to the current workspace."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    template_id = (data.get("template_id") or data.get("industry") or "").strip()
+    if not template_id:
+        return jsonify({"error": "template_id is required.", "code": "VALIDATION_ERROR"}), 400
+
+    tpl = get_template_by_id(template_id)
+    if not tpl:
+        return jsonify({"error": f"Template '{template_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    profile = org.get_business_profile()
+    profile.business_category = tpl["category"]
+    profile.industry = tpl["industry"]
+    profile.industry_name = tpl["name"]
+    if not profile.company_name or profile.company_name == org.name:
+        profile.company_name = org.name
+    profile.description = tpl["description"]
+
+    # Apply template defaults
+    profile.services_json = json.dumps(tpl.get("default_services", []))
+    profile.operating_hours_json = json.dumps(tpl.get("default_operating_hours", {}))
+    profile.policies_json = json.dumps(tpl.get("default_policies", {}))
+    profile.channels_config_json = json.dumps(tpl.get("default_channels", {}))
+    profile.custom_roles_json = json.dumps(tpl.get("default_roles", []))
+    profile.ai_instructions = tpl.get("ai_instructions", "")
+    profile.ai_guardrails = tpl.get("ai_guardrails", "")
+    profile.is_configured = True
+    profile.updated_at = datetime.datetime.utcnow()
+
+    db.session.commit()
+
+    # Synchronize with WhatsApp verified knowledge base
+    try:
+        from whatsapp_service import WhatsAppService
+        services_text = ", ".join([s.get("name", "") for s in tpl.get("default_services", [])])
+        WhatsAppService.save_tenant_business_knowledge(org.id, {
+            "business_name": profile.company_name or org.name,
+            "products_services": services_text,
+            "working_hours": str(tpl.get("default_operating_hours", {}).get("schedule", "")),
+            "custom_instructions": tpl.get("ai_instructions", ""),
+        })
+    except Exception as _sync_err:
+        logger.warning(f"Template sync to WhatsApp note: {_sync_err}")
+
+    user = get_current_user()
+    log_audit_event("business.template_applied", "business_profile", profile.id, {
+        "user_id": user.id if user else "system",
+        "template_id": tpl["id"],
+        "category": tpl["category"],
+        "industry": tpl["industry"],
+    })
+
+    return jsonify({
+        "status": "success",
+        "message": f"Successfully applied '{tpl['name']}' template to workspace.",
+        "template": tpl,
+        "profile": profile.to_dict()
+    }), 200
+
+
+@api_v1.route("/business/operating-hours/check", methods=["POST", "GET"])
+@require_auth
+def check_operating_hours_endpoint():
+    """Checks whether the business is currently open or in after-hours mode."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    profile = org.get_business_profile()
+    data = request.get_json(silent=True) or {}
+    check_time_str = data.get("check_time")
+
+    check_dt = None
+    if check_time_str:
+        try:
+            check_dt = datetime.datetime.fromisoformat(check_time_str)
+        except Exception:
+            pass
+
+    status = profile.is_open_now(check_dt)
+    return jsonify({
+        "status": "success",
+        "organization_id": org.id,
+        "operating_status": status
+    }), 200
+
+
 

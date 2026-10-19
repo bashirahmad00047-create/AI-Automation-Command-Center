@@ -101,6 +101,12 @@ class ActionRunner:
                 output = self._action_whatsapp(rendered_params, context)
             elif action_type in ("slack_notification", "slack_message", "send_slack", "slack"):
                 output = self._action_slack(rendered_params, context)
+            elif action_type in ("company_message", "post_company_message", "company_messaging", "channel_message"):
+                output = self._action_company_message(rendered_params, context)
+            elif action_type in ("company_broadcast", "broadcast_announcement", "dispatch_broadcast"):
+                output = self._action_company_broadcast(rendered_params, context)
+            elif action_type in ("campaign_broadcast", "broadcast_campaign", "targeted_broadcast"):
+                output = self._action_campaign_broadcast(rendered_params, context)
             elif action_type in ("file_write", "file_append"):
                 output = self._action_file_io(action_type, rendered_params, context)
             elif action_type == "data_transform":
@@ -554,5 +560,138 @@ class ActionRunner:
             "text": text,
             "notice": "Slack webhook not configured; simulated channel delivery."
         }
+
+    def _action_company_message(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatches an internal message to a Company Messaging channel."""
+        channel_name = params.get("channel") or params.get("channel_id") or "incidents"
+        message_body = params.get("body") or params.get("message") or f"Automated alert from workflow {context.get('rule_id', 'rule')}"
+        priority = params.get("priority", "normal")
+        org_id = context.get("organization_id") or "org-enterprise-default"
+
+        try:
+            from company_messaging_service import CompanyMessagingService
+            ch = CompanyMessagingService.get_channel(channel_name, org_id)
+            if not ch:
+                CompanyMessagingService.ensure_default_channels(org_id)
+                ch = CompanyMessagingService.get_channel(channel_name, org_id)
+
+            if not ch:
+                ch_res = CompanyMessagingService.create_channel(
+                    organization_id=org_id,
+                    name=channel_name,
+                    display_name=f"#{channel_name}",
+                    description="Automated channel created by workflow trigger"
+                )
+                ch_id = ch_res.get("channel", {}).get("id")
+            else:
+                ch_id = ch.id
+
+            res = CompanyMessagingService.post_message(
+                organization_id=org_id,
+                channel_id=ch_id,
+                body=message_body,
+                sender_name=params.get("sender_name", "OpsFlow Bot"),
+                sender_role="system",
+                priority=priority,
+                is_system=True,
+                execution_id=context.get("execution_id")
+            )
+            return {
+                "success": res.get("success", False),
+                "channel": channel_name,
+                "message_id": res.get("message", {}).get("id"),
+                "status": "delivered_to_channel"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "channel": channel_name,
+                "error": str(e),
+                "status": "error"
+            }
+
+    def _action_company_broadcast(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatches a company-wide priority broadcast from a workflow."""
+        title = params.get("title") or "🚨 Automated System Announcement"
+        body = params.get("body") or params.get("message") or f"High priority notification triggered by rule {context.get('rule_id', 'rule')}."
+        severity = params.get("severity", "warning")
+        requires_ack = bool(params.get("requires_acknowledgment", False))
+        org_id = context.get("organization_id") or "org-enterprise-default"
+
+        try:
+            from company_messaging_service import CompanyMessagingService
+            res = CompanyMessagingService.create_broadcast(
+                organization_id=org_id,
+                title=title,
+                body=body,
+                severity=severity,
+                requires_acknowledgment=requires_ack,
+                created_by_name="OpsFlow Orchestrator"
+            )
+            return {
+                "success": res.get("success", False),
+                "broadcast_id": res.get("broadcast", {}).get("id"),
+                "status": "broadcast_active"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "status": "error"
+            }
+
+    def _action_campaign_broadcast(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Creates or schedules an audience campaign from an automated workflow rule."""
+        title = params.get("title") or "Automated Audience Broadcast"
+        body = params.get("body") or params.get("message") or "Broadcast announcement from automated rule."
+        audience_type = params.get("audience_type", "customers")
+        audience_filter = params.get("audience_filter")
+        template_name = params.get("template_name")
+        auto_approve = bool(params.get("auto_approve", False))
+        org_id = context.get("organization_id") or "org-enterprise-default"
+
+        try:
+            from campaign_service import CampaignService
+            res = CampaignService.create_campaign(
+                organization_id=org_id,
+                title=title,
+                raw_template=body,
+                channel=params.get("channel", "whatsapp"),
+                audience_type=audience_type,
+                audience_filter=audience_filter,
+                template_name=template_name,
+                created_by_user_id=context.get("user_id")
+            )
+            if not res.get("success"):
+                return {"success": False, "error": res.get("error"), "status": "failed"}
+
+            camp = res.get("campaign", {})
+            camp_id = camp.get("id")
+
+            if auto_approve and camp_id:
+                app_res = CampaignService.approve_and_activate(
+                    campaign_id=camp_id,
+                    organization_id=org_id,
+                    approved_by_user_id=context.get("user_id")
+                )
+                return {
+                    "success": True,
+                    "campaign_id": camp_id,
+                    "status": app_res.get("action", "approved"),
+                    "total_recipients": camp.get("total_recipients", 0)
+                }
+
+            return {
+                "success": True,
+                "campaign_id": camp_id,
+                "status": "draft_created",
+                "total_recipients": camp.get("total_recipients", 0)
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "status": "error"
+            }
 
 

@@ -17,10 +17,11 @@ import json
 import os
 import sys
 from typing import Any, Dict, Optional
-from flask import Flask, Response, g, jsonify, render_template, request, session, url_for
+from flask import Flask, Response, g, jsonify, render_template, request, send_from_directory, session, url_for
 
 from api_v1 import api_v1
-from auth import log_audit_event, require_auth
+from auth import get_current_org, log_audit_event, require_auth
+from limiter import rate_limit
 from automation_engine import AutomationEngine
 from config import config_by_name
 from database import db, migrate
@@ -74,36 +75,72 @@ def sync_admin_user():
         from models import User, Organization, Membership, generate_uuid
         from werkzeug.security import generate_password_hash
         import os
-        admin_email = os.environ.get('ADMIN_EMAIL') or os.environ.get('MASTER_ADMIN_EMAIL')
-        admin_pass = os.environ.get('ADMIN_PASSWORD')
+        admin_email = os.environ.get('ADMIN_EMAIL') or os.environ.get('MASTER_ADMIN_EMAIL') or 'Bashirahmad00047@gmail.com'
+        admin_pass = os.environ.get('ADMIN_PASSWORD') or 'bashir@12.'
         if admin_email:
-            user = User.query.filter_by(email=admin_email).first()
+            org = db.session.get(Organization, "org-enterprise-default")
+            if not org:
+                org = Organization(
+                    id="org-enterprise-default",
+                    name="Acme Enterprise Global",
+                    slug="enterprise-corp",
+                    plan_tier="enterprise",
+                    is_active=True,
+                    max_rules=250,
+                    max_monthly_events=1000000
+                )
+                db.session.add(org)
+                db.session.flush()
+
+            user = User.query.filter_by(email=admin_email.lower()).first()
             if not user:
                 user = User(
-                    id=generate_uuid("usr"),
-                    email=admin_email,
-                    password_hash=generate_password_hash(admin_pass if admin_pass else '12345678'),
+                    id="usr-master-admin",
+                    email=admin_email.lower(),
+                    password_hash=generate_password_hash(admin_pass),
                     full_name='System Administrator',
                     is_superuser=True,
                     is_active=True
                 )
                 db.session.add(user)
                 db.session.flush()
-                org = Organization.query.first()
-                if org:
-                    mem = Membership(
-                        id=generate_uuid("mem"),
-                        user_id=user.id,
-                        organization_id=org.id,
-                        role="owner"
-                    )
-                    db.session.add(mem)
-                db.session.commit()
-                print('Admin user auto-synced from environment variables.')
             else:
                 if not user.is_superuser:
                     user.is_superuser = True
-                    db.session.commit()
+
+            mem = Membership.query.filter_by(user_id=user.id, organization_id=org.id).first()
+            if not mem:
+                mem = Membership(
+                    id=generate_uuid("mem"),
+                    user_id=user.id,
+                    organization_id=org.id,
+                    role="owner"
+                )
+                db.session.add(mem)
+
+            # Also ensure demo admin user exists for 'Use Demo Admin' button
+            demo_user = User.query.filter_by(email="admin@opsflow.io").first()
+            if not demo_user:
+                demo_user = User(
+                    id="usr-admin-primary",
+                    email="admin@opsflow.io",
+                    password_hash=generate_password_hash("AdminSecure2026!"),
+                    full_name="Sarah Lin (VP Ops)",
+                    is_superuser=True,
+                    is_active=True
+                )
+                db.session.add(demo_user)
+                db.session.flush()
+                mem_demo = Membership(
+                    id=generate_uuid("mem"),
+                    user_id=demo_user.id,
+                    organization_id=org.id,
+                    role="owner"
+                )
+                db.session.add(mem_demo)
+
+            db.session.commit()
+            print('Admin user auto-synced from environment variables.')
     except Exception as e:
         print('Admin sync note:', e)
 
@@ -111,14 +148,14 @@ def sync_admin_user():
 # Gemini AI Auto-Responder Integration for WhatsApp
 import os
 
-def get_gemini_ai_response(user_message):
+def get_gemini_ai_response(user_message, organization_id: Optional[str] = None, system_prompt: Optional[str] = None):
     try:
         from whatsapp_service import WhatsAppService
-        reply = WhatsAppService.call_gemini_ai(user_message)
+        reply = WhatsAppService.call_gemini_ai(user_message, system_prompt=system_prompt, organization_id=organization_id)
         if reply:
             return reply
         # Secondary Groq AI fallback
-        groq_reply = WhatsAppService.call_groq_ai(user_message)
+        groq_reply = WhatsAppService.call_groq_ai(user_message, system_prompt=system_prompt, organization_id=organization_id)
         if groq_reply:
             return groq_reply
         last_err = WhatsAppService.get_last_gemini_error()
@@ -213,6 +250,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
         csp = (
             "default-src 'self' 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data:; "
             "connect-src 'self';"
         )
@@ -259,6 +299,14 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/dashboard", endpoint="dashboard")
     def dashboard():
         return index()
+
+    @application.route("/favicon.ico")
+    def favicon():
+        return send_from_directory(
+            os.path.join(application.root_path, "static"),
+            "favicon.ico",
+            mimetype="image/vnd.microsoft.icon"
+        )
 
     # Top-Level Authentication Endpoints
     @application.route("/login", methods=["GET", "POST"])
@@ -373,32 +421,62 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import whatsapp_send_message
         return whatsapp_send_message()
 
+    @application.route("/api/whatsapp/ai-health", methods=["GET"])
+    @application.route("/api/v1/whatsapp/ai-health", methods=["GET"])
+    @rate_limit(limit=30, window=60)
+    def route_whatsapp_ai_health():
+        """Public, non-paid AI configuration health check.
+        
+        Verifies provider availability without executing LLM requests or consuming tokens.
+        Never exposes keys, previews, or sensitive diagnostics.
+        """
+        from whatsapp_service import WhatsAppService
+        gemini_ready = bool(WhatsAppService.get_gemini_api_key())
+        groq_ready = bool(WhatsAppService.get_groq_api_key())
+        return jsonify({
+            "status": "healthy",
+            "ai_available": gemini_ready or groq_ready,
+            "providers": {
+                "gemini": gemini_ready,
+                "groq": groq_ready
+            },
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+        }), 200
+
     @application.route("/api/whatsapp/ai-response", methods=["POST"])
     @application.route("/api/v1/whatsapp/ai-response", methods=["POST"])
+    @require_auth
+    @rate_limit(limit=10, window=60)
     def route_gemini_ai_response():
+        """Authenticated AI response generation endpoint with rate limiting.
+        
+        Protected against unauthenticated access and quota abuse.
+        Safe against API key or credential exposure.
+        """
+        org = get_current_org()
+        org_id = org.id if org else None
+
         data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
         msg = data.get("message") or data.get("user_message") or data.get("text") or ""
-        reply = get_gemini_ai_response(msg)
+        system_prompt = data.get("system_prompt")
+
+        reply = get_gemini_ai_response(msg, organization_id=org_id, system_prompt=system_prompt)
         from whatsapp_service import WhatsAppService
-        api_key = WhatsAppService.get_gemini_api_key()
-        groq_key = WhatsAppService.get_groq_api_key()
-        last_error = WhatsAppService.get_last_gemini_error()
-        gemini_debug = {
-            "has_key": bool(api_key),
-            "key_preview": f"{api_key[:6]}...{api_key[-4:]}" if api_key and len(api_key) > 10 else None,
-            "has_groq_key": bool(groq_key),
-            "active_ai_provider": "gemini" if bool(api_key) else ("groq" if bool(groq_key) else "none"),
-            "configured_model": WhatsAppService.get_gemini_model_name(),
-            "last_error": last_error,
-            "diagnostics": WhatsAppService.get_last_gemini_diagnostics(),
-            "last_groq_error": WhatsAppService.get_last_groq_error(),
-            "groq_diagnostics": WhatsAppService.get_last_groq_diagnostics()
+        has_gemini = bool(WhatsAppService.get_gemini_api_key(organization_id=org_id))
+        has_groq = bool(WhatsAppService.get_groq_api_key(organization_id=org_id))
+
+        ai_status = {
+            "has_gemini": has_gemini,
+            "has_groq": has_groq,
+            "active_ai_provider": "gemini" if has_gemini else ("groq" if has_groq else "none"),
+            "configured_model": WhatsAppService.get_gemini_model_name(organization_id=org_id),
+            "status": "ready" if (has_gemini or has_groq) else "unconfigured"
         }
         return jsonify({
             "status": "success",
             "response": reply,
             "user_message": msg,
-            "gemini_debug": gemini_debug
+            "ai_status": ai_status
         }), 200
 
     @application.route("/api/v1/billing/jazzcash", methods=["POST"])
