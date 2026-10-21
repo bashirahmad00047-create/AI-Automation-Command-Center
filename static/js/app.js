@@ -5055,11 +5055,15 @@ function groupWhatsAppConversations(messages) {
         const displayPhone = (rawPartner || '').replace(/@c\.us|@g\.us/g, '').trim() || normKey;
 
         if (!map[normKey]) {
+            let initialMsg = m.body || (m.is_audio ? '🎙️ Voice note' : '(no text)');
+            if (initialMsg.includes('[quotedMessage]')) {
+                initialMsg = initialMsg.replace(/\[quotedMessage\]/gi, 'Quoted message');
+            }
             map[normKey] = {
                 phone: displayPhone,
                 normalizedPhone: normKey,
                 name: (isInbound ? m.sender_name : '') || displayPhone,
-                lastMessage: m.body || (m.is_audio ? '🎙️ Voice note' : '(no text)'),
+                lastMessage: initialMsg,
                 timestamp: m.created_at || '',
                 is_audio: Boolean(m.is_audio),
                 messages: []
@@ -5537,6 +5541,23 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
             const previewIcon = c.is_audio ? '🎙️ ' : '';
             const unreadCount = (c.messages || []).filter(m => m.direction === 'inbound' && m.status !== 'read').length;
 
+            let previewText = c.lastMessage || '';
+            if (previewText.includes('> Quoted:')) {
+                const parts = previewText.split('> Quoted:');
+                const replyPart = (parts[0] || '').replace(/\[quotedMessage\]/gi, '').trim();
+                const rawQuote = (parts.slice(1).join('> Quoted:') || '').trim();
+                const cleanQuote = rawQuote.replace(/^\[quotedMessage\]/i, '').replace(/\[quotedMessage\]/gi, 'Quoted message').trim() || 'Quoted message';
+                if (replyPart) {
+                    previewText = `↩️ ${replyPart}`;
+                } else {
+                    previewText = `↩️ [Quote: ${cleanQuote.substring(0, 30)}${cleanQuote.length > 30 ? '...' : ''}]`;
+                }
+            } else if (previewText.toLowerCase() === '[quotedmessage]') {
+                previewText = '↩️ Quoted message';
+            } else {
+                previewText = previewText.replace(/\[quotedMessage\]/gi, 'Quoted message');
+            }
+
             return `
                 <div class="wa-chat-item ${isActive ? 'active' : ''}" onclick="selectWhatsAppChat('${escapeHtml(c.phone)}')">
                     <div class="wa-avatar" style="background-color: ${avatarColor};">
@@ -5548,7 +5569,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                             <span class="wa-chat-time">${escapeHtml(c.timestamp.substring(11, 16) || c.timestamp)}</span>
                         </div>
                         <div class="wa-chat-bottom">
-                            <span class="wa-chat-preview" title="${escapeHtml(c.lastMessage)}">${previewIcon}${escapeHtml(c.lastMessage)}</span>
+                            <span class="wa-chat-preview" title="${escapeHtml(previewText)}">${previewIcon}${escapeHtml(previewText)}</span>
                             <span class="wa-unread-badge" style="${unreadCount > 0 ? '' : 'display:none;'}">${unreadCount}</span>
                         </div>
                     </div>
@@ -5650,7 +5671,35 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                         </div>
                     `;
                 } else {
-                    bodyHtml = `<div>${escapeHtml(m.body || '(no text)')}</div>`;
+                    const rawBody = (m.body || '').trim();
+                    if (rawBody.includes('> Quoted:')) {
+                        const parts = rawBody.split('> Quoted:');
+                        const replyPart = (parts[0] || '').replace(/\[quotedMessage\]/gi, '').trim();
+                        const rawQuote = (parts.slice(1).join('> Quoted:') || '').trim();
+                        let cleanQuote = rawQuote.replace(/^\[quotedMessage\]/i, '').replace(/\[quotedMessage\]/gi, 'Quoted message').trim();
+                        if (!cleanQuote || cleanQuote.toLowerCase() === 'quoted message') {
+                            cleanQuote = 'Quoted message';
+                        }
+                        bodyHtml = `
+                            <div class="wa-quote-card" style="border-left: 3px solid #25D366; background: rgba(0,0,0,0.18); padding: 6px 10px; border-radius: 4px; margin-bottom: 6px; font-size: 0.85em;">
+                                <div style="font-weight: 600; font-size: 0.72em; color: #25D366; margin-bottom: 2px;">Quoted Message</div>
+                                <div style="white-space: pre-wrap; opacity: 0.9; word-break: break-word;">${escapeHtml(cleanQuote)}</div>
+                            </div>
+                            ${replyPart ? `<div style="word-break: break-word;">${escapeHtml(replyPart)}</div>` : ''}
+                        `;
+                    } else if (m.message_type === 'quotedMessage' || rawBody.toLowerCase() === '[quotedmessage]' || rawBody.toLowerCase() === 'quoted message') {
+                        const cleanBody = (rawBody.toLowerCase() === '[quotedmessage]' || rawBody.toLowerCase() === 'quoted message') ? '' : rawBody.replace(/\[quotedMessage\]/gi, '').trim();
+                        bodyHtml = `
+                            <div class="wa-quote-card" style="border-left: 3px solid #25D366; background: rgba(0,0,0,0.18); padding: 6px 10px; border-radius: 4px; margin-bottom: 6px; font-size: 0.85em;">
+                                <div style="font-weight: 600; font-size: 0.72em; color: #25D366; margin-bottom: 2px;">Quoted Message</div>
+                                <div style="white-space: pre-wrap; opacity: 0.9; word-break: break-word;">Quoted message</div>
+                            </div>
+                            ${cleanBody ? `<div style="word-break: break-word;">${escapeHtml(cleanBody)}</div>` : ''}
+                        `;
+                    } else {
+                        const cleanBody = rawBody.replace(/\[quotedMessage\]/gi, 'Quoted message');
+                        bodyHtml = `<div style="word-break: break-word;">${escapeHtml(cleanBody || '(no text)')}</div>`;
+                    }
                 }
 
                 return `
