@@ -2526,7 +2526,7 @@ def whatsapp_webhook_ingress():
                 target_org = db.session.get(Organization, resolved_org_id)
 
     if not target_org:
-        target_org = Organization.query.filter_by(is_active=True).first()
+        target_org = Organization.query.filter_by(id="org-enterprise-default").first() or Organization.query.filter_by(is_active=True).first()
 
     if not target_org:
         return jsonify({"error": "No active organization found to receive WhatsApp message", "code": "NOT_FOUND"}), 404
@@ -2657,7 +2657,7 @@ def green_api_webhook_ingress():
                 target_org = db.session.get(Organization, resolved_org_id)
 
     if not target_org:
-        target_org = Organization.query.filter_by(is_active=True).first()
+        target_org = Organization.query.filter_by(id="org-enterprise-default").first() or Organization.query.filter_by(is_active=True).first()
     target_org_id = target_org.id if target_org else (target_org_id or "org-enterprise-default")
 
     engine = get_engine()
