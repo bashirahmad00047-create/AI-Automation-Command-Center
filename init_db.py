@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import sys
+from typing import Optional
 
 def _get_app():
     from migrations_manager import _resolve_app
@@ -50,8 +51,44 @@ from models import (
 from presets import PRESET_BLUEPRINTS
 
 
-def init_and_seed_database(seed_data: bool = True):
-    """Initializes database, applies migrations, and optionally populates with enterprise demo data."""
+def is_production_environment() -> bool:
+    """Returns True if the current execution environment is a production deployment."""
+    flask_env = (os.environ.get("FLASK_ENV") or "").strip().lower()
+    if flask_env in ("production", "prod"):
+        return True
+    if os.environ.get("RENDER") or os.environ.get("RENDER_INSTANCE_ID"):
+        return True
+    try:
+        from flask import current_app, has_app_context
+        if has_app_context():
+            if current_app.config.get("TESTING"):
+                return False
+            if current_app.config.get("ENV") == "production" or current_app.config.get("FLASK_ENV") == "production":
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def should_seed_demo_data(explicit_seed_flag: Optional[bool] = None) -> bool:
+    """Determines whether demo credentials and demonstration data should be seeded.
+
+    Production environments NEVER create fixed demo credentials or print secrets unless explicitly
+    opted in via ENABLE_DEMO_SEED=true. Local development and testing environments retain demo mode.
+    """
+    if os.environ.get("ENABLE_DEMO_SEED", "").strip().lower() in ("true", "1", "yes"):
+        return True
+    if os.environ.get("DISABLE_DEMO_SEED", "").strip().lower() in ("true", "1", "yes"):
+        return False
+    if is_production_environment():
+        return False
+    if explicit_seed_flag is not None:
+        return explicit_seed_flag
+    return True
+
+
+def init_and_seed_database(seed_data: Optional[bool] = None):
+    """Initializes database, applies migrations, and conditionally seeds enterprise demo data."""
     print("[*] Initializing OpsFlow Enterprise SaaS Database...")
 
     with _get_app().app_context():
@@ -73,8 +110,32 @@ def init_and_seed_database(seed_data: bool = True):
         except Exception as _db_err:
             print(f"[WARN] db.create_all notice: {_db_err}")
 
-        if not seed_data:
-            print("[OK] Schema initialization complete; skipping demo data seeding.")
+        can_seed = should_seed_demo_data(seed_data)
+        if not can_seed:
+            try:
+                org_acme = db.session.get(Organization, "org-enterprise-default") or Organization.query.filter_by(slug="acme-global").first()
+                if not org_acme:
+                    org_acme = Organization(
+                        id="org-enterprise-default",
+                        name=os.environ.get("DEFAULT_ORG_NAME", "Acme Global Enterprise"),
+                        slug="acme-global",
+                        plan_tier="enterprise",
+                        is_active=True,
+                        max_rules=250,
+                        max_monthly_events=1000000
+                    )
+                    db.session.add(org_acme)
+                    db.session.commit()
+            except Exception as _org_err:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+
+            if is_production_environment():
+                print("[OK] Production database schema verified. Demo credentials and sample secrets omitted.")
+            else:
+                print("[OK] Schema initialization complete; skipping demo data seeding.")
             return
 
         now_dt = datetime.datetime.utcnow()
@@ -560,19 +621,22 @@ def init_and_seed_database(seed_data: bool = True):
             print(f"[WARN] Campaign seeding notice: {_cmp_err}")
 
         db.session.commit()
-        print("[SUCCESS] Database successfully seeded with Enterprise Client Demonstration Data!")
-        print("----------------------------------------------------------------------")
-        print("Demo Credentials:")
-        print("  [Tenant 1]: Acme Global Enterprise (slug: acme-global)")
-        print("     [Admin]:    admin@opsflow.io    / AdminSecure2026!")
-        print("     [Operator]: operator@opsflow.io / Operator2026!")
-        print("     [Viewer]:   viewer@opsflow.io   / Viewer2026!")
-        print("     [Master API Key]: sk_live_opsflow_enterprise_prod_2026")
-        print("")
-        print("  [Tenant 2]: Apex HealthTech Systems (slug: apex-health)")
-        print("     [Admin]:    admin@apexhealth.internal / HealthTech2026!")
-        print("     [Tenant API Key]: sk_live_apex_health_gateway_2026")
-        print("----------------------------------------------------------------------")
+        if not is_production_environment():
+            print("[SUCCESS] Database successfully seeded with Enterprise Client Demonstration Data!")
+            print("----------------------------------------------------------------------")
+            print("Demo Credentials:")
+            print("  [Tenant 1]: Acme Global Enterprise (slug: acme-global)")
+            print("     [Admin]:    admin@opsflow.io    / AdminSecure2026!")
+            print("     [Operator]: operator@opsflow.io / Operator2026!")
+            print("     [Viewer]:   viewer@opsflow.io   / Viewer2026!")
+            print("     [Master API Key]: sk_live_opsflow_enterprise_prod_2026")
+            print("")
+            print("  [Tenant 2]: Apex HealthTech Systems (slug: apex-health)")
+            print("     [Admin]:    admin@apexhealth.internal / HealthTech2026!")
+            print("     [Tenant API Key]: sk_live_apex_health_gateway_2026")
+            print("----------------------------------------------------------------------")
+        else:
+            print("[OK] Production database initialized successfully (demo credentials omitted).")
 
 
 if __name__ == "__main__":
@@ -580,6 +644,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="OpsFlow Database Initialization & Seeding")
     parser.add_argument("--migrate-only", action="store_true", help="Run migrations without seeding demo data")
     parser.add_argument("--seed-only", action="store_true", help="Seed data without running migrations")
+    parser.add_argument("--seed-demo", action="store_true", help="Explicitly force seeding of demo credentials")
     args = parser.parse_args()
 
     if args.migrate_only:
@@ -588,4 +653,5 @@ if __name__ == "__main__":
             res = run_database_migrations()
             print(f"[OK] Migrations applied: revision {res.get('current_revision')}")
     else:
-        init_and_seed_database(seed_data=not args.migrate_only)
+        seed_flag = True if args.seed_demo else (False if args.migrate_only else None)
+        init_and_seed_database(seed_data=seed_flag)

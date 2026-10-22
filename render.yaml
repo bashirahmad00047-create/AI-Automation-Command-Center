@@ -32,4 +32,4 @@ services:
       - key: GREEN_API_TOKEN_INSTANCE
         sync: false
       - key: GREEN_API_HOST
-        value: "https://7103.api.greenapi.com"
+        value: "https://7107.api.greenapi.com"
