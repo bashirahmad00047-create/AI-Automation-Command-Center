@@ -2712,16 +2712,69 @@ def green_api_webhook_ingress():
 
             # Trigger AI Auto-Responder if configured and active
             if not rule_replied:
-                try:
-                    WhatsAppService.handle_inbound_auto_response(
-                        organization_id=target_org_id,
-                        sender_phone=msg.get("from_phone", "unknown"),
-                        message_body=msg.get("body", ""),
-                        sender_name=msg.get("sender_name", ""),
-                        message_id=msg_id
+                # Under unit test execution, run synchronously for deterministic assertions
+                if current_app.config.get("TESTING"):
+                    try:
+                        WhatsAppService.handle_inbound_auto_response(
+                            organization_id=target_org_id,
+                            sender_phone=msg.get("from_phone", "unknown"),
+                            message_body=msg.get("body", ""),
+                            sender_name=msg.get("sender_name", ""),
+                            message_id=msg_id,
+                            message_timestamp=msg.get("timestamp")
+                        )
+                    except Exception as auto_err:
+                        logger.error(f"AI Auto-Responder error in Green-API webhook: {auto_err}")
+                else:
+                    # In production, dispatch asynchronously so webhook returns HTTP 200 to Green-API immediately (<50ms)
+                    def _async_webhook_reply(app_ref, org_id, from_p, body_txt, s_name, m_id, m_ts, d_url, m_type, rec_id):
+                        with app_ref.app_context():
+                            try:
+                                # For voice notes, attempt background transcription before generating AI reply
+                                if m_type in ("audioMessage", "voiceMessage", "ptt") and body_txt == "[Voice note]":
+                                    try:
+                                        audio_b = WhatsAppService._download_media(from_p, m_id, download_url=d_url)
+                                        if audio_b:
+                                            transcript = WhatsAppService._transcribe_audio(audio_b, organization_id=org_id)
+                                            if transcript:
+                                                body_txt = transcript
+                                                if rec_id:
+                                                    rec_obj = db.session.get(WhatsAppMessage, rec_id)
+                                                    if rec_obj:
+                                                        rec_obj.body = transcript
+                                                        db.session.commit()
+                                    except Exception as tr_err:
+                                        logger.debug(f"Background audio transcription failed: {tr_err}")
+
+                                WhatsAppService.handle_inbound_auto_response(
+                                    organization_id=org_id,
+                                    sender_phone=from_p,
+                                    message_body=body_txt,
+                                    sender_name=s_name,
+                                    message_id=m_id,
+                                    message_timestamp=m_ts
+                                )
+                            except Exception as err:
+                                logger.error(f"Async AI Auto-Responder error: {err}")
+
+                    app_obj = current_app._get_current_object()
+                    t = threading.Thread(
+                        target=_async_webhook_reply,
+                        args=(
+                            app_obj,
+                            target_org_id,
+                            msg.get("from_phone", "unknown"),
+                            msg.get("body", ""),
+                            msg.get("sender_name", ""),
+                            msg_id,
+                            msg.get("timestamp"),
+                            msg.get("download_url"),
+                            msg.get("message_type"),
+                            record.id if record else None
+                        ),
+                        daemon=True
                     )
-                except Exception as auto_err:
-                    logger.error(f"AI Auto-Responder error in Green-API webhook: {auto_err}")
+                    t.start()
 
             processed_count += 1
         except Exception as item_err:
