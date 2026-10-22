@@ -78,80 +78,6 @@ if os.path.exists("/etc/secrets") and os.path.isdir("/etc/secrets"):
 class WhatsAppService:
     """Manages WhatsApp Business Cloud API & Green-API interactions and message tracking."""
 
-    # Existing class attributes ... (unchanged)
-
-    # --- New helpers for media download and transcription ---
-    @classmethod
-    def _download_media(cls, chat_id: str, message_id: str) -> Optional[bytes]:
-        """Download media file (audio, image, etc.) from Green-API.
-        Returns raw bytes or None on failure.
-        """
-        conf = cls.get_config()
-        id_inst = conf.get("green_api_id_instance")
-        token = conf.get("green_api_token_instance")
-        host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
-        if not (id_inst and token and chat_id and message_id):
-            logger.debug("Missing credentials or identifiers for media download.")
-            return None
-        # Green-API download endpoint (POST with JSON body per official docs)
-        url = f"{host}/waInstance{id_inst}/downloadFile/{token}"
-        timeouts = cls.get_timeout_tuple()
-        try:
-            with cls.get_http_session(retries=1) as session:
-                resp = session.post(url, json={"chatId": chat_id, "idMessage": message_id}, timeout=timeouts)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    # Expect {"downloadUrl": "https://..."}
-                    dl_url = data.get("downloadUrl")
-                    if dl_url:
-                        file_resp = session.get(dl_url, timeout=timeouts)
-                        if file_resp.status_code == 200:
-                            return file_resp.content
-                logger.debug(f"Media download failed, status {resp.status_code}: {resp.text}")
-        except Exception as e:
-            logger.debug(f"Exception during media download: {e}")
-        return None
-
-    @classmethod
-    def _transcribe_audio(cls, audio_bytes: bytes) -> Optional[str]:
-        """Transcribe audio using Gemini (if API key is configured).
-        Returns the transcript string or None.
-        """
-        api_key = cls.get_gemini_api_key()
-        if not api_key:
-            logger.debug("Google Generative AI API key not set, skipping transcription.")
-            return None
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
-            # Write bytes to a temporary file (Gemini expects a file path)
-            import tempfile, os
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-            try:
-                uploaded = genai.upload_file(path=tmp_path)
-                model = genai.GenerativeModel(cls.get_gemini_model_name())
-                response = model.generate_content([uploaded])
-                # Extract text from response
-                if hasattr(response, "text") and response.text:
-                    return response.text.strip()
-                # Fallback parsing
-                if getattr(response, "candidates", None):
-                    parts = response.candidates[0].content.parts
-                    for p in parts:
-                        if getattr(p, "text", None):
-                            return p.text.strip()
-            finally:
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.debug(f"Audio transcription failed: {e}")
-        return None
-    """Manages WhatsApp Business Cloud API & Green-API interactions and message tracking."""
-
     GRAPH_API_VERSION = "v19.0"
     DEFAULT_VERIFY_TOKEN = "opsflow_whatsapp_verify_2026"
     DEFAULT_GREEN_API_HOST = "https://api.greenapi.com"
@@ -163,6 +89,99 @@ class WhatsAppService:
     _processed_ids_lock = threading.Lock()
     _in_flight_phones: Set[str] = set()
     _in_flight_phones_lock = threading.Lock()
+
+    # --- Media download and voice transcription helpers ---
+    @classmethod
+    def _download_media(cls, chat_id: str, message_id: str, download_url: Optional[str] = None) -> Optional[bytes]:
+        """Download media file (audio, image, etc.) from Green-API or direct storage URL.
+        Returns raw bytes or None on failure.
+        """
+        timeouts = (4.0, 8.0)
+        # 1. If direct download URL is available from payload, fetch directly
+        if download_url and str(download_url).startswith("http"):
+            try:
+                with cls.get_http_session(retries=1) as session:
+                    file_resp = session.get(download_url, timeout=timeouts)
+                    if file_resp.status_code == 200 and file_resp.content:
+                        return file_resp.content
+            except Exception as e:
+                logger.debug(f"Direct media download failed: {e}")
+
+        conf = cls.get_config()
+        id_inst = conf.get("green_api_id_instance")
+        token = conf.get("green_api_token_instance")
+        host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
+        if not (id_inst and token and chat_id and message_id):
+            logger.debug("Missing credentials or identifiers for media download.")
+            return None
+        # Green-API download endpoint (POST with JSON body per official docs)
+        url = f"{host}/waInstance{id_inst}/downloadFile/{token}"
+        try:
+            with cls.get_http_session(retries=1) as session:
+                resp = session.post(url, json={"chatId": chat_id, "idMessage": message_id}, timeout=timeouts)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    dl_url = data.get("downloadUrl")
+                    if dl_url:
+                        file_resp = session.get(dl_url, timeout=timeouts)
+                        if file_resp.status_code == 200:
+                            return file_resp.content
+                logger.debug(f"Media download failed, status {resp.status_code}: {resp.text}")
+        except Exception as e:
+            logger.debug(f"Exception during media download: {e}")
+        return None
+
+    @classmethod
+    def _transcribe_audio(cls, audio_bytes: bytes, organization_id: Optional[str] = None) -> Optional[str]:
+        """Transcribe audio using Gemini (if API key is configured).
+        Returns the transcript string or None.
+        """
+        api_key = cls.get_gemini_api_key(organization_id=organization_id)
+        if not api_key:
+            logger.debug("Google Generative AI API key not set, skipping transcription.")
+            return None
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            import tempfile, os
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+            try:
+                uploaded = genai.upload_file(path=tmp_path)
+                candidate_models = [
+                    cls.get_gemini_model_name(organization_id=organization_id),
+                    "gemini-2.5-flash",
+                    "gemini-2.0-flash",
+                    "gemini-1.5-flash",
+                    "gemini-1.5-flash-8b"
+                ]
+                models_to_try = [m for m in candidate_models if m and m != "gemini-3.8-flash"]
+                if "gemini-1.5-flash" not in models_to_try:
+                    models_to_try.append("gemini-1.5-flash")
+
+                for m_name in models_to_try:
+                    try:
+                        model = genai.GenerativeModel(m_name)
+                        response = model.generate_content([uploaded])
+                        if hasattr(response, "text") and response.text:
+                            return response.text.strip()
+                        if getattr(response, "candidates", None):
+                            parts = response.candidates[0].content.parts
+                            for p in parts:
+                                if getattr(p, "text", None):
+                                    return p.text.strip()
+                    except Exception as model_err:
+                        logger.debug(f"Transcription model {m_name} failed: {model_err}")
+                        continue
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"Audio transcription failed: {e}")
+        return None
 
     @classmethod
     def clear_recent_replied_trigger_ids(cls) -> None:
@@ -3001,13 +3020,14 @@ class WhatsAppService:
         message_data = data.get("messageData", {})
         type_message = message_data.get("typeMessage", "textMessage")
         body = cls.extract_message_body_and_quote(message_data, type_message)
-        # Attempt transcription for audio messages if placeholder returned
-        if type_message in ("audioMessage", "voiceMessage", "ptt") and body == "[Voice note]":
-            audio_bytes = cls._download_media(chat_id, msg_id)
-            if audio_bytes:
-                transcription = cls._transcribe_audio(audio_bytes)
-                if transcription:
-                    body = transcription
+
+        # Extract direct download URL if present (avoids extra /downloadFile/ API calls)
+        file_data = message_data.get("fileMessageData", {}) if isinstance(message_data, dict) else {}
+        download_url = ""
+        if isinstance(file_data, dict):
+            download_url = file_data.get("downloadUrl", "")
+        if not download_url:
+            download_url = data.get("downloadUrl", "")
 
         messages.append({
             "message_id": msg_id,
@@ -3019,6 +3039,7 @@ class WhatsAppService:
             "timestamp": timestamp,
             "message_type": type_message,
             "body": body,
+            "download_url": download_url,
             "provider": "green_api",
             "raw": data
         })
@@ -3838,11 +3859,7 @@ class WhatsAppService:
         clean_id = str(message_id).strip()
         now = time.time()
         with cls._processed_ids_lock:
-            cutoff = now - 3600
-            cls._processed_message_ids = {k: v for k, v in cls._processed_message_ids.items() if v > cutoff}
-            if clean_id in cls._processed_message_ids:
-                return True
-
+            # 1. Primary check: Has this message already been persisted in the database ledger?
             if has_app_context():
                 try:
                     existing = WhatsAppMessage.query.filter(
@@ -3854,6 +3871,11 @@ class WhatsAppService:
                         return True
                 except Exception:
                     pass
+
+            # 2. In-flight debounce check: Short 30s window to prevent rapid duplicate concurrent webhook bursts
+            last_seen = cls._processed_message_ids.get(clean_id)
+            if last_seen and (now - last_seen) < 30:
+                return True
 
             cls._processed_message_ids[clean_id] = now
             return False
@@ -3893,6 +3915,9 @@ class WhatsAppService:
             try:
                 db.session.add(msg)
                 db.session.commit()
+                if whatsapp_message_id:
+                    with cls._processed_ids_lock:
+                        cls._processed_message_ids[str(whatsapp_message_id).strip()] = time.time()
             except Exception as e:
                 try:
                     db.session.rollback()
