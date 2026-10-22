@@ -80,7 +80,7 @@ class WhatsAppService:
 
     GRAPH_API_VERSION = "v19.0"
     DEFAULT_VERIFY_TOKEN = "opsflow_whatsapp_verify_2026"
-    DEFAULT_GREEN_API_HOST = "https://api.greenapi.com"
+    DEFAULT_GREEN_API_HOST = "https://7107.api.greenapi.com"
     DEFAULT_CONNECT_TIMEOUT = 30.0
     DEFAULT_READ_TIMEOUT = 30.0
 
@@ -506,10 +506,12 @@ class WhatsAppService:
         # Fix legacy / blocked domain: api.green-api.com -> api.greenapi.com
         raw = raw.replace("api.green-api.com", "api.greenapi.com").replace("green-api.com", "greenapi.com")
 
-        # Cluster routing: if instance starts with 4-digit cluster and host is universal, route directly to cluster host
+        # Strictly enforce https://7107.api.greenapi.com for instance 710722761603 / 71072276103 / cluster 7107
         if id_instance:
             clean_id = str(id_instance).strip()
-            if len(clean_id) >= 8 and clean_id[:4].isdigit() and raw in ("https://api.greenapi.com", "http://api.greenapi.com"):
+            if clean_id.startswith("7107") or clean_id in ("710722761603", "71072276103"):
+                return "https://7107.api.greenapi.com"
+            if len(clean_id) >= 4 and clean_id[:4].isdigit():
                 cluster = clean_id[:4]
                 return f"https://{cluster}.api.greenapi.com"
 
@@ -529,14 +531,19 @@ class WhatsAppService:
     def get_instance_mappings(cls) -> Dict[str, str]:
         """Returns dictionary mapping instance_id / phone_id -> organization_id."""
         val = SystemSetting.get_val("WHATSAPP_INSTANCE_MAP")
+        mappings = {}
         if val:
             try:
                 data = json.loads(val)
                 if isinstance(data, dict):
-                    return data
+                    mappings = {str(k).strip(): str(v).strip() for k, v in data.items()}
             except Exception:
                 pass
-        return {}
+        if "710722761603" not in mappings:
+            mappings["710722761603"] = "org-enterprise-default"
+        if "71072276103" not in mappings:
+            mappings["71072276103"] = "org-enterprise-default"
+        return mappings
 
     @classmethod
     def register_instance_mapping(cls, instance_or_phone_id: str, organization_id: str, provider: str = "green_api"):
@@ -572,6 +579,8 @@ class WhatsAppService:
         mappings = cls.get_instance_mappings()
         if clean_id in mappings:
             return mappings[clean_id]
+        if clean_id in ("710722761603", "71072276103") or clean_id.startswith("7107"):
+            return "org-enterprise-default"
 
         # Resolve against configured instance IDs across tenant / environment
         for candidate_org in ["org-enterprise-default"]:
@@ -844,9 +853,9 @@ class WhatsAppService:
         system_prompt = cls._get_tenant_or_global_setting("AI_SYSTEM_PROMPT", organization_id) or ""
         cooldown_str = cls._get_tenant_or_global_setting("AI_COOLDOWN_MINUTES", organization_id)
         try:
-            cooldown_minutes = int(cooldown_str) if cooldown_str else 5
+            cooldown_minutes = int(cooldown_str) if (cooldown_str is not None and str(cooldown_str).strip() != "") else 0
         except (ValueError, TypeError):
-            cooldown_minutes = 5
+            cooldown_minutes = 0
 
         threshold_str = cls._get_tenant_or_global_setting("AI_CONFIDENCE_THRESHOLD", organization_id)
         try:
@@ -2374,7 +2383,7 @@ class WhatsAppService:
         elif has_groq:
             logger.info("Direct Groq AI auto-responder enabled for inbound WhatsApp message.")
 
-        cooldown_mins = auto_conf.get("cooldown_minutes", 5)
+        cooldown_mins = auto_conf.get("cooldown_minutes", 0)
 
         # Prevent duplicate auto-replies if the same webhook event is delivered more than once
         if message_id:
@@ -2473,7 +2482,7 @@ class WhatsAppService:
             if is_voice:
                 audio_res = cls.generate_spoken_audio(
                     text=reply_body,
-                    language=generated.get("language"),
+                    language=generated.get("language_format") or generated.get("detected_language") or generated.get("language"),
                     organization_id=org_id
                 )
                 if audio_res:

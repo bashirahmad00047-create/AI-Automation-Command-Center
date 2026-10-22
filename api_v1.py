@@ -2605,16 +2605,56 @@ def whatsapp_webhook_ingress():
 
         # Trigger AI Auto-Responder if configured and active
         if not rule_replied:
-            try:
-                WhatsAppService.handle_inbound_auto_response(
-                    organization_id=target_org.id,
-                    sender_phone=msg.get("from_phone", "unknown"),
-                    message_body=msg.get("body", ""),
-                    sender_name=msg.get("sender_name", ""),
-                    message_id=msg_id
+            if current_app.config.get("TESTING"):
+                try:
+                    WhatsAppService.handle_inbound_auto_response(
+                        organization_id=target_org.id,
+                        sender_phone=msg.get("from_phone", "unknown"),
+                        message_body=msg.get("body", ""),
+                        sender_name=msg.get("sender_name", ""),
+                        message_id=msg_id,
+                        message_timestamp=msg.get("timestamp")
+                    )
+                except Exception as auto_err:
+                    logger.error(f"AI Auto-Responder error in Meta webhook: {auto_err}")
+            else:
+                def _async_meta_reply(app_ref, org_id, from_p, body_txt, s_name, m_id, m_ts, m_type):
+                    with app_ref.app_context():
+                        try:
+                            is_v = m_type in ("audioMessage", "voiceMessage", "ptt", "audio") or "[voice note]" in str(body_txt or "").lower()
+                            WhatsAppService.handle_inbound_auto_response(
+                                organization_id=org_id,
+                                sender_phone=from_p,
+                                message_body=body_txt,
+                                sender_name=s_name,
+                                message_id=m_id,
+                                message_timestamp=m_ts,
+                                is_voice=is_v
+                            )
+                        except Exception as err:
+                            logger.error(f"Async AI Auto-Responder error in Meta webhook: {err}")
+                        finally:
+                            try:
+                                db.session.remove()
+                            except Exception:
+                                pass
+
+                app_obj = current_app._get_current_object()
+                t = threading.Thread(
+                    target=_async_meta_reply,
+                    args=(
+                        app_obj,
+                        target_org.id,
+                        msg.get("from_phone", "unknown"),
+                        msg.get("body", ""),
+                        msg.get("sender_name", ""),
+                        msg_id,
+                        msg.get("timestamp"),
+                        msg.get("message_type")
+                    ),
+                    daemon=True
                 )
-            except Exception as auto_err:
-                logger.error(f"AI Auto-Responder error in Meta webhook: {auto_err}")
+                t.start()
 
         processed_count += 1
 
@@ -2765,6 +2805,11 @@ def green_api_webhook_ingress():
                                 )
                             except Exception as err:
                                 logger.error(f"Async AI Auto-Responder error: {err}")
+                            finally:
+                                try:
+                                    db.session.remove()
+                                except Exception:
+                                    pass
 
                     app_obj = current_app._get_current_object()
                     t = threading.Thread(
@@ -3148,7 +3193,7 @@ def get_whatsapp_config():
         "webhook_url": green_api_webhook_url if active_provider == "green_api" else meta_webhook_url,
         "meta_webhook_url": meta_webhook_url,
         "green_api_id_instance": masked_green_id,
-        "green_api_host": conf.get("green_api_host", "https://api.greenapi.com"),
+        "green_api_host": WhatsAppService.normalize_green_api_host(conf.get("green_api_host"), conf.get("green_api_id_instance")),
         "green_api_webhook_url": green_api_webhook_url,
         "mode": active_provider
     }), 200
