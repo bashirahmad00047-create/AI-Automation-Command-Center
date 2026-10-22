@@ -2616,6 +2616,45 @@ class WhatsAppService:
                         getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
                     logger.info(f"AI Auto-Reply debounced for {clean_phone} (last outbound at {recent_outbound.created_at})")
                     return None
+        # 1. Check for customer item selection & CRM order placement intent
+        order_action = cls.parse_order_intent_from_message(
+            organization_id=org_id,
+            message_body=message_body,
+            sender_phone=clean_phone,
+            sender_name=sender_name
+        )
+        if order_action and order_action.get("message"):
+            cls.send_message(
+                organization_id=org_id,
+                to_phone=clean_phone,
+                message_text=order_action["message"]
+            )
+            return {
+                "success": True,
+                "action": "order_created",
+                "order": order_action.get("order"),
+                "reply_body": order_action["message"]
+            }
+
+        # 2. Check for order tracking query by Order ID
+        tracking_action = cls.handle_order_tracking_query(
+            organization_id=org_id,
+            sender_phone=clean_phone,
+            message_text=message_body
+        )
+        if tracking_action and tracking_action.get("message"):
+            cls.send_message(
+                organization_id=org_id,
+                to_phone=clean_phone,
+                message_text=tracking_action["message"]
+            )
+            return {
+                "success": True,
+                "action": "order_tracked",
+                "order": tracking_action.get("order"),
+                "reply_body": tracking_action["message"]
+            }
+
         # Generate response
         generated = cls.generate_ai_auto_response(
             organization_id=org_id,
@@ -5186,6 +5225,9 @@ class WhatsAppService:
                 item_line += f" (SKU: `{sku}`)"
             lines.append(item_line)
             lines.append(f"   💰 *Price:* {curr} {price:,.2f} | {stock_badge}")
+            img = item.get("image_url")
+            if img and str(img).startswith("http"):
+                lines.append(f"   🖼️ *Image:* {img}")
             if desc and len(desc.strip()) > 0:
                 short_desc = desc.strip().replace("\n", " ")
                 if len(short_desc) > 90:
@@ -5576,6 +5618,440 @@ class WhatsAppService:
         except Exception as e:
             logger.error(f"Error processing pending cart reminders: {e}")
             return {"success": False, "error": str(e), "processed": 0}
+
+
+    # --- Feature 1b: WhatsApp Item Selection & CRM Order Creation ---
+
+    @classmethod
+    def parse_order_intent_from_message(
+        cls,
+        organization_id: str,
+        message_body: str,
+        sender_phone: str,
+        sender_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Parses an order request from customer text/voice message, matches product, and creates CRM order with payment options."""
+        if not message_body or not sender_phone or not has_app_context():
+            return None
+
+        clean_text = str(message_body).strip()
+        lower = clean_text.lower()
+
+        order_triggers = [
+            "order", "buy", "purchase", "book", "chahiye", "mangwana", "kharidna", "bhejo", "deliver", "booking"
+        ]
+        has_trigger = any(t in lower for t in order_triggers)
+        if not has_trigger:
+            return None
+
+        # Exclude tracking / query questions
+        tracking_words = ["status", "track", "tracking", "kahan", "where", "update", "cancel", "kab tak"]
+        if any(w in lower for w in tracking_words):
+            return None
+
+        products = Product.query.filter(
+            Product.organization_id == organization_id,
+            Product.is_active.is_(True)
+        ).order_by(Product.name.asc()).all()
+        if not products:
+            return None
+
+        matched_product = None
+        quantity = 1
+
+        qty_match = re.search(r'\b(\d+)\s*(?:x|pcs|pieces|units|dane|adad)?\b', clean_text, re.IGNORECASE)
+        idx_match = re.search(r'\b(?:order|item|option|number|no\.?|choice)\s*#?\s*(\d{1,2})\b', clean_text, re.IGNORECASE)
+        if idx_match:
+            idx = int(idx_match.group(1)) - 1
+            if 0 <= idx < len(products):
+                matched_product = products[idx]
+
+        if not matched_product:
+            for p in products:
+                p_name_lower = p.name.lower()
+                if p_name_lower in lower:
+                    matched_product = p
+                    break
+                p_tokens = [tok for tok in p_name_lower.split() if len(tok) >= 4]
+                if p_tokens and any(tok in lower for tok in p_tokens):
+                    matched_product = p
+                    break
+                if p.sku and p.sku.lower() in lower:
+                    matched_product = p
+                    break
+
+        if not matched_product:
+            return None
+
+        if qty_match:
+            try:
+                parsed_qty = int(qty_match.group(1))
+                if not idx_match or parsed_qty != int(idx_match.group(1)):
+                    if 1 <= parsed_qty <= 50:
+                        quantity = parsed_qty
+            except Exception:
+                quantity = 1
+
+        if matched_product.stock_quantity <= 0:
+            return {
+                "success": False,
+                "reason": "out_of_stock",
+                "product": matched_product.to_dict(),
+                "message": (
+                    f"Maazrat! *{matched_product.name}* abhi out of stock hai. "
+                    "Jaise hi fresh stock aayega hum aapko inform kar denge. "
+                    "Aap hamara baqi catalog dekhne ke liye 'Catalog' likh kar reply kar sakte hain."
+                )
+            }
+
+        import secrets
+        clean_phone = cls.format_phone_number(sender_phone)
+        order_num = f"ORD-{secrets.token_hex(3).upper()}"
+        total_price = matched_product.price * quantity
+
+        order = EcommerceOrder(
+            organization_id=organization_id,
+            order_number=order_num,
+            customer_phone=clean_phone,
+            customer_name=sender_name or f"WhatsApp {clean_phone[-4:]}",
+            total_amount=total_price,
+            currency=matched_product.currency or "PKR",
+            order_status="confirmed",
+            payment_status="unpaid",
+            payment_method="cod",
+            notes="Order placed via WhatsApp chat"
+        )
+        order.set_items([{
+            "product_id": matched_product.id,
+            "name": matched_product.name,
+            "price": matched_product.price,
+            "quantity": quantity,
+            "sku": matched_product.sku,
+            "image_url": matched_product.image_url or ""
+        }])
+        db.session.add(order)
+
+        if matched_product.stock_quantity >= quantity:
+            matched_product.stock_quantity -= quantity
+            matched_product.stock_status = matched_product.calculate_stock_status()
+
+        # Create or update CRM Lead
+        try:
+            from models import Lead
+            lead_name = sender_name or f"Customer {clean_phone}"
+            crm_lead = Lead(
+                organization_id=organization_id,
+                name=lead_name,
+                phone=clean_phone,
+                company="",
+                message=f"Placed Order #{order_num} for {quantity}x {matched_product.name} ({matched_product.currency} {total_price:,.2f})",
+                intent="order_placed",
+                urgency_score=80,
+                lead_score=95,
+                route_department="Sales",
+                draft_response=f"Order #{order_num} confirmed via WhatsApp."
+            )
+            db.session.add(crm_lead)
+        except Exception as lead_err:
+            logger.error(f"Failed to record CRM lead for order: {lead_err}")
+
+        db.session.commit()
+
+        payment_info = cls.generate_payment_instructions(
+            organization_id=organization_id,
+            order_number=order_num,
+            amount=total_price,
+            currency=matched_product.currency or "PKR",
+            customer_phone=clean_phone
+        )
+
+        curr = matched_product.currency or "PKR"
+        c_name = sender_name or "Valued Customer"
+        img_line = f"🖼️ {matched_product.image_url}\n" if matched_product.image_url else ""
+        response_text = (
+            f"🎉 *Order Confirmed Successfully!*\n\n"
+            f"Salam {c_name}! Aapka order register ho chuka hai:\n\n"
+            f"📋 *Order Number:* `{order_num}`\n"
+            f"📦 *Item:* {quantity}x {matched_product.name}\n"
+            f"{img_line}"
+            f"💵 *Total Amount:* {curr} {total_price:,.2f}\n\n"
+            f"{payment_info['formatted_text']}\n\n"
+            f"📍 *Order Tracking:* Kisi bhi waqt apna status check karne ke liye `{order_num}` likh kar reply karein. Shukriya!"
+        )
+
+        return {
+            "success": True,
+            "order": order.to_dict(),
+            "payment_info": payment_info,
+            "message": response_text
+        }
+
+    # --- Feature 2b: Automated Payment Instructions & Links (EasyPaisa/JazzCash/Card) ---
+
+    @classmethod
+    def generate_payment_instructions(
+        cls,
+        organization_id: Optional[str] = None,
+        order_number: Optional[str] = None,
+        amount: Optional[float] = None,
+        currency: str = "PKR",
+        customer_phone: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Generates automated payment instructions and checkout links for EasyPaisa, JazzCash, and Card/Stripe."""
+        org_id = organization_id or "org-enterprise-default"
+        amt_str = f"{currency} {amount:,.2f}" if amount is not None else ""
+        ord_no = order_number or "ORD-DEFAULT"
+        clean_phone = cls.format_phone_number(customer_phone or "")
+
+        ep_acc = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_NUMBER", org_id) or "03471000668"
+        ep_title = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_TITLE", org_id) or "OpsFlow Cloud Commerce"
+
+        jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "03209350858"
+        jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "OpsFlow Cloud Commerce"
+
+        base_url = cls._get_tenant_or_global_setting("CHECKOUT_BASE_URL", org_id) or "https://opsflow.cloud"
+        card_link = f"{base_url}/checkout/pay?order={ord_no}&amount={amount or 0}&phone={clean_phone}"
+
+        formatted = (
+            "💳 *Payment Options (EasyPaisa / JazzCash / Card):*\n"
+            f"• *EasyPaisa:* `{ep_acc}` (Title: *{ep_title}*)\n"
+            f"• *JazzCash:* `{jc_acc}` (Title: *{jc_title}*)\n"
+            f"• *Debit/Credit Card / Stripe:* {card_link}\n\n"
+            "Payment ke baad transaction ID ya screenshot yahan share karein. "
+            "Agar aap Cash on Delivery (COD) chahte hain to 'COD' reply karein."
+        )
+
+        return {
+            "order_number": ord_no,
+            "amount": amount,
+            "currency": currency,
+            "easypaisa": {
+                "account_number": ep_acc,
+                "account_title": ep_title
+            },
+            "jazzcash": {
+                "account_number": jc_acc,
+                "account_title": jc_title
+            },
+            "card_payment_link": card_link,
+            "formatted_text": formatted
+        }
+
+    @classmethod
+    def handle_order_tracking_query(
+        cls,
+        organization_id: Optional[str],
+        sender_phone: str,
+        message_text: str
+    ) -> Optional[Dict[str, Any]]:
+        """Handles customer inquiries about order status and tracking by Order ID."""
+        if not message_text or not has_app_context():
+            return None
+
+        clean_text = str(message_text).strip()
+        ord_match = re.search(r'\b(ORD-[A-Z0-9]{4,10}|\#\d{3,8})\b', clean_text, re.IGNORECASE)
+        is_tracking_intent = bool(
+            ord_match
+            or any(w in clean_text.lower() for w in ["track", "status", "mera order", "parcel", "delivery status", "order update", "kahan pohancha"])
+        )
+        if not is_tracking_intent:
+            return None
+
+        org_id = organization_id or "org-enterprise-default"
+        clean_phone = cls.format_phone_number(sender_phone or "")
+        order = None
+
+        if ord_match:
+            raw_no = ord_match.group(1).replace("#", "").replace(" ", "").upper()
+            order = EcommerceOrder.query.filter(
+                EcommerceOrder.organization_id == org_id,
+                db.or_(
+                    EcommerceOrder.order_number.ilike(f"%{raw_no}%"),
+                    EcommerceOrder.order_number.ilike(f"%{ord_match.group(1)}%")
+                )
+            ).first()
+
+        if not order and clean_phone and len(clean_phone) >= 7:
+            suffix = clean_phone[-8:]
+            order = EcommerceOrder.query.filter(
+                EcommerceOrder.organization_id == org_id,
+                EcommerceOrder.customer_phone.like(f"%{suffix}%")
+            ).order_by(EcommerceOrder.created_at.desc()).first()
+
+        if not order:
+            if ord_match:
+                return {
+                    "found": False,
+                    "message": f"Maazrat! Order `{ord_match.group(1)}` hamare system mein nahi mila. Baraye karam apna order number dobara check karein."
+                }
+            return None
+
+        c_name = order.customer_name or "Valued Customer"
+        st = order.order_status.upper()
+        curr = order.currency or "PKR"
+
+        item_names = [it.get("name", "Item") for it in order.get_items()]
+        items_str = ", ".join(item_names) if item_names else "Products"
+
+        lines = [
+            f"📦 *Order Status Update: {st}*",
+            f"Salam {c_name}!\n",
+            f"• *Order Number:* `{order.order_number}`",
+            f"• *Items:* {items_str}",
+            f"• *Total Amount:* {curr} {order.total_amount:,.2f}",
+            f"• *Current Status:* *{st}*",
+        ]
+
+        if order.courier_name:
+            lines.append(f"• *Courier:* {order.courier_name}")
+        if order.tracking_number:
+            lines.append(f"• *Tracking Number:* `{order.tracking_number}`")
+        if order.tracking_url:
+            lines.append(f"🔗 *Live Tracking Link:* {order.tracking_url}")
+
+        if order.payment_status == "unpaid":
+            pay_info = cls.generate_payment_instructions(
+                organization_id=org_id,
+                order_number=order.order_number,
+                amount=order.total_amount,
+                currency=curr,
+                customer_phone=clean_phone
+            )
+            lines.append(f"\n{pay_info['formatted_text']}")
+
+        return {
+            "found": True,
+            "order": order.to_dict(),
+            "message": "\n".join(lines).strip()
+        }
+
+    # --- Feature 3b: Broadcast Marketing Module ---
+
+    @classmethod
+    def send_promotional_broadcast(
+        cls,
+        organization_id: str,
+        campaign_name: str,
+        message_template: str,
+        target_audience: str = "all_leads",
+        min_lead_score: int = 0,
+        custom_phone_numbers: Optional[List[str]] = None,
+        discount_code: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Dispatches personalized promotional WhatsApp broadcast messages to leads/contacts stored in database."""
+        if not has_app_context():
+            return {"success": False, "reason": "no_app_context", "sent": 0}
+
+        org_id = organization_id or "org-enterprise-default"
+        clean_tpl = str(message_template or "").strip()
+        if not clean_tpl:
+            return {"success": False, "error": "message_template is required", "sent": 0}
+
+        recipients_list = []
+
+        from models import ContactConsent, Lead, BroadcastCampaign
+        opted_out_phones = set()
+        try:
+            consents = ContactConsent.query.filter_by(organization_id=org_id, status="opted_out").all()
+            for c in consents:
+                opted_out_phones.add(cls.format_phone_number(c.phone))
+        except Exception:
+            pass
+
+        if target_audience == "custom" and custom_phone_numbers:
+            for p in custom_phone_numbers:
+                recipients_list.append({"phone": str(p).strip(), "name": "Valued Customer"})
+
+        elif target_audience in ("all_leads", "high_intent_leads"):
+            lead_query = Lead.query.filter(
+                Lead.organization_id == org_id,
+                Lead.phone.isnot(None),
+                Lead.phone != ""
+            )
+            if target_audience == "high_intent_leads" or min_lead_score > 0:
+                score_thresh = max(min_lead_score, 50)
+                lead_query = lead_query.filter(Lead.lead_score >= score_thresh)
+
+            leads = lead_query.all()
+            seen_phones = set()
+            for ld in leads:
+                cl_p = cls.format_phone_number(ld.phone)
+                if cl_p and cl_p not in seen_phones:
+                    seen_phones.add(cl_p)
+                    recipients_list.append({"phone": cl_p, "name": ld.name or "Valued Customer"})
+
+        elif target_audience == "consented_contacts":
+            consented = ContactConsent.query.filter_by(organization_id=org_id, status="opted_in").all()
+            seen_phones = set()
+            for c in consented:
+                cl_p = cls.format_phone_number(c.phone)
+                if cl_p and cl_p not in seen_phones:
+                    seen_phones.add(cl_p)
+                    recipients_list.append({"phone": cl_p, "name": "Valued Customer"})
+
+        campaign = None
+        try:
+            campaign = BroadcastCampaign(
+                organization_id=org_id,
+                name=campaign_name,
+                message_body=clean_tpl,
+                status="dispatching"
+            )
+            db.session.add(campaign)
+            db.session.commit()
+        except Exception as camp_err:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            logger.debug(f"Campaign tracking record creation notice: {camp_err}")
+
+        sent_count = 0
+        failed_count = 0
+        skipped_optout = 0
+
+        for target in recipients_list:
+            raw_phone = target["phone"]
+            clean_p = cls.format_phone_number(raw_phone)
+            if not clean_p or len(clean_p) < 7:
+                continue
+
+            if clean_p in opted_out_phones:
+                skipped_optout += 1
+                continue
+
+            pers_body = clean_tpl.replace("{{name}}", target["name"])
+            pers_body = pers_body.replace("{{phone}}", clean_p)
+            if discount_code:
+                pers_body = pers_body.replace("{{discount_code}}", discount_code)
+
+            send_res = cls.send_message(
+                organization_id=org_id,
+                to_phone=clean_p,
+                message_text=pers_body
+            )
+            if send_res.get("success"):
+                sent_count += 1
+            else:
+                failed_count += 1
+
+        if campaign:
+            try:
+                campaign.status = "completed"
+                db.session.commit()
+            except Exception:
+                pass
+
+        return {
+            "success": True,
+            "campaign_name": campaign_name,
+            "campaign_id": campaign.id if campaign else None,
+            "target_audience": target_audience,
+            "total_recipients": len(recipients_list),
+            "sent": sent_count,
+            "failed": failed_count,
+            "skipped_optout": skipped_optout
+        }
 
     send_text_message = send_message
 
