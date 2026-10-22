@@ -2744,15 +2744,24 @@ def green_api_webhook_ingress():
                                                         rec_obj.body = transcript
                                                         db.session.commit()
                                     except Exception as tr_err:
+                                        try:
+                                            db.session.rollback()
+                                        except Exception:
+                                            pass
                                         logger.debug(f"Background audio transcription failed: {tr_err}")
 
+                                is_voice_inbound = (
+                                    m_type in ("audioMessage", "voiceMessage", "ptt")
+                                    or "[voice note]" in str(body_txt or "").lower()
+                                )
                                 WhatsAppService.handle_inbound_auto_response(
                                     organization_id=org_id,
                                     sender_phone=from_p,
                                     message_body=body_txt,
                                     sender_name=s_name,
                                     message_id=m_id,
-                                    message_timestamp=m_ts
+                                    message_timestamp=m_ts,
+                                    is_voice=is_voice_inbound
                                 )
                             except Exception as err:
                                 logger.error(f"Async AI Auto-Responder error: {err}")
@@ -3091,7 +3100,9 @@ def whatsapp_media_proxy():
     try:
         import requests
         req = requests.get(media_url, stream=True, timeout=12)
-        content_type = req.headers.get("Content-Type", "audio/ogg")
+        content_type = req.headers.get("Content-Type")
+        if not content_type or content_type in ("application/octet-stream", "binary/octet-stream"):
+            content_type = "audio/ogg; codecs=opus"
         response = Response(req.iter_content(chunk_size=8192), content_type=content_type)
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Accept-Ranges"] = "bytes"

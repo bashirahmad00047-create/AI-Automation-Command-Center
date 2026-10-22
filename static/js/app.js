@@ -5654,6 +5654,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
 
                 let bodyHtml = '';
                 if (isVoice) {
+                    const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage');
                     bodyHtml = `
                         <div class="wa-voice-bubble">
                             <button type="button" class="wa-play-btn" id="waPlayBtn_${m.id}" onclick="togglePlayVoiceMessage('${m.id}', '${escapeHtml(safeMediaUrl)}', '${escapeHtml(safeBody)}')">
@@ -5669,6 +5670,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                                 </div>
                             </div>
                         </div>
+                        ${hasTranscript ? `<div class="wa-voice-transcript" style="margin-top:6px;font-size:0.86em;padding:5px 8px;background:rgba(0,0,0,0.14);border-left:3px solid #00a884;border-radius:4px;word-break:break-word;"><span style="color:#00a884;font-size:0.75em;font-weight:600;display:block;margin-bottom:2px;">📝 Transcription</span>${escapeHtml(safeBody)}</div>` : ''}
                     `;
                 } else {
                     const rawBody = (m.body || '').trim();

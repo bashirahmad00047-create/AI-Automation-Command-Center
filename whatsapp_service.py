@@ -117,8 +117,9 @@ class WhatsAppService:
         # Green-API download endpoint (POST with JSON body per official docs)
         url = f"{host}/waInstance{id_inst}/downloadFile/{token}"
         try:
+            target_chat = f"{chat_id}@c.us" if "@" not in str(chat_id) else chat_id
             with cls.get_http_session(retries=1) as session:
-                resp = session.post(url, json={"chatId": chat_id, "idMessage": message_id}, timeout=timeouts)
+                resp = session.post(url, json={"chatId": target_chat, "idMessage": message_id}, timeout=timeouts)
                 if resp.status_code == 200:
                     data = resp.json()
                     dl_url = data.get("downloadUrl")
@@ -133,54 +134,211 @@ class WhatsAppService:
 
     @classmethod
     def _transcribe_audio(cls, audio_bytes: bytes, organization_id: Optional[str] = None) -> Optional[str]:
-        """Transcribe audio using Gemini (if API key is configured).
-        Returns the transcript string or None.
+        """Transcribe audio using Gemini or Groq Whisper with language awareness.
+        Returns the transcript string or None on failure.
         """
-        api_key = cls.get_gemini_api_key(organization_id=organization_id)
-        if not api_key:
-            logger.debug("Google Generative AI API key not set, skipping transcription.")
+        if not audio_bytes or len(audio_bytes) < 32:
             return None
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
-            import tempfile, os
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-            try:
-                uploaded = genai.upload_file(path=tmp_path)
-                candidate_models = [
-                    cls.get_gemini_model_name(organization_id=organization_id),
-                    "gemini-2.5-flash",
-                    "gemini-2.0-flash",
-                    "gemini-1.5-flash",
-                    "gemini-1.5-flash-8b"
-                ]
-                models_to_try = [m for m in candidate_models if m and m != "gemini-3.8-flash"]
-                if "gemini-1.5-flash" not in models_to_try:
-                    models_to_try.append("gemini-1.5-flash")
 
-                for m_name in models_to_try:
-                    try:
-                        model = genai.GenerativeModel(m_name)
-                        response = model.generate_content([uploaded])
-                        if hasattr(response, "text") and response.text:
-                            return response.text.strip()
-                        if getattr(response, "candidates", None):
-                            parts = response.candidates[0].content.parts
-                            for p in parts:
-                                if getattr(p, "text", None):
-                                    return p.text.strip()
-                    except Exception as model_err:
-                        logger.debug(f"Transcription model {m_name} failed: {model_err}")
-                        continue
-            finally:
+        transcription_prompt = (
+            "Provide an accurate, verbatim transcription of this WhatsApp voice message. "
+            "If spoken in Pashto, transcribe accurately in Pashto (Arabic script or Roman Pashto as spoken). "
+            "If in Urdu, transcribe accurately in Urdu (Arabic script or Roman Urdu as spoken). "
+            "If in English, transcribe in English. "
+            "Output ONLY the transcribed speech text without introductory or explanatory text."
+        )
+
+        # 1. Try Gemini Generative AI transcription
+        gemini_key = cls.get_gemini_api_key(organization_id=organization_id)
+        if gemini_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=gemini_key)
+                import tempfile, os
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp:
+                    tmp.write(audio_bytes)
+                    tmp_path = tmp.name
                 try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
+                    uploaded = genai.upload_file(path=tmp_path)
+                    candidate_models = [
+                        cls.get_gemini_model_name(organization_id=organization_id),
+                        "gemini-2.5-flash",
+                        "gemini-2.0-flash",
+                        "gemini-1.5-flash",
+                        "gemini-1.5-flash-8b"
+                    ]
+                    models_to_try = [m for m in candidate_models if m and m != "gemini-3.8-flash"]
+                    if "gemini-1.5-flash" not in models_to_try:
+                        models_to_try.append("gemini-1.5-flash")
+
+                    for m_name in models_to_try:
+                        try:
+                            model = genai.GenerativeModel(m_name)
+                            response = model.generate_content([uploaded, transcription_prompt])
+                            if hasattr(response, "text") and response.text:
+                                res_txt = response.text.strip()
+                                if res_txt:
+                                    return res_txt
+                            if getattr(response, "candidates", None):
+                                parts = response.candidates[0].content.parts
+                                for p in parts:
+                                    if getattr(p, "text", None) and p.text.strip():
+                                        return p.text.strip()
+                        except Exception as model_err:
+                            logger.debug(f"Gemini transcription model {m_name} failed: {model_err}")
+                            continue
+                finally:
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"Gemini audio transcription failed: {e}")
+
+        # 2. Fallback to Groq Whisper transcription (fast multilingual Whisper)
+        groq_key = cls.get_groq_api_key(organization_id=organization_id)
+        if groq_key:
+            try:
+                import requests
+                files = {
+                    "file": ("voice_note.ogg", audio_bytes, "audio/ogg; codecs=opus")
+                }
+                data = {
+                    "model": "whisper-large-v3",
+                    "response_format": "json"
+                }
+                headers = {
+                    "Authorization": f"Bearer {groq_key}"
+                }
+                resp = requests.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers=headers,
+                    files=files,
+                    data=data,
+                    timeout=8.0
+                )
+                if resp.status_code == 200:
+                    whisper_res = resp.json()
+                    whisper_text = whisper_res.get("text", "").strip()
+                    if whisper_text:
+                        return whisper_text
+            except Exception as groq_err:
+                logger.debug(f"Groq Whisper transcription failed: {groq_err}")
+
+        return None
+
+    @classmethod
+    def generate_spoken_audio(
+        cls,
+        text: str,
+        language: Optional[str] = None,
+        organization_id: Optional[str] = None
+    ) -> Optional[Tuple[bytes, str, str]]:
+        """Synthesizes text into spoken audio bytes if a TTS engine/provider is available.
+
+        Supported providers in order of precedence:
+        1. Local gTTS (Google Text-to-Speech) if 'gtts' is installed
+        2. OpenAI Audio Speech API if OPENAI_API_KEY is configured
+        3. ElevenLabs Text-to-Speech API if ELEVENLABS_API_KEY is configured
+
+        Returns (audio_bytes, filename, mime_type) or None if no TTS capability is available.
+        """
+        if not text or not str(text).strip():
+            return None
+
+        clean_text = str(text).strip()
+        import re
+        clean_text = re.sub(r"\[.*?\]", "", clean_text).strip()
+        if not clean_text:
+            clean_text = str(text).strip()
+
+        # 1. Local gTTS synthesis (if installed)
+        try:
+            from gtts import gTTS
+            import io
+            lang_code = "en"
+            if language:
+                l_lower = language.lower()
+                if "urdu" in l_lower or l_lower == "ur":
+                    lang_code = "ur"
+                elif "arabic" in l_lower or l_lower == "ar":
+                    lang_code = "ar"
+                elif "spanish" in l_lower or l_lower == "es":
+                    lang_code = "es"
+                elif "french" in l_lower or l_lower == "fr":
+                    lang_code = "fr"
+            tts = gTTS(text=clean_text[:1000], lang=lang_code)
+            buf = io.BytesIO()
+            tts.write_to_fp(buf)
+            audio_bytes = buf.getvalue()
+            if audio_bytes and len(audio_bytes) > 100:
+                return (audio_bytes, "voice_reply.mp3", "audio/mpeg")
+        except ImportError:
+            pass
         except Exception as e:
-            logger.debug(f"Audio transcription failed: {e}")
+            logger.debug(f"gTTS audio synthesis failed: {e}")
+
+        # 2. OpenAI Audio Speech API (if OPENAI_API_KEY configured)
+        openai_key = (
+            cls._get_tenant_or_global_setting("OPENAI_API_KEY", organization_id=organization_id)
+            or os.environ.get("OPENAI_API_KEY")
+        )
+        if openai_key:
+            try:
+                import requests
+                resp = requests.post(
+                    "https://api.openai.com/v1/audio/speech",
+                    headers={
+                        "Authorization": f"Bearer {openai_key.strip()}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "tts-1",
+                        "input": clean_text[:1000],
+                        "voice": "alloy"
+                    },
+                    timeout=15.0
+                )
+                if resp.status_code == 200 and resp.content:
+                    return (resp.content, "voice_reply.mp3", "audio/mpeg")
+            except Exception as e:
+                logger.debug(f"OpenAI TTS synthesis failed: {e}")
+
+        # 3. ElevenLabs Text-to-Speech API (if ELEVENLABS_API_KEY configured)
+        eleven_key = (
+            cls._get_tenant_or_global_setting("ELEVENLABS_API_KEY", organization_id=organization_id)
+            or os.environ.get("ELEVENLABS_API_KEY")
+        )
+        if eleven_key:
+            try:
+                import requests
+                voice_id = (
+                    cls._get_tenant_or_global_setting("ELEVENLABS_VOICE_ID", organization_id=organization_id)
+                    or os.environ.get("ELEVENLABS_VOICE_ID")
+                    or "21m00Tcm4TlvDq8ikWAM"
+                )
+                resp = requests.post(
+                    f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+                    headers={
+                        "xi-api-key": eleven_key.strip(),
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "text": clean_text[:1000],
+                        "model_id": "eleven_multilingual_v2"
+                    },
+                    timeout=15.0
+                )
+                if resp.status_code == 200 and resp.content:
+                    return (resp.content, "voice_reply.mp3", "audio/mpeg")
+            except Exception as e:
+                logger.debug(f"ElevenLabs TTS synthesis failed: {e}")
+
+        logger.warning(
+            "[WhatsApp Voice] Audio reply synthesis unavailable: "
+            "no TTS engine installed (e.g. gTTS) or API key configured (OPENAI_API_KEY, ELEVENLABS_API_KEY). "
+            "Delivering reply as text."
+        )
         return None
 
     @classmethod
@@ -2136,7 +2294,8 @@ class WhatsAppService:
         sender_name: Optional[str] = None,
         message_id: Optional[str] = None,
         engine_res: Optional[Dict[str, Any]] = None,
-        message_timestamp: Optional[Any] = None
+        message_timestamp: Optional[Any] = None,
+        is_voice: bool = False
     ) -> Optional[Dict[str, Any]]:
         """Handles automated AI response to an inbound message if enabled and not debounced."""
         if not sender_phone or not message_body:
@@ -2308,13 +2467,38 @@ class WhatsAppService:
             with cls._processed_ids_lock:
                 cls._recent_replied_trigger_ids[message_id] = time.time()
 
-        # Dispatch outbound message via WhatsAppService.send_message
+        # Dispatch outbound message (audio file reply if voice note and TTS available, else text)
         try:
-            dispatch_res = cls.send_message(
-                organization_id=org_id,
-                to_phone=clean_phone,
-                message_text=reply_body
-            )
+            dispatch_res = None
+            if is_voice:
+                audio_res = cls.generate_spoken_audio(
+                    text=reply_body,
+                    language=generated.get("language"),
+                    organization_id=org_id
+                )
+                if audio_res:
+                    audio_b, audio_fn, audio_mt = audio_res
+                    logger.info(f"Synthesized {len(audio_b)} bytes of spoken audio for voice note reply to {clean_phone}.")
+                    active_prov = cls.get_active_provider(organization_id=org_id)
+                    if active_prov == "green_api":
+                        dispatch_res = cls.send_green_api_file(
+                            organization_id=org_id,
+                            to_phone=clean_phone,
+                            file_bytes=audio_b,
+                            filename=audio_fn,
+                            mime_type=audio_mt,
+                            caption=reply_body,
+                            quoted_message_id=message_id
+                        )
+                else:
+                    logger.info(f"TTS audio synthesis unavailable for voice note reply to {clean_phone}; delivering text reply.")
+
+            if not dispatch_res or not dispatch_res.get("success"):
+                dispatch_res = cls.send_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    message_text=reply_body
+                )
             # Tag the newly recorded outbound message with AI metadata
             outbound_record_id = dispatch_res.get("record_id") or dispatch_res.get("message_record_id")
             msg_rec = None
@@ -4283,6 +4467,108 @@ class WhatsAppService:
                 "error": err_msg,
                 "recipient": clean_to
             }
+
+    @classmethod
+    def send_green_api_file(
+        cls,
+        organization_id: Optional[str] = None,
+        to_phone: Optional[str] = None,
+        file_bytes: Optional[bytes] = None,
+        filename: Optional[str] = None,
+        mime_type: Optional[str] = None,
+        caption: Optional[str] = None,
+        quoted_message_id: Optional[str] = None,
+        execution_id: Optional[int] = None,
+        allow_fallback: bool = True
+    ) -> Dict[str, Any]:
+        """Dispatches an outbound WhatsApp file/audio message via Green-API (uploadFile + sendFileByUrl)."""
+        if to_phone is not None and file_bytes is None and isinstance(organization_id, (bytes, bytearray)):
+            file_bytes = organization_id
+            organization_id = "org-enterprise-default"
+        elif organization_id is None:
+            organization_id = "org-enterprise-default"
+
+        conf = cls.get_config(organization_id=organization_id)
+        clean_to = cls.format_phone_number(to_phone or "")
+        if not clean_to or len(clean_to) < 7:
+            raise ValueError(f"Invalid recipient phone number: '{to_phone}'.")
+
+        id_inst = conf.get("green_api_id_instance")
+        tok_inst = conf.get("green_api_token_instance")
+        host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
+
+        if not id_inst or not tok_inst or not file_bytes:
+            err_msg = "Green-API credentials or file bytes missing."
+            return {"success": False, "status": "failed", "error": err_msg, "recipient": clean_to}
+
+        fn = filename or "voice_reply.mp3"
+        mt = mime_type or "audio/mpeg"
+        chat_id = f"{clean_to}@c.us"
+        timeouts = cls.get_timeout_tuple()
+
+        try:
+            with cls.get_http_session(retries=2) as session:
+                # 1. Upload to Green-API storage
+                up_url = f"{host}/waInstance{id_inst}/uploadFile/{tok_inst}"
+                import io
+                files = {"file": (fn, io.BytesIO(file_bytes), mt)}
+                up_resp = session.post(up_url, files=files, timeout=timeouts)
+                if up_resp.status_code != 200:
+                    err_txt = f"uploadFile failed: HTTP {up_resp.status_code} {up_resp.text[:200]}"
+                    logger.warning(err_txt)
+                    return {"success": False, "status": "failed", "error": err_txt, "recipient": clean_to}
+                up_data = up_resp.json() if up_resp.text else {}
+                url_file = up_data.get("urlFile")
+                if not url_file:
+                    err_txt = "uploadFile response missing urlFile."
+                    logger.warning(err_txt)
+                    return {"success": False, "status": "failed", "error": err_txt, "recipient": clean_to}
+
+                # 2. Send via sendFileByUrl
+                send_url = f"{host}/waInstance{id_inst}/sendFileByUrl/{tok_inst}"
+                payload = {
+                    "chatId": chat_id,
+                    "urlFile": url_file,
+                    "fileName": fn,
+                    "caption": caption or ""
+                }
+                if quoted_message_id:
+                    payload["quotedMessageId"] = quoted_message_id
+
+                send_resp = session.post(send_url, json=payload, timeout=timeouts)
+                send_data = send_resp.json() if send_resp.text else {}
+                if send_resp.status_code == 200 and send_data.get("idMessage"):
+                    msg_id = send_data.get("idMessage")
+                    record = cls.record_message(
+                        organization_id=organization_id,
+                        sender=f"GreenAPI Instance {id_inst}",
+                        recipient=clean_to,
+                        direction="outbound",
+                        body=caption or f"[Voice Note: {fn}]",
+                        message_type="audioMessage",
+                        status="sent",
+                        whatsapp_message_id=msg_id,
+                        execution_id=execution_id,
+                        raw_payload={**send_data, "urlFile": url_file, "downloadUrl": url_file, "fileName": fn}
+                    )
+                    return {
+                        "success": True,
+                        "status": "sent",
+                        "provider": "green_api",
+                        "whatsapp_message_id": msg_id,
+                        "url_file": url_file,
+                        "message_record_id": record.id if record else None,
+                        "recipient": clean_to,
+                        "message_type": "audioMessage"
+                    }
+                else:
+                    err = send_data.get("message") or send_resp.text[:200] or f"HTTP {send_resp.status_code}"
+                    logger.warning(f"sendFileByUrl failed: {err}")
+                    return {"success": False, "status": "failed", "error": err, "recipient": clean_to}
+        except Exception as e:
+            err_msg = str(e)
+            logger.error(f"Error in send_green_api_file: {err_msg}")
+            return {"success": False, "status": "failed", "error": err_msg, "recipient": clean_to}
 
     @classmethod
     def send_message(
