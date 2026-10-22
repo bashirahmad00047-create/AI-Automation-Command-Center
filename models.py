@@ -1293,6 +1293,7 @@ class Product(db.Model):
     description = db.Column(db.Text, nullable=True)
     sku = db.Column(db.String(128), nullable=True, index=True)
     barcode = db.Column(db.String(128), nullable=True)
+    image_url = db.Column(db.String(512), nullable=True)
     unit = db.Column(db.String(64), nullable=False, default="piece")
     price = db.Column(db.Float, nullable=False, default=0.0)
     currency = db.Column(db.String(10), nullable=False, default="PKR")
@@ -1318,6 +1319,7 @@ class Product(db.Model):
             "description": self.description or "",
             "sku": self.sku or "",
             "barcode": self.barcode or "",
+            "image_url": self.image_url or "",
             "unit": self.unit or "piece",
             "price": float(self.price),
             "currency": self.currency or "PKR",

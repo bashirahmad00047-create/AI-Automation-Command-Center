@@ -4593,6 +4593,7 @@ def create_ecommerce_product():
         description=(data.get("description") or "").strip(),
         sku=(data.get("sku") or "").strip() or None,
         barcode=(data.get("barcode") or "").strip() or None,
+        image_url=(data.get("image_url") or "").strip() or None,
         unit=(data.get("unit") or "piece").strip(),
         price=price,
         currency=(data.get("currency") or "PKR").strip().upper(),
@@ -4628,6 +4629,8 @@ def update_ecommerce_product(product_id: str):
         product.description = str(data["description"]).strip()
     if "sku" in data:
         product.sku = str(data["sku"]).strip() or None
+    if "image_url" in data:
+        product.image_url = str(data["image_url"]).strip() or None
     if "price" in data:
         try:
             product.price = float(data["price"])
@@ -5062,5 +5065,119 @@ def mark_cart_recovered(cart_id: str):
     return jsonify({
         "status": "success",
         "cart": cart.to_dict()
+    }), 200
+
+
+
+# --- 2b. Order Payment Link Generator Endpoint ---
+
+@api_v1.route("/ecommerce/orders/<order_id>/payment-link", methods=["POST", "GET"])
+@require_auth
+def get_order_payment_link(order_id: str):
+    """Generates automated payment instructions & links (EasyPaisa/JazzCash/Card) for an order."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    order = EcommerceOrder.query.filter(
+        db.or_(EcommerceOrder.id == order_id, EcommerceOrder.order_number == order_id),
+        EcommerceOrder.organization_id == org.id
+    ).first()
+    if not order:
+        return jsonify({"error": "Order not found.", "code": "NOT_FOUND"}), 404
+
+    pay_info = WhatsAppService.generate_payment_instructions(
+        organization_id=org.id,
+        order_number=order.order_number,
+        amount=order.total_amount,
+        currency=order.currency,
+        customer_phone=order.customer_phone
+    )
+
+    return jsonify({
+        "status": "success",
+        "order_number": order.order_number,
+        "payment_status": order.payment_status,
+        "payment_info": pay_info
+    }), 200
+
+
+# --- 4. Broadcast Marketing Module Endpoints ---
+
+@api_v1.route("/marketing/broadcast/dispatch", methods=["POST"])
+@require_auth
+def dispatch_marketing_broadcast():
+    """Dispatches a promotional WhatsApp broadcast campaign to leads/contacts stored in database."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    campaign_name = (data.get("campaign_name") or data.get("name") or "Promotional Broadcast").strip()
+    template = (data.get("message_template") or data.get("message") or "").strip()
+    if not template:
+        return jsonify({"error": "Field 'message_template' is required.", "code": "MISSING_TEMPLATE"}), 400
+
+    target_audience = data.get("target_audience", "all_leads")
+    min_lead_score = int(data.get("min_lead_score", 0))
+    custom_numbers = data.get("custom_phone_numbers") or data.get("phones")
+    discount_code = data.get("discount_code")
+
+    res = WhatsAppService.send_promotional_broadcast(
+        organization_id=org.id,
+        campaign_name=campaign_name,
+        message_template=template,
+        target_audience=target_audience,
+        min_lead_score=min_lead_score,
+        custom_phone_numbers=custom_numbers,
+        discount_code=discount_code
+    )
+
+    log_audit_event("marketing.broadcast_dispatched", "campaign", res.get("campaign_id") or "camp", {
+        "campaign_name": campaign_name,
+        "sent": res.get("sent"),
+        "total": res.get("total_recipients")
+    })
+
+    return jsonify({
+        "status": "success" if res.get("success") else "failed",
+        "result": res
+    }), 200 if res.get("success") else 400
+
+
+@api_v1.route("/marketing/broadcast/audiences", methods=["GET"])
+@require_auth
+def get_broadcast_audiences_summary():
+    """Returns available marketing audience segments and counts from the database."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    from models import Lead, ContactConsent
+    total_leads = Lead.query.filter(
+        Lead.organization_id == org.id,
+        Lead.phone.isnot(None),
+        Lead.phone != ""
+    ).count()
+
+    high_intent = Lead.query.filter(
+        Lead.organization_id == org.id,
+        Lead.phone.isnot(None),
+        Lead.phone != "",
+        Lead.lead_score >= 50
+    ).count()
+
+    consented = ContactConsent.query.filter_by(organization_id=org.id, status="opted_in").count()
+    opted_out = ContactConsent.query.filter_by(organization_id=org.id, status="opted_out").count()
+
+    return jsonify({
+        "status": "success",
+        "organization_id": org.id,
+        "audiences": {
+            "all_leads": total_leads,
+            "high_intent_leads": high_intent,
+            "consented_contacts": consented,
+            "opted_out_contacts": opted_out
+        }
     }), 200
 

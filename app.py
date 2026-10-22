@@ -203,6 +203,10 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                             _c_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN phone VARCHAR(64);"))
                         if "department" not in _user_cols:
                             _c_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN department VARCHAR(64) DEFAULT 'General';"))
+                        if "products" in _insp.get_table_names():
+                            _prd_cols = {c["name"] for c in _insp.get_columns("products")}
+                            if "image_url" not in _prd_cols:
+                                _c_conn.execute(_sa_text("ALTER TABLE products ADD COLUMN image_url VARCHAR(512);"))
                         _c_conn.commit()
             except Exception as _col_err:
                 application.logger.warning(f"Runtime column sync notice: {_col_err}")

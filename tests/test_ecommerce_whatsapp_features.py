@@ -430,5 +430,209 @@ class TestEcommerceWhatsAppFeatures(unittest.TestCase):
         self.assertEqual(mark_resp.get_json()["cart"]["recovery_status"], "recovered")
 
 
-if __name__ == "__main__":
+
+    # =========================================================================
+    # ADDITIONAL CORE E-COMMERCE & MARKETING TESTS
+    # =========================================================================
+
+    def test_customer_order_placement_creates_order_and_crm_lead(self):
+        """Verifies customer chat message creates EcommerceOrder, decrements stock, creates CRM Lead, and attaches payment info."""
+        p = Product(
+            organization_id=self.org.id,
+            name="AirPods Pro 2",
+            category="Audio",
+            image_url="https://images.unsplash.com/airpods.jpg",
+            price=35000.0,
+            currency="PKR",
+            stock_quantity=5,
+            stock_status="in_stock"
+        )
+        db.session.add(p)
+        db.session.commit()
+
+        initial_stock = p.stock_quantity
+
+        # Customer message: "Order 2x AirPods Pro 2"
+        res = WhatsAppService.parse_order_intent_from_message(
+            organization_id=self.org.id,
+            message_body="Order 2x AirPods Pro 2 please",
+            sender_phone="923209350858",
+            sender_name="Waqas Ahmad"
+        )
+
+        self.assertIsNotNone(res)
+        self.assertTrue(res["success"])
+        order_dict = res["order"]
+        self.assertEqual(order_dict["total_amount"], 70000.0)
+        self.assertEqual(order_dict["customer_name"], "Waqas Ahmad")
+        self.assertEqual(order_dict["items"][0]["quantity"], 2)
+        self.assertEqual(order_dict["items"][0]["image_url"], "https://images.unsplash.com/airpods.jpg")
+
+        # Verify stock decremented
+        db.session.refresh(p)
+        self.assertEqual(p.stock_quantity, initial_stock - 2)
+
+        # Verify CRM Lead created
+        from models import Lead
+        lead = Lead.query.filter(
+            Lead.organization_id == self.org.id,
+            Lead.phone.like("%923209350858%")
+        ).order_by(Lead.created_at.desc()).first()
+        self.assertIsNotNone(lead)
+        self.assertEqual(lead.intent, "order_placed")
+        self.assertEqual(lead.lead_score, 95)
+        self.assertIn("AirPods Pro 2", lead.message)
+
+        # Verify payment instructions in response
+        pay_info = res["payment_info"]
+        self.assertIn("easypaisa", pay_info)
+        self.assertIn("jazzcash", pay_info)
+        self.assertIn("card_payment_link", pay_info)
+        self.assertIn("EasyPaisa", res["message"])
+        self.assertIn("JazzCash", res["message"])
+
+    def test_customer_order_placement_by_index_selection(self):
+        """Verifies customer can place order by replying with item number (e.g. 'Order 1')."""
+        p = Product(
+            organization_id=self.org.id,
+            name="Mechanical Gaming Mouse",
+            category="Accessories",
+            price=4500.0,
+            currency="PKR",
+            stock_quantity=10,
+            stock_status="in_stock"
+        )
+        db.session.add(p)
+        db.session.commit()
+
+        res = WhatsAppService.parse_order_intent_from_message(
+            organization_id=self.org.id,
+            message_body="Order item #1",
+            sender_phone="923471000668",
+            sender_name="Bilal"
+        )
+        self.assertIsNotNone(res)
+        self.assertTrue(res["success"])
+        self.assertIn("ORD-", res["order"]["order_number"])
+
+    def test_order_tracking_query_returns_status_and_payment_links(self):
+        """Verifies customer sending their Order ID gets tracking status and automated payment options."""
+        order = EcommerceOrder(
+            organization_id=self.org.id,
+            order_number="ORD-774411",
+            customer_phone="923209350858",
+            customer_name="Usman",
+            order_status="shipped",
+            payment_status="unpaid",
+            courier_name="Trax Express",
+            tracking_number="TRX-998877",
+            tracking_url="https://trax.pk/track/TRX-998877",
+            total_amount=9500.0,
+            currency="PKR"
+        )
+        order.set_items([{"name": "Leather Shoes", "quantity": 1}])
+        db.session.add(order)
+        db.session.commit()
+
+        track_res = WhatsAppService.handle_order_tracking_query(
+            organization_id=self.org.id,
+            sender_phone="923209350858",
+            message_text="Status ORD-774411"
+        )
+
+        self.assertIsNotNone(track_res)
+        self.assertTrue(track_res["found"])
+        msg = track_res["message"]
+        self.assertIn("ORD-774411", msg)
+        self.assertIn("SHIPPED", msg)
+        self.assertIn("Trax Express", msg)
+        self.assertIn("TRX-998877", msg)
+        self.assertIn("EasyPaisa", msg)
+        self.assertIn("JazzCash", msg)
+
+    def test_send_promotional_broadcast_marketing(self):
+        """Verifies promotional WhatsApp broadcast dispatching to leads, personalization, and opt-out filtering."""
+        from models import Lead, ContactConsent
+        # 1. Active Lead
+        lead1 = Lead(
+            organization_id=self.org.id,
+            name="Kashif",
+            phone="923209350858",
+            lead_score=75
+        )
+        # 2. Opted-out Lead
+        lead2 = Lead(
+            organization_id=self.org.id,
+            name="OptedOut User",
+            phone="923001234567",
+            lead_score=80
+        )
+        consent_out = ContactConsent(
+            organization_id=self.org.id,
+            phone="923001234567",
+            channel="whatsapp",
+            status="opted_out"
+        )
+        db.session.add_all([lead1, lead2, consent_out])
+        db.session.commit()
+
+        with patch.object(WhatsAppService, "send_message", return_value={"success": True, "status": "sent"}) as mock_send:
+            res = WhatsAppService.send_promotional_broadcast(
+                organization_id=self.org.id,
+                campaign_name="Eid Mega Sale 2026",
+                message_template="Salam {{name}}! Eid Mega Sale is live! Use code {{discount_code}} for 25% off.",
+                target_audience="all_leads",
+                discount_code="EID25"
+            )
+
+            self.assertTrue(res["success"])
+            self.assertGreaterEqual(res["sent"], 1)
+            self.assertGreaterEqual(res["skipped_optout"], 1)
+
+            # Check personalized message content sent
+            sent_texts = [call[1]["message_text"] for call in mock_send.call_args_list]
+            self.assertTrue(any("Salam Kashif!" in t and "EID25" in t for t in sent_texts))
+
+    def test_api_order_payment_link_and_marketing_broadcast(self):
+        """Verifies API endpoints for order payment links and broadcast marketing dispatch."""
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = self.user.id
+            sess["org_id"] = self.org.id
+
+        # 1. Order payment link endpoint
+        order = EcommerceOrder(
+            organization_id=self.org.id,
+            order_number="ORD-PAY-001",
+            customer_phone="923209350858",
+            total_amount=5000.0,
+            currency="PKR"
+        )
+        db.session.add(order)
+        db.session.commit()
+
+        pay_resp = self.client.get(f"/api/v1/ecommerce/orders/{order.id}/payment-link")
+        self.assertEqual(pay_resp.status_code, 200)
+        pay_data = pay_resp.get_json()["payment_info"]
+        self.assertIn("easypaisa", pay_data)
+        self.assertIn("jazzcash", pay_data)
+
+        # 2. Marketing broadcast audiences summary
+        aud_resp = self.client.get("/api/v1/marketing/broadcast/audiences")
+        self.assertEqual(aud_resp.status_code, 200)
+        self.assertIn("all_leads", aud_resp.get_json()["audiences"])
+
+        # 3. Marketing broadcast dispatch endpoint
+        with patch.object(WhatsAppService, "send_message", return_value={"success": True, "status": "sent"}):
+            bc_resp = self.client.post("/api/v1/marketing/broadcast/dispatch", json={
+                "campaign_name": "Weekend Flash Sale",
+                "message_template": "Salam {{name}}! Flash sale is live today.",
+                "target_audience": "custom",
+                "custom_phone_numbers": ["923209350858"]
+            })
+            self.assertEqual(bc_resp.status_code, 200)
+            self.assertEqual(bc_resp.get_json()["result"]["sent"], 1)
+
+
+if __name__ == '__main__':
     unittest.main()
+
