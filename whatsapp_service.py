@@ -34,7 +34,7 @@ from urllib3.util.retry import Retry
 from flask import current_app, has_app_context
 
 from database import db
-from models import Organization, SystemSetting, WhatsAppMessage, generate_uuid
+from models import Organization, SystemSetting, WhatsAppMessage, generate_uuid, Product, EcommerceOrder, AbandonedCart
 
 logger = logging.getLogger("opsflow.whatsapp")
 
@@ -2280,6 +2280,22 @@ class WhatsAppService:
                 "is_ai_generated": False,
                 "confidence": 95
             }
+
+        # E-Commerce & Marketing Grounding: Live Catalog & Order Tracking
+        catalog_grounding = cls.get_product_catalog_context(
+            organization_id=organization_id,
+            search_term=message_body
+        )
+        if catalog_grounding:
+            custom_prompt = f"{custom_prompt}\n\n{catalog_grounding}" if custom_prompt else catalog_grounding
+
+        order_grounding = cls.get_order_tracking_context(
+            organization_id=organization_id,
+            sender_phone=sender_phone,
+            query_text=message_body
+        )
+        if order_grounding:
+            custom_prompt = f"{custom_prompt}\n\n{order_grounding}" if custom_prompt else order_grounding
 
         # 1. Direct Gemini AI Generation
         ai_reply = cls.call_gemini_ai(
@@ -5074,6 +5090,492 @@ class WhatsAppService:
             template_name=template_name,
             template_language=template_language
         )
+
+
+    # =========================================================================
+    # E-COMMERCE & MARKETING FEATURES
+    # =========================================================================
+
+    # --- Feature 1: Live Product Catalog & Inventory Search ---
+
+    @classmethod
+    def query_product_catalog(
+        cls,
+        organization_id: Optional[str] = None,
+        search_query: Optional[str] = None,
+        category: Optional[str] = None,
+        in_stock_only: bool = False,
+        limit: int = 15
+    ) -> List[Dict[str, Any]]:
+        """Queries tenant products from database for live inventory checking, catalog sharing, and AI grounding."""
+        org_id = organization_id or "org-enterprise-default"
+        if not has_app_context():
+            return []
+
+        try:
+            query = Product.query.filter(
+                Product.organization_id == org_id,
+                Product.is_active.is_(True)
+            )
+
+            if category and category.strip() and category.strip().lower() != "all":
+                query = query.filter(Product.category.ilike(f"%{category.strip()}%"))
+
+            if in_stock_only:
+                query = query.filter(Product.stock_quantity > 0)
+
+            if search_query and search_query.strip():
+                clean_term = search_query.strip()
+                tokens = [t for t in clean_term.split() if len(t) >= 2][:4]
+                if tokens:
+                    conditions = []
+                    for t in tokens:
+                        conditions.append(
+                            db.or_(
+                                Product.name.ilike(f"%{t}%"),
+                                Product.description.ilike(f"%{t}%"),
+                                Product.sku.ilike(f"%{t}%"),
+                                Product.category.ilike(f"%{t}%")
+                            )
+                        )
+                    query = query.filter(db.and_(*conditions))
+                else:
+                    query = query.filter(Product.name.ilike(f"%{clean_term}%"))
+
+            products = query.order_by(Product.name.asc()).limit(limit).all()
+            return [p.to_dict() for p in products]
+        except Exception as e:
+            logger.error(f"Error querying product catalog: {e}")
+            return []
+
+    @classmethod
+    def format_product_catalog_message(
+        cls,
+        products: List[Dict[str, Any]],
+        organization_id: Optional[str] = None,
+        header_text: Optional[str] = None
+    ) -> str:
+        """Formats a list of products into a clean, mobile-optimized WhatsApp catalog showcase."""
+        if not products:
+            return "Hamara product catalog abhi update ho raha hai. Agar aapko kisi specific item ki maloomat chahiye to baraye karam naam batayein!"
+
+        lines = []
+        if header_text:
+            lines.append(f"*{header_text}*\n")
+        else:
+            lines.append("*🛍️ Product Catalog & Live Stock Status:*\n")
+
+        for idx, item in enumerate(products, start=1):
+            name = item.get("name", "Product")
+            price = item.get("price", 0.0)
+            curr = item.get("currency", "PKR")
+            stock_qty = item.get("stock_quantity", 0)
+            status = item.get("stock_status", "in_stock")
+            sku = item.get("sku")
+            desc = item.get("description", "")
+
+            if stock_qty <= 0 or status == "out_of_stock":
+                stock_badge = "❌ Out of Stock"
+            elif stock_qty <= 5 or status == "low_stock":
+                stock_badge = f"⚠️ Only {stock_qty} left!"
+            else:
+                stock_badge = "✅ In Stock"
+
+            item_line = f"*{idx}. {name}*"
+            if sku:
+                item_line += f" (SKU: `{sku}`)"
+            lines.append(item_line)
+            lines.append(f"   💰 *Price:* {curr} {price:,.2f} | {stock_badge}")
+            if desc and len(desc.strip()) > 0:
+                short_desc = desc.strip().replace("\n", " ")
+                if len(short_desc) > 90:
+                    short_desc = short_desc[:87] + "..."
+                lines.append(f"   📝 _{short_desc}_")
+            lines.append("")
+
+        lines.append("Order karne ya kisi item ki tafseel ke liye item ka naam ya number likh kar reply karein!")
+        return "\n".join(lines).strip()
+
+    @classmethod
+    def get_product_catalog_context(
+        cls,
+        organization_id: Optional[str] = None,
+        search_term: Optional[str] = None,
+        limit: int = 10
+    ) -> str:
+        """Generates a real-time grounding prompt section containing live products, pricing, and stock."""
+        items = cls.query_product_catalog(
+            organization_id=organization_id,
+            search_query=search_term,
+            limit=limit
+        )
+        if not items:
+            return ""
+
+        summary_lines = [
+            "LIVE PRODUCT CATALOG & INVENTORY GROUNDING (CRITICAL - ALWAYS USE THESE REAL PRICES & STOCK):",
+            "When answering customer inquiries regarding products, prices, availability, or orders, strictly cite these exact values:"
+        ]
+        for p in items:
+            p_name = p.get("name")
+            p_price = p.get("price")
+            p_curr = p.get("currency", "PKR")
+            p_stock = p.get("stock_quantity", 0)
+            p_status = p.get("stock_status", "in_stock")
+            p_sku = p.get("sku") or "N/A"
+            summary_lines.append(
+                f"- Product: '{p_name}' | SKU: {p_sku} | Price: {p_curr} {p_price:,.2f} | "
+                f"Available Stock: {p_stock} units ({p_status})"
+            )
+        return "\n".join(summary_lines)
+
+    @classmethod
+    def send_catalog_to_whatsapp(
+        cls,
+        organization_id: str,
+        to_phone: str,
+        search_query: Optional[str] = None,
+        category: Optional[str] = None,
+        header_text: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Dispatches an interactive product catalog list directly to a customer on WhatsApp."""
+        products = cls.query_product_catalog(
+            organization_id=organization_id,
+            search_query=search_query,
+            category=category,
+            limit=12
+        )
+        body = cls.format_product_catalog_message(
+            products=products,
+            organization_id=organization_id,
+            header_text=header_text
+        )
+        return cls.send_message(
+            organization_id=organization_id,
+            to_phone=to_phone,
+            message_text=body
+        )
+
+    # --- Feature 2: Order Tracking & Status Updates ---
+
+    @classmethod
+    def get_order_tracking_context(
+        cls,
+        organization_id: Optional[str] = None,
+        sender_phone: Optional[str] = None,
+        query_text: Optional[str] = None
+    ) -> str:
+        """Finds live orders for the customer and builds grounding prompt instructions for tracking inquiries."""
+        if not has_app_context() or not (sender_phone or query_text):
+            return ""
+
+        org_id = organization_id or "org-enterprise-default"
+        clean_phone = cls.format_phone_number(sender_phone or "")
+        orders = []
+
+        if query_text:
+            ord_match = re.search(r'\b(ORD[-\s]?\d+|\#\d{3,8})\b', query_text, re.IGNORECASE)
+            if ord_match:
+                extracted_no = ord_match.group(1).replace("#", "").replace(" ", "").upper()
+                if not extracted_no.startswith("ORD"):
+                    extracted_no = f"ORD-{extracted_no}"
+                found = EcommerceOrder.query.filter(
+                    EcommerceOrder.organization_id == org_id,
+                    db.or_(
+                        EcommerceOrder.order_number.ilike(f"%{extracted_no}%"),
+                        EcommerceOrder.order_number.ilike(f"%{ord_match.group(1)}%")
+                    )
+                ).first()
+                if found:
+                    orders.append(found)
+
+        if not orders and clean_phone and len(clean_phone) >= 7:
+            phone_suffix = clean_phone[-8:]
+            orders = EcommerceOrder.query.filter(
+                EcommerceOrder.organization_id == org_id,
+                EcommerceOrder.customer_phone.like(f"%{phone_suffix}%")
+            ).order_by(EcommerceOrder.created_at.desc()).limit(3).all()
+
+        if not orders:
+            return ""
+
+        context_lines = [
+            "CUSTOMER ORDER & TRACKING GROUNDING (CRITICAL - ACCURATELY ANSWER ORDER INQUIRIES):",
+            "The customer asking has the following registered order(s) in the system:"
+        ]
+        for o in orders:
+            item_names = [it.get("name", "Item") for it in o.get_items()]
+            items_str = ", ".join(item_names) if item_names else "Items"
+            trk = o.tracking_number or "Pending courier assignment"
+            courier = o.courier_name or "Standard Courier"
+            trk_url = o.tracking_url or ""
+            context_lines.append(
+                f"- Order #{o.order_number} | Status: {o.order_status.upper()} | "
+                f"Items: {items_str} | Total: {o.currency} {o.total_amount:,.2f} | "
+                f"Courier: {courier} | Tracking Number: {trk}" + (f" | Tracking Link: {trk_url}" if trk_url else "")
+            )
+        return "\n".join(context_lines)
+
+    @classmethod
+    def send_order_status_update(
+        cls,
+        organization_id: str,
+        to_phone: str,
+        order_number: str,
+        order_status: str,
+        customer_name: Optional[str] = None,
+        items: Optional[List[Dict[str, Any]]] = None,
+        total_amount: Optional[float] = None,
+        currency: Optional[str] = None,
+        tracking_number: Optional[str] = None,
+        courier_name: Optional[str] = None,
+        tracking_url: Optional[str] = None,
+        notes: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Dispatches an authoritative WhatsApp order status notification and updates order record."""
+        clean_phone = cls.format_phone_number(to_phone)
+        curr = currency or "PKR"
+        status_norm = order_status.strip().lower()
+        c_name = customer_name or "Valued Customer"
+
+        item_names = []
+        if items:
+            for it in items:
+                q = it.get("quantity", 1)
+                n = it.get("name", "Item")
+                item_names.append(f"{q}x {n}")
+        items_str = ", ".join(item_names) if item_names else ""
+
+        if status_norm in ("confirmed", "received", "pending"):
+            header = f"🎉 *Order Confirmed!* (Order #{order_number})"
+            msg = (
+                f"Salam {c_name}!\n\n"
+                f"{header}\n\n"
+                f"Aapka order kamyabi ke sath receive ho chuka hai."
+            )
+            if items_str:
+                msg += f"\n📦 *Items:* {items_str}"
+            if total_amount is not None:
+                msg += f"\n💵 *Total Amount:* {curr} {total_amount:,.2f}"
+            msg += "\n\nJaise hi aapka parcel dispatch hoga, hum aapko tracking details WhatsApp kar denge. Shukriya!"
+
+        elif status_norm in ("shipped", "dispatched", "in_transit"):
+            header = f"🚚 *Your Order Has Been Shipped!* (Order #{order_number})"
+            courier = courier_name or "Courier Service"
+            trk = tracking_number or "Assigned"
+            msg = (
+                f"Salam {c_name}!\n\n"
+                f"{header}\n\n"
+                f"Aapka parcel *{courier}* ke hawale kar diya gaya hai.\n"
+                f"📍 *Tracking Number:* `{trk}`\n"
+            )
+            if tracking_url:
+                msg += f"🔗 *Live Tracking Link:* {tracking_url}\n"
+            if total_amount is not None:
+                msg += f"💵 *Payable (COD):* {curr} {total_amount:,.2f}\n"
+            msg += "\nBaraye karam delivery rider se parcel receive karte waqt tracking number verify karein."
+
+        elif status_norm in ("delivered", "completed"):
+            header = f"✅ *Order Delivered!* (Order #{order_number})"
+            msg = (
+                f"Salam {c_name}!\n\n"
+                f"{header}\n\n"
+                f"Aapka order deliver ho chuka hai. Umeed hai aapko product pasand aayegi!\n\n"
+                f"Agar aapka koi sawal ho ya mazeed madad chahiye ho, to is number par reply kar sakte hain. "
+                f"Thank you for shopping with us! ⭐"
+            )
+
+        elif status_norm in ("cancelled", "canceled"):
+            header = f"⚠️ *Order Cancelled* (Order #{order_number})"
+            msg = (
+                f"Salam {c_name}!\n\n"
+                f"{header}\n\n"
+                f"Aapka order #{order_number} cancel kar diya gaya hai."
+            )
+            if notes:
+                msg += f"\nReason: {notes}"
+            msg += "\nAgar yeh ghalti se hua hai to baraye karam humein foran yahan message karein."
+
+        else:
+            header = f"📦 *Order Update: {order_status.title()}* (Order #{order_number})"
+            msg = (
+                f"Salam {c_name}!\n\n"
+                f"{header}\n\n"
+                f"Aapke order ka status update ho gaya hai: *{order_status.title()}*."
+            )
+            if notes:
+                msg += f"\nDetails: {notes}"
+
+        dispatch_res = cls.send_message(
+            organization_id=organization_id,
+            to_phone=clean_phone,
+            message_text=msg
+        )
+
+        if has_app_context():
+            try:
+                order_rec = EcommerceOrder.query.filter_by(
+                    organization_id=organization_id,
+                    order_number=order_number
+                ).first()
+                if not order_rec:
+                    order_rec = EcommerceOrder(
+                        organization_id=organization_id,
+                        order_number=order_number,
+                        customer_phone=clean_phone,
+                        customer_name=customer_name,
+                        total_amount=total_amount or 0.0,
+                        currency=curr,
+                        order_status=status_norm,
+                        tracking_number=tracking_number,
+                        courier_name=courier_name,
+                        tracking_url=tracking_url,
+                        notes=notes
+                    )
+                    if items:
+                        order_rec.set_items(items)
+                    db.session.add(order_rec)
+
+                order_rec.order_status = status_norm
+                if tracking_number:
+                    order_rec.tracking_number = tracking_number
+                if courier_name:
+                    order_rec.courier_name = courier_name
+                if tracking_url:
+                    order_rec.tracking_url = tracking_url
+                order_rec.last_notified_status = status_norm
+                order_rec.last_notified_at = datetime.datetime.utcnow()
+                db.session.commit()
+                dispatch_res["order_id"] = order_rec.id
+            except Exception as ord_err:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                logger.error(f"Error persisting order status update: {ord_err}")
+
+        return dispatch_res
+
+    # --- Feature 3: Abandoned Cart Recovery Alerts ---
+
+    @classmethod
+    def send_abandoned_cart_recovery(
+        cls,
+        organization_id: str,
+        to_phone: str,
+        customer_name: Optional[str] = None,
+        items: Optional[List[Dict[str, Any]]] = None,
+        cart_value: Optional[float] = None,
+        currency: Optional[str] = None,
+        checkout_url: Optional[str] = None,
+        discount_code: Optional[str] = None,
+        cart_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Dispatches an engaging WhatsApp abandoned cart recovery reminder to boost conversions."""
+        clean_phone = cls.format_phone_number(to_phone)
+        curr = currency or "PKR"
+        c_name = customer_name or "Friend"
+
+        item_names = []
+        if items:
+            for it in items:
+                q = it.get("quantity", 1)
+                n = it.get("name", "Item")
+                item_names.append(f"{q}x {n}")
+        items_str = ", ".join(item_names) if item_names else "kuch pasandeeda products"
+
+        lines = [
+            f"Salam {c_name}! 👋\n",
+            "Aapne checkout mein kuch items chhor diye hain:\n",
+            f"🛒 *Cart Items:* {items_str}"
+        ]
+        if cart_value is not None and cart_value > 0:
+            lines.append(f"💰 *Cart Total:* {curr} {cart_value:,.2f}")
+
+        if discount_code and discount_code.strip():
+            lines.append(f"\n🎁 *Special Discount Code:* Use `{discount_code.strip()}` at checkout to save extra!")
+
+        if checkout_url and str(checkout_url).startswith("http"):
+            lines.append(f"\n👉 *Apna order mukammal karein yahan:* {checkout_url}")
+        else:
+            lines.append("\n👉 Agar aap order confirm karna chahte hain to yahan *'YES'* reply karein, hum aapka order place kar denge!")
+
+        lines.append("\nLimited stock mojood hai. Shukriya!")
+        msg = "\n".join(lines).strip()
+
+        dispatch_res = cls.send_message(
+            organization_id=organization_id,
+            to_phone=clean_phone,
+            message_text=msg
+        )
+
+        if has_app_context() and cart_id:
+            try:
+                cart_rec = db.session.get(AbandonedCart, cart_id)
+                if cart_rec:
+                    cart_rec.recovery_status = "reminder_sent"
+                    cart_rec.reminder_count = (cart_rec.reminder_count or 0) + 1
+                    cart_rec.last_reminder_sent_at = datetime.datetime.utcnow()
+                    db.session.commit()
+            except Exception as c_err:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                logger.error(f"Error updating abandoned cart status: {c_err}")
+
+        return dispatch_res
+
+    @classmethod
+    def process_pending_cart_reminders(
+        cls,
+        organization_id: Optional[str] = None,
+        older_than_minutes: int = 30,
+        max_batch: int = 25
+    ) -> Dict[str, Any]:
+        """Automatically scans and sends WhatsApp recovery messages to pending abandoned carts."""
+        if not has_app_context():
+            return {"success": False, "reason": "no_app_context", "processed": 0}
+
+        org_id = organization_id or "org-enterprise-default"
+        cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=older_than_minutes)
+
+        try:
+            pending_carts = AbandonedCart.query.filter(
+                AbandonedCart.organization_id == org_id,
+                AbandonedCart.recovery_status == "abandoned",
+                AbandonedCart.reminder_count == 0,
+                AbandonedCart.created_at <= cutoff
+            ).order_by(AbandonedCart.created_at.asc()).limit(max_batch).all()
+
+            sent_count = 0
+            failed_count = 0
+            for cart in pending_carts:
+                res = cls.send_abandoned_cart_recovery(
+                    organization_id=org_id,
+                    to_phone=cart.customer_phone,
+                    customer_name=cart.customer_name,
+                    items=cart.get_items(),
+                    cart_value=cart.cart_value,
+                    currency=cart.currency,
+                    checkout_url=cart.checkout_url,
+                    discount_code=cart.discount_code or "SAVE10",
+                    cart_id=cart.id
+                )
+                if res.get("success"):
+                    sent_count += 1
+                else:
+                    failed_count += 1
+
+            return {
+                "success": True,
+                "scanned": len(pending_carts),
+                "reminders_sent": sent_count,
+                "failed": failed_count
+            }
+        except Exception as e:
+            logger.error(f"Error processing pending cart reminders: {e}")
+            return {"success": False, "error": str(e), "processed": 0}
 
     send_text_message = send_message
 

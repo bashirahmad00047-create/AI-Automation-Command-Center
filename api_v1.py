@@ -77,6 +77,9 @@ from models import (
     Workflow,
     WorkflowExecution,
     WorkflowStep,
+    Product,
+    EcommerceOrder,
+    AbandonedCart,
     generate_uuid,
 )
 from business_templates import (
@@ -4521,4 +4524,543 @@ def check_operating_hours_endpoint():
     }), 200
 
 
+
+# =============================================================================
+# E-COMMERCE & MARKETING ENDPOINTS
+# =============================================================================
+
+# --- 1. Product Catalog & Live Stock Endpoints ---
+
+@api_v1.route("/ecommerce/products", methods=["GET"])
+@require_auth
+def list_ecommerce_products():
+    """List and search active products with inventory stock levels and pricing."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    query_term = request.args.get("query") or request.args.get("q")
+    category = request.args.get("category")
+    in_stock_only = request.args.get("in_stock_only", "").lower() in ("true", "1", "yes")
+    limit = min(int(request.args.get("limit", 50)), 200)
+
+    products = WhatsAppService.query_product_catalog(
+        organization_id=org.id,
+        search_query=query_term,
+        category=category,
+        in_stock_only=in_stock_only,
+        limit=limit
+    )
+
+    categories = [
+        c[0] for c in db.session.query(Product.category)
+        .filter(Product.organization_id == org.id, Product.is_active.is_(True))
+        .distinct().all() if c[0]
+    ]
+
+    return jsonify({
+        "status": "success",
+        "organization_id": org.id,
+        "count": len(products),
+        "categories": categories,
+        "products": products
+    }), 200
+
+
+@api_v1.route("/ecommerce/products", methods=["POST"])
+@require_auth
+def create_ecommerce_product():
+    """Creates a new product in the tenant catalog."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "Product 'name' is required.", "code": "MISSING_FIELD"}), 400
+
+    try:
+        price = float(data.get("price", 0.0))
+        stock = int(data.get("stock_quantity", 0))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid price or stock quantity.", "code": "INVALID_VALUE"}), 400
+
+    product = Product(
+        organization_id=org.id,
+        name=name,
+        category=(data.get("category") or "General").strip(),
+        description=(data.get("description") or "").strip(),
+        sku=(data.get("sku") or "").strip() or None,
+        barcode=(data.get("barcode") or "").strip() or None,
+        unit=(data.get("unit") or "piece").strip(),
+        price=price,
+        currency=(data.get("currency") or "PKR").strip().upper(),
+        stock_quantity=stock,
+        stock_status=data.get("stock_status") or ("out_of_stock" if stock <= 0 else ("low_stock" if stock <= 5 else "in_stock")),
+        is_active=bool(data.get("is_active", True))
+    )
+    db.session.add(product)
+    db.session.commit()
+    log_audit_event("ecommerce.product_created", "product", product.id, {"name": product.name, "price": product.price})
+
+    return jsonify({"status": "success", "product": product.to_dict()}), 201
+
+
+@api_v1.route("/ecommerce/products/<product_id>", methods=["PUT", "PATCH"])
+@require_auth
+def update_ecommerce_product(product_id: str):
+    """Updates an existing product in the tenant catalog."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    product = Product.query.filter_by(id=product_id, organization_id=org.id).first()
+    if not product:
+        return jsonify({"error": "Product not found.", "code": "NOT_FOUND"}), 404
+
+    data = request.get_json(silent=True) or {}
+    if "name" in data and str(data["name"]).strip():
+        product.name = str(data["name"]).strip()
+    if "category" in data:
+        product.category = str(data["category"]).strip()
+    if "description" in data:
+        product.description = str(data["description"]).strip()
+    if "sku" in data:
+        product.sku = str(data["sku"]).strip() or None
+    if "price" in data:
+        try:
+            product.price = float(data["price"])
+        except (ValueError, TypeError):
+            pass
+    if "currency" in data:
+        product.currency = str(data["currency"]).strip().upper()
+    if "stock_quantity" in data:
+        try:
+            product.stock_quantity = int(data["stock_quantity"])
+            product.stock_status = product.calculate_stock_status()
+        except (ValueError, TypeError):
+            pass
+    if "stock_status" in data:
+        product.stock_status = str(data["stock_status"]).strip()
+    if "is_active" in data:
+        product.is_active = bool(data["is_active"])
+
+    db.session.commit()
+    return jsonify({"status": "success", "product": product.to_dict()}), 200
+
+
+@api_v1.route("/ecommerce/catalog/share", methods=["POST"])
+@require_auth
+def share_catalog_via_whatsapp():
+    """Dispatches an interactive product catalog or product recommendations to a customer on WhatsApp."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    to_phone = data.get("to_phone") or data.get("phone")
+    if not to_phone:
+        return jsonify({"error": "Recipient 'to_phone' is required.", "code": "MISSING_PHONE"}), 400
+
+    search_query = data.get("query") or data.get("search_query")
+    category = data.get("category")
+    header_text = data.get("header_text")
+
+    res = WhatsAppService.send_catalog_to_whatsapp(
+        organization_id=org.id,
+        to_phone=to_phone,
+        search_query=search_query,
+        category=category,
+        header_text=header_text
+    )
+
+    return jsonify({
+        "status": "success" if res.get("success") else "failed",
+        "result": res
+    }), 200 if res.get("success") else 400
+
+
+# --- 2. Order Tracking & Status Update Endpoints ---
+
+@api_v1.route("/ecommerce/orders", methods=["GET"])
+@require_auth
+def list_ecommerce_orders():
+    """Lists orders with filtering by customer phone, order status, or order number."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    query = EcommerceOrder.query.filter_by(organization_id=org.id)
+
+    phone = request.args.get("phone") or request.args.get("customer_phone")
+    if phone:
+        clean = WhatsAppService.format_phone_number(phone)
+        suffix = clean[-8:] if len(clean) >= 8 else clean
+        query = query.filter(EcommerceOrder.customer_phone.like(f"%{suffix}%"))
+
+    status = request.args.get("status") or request.args.get("order_status")
+    if status and status.lower() != "all":
+        query = query.filter(EcommerceOrder.order_status == status.lower().strip())
+
+    order_no = request.args.get("order_number")
+    if order_no:
+        query = query.filter(EcommerceOrder.order_number.ilike(f"%{order_no.strip()}%"))
+
+    orders = query.order_by(EcommerceOrder.created_at.desc()).limit(100).all()
+    return jsonify({
+        "status": "success",
+        "organization_id": org.id,
+        "count": len(orders),
+        "orders": [o.to_dict() for o in orders]
+    }), 200
+
+
+@api_v1.route("/ecommerce/orders", methods=["POST"])
+def create_ecommerce_order():
+    """Creates/ingests an order (supports authenticated API or store webhook ingestion)."""
+    org = get_current_org()
+    data = request.get_json(silent=True) or {}
+
+    org_id = org.id if org else (data.get("organization_id") or request.args.get("org_id"))
+    if not org_id:
+        default_org = Organization.query.filter_by(id="org-enterprise-default").first() or Organization.query.filter_by(is_active=True).first()
+        org_id = default_org.id if default_org else None
+
+    if not org_id:
+        return jsonify({"error": "Active organization could not be resolved.", "code": "NO_ORG"}), 400
+
+    customer_phone = data.get("customer_phone") or data.get("phone")
+    order_number = data.get("order_number") or data.get("order_id")
+    if not (customer_phone and order_number):
+        return jsonify({"error": "Both 'customer_phone' and 'order_number' are required.", "code": "MISSING_FIELDS"}), 400
+
+    total_amount = float(data.get("total_amount") or data.get("total") or 0.0)
+    currency = (data.get("currency") or "PKR").strip().upper()
+    order_status = (data.get("order_status") or data.get("status") or "confirmed").strip().lower()
+
+    order = EcommerceOrder.query.filter_by(organization_id=org_id, order_number=str(order_number).strip()).first()
+    if not order:
+        order = EcommerceOrder(
+            organization_id=org_id,
+            order_number=str(order_number).strip(),
+            customer_phone=WhatsAppService.format_phone_number(customer_phone),
+            customer_name=(data.get("customer_name") or data.get("name") or "").strip() or None,
+            customer_email=(data.get("customer_email") or data.get("email") or "").strip() or None,
+            total_amount=total_amount,
+            currency=currency,
+            order_status=order_status,
+            payment_status=data.get("payment_status", "unpaid"),
+            payment_method=data.get("payment_method", "cod"),
+            tracking_number=data.get("tracking_number"),
+            courier_name=data.get("courier_name"),
+            tracking_url=data.get("tracking_url"),
+            shipping_address=data.get("shipping_address"),
+            notes=data.get("notes")
+        )
+        if "items" in data and isinstance(data["items"], list):
+            order.set_items(data["items"])
+        db.session.add(order)
+    else:
+        order.order_status = order_status
+        if "tracking_number" in data:
+            order.tracking_number = data["tracking_number"]
+        if "courier_name" in data:
+            order.courier_name = data["courier_name"]
+        if "tracking_url" in data:
+            order.tracking_url = data["tracking_url"]
+
+    db.session.commit()
+
+    notify_customer = data.get("notify_customer", False)
+    notify_res = None
+    if notify_customer:
+        notify_res = WhatsAppService.send_order_status_update(
+            organization_id=org_id,
+            to_phone=order.customer_phone,
+            order_number=order.order_number,
+            order_status=order.order_status,
+            customer_name=order.customer_name,
+            items=order.get_items(),
+            total_amount=order.total_amount,
+            currency=order.currency,
+            tracking_number=order.tracking_number,
+            courier_name=order.courier_name,
+            tracking_url=order.tracking_url,
+            notes=order.notes
+        )
+
+    return jsonify({
+        "status": "success",
+        "order": order.to_dict(),
+        "notification": notify_res
+    }), 201
+
+
+@api_v1.route("/ecommerce/orders/<order_id>/notify", methods=["POST"])
+@require_auth
+def notify_order_status(order_id: str):
+    """Explicitly triggers WhatsApp order update notification to customer."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    order = EcommerceOrder.query.filter(
+        db.or_(EcommerceOrder.id == order_id, EcommerceOrder.order_number == order_id),
+        EcommerceOrder.organization_id == org.id
+    ).first()
+    if not order:
+        return jsonify({"error": "Order not found.", "code": "NOT_FOUND"}), 404
+
+    data = request.get_json(silent=True) or {}
+    new_status = data.get("order_status") or order.order_status
+    if "tracking_number" in data:
+        order.tracking_number = data["tracking_number"]
+    if "courier_name" in data:
+        order.courier_name = data["courier_name"]
+    if "tracking_url" in data:
+        order.tracking_url = data["tracking_url"]
+    order.order_status = new_status
+    db.session.commit()
+
+    res = WhatsAppService.send_order_status_update(
+        organization_id=org.id,
+        to_phone=order.customer_phone,
+        order_number=order.order_number,
+        order_status=new_status,
+        customer_name=order.customer_name,
+        items=order.get_items(),
+        total_amount=order.total_amount,
+        currency=order.currency,
+        tracking_number=order.tracking_number,
+        courier_name=order.courier_name,
+        tracking_url=order.tracking_url,
+        notes=order.notes
+    )
+
+    return jsonify({
+        "status": "success" if res.get("success") else "failed",
+        "order": order.to_dict(),
+        "whatsapp_result": res
+    }), 200
+
+
+@api_v1.route("/ecommerce/orders/track", methods=["POST", "GET"])
+def track_ecommerce_order():
+    """Customer-facing tracking lookup by order number or phone."""
+    data = request.get_json(silent=True) or {}
+    order_no = data.get("order_number") or request.args.get("order_number")
+    phone = data.get("phone") or request.args.get("phone")
+
+    if not order_no and not phone:
+        return jsonify({"error": "Please provide 'order_number' or 'phone' to track your order.", "code": "MISSING_QUERY"}), 400
+
+    query = EcommerceOrder.query
+    if order_no:
+        clean_no = str(order_no).strip().replace("#", "").upper()
+        query = query.filter(db.or_(
+            EcommerceOrder.order_number.ilike(f"%{clean_no}%"),
+            EcommerceOrder.order_number.ilike(f"%{order_no}%")
+        ))
+    if phone:
+        clean_p = WhatsAppService.format_phone_number(phone)
+        suffix = clean_p[-8:] if len(clean_p) >= 8 else clean_p
+        query = query.filter(EcommerceOrder.customer_phone.like(f"%{suffix}%"))
+
+    found_orders = query.order_by(EcommerceOrder.created_at.desc()).limit(5).all()
+    if not found_orders:
+        return jsonify({
+            "status": "not_found",
+            "message": "Koi order nahi mila. Baraye karam order number ya phone number dobara check karein.",
+            "orders": []
+        }), 404
+
+    return jsonify({
+        "status": "success",
+        "count": len(found_orders),
+        "orders": [
+            {
+                "order_number": o.order_number,
+                "status": o.order_status,
+                "courier_name": o.courier_name or "Standard Courier",
+                "tracking_number": o.tracking_number or "Processing",
+                "tracking_url": o.tracking_url or "",
+                "total_amount": o.total_amount,
+                "currency": o.currency,
+                "created_at": o.created_at.strftime("%Y-%m-%d %H:%M:%S") if o.created_at else None
+            } for o in found_orders
+        ]
+    }), 200
+
+
+# --- 3. Abandoned Cart Recovery Alerts Endpoints ---
+
+@api_v1.route("/ecommerce/carts/abandoned", methods=["GET"])
+@require_auth
+def list_abandoned_carts():
+    """Lists abandoned carts with recovery conversion statistics."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    carts = AbandonedCart.query.filter_by(organization_id=org.id).order_by(AbandonedCart.created_at.desc()).limit(100).all()
+
+    total_count = len(carts)
+    recovered_count = sum(1 for c in carts if c.recovery_status == "recovered")
+    total_val = sum(c.cart_value for c in carts)
+    recovered_val = sum(c.cart_value for c in carts if c.recovery_status == "recovered")
+    recovery_rate = (recovered_count / total_count * 100) if total_count > 0 else 0.0
+
+    return jsonify({
+        "status": "success",
+        "organization_id": org.id,
+        "metrics": {
+            "total_abandoned_carts": total_count,
+            "recovered_carts": recovered_count,
+            "recovery_rate_percent": round(recovery_rate, 2),
+            "total_abandoned_value": total_val,
+            "recovered_revenue": recovered_val,
+            "currency": carts[0].currency if carts else "PKR"
+        },
+        "carts": [c.to_dict() for c in carts]
+    }), 200
+
+
+@api_v1.route("/ecommerce/carts/abandoned", methods=["POST"])
+def ingest_abandoned_cart():
+    """Ingests an abandoned cart from checkout webhook / frontend beacon."""
+    org = get_current_org()
+    data = request.get_json(silent=True) or {}
+
+    org_id = org.id if org else (data.get("organization_id") or request.args.get("org_id"))
+    if not org_id:
+        default_org = Organization.query.filter_by(id="org-enterprise-default").first() or Organization.query.filter_by(is_active=True).first()
+        org_id = default_org.id if default_org else None
+
+    if not org_id:
+        return jsonify({"error": "Active organization could not be resolved.", "code": "NO_ORG"}), 400
+
+    phone = data.get("customer_phone") or data.get("phone")
+    if not phone:
+        return jsonify({"error": "'customer_phone' is required.", "code": "MISSING_PHONE"}), 400
+
+    clean_phone = WhatsAppService.format_phone_number(phone)
+    cart_value = float(data.get("cart_value") or data.get("total") or 0.0)
+    curr = (data.get("currency") or "PKR").strip().upper()
+
+    cart = AbandonedCart(
+        organization_id=org_id,
+        customer_phone=clean_phone,
+        customer_name=(data.get("customer_name") or data.get("name") or "").strip() or None,
+        customer_email=(data.get("customer_email") or data.get("email") or "").strip() or None,
+        cart_value=cart_value,
+        currency=curr,
+        checkout_url=(data.get("checkout_url") or "").strip() or None,
+        discount_code=(data.get("discount_code") or "SAVE10").strip(),
+        recovery_status="abandoned"
+    )
+    if "items" in data and isinstance(data["items"], list):
+        cart.set_items(data["items"])
+    db.session.add(cart)
+    db.session.commit()
+
+    notify_res = None
+    if data.get("send_immediate_reminder"):
+        notify_res = WhatsAppService.send_abandoned_cart_recovery(
+            organization_id=org_id,
+            to_phone=cart.customer_phone,
+            customer_name=cart.customer_name,
+            items=cart.get_items(),
+            cart_value=cart.cart_value,
+            currency=cart.currency,
+            checkout_url=cart.checkout_url,
+            discount_code=cart.discount_code,
+            cart_id=cart.id
+        )
+
+    return jsonify({
+        "status": "success",
+        "cart": cart.to_dict(),
+        "reminder_result": notify_res
+    }), 201
+
+
+@api_v1.route("/ecommerce/carts/<cart_id>/recover", methods=["POST"])
+@require_auth
+def trigger_cart_recovery(cart_id: str):
+    """Sends immediate WhatsApp abandoned cart recovery reminder."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    cart = AbandonedCart.query.filter_by(id=cart_id, organization_id=org.id).first()
+    if not cart:
+        return jsonify({"error": "Abandoned cart record not found.", "code": "NOT_FOUND"}), 404
+
+    data = request.get_json(silent=True) or {}
+    discount_code = data.get("discount_code") or cart.discount_code or "SAVE10"
+
+    res = WhatsAppService.send_abandoned_cart_recovery(
+        organization_id=org.id,
+        to_phone=cart.customer_phone,
+        customer_name=cart.customer_name,
+        items=cart.get_items(),
+        cart_value=cart.cart_value,
+        currency=cart.currency,
+        checkout_url=cart.checkout_url,
+        discount_code=discount_code,
+        cart_id=cart.id
+    )
+
+    return jsonify({
+        "status": "success" if res.get("success") else "failed",
+        "cart": cart.to_dict(),
+        "whatsapp_result": res
+    }), 200
+
+
+@api_v1.route("/ecommerce/carts/recover-pending", methods=["POST"])
+@require_auth
+def recover_pending_abandoned_carts():
+    """Batch-triggers automated recovery WhatsApp messages to pending abandoned carts."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    older_than = int(data.get("older_than_minutes", 30))
+    max_batch = int(data.get("max_batch", 25))
+
+    res = WhatsAppService.process_pending_cart_reminders(
+        organization_id=org.id,
+        older_than_minutes=older_than,
+        max_batch=max_batch
+    )
+
+    return jsonify({
+        "status": "success",
+        "result": res
+    }), 200
+
+
+@api_v1.route("/ecommerce/carts/<cart_id>/mark-recovered", methods=["POST"])
+@require_auth
+def mark_cart_recovered(cart_id: str):
+    """Marks an abandoned cart as recovered when customer completes purchase."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    cart = AbandonedCart.query.filter_by(id=cart_id, organization_id=org.id).first()
+    if not cart:
+        return jsonify({"error": "Abandoned cart record not found.", "code": "NOT_FOUND"}), 404
+
+    cart.recovery_status = "recovered"
+    cart.recovered_at = datetime.datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({
+        "status": "success",
+        "cart": cart.to_dict()
+    }), 200
 
