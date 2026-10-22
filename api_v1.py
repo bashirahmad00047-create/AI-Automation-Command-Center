@@ -2605,6 +2605,11 @@ def whatsapp_webhook_ingress():
 
         # Trigger AI Auto-Responder if configured and active
         if not rule_replied:
+            is_v_meta = (
+                msg.get("message_type") in ("audioMessage", "voiceMessage", "ptt", "audio")
+                or "[voice note]" in str(msg.get("body", "")).lower()
+            )
+            d_url_meta = msg.get("download_url")
             if current_app.config.get("TESTING"):
                 try:
                     WhatsAppService.handle_inbound_auto_response(
@@ -2613,12 +2618,14 @@ def whatsapp_webhook_ingress():
                         message_body=msg.get("body", ""),
                         sender_name=msg.get("sender_name", ""),
                         message_id=msg_id,
-                        message_timestamp=msg.get("timestamp")
+                        message_timestamp=msg.get("timestamp"),
+                        is_voice=is_v_meta,
+                        download_url=d_url_meta
                     )
                 except Exception as auto_err:
                     logger.error(f"AI Auto-Responder error in Meta webhook: {auto_err}")
             else:
-                def _async_meta_reply(app_ref, org_id, from_p, body_txt, s_name, m_id, m_ts, m_type):
+                def _async_meta_reply(app_ref, org_id, from_p, body_txt, s_name, m_id, m_ts, m_type, d_url):
                     with app_ref.app_context():
                         try:
                             is_v = m_type in ("audioMessage", "voiceMessage", "ptt", "audio") or "[voice note]" in str(body_txt or "").lower()
@@ -2629,7 +2636,8 @@ def whatsapp_webhook_ingress():
                                 sender_name=s_name,
                                 message_id=m_id,
                                 message_timestamp=m_ts,
-                                is_voice=is_v
+                                is_voice=is_v,
+                                download_url=d_url
                             )
                         except Exception as err:
                             logger.error(f"Async AI Auto-Responder error in Meta webhook: {err}")
@@ -2650,7 +2658,8 @@ def whatsapp_webhook_ingress():
                         msg.get("sender_name", ""),
                         msg_id,
                         msg.get("timestamp"),
-                        msg.get("message_type")
+                        msg.get("message_type"),
+                        msg.get("download_url")
                     ),
                     daemon=True
                 )
@@ -2752,6 +2761,11 @@ def green_api_webhook_ingress():
 
             # Trigger AI Auto-Responder if configured and active
             if not rule_replied:
+                is_v_green = (
+                    msg.get("message_type") in ("audioMessage", "voiceMessage", "ptt")
+                    or "[voice note]" in str(msg.get("body", "")).lower()
+                )
+                d_url_green = msg.get("download_url")
                 # Under unit test execution, run synchronously for deterministic assertions
                 if current_app.config.get("TESTING"):
                     try:
@@ -2761,7 +2775,9 @@ def green_api_webhook_ingress():
                             message_body=msg.get("body", ""),
                             sender_name=msg.get("sender_name", ""),
                             message_id=msg_id,
-                            message_timestamp=msg.get("timestamp")
+                            message_timestamp=msg.get("timestamp"),
+                            is_voice=is_v_green,
+                            download_url=d_url_green
                         )
                     except Exception as auto_err:
                         logger.error(f"AI Auto-Responder error in Green-API webhook: {auto_err}")
@@ -2801,7 +2817,8 @@ def green_api_webhook_ingress():
                                     sender_name=s_name,
                                     message_id=m_id,
                                     message_timestamp=m_ts,
-                                    is_voice=is_voice_inbound
+                                    is_voice=is_voice_inbound,
+                                    download_url=d_url
                                 )
                             except Exception as err:
                                 logger.error(f"Async AI Auto-Responder error: {err}")

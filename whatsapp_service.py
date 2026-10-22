@@ -92,22 +92,75 @@ class WhatsAppService:
 
     # --- Media download and voice transcription helpers ---
     @classmethod
-    def _download_media(cls, chat_id: str, message_id: str, download_url: Optional[str] = None) -> Optional[bytes]:
+    def get_openai_api_key(cls, organization_id: Optional[str] = None) -> Optional[str]:
+        """Resolves OpenAI API key across environment, database settings, app config, and secret files."""
+        candidates = ["OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_SECRET_KEY"]
+        for k in candidates:
+            val = cls._get_tenant_or_global_setting(k, organization_id)
+            if val and str(val).strip():
+                return str(val).strip().strip("'\" \t\r\n")
+
+            val = os.environ.get(k)
+            if val and str(val).strip():
+                return str(val).strip().strip("'\" \t\r\n")
+
+            for env_k, env_v in os.environ.items():
+                if env_k.strip().upper() == k and env_v and str(env_v).strip():
+                    return str(env_v).strip().strip("'\" \t\r\n")
+
+            if has_app_context():
+                val = current_app.config.get(k)
+                if val and str(val).strip():
+                    return str(val).strip().strip("'\" \t\r\n")
+                for cfg_k, cfg_v in current_app.config.items():
+                    if cfg_k.strip().upper() == k and cfg_v and str(cfg_v).strip():
+                        return str(cfg_v).strip().strip("'\" \t\r\n")
+
+        for secret_dir in ["/etc/secrets", os.path.join(_base_dir, ".secrets")]:
+            if os.path.exists(secret_dir):
+                for k in candidates:
+                    for filename in (k, k.lower()):
+                        sf_path = os.path.join(secret_dir, filename)
+                        if os.path.isfile(sf_path):
+                            try:
+                                with open(sf_path, "r", encoding="utf-8") as f:
+                                    c = f.read().strip().strip("'\" \t\r\n")
+                                    if c:
+                                        return c
+                            except Exception:
+                                pass
+        return None
+
+    @classmethod
+    def _download_media(
+        cls,
+        chat_id: Optional[str] = None,
+        message_id: Optional[str] = None,
+        download_url: Optional[str] = None,
+        organization_id: Optional[str] = None
+    ) -> Optional[bytes]:
         """Download media file (audio, image, etc.) from Green-API or direct storage URL.
         Returns raw bytes or None on failure.
         """
-        timeouts = (4.0, 8.0)
+        timeouts = (4.0, 10.0)
         # 1. If direct download URL is available from payload, fetch directly
         if download_url and str(download_url).startswith("http"):
             try:
-                with cls.get_http_session(retries=1) as session:
+                with cls.get_http_session(retries=2) as session:
                     file_resp = session.get(download_url, timeout=timeouts)
                     if file_resp.status_code == 200 and file_resp.content:
                         return file_resp.content
             except Exception as e:
                 logger.debug(f"Direct media download failed: {e}")
+            try:
+                import requests
+                resp = requests.get(download_url, timeout=timeouts)
+                if resp.status_code == 200 and resp.content:
+                    return resp.content
+            except Exception as req_err:
+                logger.debug(f"Requests direct media download failed: {req_err}")
 
-        conf = cls.get_config()
+        conf = cls.get_config(organization_id=organization_id)
         id_inst = conf.get("green_api_id_instance")
         token = conf.get("green_api_token_instance")
         host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
@@ -118,7 +171,7 @@ class WhatsAppService:
         url = f"{host}/waInstance{id_inst}/downloadFile/{token}"
         try:
             target_chat = f"{chat_id}@c.us" if "@" not in str(chat_id) else chat_id
-            with cls.get_http_session(retries=1) as session:
+            with cls.get_http_session(retries=2) as session:
                 resp = session.post(url, json={"chatId": target_chat, "idMessage": message_id}, timeout=timeouts)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -134,7 +187,7 @@ class WhatsAppService:
 
     @classmethod
     def _transcribe_audio(cls, audio_bytes: bytes, organization_id: Optional[str] = None) -> Optional[str]:
-        """Transcribe audio using Gemini or Groq Whisper with language awareness.
+        """Transcribe audio using OpenAI Whisper API, Groq Whisper, or Gemini with language awareness.
         Returns the transcript string or None on failure.
         """
         if not audio_bytes or len(audio_bytes) < 32:
@@ -148,14 +201,96 @@ class WhatsAppService:
             "Output ONLY the transcribed speech text without introductory or explanatory text."
         )
 
-        # 1. Try Gemini Generative AI transcription
+        # Detect audio container format
+        if audio_bytes.startswith(b"ID3") or audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+            audio_fn = "voice_note.mp3"
+            audio_mt = "audio/mpeg"
+        elif audio_bytes.startswith(b"RIFF"):
+            audio_fn = "voice_note.wav"
+            audio_mt = "audio/wav"
+        elif audio_bytes.startswith(b"OggS"):
+            audio_fn = "voice_note.ogg"
+            audio_mt = "audio/ogg; codecs=opus"
+        else:
+            audio_fn = "voice_note.ogg"
+            audio_mt = "audio/ogg"
+
+        # 1. Primary: OpenAI Whisper API (whisper-1)
+        openai_key = cls.get_openai_api_key(organization_id=organization_id)
+        if openai_key and str(openai_key).strip():
+            try:
+                import requests
+                files = {
+                    "file": (audio_fn, audio_bytes, audio_mt)
+                }
+                data = {
+                    "model": "whisper-1",
+                    "response_format": "json",
+                    "prompt": transcription_prompt[:250]
+                }
+                headers = {
+                    "Authorization": f"Bearer {openai_key.strip()}"
+                }
+                resp = requests.post(
+                    "https://api.openai.com/v1/audio/transcriptions",
+                    headers=headers,
+                    files=files,
+                    data=data,
+                    timeout=15.0
+                )
+                if resp.status_code == 200:
+                    openai_res = resp.json()
+                    openai_text = (openai_res.get("text") or "").strip()
+                    if openai_text:
+                        logger.info(f"OpenAI Whisper transcription successful ({len(openai_text)} chars): {openai_text[:60]}...")
+                        return openai_text
+                else:
+                    logger.debug(f"OpenAI Whisper API failed with HTTP {resp.status_code}: {resp.text[:200]}")
+            except Exception as openai_err:
+                logger.debug(f"OpenAI Whisper transcription exception: {openai_err}")
+
+        # 2. Secondary: Groq Whisper transcription (whisper-large-v3)
+        groq_key = cls.get_groq_api_key(organization_id=organization_id)
+        if groq_key:
+            try:
+                import requests
+                files = {
+                    "file": (audio_fn, audio_bytes, audio_mt)
+                }
+                data = {
+                    "model": "whisper-large-v3",
+                    "response_format": "json"
+                }
+                headers = {
+                    "Authorization": f"Bearer {groq_key}"
+                }
+                resp = requests.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers=headers,
+                    files=files,
+                    data=data,
+                    timeout=10.0
+                )
+                if resp.status_code == 200:
+                    whisper_res = resp.json()
+                    whisper_text = (whisper_res.get("text") or "").strip()
+                    if whisper_text:
+                        logger.info(f"Groq Whisper transcription successful ({len(whisper_text)} chars): {whisper_text[:60]}...")
+                        return whisper_text
+                else:
+                    logger.debug(f"Groq Whisper API returned HTTP {resp.status_code}: {resp.text[:200]}")
+            except Exception as groq_err:
+                logger.debug(f"Groq Whisper transcription failed: {groq_err}")
+
+        # 3. Tertiary: Gemini Generative AI transcription
         gemini_key = cls.get_gemini_api_key(organization_id=organization_id)
         if gemini_key:
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=gemini_key)
                 import tempfile, os
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp:
+                ext = ".mp3" if "mp3" in audio_fn else (".wav" if "wav" in audio_fn else ".ogg")
+                with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
                     tmp.write(audio_bytes)
                     tmp_path = tmp.name
                 try:
@@ -178,6 +313,7 @@ class WhatsAppService:
                             if hasattr(response, "text") and response.text:
                                 res_txt = response.text.strip()
                                 if res_txt:
+                                    logger.info(f"Gemini transcription successful ({len(res_txt)} chars): {res_txt[:60]}...")
                                     return res_txt
                             if getattr(response, "candidates", None):
                                 parts = response.candidates[0].content.parts
@@ -194,36 +330,6 @@ class WhatsAppService:
                         pass
             except Exception as e:
                 logger.debug(f"Gemini audio transcription failed: {e}")
-
-        # 2. Fallback to Groq Whisper transcription (fast multilingual Whisper)
-        groq_key = cls.get_groq_api_key(organization_id=organization_id)
-        if groq_key:
-            try:
-                import requests
-                files = {
-                    "file": ("voice_note.ogg", audio_bytes, "audio/ogg; codecs=opus")
-                }
-                data = {
-                    "model": "whisper-large-v3",
-                    "response_format": "json"
-                }
-                headers = {
-                    "Authorization": f"Bearer {groq_key}"
-                }
-                resp = requests.post(
-                    "https://api.groq.com/openai/v1/audio/transcriptions",
-                    headers=headers,
-                    files=files,
-                    data=data,
-                    timeout=8.0
-                )
-                if resp.status_code == 200:
-                    whisper_res = resp.json()
-                    whisper_text = whisper_res.get("text", "").strip()
-                    if whisper_text:
-                        return whisper_text
-            except Exception as groq_err:
-                logger.debug(f"Groq Whisper transcription failed: {groq_err}")
 
         return None
 
@@ -2312,11 +2418,26 @@ class WhatsAppService:
         message_id: Optional[str] = None,
         engine_res: Optional[Dict[str, Any]] = None,
         message_timestamp: Optional[Any] = None,
-        is_voice: bool = False
+        is_voice: bool = False,
+        download_url: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Handles automated AI response to an inbound message if enabled and not debounced."""
-        if not sender_phone or not message_body:
+        if not sender_phone:
             return None
+
+        # Determine if message is an incoming audio/voice note
+        body_clean_str = str(message_body or "").strip().lower()
+        is_voice_inbound = bool(
+            is_voice
+            or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]")
+            or (not message_body and bool(download_url))
+        )
+        if not message_body:
+            if is_voice_inbound or download_url:
+                message_body = "[Voice note]"
+                body_clean_str = "[voice note]"
+            else:
+                return None
 
         # Ignore group messages, broadcast channels, newsletters, and status stories
         sender_str = str(sender_phone or "").strip().lower()
@@ -2332,6 +2453,44 @@ class WhatsAppService:
 
         clean_phone = cls.format_phone_number(sender_phone)
         org_id = organization_id or "org-enterprise-default"
+
+        # If incoming message is a voice note and text is still a placeholder, download and transcribe via OpenAI Whisper
+        if is_voice_inbound and (not message_body or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]")):
+            try:
+                logger.info(f"Downloading incoming voice note for {clean_phone} (message_id={message_id})...")
+                audio_bytes = cls._download_media(
+                    chat_id=sender_phone,
+                    message_id=message_id,
+                    download_url=download_url,
+                    organization_id=org_id
+                )
+                if audio_bytes:
+                    transcript = cls._transcribe_audio(audio_bytes, organization_id=org_id)
+                    if transcript and transcript.strip():
+                        logger.info(f"Successfully transcribed voice note for {clean_phone} ({message_id}): '{transcript}'")
+                        message_body = transcript.strip()
+                        body_clean_str = message_body.lower()
+                        # Update persisted message in DB if present
+                        if has_app_context() and message_id:
+                            try:
+                                rec_obj = WhatsAppMessage.query.filter_by(
+                                    organization_id=org_id,
+                                    whatsapp_message_id=message_id
+                                ).first()
+                                if rec_obj:
+                                    rec_obj.body = message_body
+                                    db.session.commit()
+                            except Exception as rec_err:
+                                try:
+                                    db.session.rollback()
+                                except Exception:
+                                    pass
+                    else:
+                        logger.warning(f"Voice note transcription returned empty for {clean_phone}.")
+                else:
+                    logger.warning(f"Could not download audio bytes for voice note ({message_id}) from {clean_phone}.")
+            except Exception as v_err:
+                logger.error(f"Error downloading or transcribing voice note: {v_err}")
 
         # Ignore stale / historical messages (older than 15 minutes) to prevent delayed reply bursts on login/startup
         if message_timestamp:
@@ -2379,10 +2538,11 @@ class WhatsAppService:
 
         auto_conf = cls.get_auto_responder_config(organization_id=org_id)
 
-        # Force enabled if Gemini or Groq API key exists or explicitly enabled
+        # Force enabled if Gemini, Groq, or OpenAI API key exists or explicitly enabled
         has_gemini = bool(cls.get_gemini_api_key(organization_id=org_id))
         has_groq = bool(cls.get_groq_api_key(organization_id=org_id))
-        has_ai = has_gemini or has_groq
+        has_openai = bool(cls.get_openai_api_key(organization_id=org_id))
+        has_ai = has_gemini or has_groq or has_openai
         if not auto_conf.get("enabled") and not has_ai:
             return None
 
@@ -2390,6 +2550,8 @@ class WhatsAppService:
             logger.info("Direct Gemini AI auto-responder enabled for inbound WhatsApp message.")
         elif has_groq:
             logger.info("Direct Groq AI auto-responder enabled for inbound WhatsApp message.")
+        elif has_openai:
+            logger.info("Direct OpenAI auto-responder enabled for inbound WhatsApp message.")
 
         cooldown_mins = 0  # Force zero cooldown for all inbound messages
 
@@ -2487,7 +2649,7 @@ class WhatsAppService:
         # Dispatch outbound message (audio file reply if voice note and TTS available, else text)
         try:
             dispatch_res = None
-            if is_voice:
+            if is_voice or is_voice_inbound:
                 audio_res = cls.generate_spoken_audio(
                     text=reply_body,
                     language=generated.get("language_format") or generated.get("detected_language") or generated.get("language"),
@@ -2497,7 +2659,7 @@ class WhatsAppService:
                     audio_b, audio_fn, audio_mt = audio_res
                     logger.info(f"Synthesized {len(audio_b)} bytes of spoken audio for voice note reply to {clean_phone}.")
                     active_prov = cls.get_active_provider(organization_id=org_id)
-                    if active_prov == "green_api":
+                    if active_prov == "green_api" or cls.is_green_api_configured(organization_id=org_id):
                         dispatch_res = cls.send_green_api_file(
                             organization_id=org_id,
                             to_phone=clean_phone,
@@ -3158,7 +3320,7 @@ class WhatsAppService:
         if type_message == "reactionMessage":
             return reply_text or "[Reaction]"
 
-        if type_message in ("imageMessage", "documentMessage", "audioMessage", "videoMessage"):
+        if type_message in ("imageMessage", "documentMessage", "audioMessage", "voiceMessage", "ptt", "videoMessage"):
             file_data = message_data_or_item.get("fileMessageData") or {}
             cap = message_data_or_item.get("caption") or (file_data.get("caption") if isinstance(file_data, dict) else "")
             fname = message_data_or_item.get("fileName") or (file_data.get("fileName") if isinstance(file_data, dict) else "")
@@ -3166,10 +3328,17 @@ class WhatsAppService:
                 return f"[Image] {cap}".strip() if cap else "[Image message]"
             if type_message == "documentMessage":
                 return f"[Document: {fname}]" if fname else (f"[Document] {cap}".strip() if cap else "[Document message]")
-            if type_message == "audioMessage":
+            if type_message in ("audioMessage", "voiceMessage", "ptt"):
                 return "[Voice note]"
             if type_message == "videoMessage":
                 return f"[Video] {cap}".strip() if cap else "[Video message]"
+
+        if type_message == "fileMessage":
+            file_data = message_data_or_item.get("fileMessageData") or {}
+            mime = (file_data.get("mimeType") or "").lower()
+            fname = (file_data.get("fileName") or "").lower()
+            if mime.startswith("audio/") or fname.endswith((".oga", ".ogg", ".opus", ".mp3", ".wav", ".m4a", ".aac")):
+                return "[Voice note]"
 
         # Default fallback: return reply_text if present, else human-friendly description
         if reply_text:
@@ -3226,9 +3395,9 @@ class WhatsAppService:
         file_data = message_data.get("fileMessageData", {}) if isinstance(message_data, dict) else {}
         download_url = ""
         if isinstance(file_data, dict):
-            download_url = file_data.get("downloadUrl", "")
+            download_url = file_data.get("downloadUrl", "") or file_data.get("urlFile", "")
         if not download_url:
-            download_url = data.get("downloadUrl", "")
+            download_url = data.get("downloadUrl", "") or data.get("urlFile", "") or (message_data.get("downloadUrl", "") if isinstance(message_data, dict) else "")
 
         messages.append({
             "message_id": msg_id,
@@ -3412,6 +3581,12 @@ class WhatsAppService:
 
             if is_fresh and not (engine_res and cls.engine_dispatched_reply(engine_res)):
                 try:
+                    is_v_synced = (
+                        t_msg in ("audioMessage", "voiceMessage", "ptt")
+                        or "[voice note]" in str(body or "").lower()
+                    )
+                    file_d = item.get("fileMessageData") if isinstance(item.get("fileMessageData"), dict) else {}
+                    d_url_synced = item.get("downloadUrl") or file_d.get("downloadUrl") or item.get("urlFile") or file_d.get("urlFile")
                     cls.handle_inbound_auto_response(
                         organization_id=org_id,
                         sender_phone=from_phone,
@@ -3419,7 +3594,9 @@ class WhatsAppService:
                         sender_name=sender_name,
                         message_id=msg_id,
                         engine_res=engine_res,
-                        message_timestamp=msg_ts
+                        message_timestamp=msg_ts,
+                        is_voice=is_v_synced,
+                        download_url=d_url_synced
                     )
                 except Exception as auto_err:
                     logger.error(f"AI Auto-Responder error on fresh synced message: {auto_err}")
@@ -3513,6 +3690,10 @@ class WhatsAppService:
                 # Trigger AI Auto-Responder if configured and active
                 if not (engine_res and cls.engine_dispatched_reply(engine_res)):
                     try:
+                        is_v_polled = (
+                            msg.get("message_type") in ("audioMessage", "voiceMessage", "ptt")
+                            or "[voice note]" in str(msg.get("body", "")).lower()
+                        )
                         cls.handle_inbound_auto_response(
                             organization_id=org_id,
                             sender_phone=msg.get("from_phone", "unknown"),
@@ -3520,7 +3701,9 @@ class WhatsAppService:
                             sender_name=msg.get("sender_name", ""),
                             message_id=msg_id,
                             engine_res=engine_res,
-                            message_timestamp=msg.get("timestamp")
+                            message_timestamp=msg.get("timestamp"),
+                            is_voice=is_v_polled,
+                            download_url=msg.get("download_url")
                         )
                     except Exception as auto_err:
                         logger.error(f"AI Auto-Responder error on polled message: {auto_err}")

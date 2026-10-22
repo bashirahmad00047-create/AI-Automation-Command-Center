@@ -418,5 +418,62 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             self.assertEqual(mock_send_msg.call_args[1]["message_text"], "Fallback text response due to audio failure.")
 
 
+    def test_transcribe_audio_uses_openai_whisper_primary(self):
+        """Verifies _transcribe_audio calls OpenAI Whisper API (whisper-1) when OPENAI_API_KEY is configured."""
+        fake_audio = b"\x00" * 100
+        with patch.object(WhatsAppService, "get_openai_api_key", return_value="sk-test-openai-key"), \
+             patch("requests.post") as mock_openai_post:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = {"text": "Salam, OpsFlow Cloud demo chaheye."}
+            mock_openai_post.return_value = mock_resp
+
+            transcript = WhatsAppService._transcribe_audio(fake_audio, organization_id=self.org.id)
+            self.assertEqual(transcript, "Salam, OpsFlow Cloud demo chaheye.")
+            mock_openai_post.assert_called_once()
+            call_url = mock_openai_post.call_args[0][0]
+            self.assertEqual(call_url, "https://api.openai.com/v1/audio/transcriptions")
+            call_data = mock_openai_post.call_args[1]["data"]
+            self.assertEqual(call_data["model"], "whisper-1")
+
+    def test_handle_inbound_auto_response_downloads_and_transcribes_incoming_voice_note(self):
+        """Verifies handle_inbound_auto_response downloads audio from download_url and transcribes it to text."""
+        WhatsAppService.clear_recent_replied_trigger_ids()
+        fake_audio_bytes = b"OggS" + b"\x00" * 80
+        with patch.dict(os.environ, {"AI_AUTO_REPLY_ENABLED": "true"}), \
+             patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake_key"), \
+             patch.object(WhatsAppService, "_download_media", return_value=fake_audio_bytes) as mock_dl, \
+             patch.object(WhatsAppService, "_transcribe_audio", return_value="What are your service packages?") as mock_tr, \
+             patch.object(WhatsAppService, "generate_ai_auto_response", return_value={
+                 "reply_body": "We offer Enterprise and Startup packages.",
+                 "intent": "pricing",
+                 "lead_score": 30,
+                 "language": "english"
+             }) as mock_gen, \
+             patch.object(WhatsAppService, "generate_spoken_audio", return_value=None), \
+             patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "TXT_OUT_999"}):
+
+            WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_body="[Voice note]",
+                message_id="VOICE_INBOUND_999",
+                is_voice=True,
+                download_url="https://do-media.com/test_audio.oga"
+            )
+
+            mock_dl.assert_called_once_with(
+                chat_id="923209350858",
+                message_id="VOICE_INBOUND_999",
+                download_url="https://do-media.com/test_audio.oga",
+                organization_id=self.org.id
+            )
+            mock_tr.assert_called_once_with(fake_audio_bytes, organization_id=self.org.id)
+            mock_gen.assert_called_once()
+            # The AI generation should have received the transcribed text!
+            self.assertEqual(mock_gen.call_args[1]["message_body"], "What are your service packages?")
+
+
 if __name__ == "__main__":
     unittest.main()
+
