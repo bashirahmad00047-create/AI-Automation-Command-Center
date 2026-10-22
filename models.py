@@ -1462,5 +1462,122 @@ class BusinessProfile(db.Model):
         }
 
 
+class EcommerceOrder(db.Model):
+    """Tenant-scoped e-commerce orders for multi-channel sales, WhatsApp status updates, and tracking."""
+    __tablename__ = "ecommerce_orders"
 
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("ord"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    order_number = db.Column(db.String(64), nullable=False, index=True)
+    customer_phone = db.Column(db.String(32), nullable=False, index=True)
+    customer_name = db.Column(db.String(255), nullable=True)
+    customer_email = db.Column(db.String(255), nullable=True)
+    total_amount = db.Column(db.Float, nullable=False, default=0.0)
+    currency = db.Column(db.String(10), nullable=False, default="PKR")
+    order_status = db.Column(db.String(32), nullable=False, default="confirmed", index=True)  # pending, confirmed, processing, shipped, delivered, cancelled
+    payment_status = db.Column(db.String(32), nullable=False, default="unpaid")  # unpaid, paid, cod, refunded
+    payment_method = db.Column(db.String(64), nullable=True, default="cod")  # cod, jazzcash, stripe, bank_transfer
+    items_json = db.Column(db.Text, nullable=True)  # JSON list of [{"name": str, "sku": str, "quantity": int, "price": float}]
+    tracking_number = db.Column(db.String(128), nullable=True, index=True)
+    courier_name = db.Column(db.String(128), nullable=True)  # e.g., TCS, Leopard, CallCourier, DHL, Trax, M&P
+    tracking_url = db.Column(db.String(512), nullable=True)
+    shipping_address = db.Column(db.Text, nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    last_notified_status = db.Column(db.String(32), nullable=True)
+    last_notified_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    def get_items(self) -> List[Dict[str, Any]]:
+        if self.items_json:
+            try:
+                data = json.loads(self.items_json)
+                if isinstance(data, list):
+                    return data
+            except Exception:
+                pass
+        return []
+
+    def set_items(self, items: List[Dict[str, Any]]) -> None:
+        self.items_json = json.dumps(items or [])
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "order_number": self.order_number,
+            "customer_phone": self.customer_phone,
+            "customer_name": self.customer_name or "",
+            "customer_email": self.customer_email or "",
+            "total_amount": float(self.total_amount),
+            "currency": self.currency or "PKR",
+            "order_status": self.order_status,
+            "payment_status": self.payment_status,
+            "payment_method": self.payment_method or "cod",
+            "items": self.get_items(),
+            "tracking_number": self.tracking_number or "",
+            "courier_name": self.courier_name or "",
+            "tracking_url": self.tracking_url or "",
+            "shipping_address": self.shipping_address or "",
+            "notes": self.notes or "",
+            "last_notified_status": self.last_notified_status,
+            "last_notified_at": self.last_notified_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_notified_at else None,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
+
+
+class AbandonedCart(db.Model):
+    """Tenant-scoped abandoned carts for automated WhatsApp recovery flows and conversion alerts."""
+    __tablename__ = "abandoned_carts"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("crt"))
+    organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    customer_phone = db.Column(db.String(32), nullable=False, index=True)
+    customer_name = db.Column(db.String(255), nullable=True)
+    customer_email = db.Column(db.String(255), nullable=True)
+    cart_value = db.Column(db.Float, nullable=False, default=0.0)
+    currency = db.Column(db.String(10), nullable=False, default="PKR")
+    cart_items_json = db.Column(db.Text, nullable=True)  # JSON list of [{"name": str, "price": float, "quantity": int}]
+    checkout_url = db.Column(db.String(512), nullable=True)
+    recovery_status = db.Column(db.String(32), nullable=False, default="abandoned", index=True)  # abandoned, reminder_sent, recovered, expired
+    discount_code = db.Column(db.String(64), nullable=True)
+    reminder_count = db.Column(db.Integer, nullable=False, default=0)
+    last_reminder_sent_at = db.Column(db.DateTime, nullable=True)
+    recovered_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    def get_items(self) -> List[Dict[str, Any]]:
+        if self.cart_items_json:
+            try:
+                data = json.loads(self.cart_items_json)
+                if isinstance(data, list):
+                    return data
+            except Exception:
+                pass
+        return []
+
+    def set_items(self, items: List[Dict[str, Any]]) -> None:
+        self.cart_items_json = json.dumps(items or [])
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "customer_phone": self.customer_phone,
+            "customer_name": self.customer_name or "",
+            "customer_email": self.customer_email or "",
+            "cart_value": float(self.cart_value),
+            "currency": self.currency or "PKR",
+            "items": self.get_items(),
+            "checkout_url": self.checkout_url or "",
+            "recovery_status": self.recovery_status,
+            "discount_code": self.discount_code or "",
+            "reminder_count": int(self.reminder_count),
+            "last_reminder_sent_at": self.last_reminder_sent_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_reminder_sent_at else None,
+            "recovered_at": self.recovered_at.strftime("%Y-%m-%d %H:%M:%S") if self.recovered_at else None,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
 
