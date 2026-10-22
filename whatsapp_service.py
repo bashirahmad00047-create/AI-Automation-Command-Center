@@ -1573,8 +1573,14 @@ class WhatsAppService:
                 "- Preserve proprietary brand names such as 'OpsFlow Cloud' as-is."
             )
         else:
-            return (
-                "LANGUAGE REQUIREMENT (CRITICAL - ENGLISH):\n"
+        return (
+            "LANGUAGE REQUIREMENT (CRITICAL - ROMAN URDU):\n"
+            f"- The customer messaged in an unspecified language (defaulting to Roman Urdu): '{clean_text}'.\n"
+            "- You MUST formulate your entire reply in natural, conversational Roman Urdu (Latin script Urdu).\n"
+            "- Do NOT answer in English by default.\n"
+            "- Use natural Roman Urdu phrasing (e.g., 'Salam! OpsFlow Cloud mein khush-amdeed, main aapki kya madad kar sakta hoon?').\n"
+            "- Preserve proprietary brand names such as 'OpsFlow Cloud' as-is."
+        ):\n"
                 f"- The customer messaged in English: '{clean_text}'.\n"
                 "- You MUST formulate your entire reply in clear, professional English formatted concisely for WhatsApp."
             )
@@ -2383,7 +2389,7 @@ class WhatsAppService:
         elif has_groq:
             logger.info("Direct Groq AI auto-responder enabled for inbound WhatsApp message.")
 
-        cooldown_mins = auto_conf.get("cooldown_minutes", 0)
+        cooldown_mins = 0  # Force zero cooldown for all inbound messages
 
         # Prevent duplicate auto-replies if the same webhook event is delivered more than once
         if message_id:
