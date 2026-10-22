@@ -819,11 +819,14 @@ class WhatsAppMessage(db.Model):
                 if isinstance(raw, dict):
                     sender_name = raw.get("senderName") or raw.get("senderContactName")
                     media_url = (
+                        raw.get("download_url") or
                         raw.get("downloadUrl") or
                         raw.get("urlFile") or
-                        raw.get("fileMessageData", {}).get("downloadUrl") or
-                        raw.get("audioMessageData", {}).get("downloadUrl") or
-                        raw.get("media_url")
+                        raw.get("media_url") or
+                        (raw.get("fileMessageData", {}).get("downloadUrl") if isinstance(raw.get("fileMessageData"), dict) else None) or
+                        (raw.get("audioMessageData", {}).get("downloadUrl") if isinstance(raw.get("audioMessageData"), dict) else None) or
+                        (raw.get("raw", {}).get("messageData", {}).get("fileMessageData", {}).get("downloadUrl") if isinstance(raw.get("raw"), dict) and isinstance(raw.get("raw", {}).get("messageData"), dict) else None) or
+                        (raw.get("raw", {}).get("downloadUrl") if isinstance(raw.get("raw"), dict) else None)
                     )
                     duration = (
                         raw.get("audioMessageData", {}).get("duration") or
@@ -838,8 +841,8 @@ class WhatsAppMessage(db.Model):
 
         is_audio = (
             self.message_type in ("audioMessage", "voiceMessage", "audio", "voice", "ptt") or
-            bool(self.body and ("[audiomessage]" in self.body.lower() or "[voicemessage]" in self.body.lower())) or
-            bool(media_url and any(str(media_url).lower().endswith(ext) for ext in (".ogg", ".mp3", ".wav", ".m4a", ".aac", ".opus")))
+            bool(self.body and any(tag in self.body.lower() for tag in ("[audiomessage]", "[voicemessage]", "[voice note]"))) or
+            bool(media_url and any(str(media_url).lower().split("?")[0].endswith(ext) for ext in (".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aac", ".opus")))
         )
 
         return {
