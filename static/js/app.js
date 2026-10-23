@@ -282,6 +282,7 @@ function switchTab(tabId) {
     if (tabId === 'team') loadTeamAndAudits();
     if (tabId === 'billing') loadBillingDashboard();
     if (tabId === 'settings') loadAllSettings();
+    if (tabId === 'products') loadProductsCatalog();
 }
 
 // ==========================================
@@ -6405,7 +6406,8 @@ const TAB_TITLES = {
     apidocs: 'API Docs',
     team: 'Team & RBAC',
     billing: 'Plans & Billing',
-    settings: 'Settings'
+    settings: 'Settings',
+    products: 'Products Catalog & Inventory'
 };
 
 function initEnterpriseSidebar() {
@@ -6513,6 +6515,7 @@ const COMMAND_PALETTE_ITEMS = [
     { id: 'nav-team', category: 'Navigation', icon: '👥', title: 'Team & RBAC Management', shortcut: 'G U', action: () => switchTab('team') },
     { id: 'nav-billing', category: 'Navigation', icon: '💳', title: 'Plans, Quotas & Billing', shortcut: 'G B', action: () => switchTab('billing') },
     { id: 'nav-settings', category: 'Navigation', icon: '⚙️', title: 'Workspace Settings', shortcut: 'G S', action: () => switchTab('settings') },
+    { id: 'nav-products', category: 'Navigation', icon: '🛍️', title: 'Products Catalog & Shop', shortcut: 'G P', action: () => switchTab('products') },
 
     // Quick Actions
     { id: 'act-new-rule', category: 'Quick Actions', icon: '➕', title: 'Create New Workflow Rule', shortcut: 'N W', action: () => { switchTab('rules'); openRuleModal(); } },
@@ -8605,4 +8608,728 @@ function stopCompanyMessagingAutoPoll() {
         clearInterval(cmAutoPollTimer);
         cmAutoPollTimer = null;
     }
+}
+
+
+// ==========================================================================
+// OPSFLOW CLOUD: PRODUCTS CATALOG & SHOP MANAGEMENT CONTROLLER
+// ==========================================================================
+
+let productSearchDebounceTimer = null;
+
+function loadProductsCatalog() {
+    const tbody = document.getElementById('productsTableBody');
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding: 30px; color: var(--text-secondary);"><span class="icon spinning" style="display:inline-block; margin-right: 6px;">🔄</span> Loading product catalog...</td></tr>';
+    }
+
+    const sortVal = document.getElementById('productSortFilter') ? document.getElementById('productSortFilter').value : 'name_asc';
+    const activeVal = document.getElementById('productActiveFilter') ? document.getElementById('productActiveFilter').value : 'active';
+    const categoryVal = document.getElementById('productCategoryFilter') ? document.getElementById('productCategoryFilter').value : 'all';
+    const stockVal = document.getElementById('productStockStatusFilter') ? document.getElementById('productStockStatusFilter').value : 'all';
+    const searchVal = document.getElementById('productSearchInput') ? document.getElementById('productSearchInput').value.trim() : '';
+
+    let url = `/api/v1/ecommerce/products?limit=250&sort=${encodeURIComponent(sortVal)}`;
+    if (activeVal === 'all') url += '&include_inactive=true';
+    else if (activeVal === 'archived') url += '&status=archived';
+    
+    if (categoryVal && categoryVal !== 'all') url += `&category=${encodeURIComponent(categoryVal)}`;
+    if (stockVal && stockVal !== 'all') url += `&stock_status=${encodeURIComponent(stockVal)}`;
+    if (searchVal) url += `&query=${encodeURIComponent(searchVal)}`;
+
+    fetch(url)
+        .then(res => {
+            if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+            return res.json();
+        })
+        .then(data => {
+            state.products = data.products || [];
+            state.productCategories = data.categories || [];
+            state.productStats = data.stats || {};
+
+            updateProductCatalogKPIs(data.stats, data.count);
+            populateProductCategoryDropdowns(data.categories);
+            renderProducts(state.products);
+        })
+        .catch(err => {
+            console.error('Failed to load products catalog:', err);
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="8" class="text-center" style="padding: 24px; color: #f87171;">Failed to load catalog: ${escapeHtml(err.message)} <button class="hud-btn outline small" style="margin-left: 10px;" onclick="loadProductsCatalog()">Retry</button></td></tr>`;
+            }
+        });
+}
+
+function updateProductCatalogKPIs(stats, count) {
+    if (!stats) return;
+
+    const totalEl = document.getElementById('prodMetricTotal');
+    const inStockEl = document.getElementById('prodMetricInStock');
+    const lowStockEl = document.getElementById('prodMetricLowStock');
+    const outOfStockEl = document.getElementById('prodMetricOutOfStock');
+    const valEl = document.getElementById('prodMetricValuation');
+    const pill = document.getElementById('tabProductCount');
+
+    if (totalEl) totalEl.textContent = stats.total !== undefined ? stats.total : count;
+    if (inStockEl) inStockEl.textContent = stats.in_stock || 0;
+    if (lowStockEl) lowStockEl.textContent = stats.low_stock || 0;
+    if (outOfStockEl) outOfStockEl.textContent = stats.out_of_stock || 0;
+    
+    if (valEl) {
+        const val = stats.total_inventory_value || 0;
+        valEl.textContent = `PKR ${Number(val).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    }
+
+    if (pill) {
+        const activeCount = stats.active !== undefined ? stats.active : count;
+        pill.textContent = activeCount;
+        pill.style.display = activeCount > 0 ? 'inline-block' : 'none';
+    }
+}
+
+function populateProductCategoryDropdowns(categories) {
+    const filterSelect = document.getElementById('productCategoryFilter');
+    const shareSelect = document.getElementById('shareCatalogCategory');
+    const addDatalist = document.getElementById('addProdCategoryDatalist');
+    const editDatalist = document.getElementById('editProdCategoryDatalist');
+
+    const currentFilterVal = filterSelect ? filterSelect.value : 'all';
+
+    const safeCats = Array.isArray(categories) ? categories : [];
+
+    if (filterSelect) {
+        let opts = '<option value="all">All Categories</option>';
+        safeCats.forEach(c => {
+            opts += `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`;
+        });
+        filterSelect.innerHTML = opts;
+        filterSelect.value = currentFilterVal;
+    }
+
+    if (shareSelect) {
+        let opts = '<option value="">All Categories (Full Catalog)</option>';
+        safeCats.forEach(c => {
+            opts += `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`;
+        });
+        shareSelect.innerHTML = opts;
+    }
+
+    const datalistOptions = safeCats.map(c => `<option value="${escapeHtml(c)}">`).join('');
+    if (addDatalist) addDatalist.innerHTML = datalistOptions;
+    if (editDatalist) editDatalist.innerHTML = datalistOptions;
+}
+
+function renderProducts(products) {
+    const tbody = document.getElementById('productsTableBody');
+    const gridContainer = document.getElementById('productGridViewContainer');
+    const emptyState = document.getElementById('productsEmptyState');
+    const tableContainer = document.getElementById('productTableViewContainer');
+
+    if (!products || products.length === 0) {
+        if (tbody) tbody.innerHTML = '';
+        if (gridContainer) gridContainer.innerHTML = '';
+        if (emptyState) emptyState.style.display = 'block';
+        if (tableContainer) tableContainer.style.display = 'none';
+        if (gridContainer) gridContainer.style.display = 'none';
+        return;
+    }
+
+    if (emptyState) emptyState.style.display = 'none';
+
+    const isGrid = state.productViewMode === 'grid';
+    if (tableContainer) tableContainer.style.display = isGrid ? 'none' : 'block';
+    if (gridContainer) gridContainer.style.display = isGrid ? 'grid' : 'none';
+
+    // 1. Render Table Rows
+    if (tbody) {
+        let rowsHtml = '';
+        products.forEach(p => {
+            const hasImg = p.image_url && p.image_url.trim().length > 0;
+            const priceFormatted = `${escapeHtml(p.currency || 'PKR')} ${Number(p.price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            
+            let stockStatusClass = 'in-stock';
+            let stockStatusLabel = '● In Stock';
+            if (p.stock_quantity <= 0 || p.stock_status === 'out_of_stock') {
+                stockStatusClass = 'out-of-stock';
+                stockStatusLabel = '✖ Out of Stock';
+            } else if (p.stock_quantity <= 5 || p.stock_status === 'low_stock') {
+                stockStatusClass = 'low-stock';
+                stockStatusLabel = '▲ Low Stock';
+            }
+
+            const imgMarkup = hasImg
+                ? `<div class="product-thumb-container" onclick="openProductImagePreview('${encodeURIComponent(p.image_url)}', '${encodeURIComponent(p.name)}')" title="Click to enlarge image">
+                       <img src="${escapeHtml(p.image_url)}" class="product-thumb-img" alt="${escapeHtml(p.name)}" onerror="this.onerror=null; this.parentElement.innerHTML='<span style=\'font-size:20px;\'>🛍️</span>';">
+                   </div>`
+                : `<div class="product-thumb-container" title="No image provided">
+                       <span style="font-size: 20px;">🛍️</span>
+                   </div>`;
+
+            const imgUrlCol = hasImg
+                ? `<a href="javascript:void(0)" class="product-image-url-link" onclick="openProductImagePreview('${encodeURIComponent(p.image_url)}', '${encodeURIComponent(p.name)}')" title="${escapeHtml(p.image_url)}">
+                       <span>🖼️</span> View Image
+                   </a>`
+                : `<span style="color: var(--text-secondary); font-size: 11px; font-style: italic;">No image</span>`;
+
+            const statusBadge = p.is_active
+                ? `<span class="badge success" style="font-size: 11px;">Active</span>`
+                : `<span class="badge skipped" style="font-size: 11px;">Archived</span>`;
+
+            rowsHtml += `
+                <tr id="prod-row-${p.id}" class="${p.is_active ? '' : 'opacity-60'}">
+                    <td>
+                        <div class="product-item-cell">
+                            ${imgMarkup}
+                            <div style="min-width: 0;">
+                                <div class="product-item-title">${escapeHtml(p.name)}</div>
+                                <div class="product-item-desc" title="${escapeHtml(p.description || '')}">${escapeHtml(p.description || 'No description provided')}</div>
+                                <div style="margin-top: 4px; display: flex; gap: 6px; align-items: center;">
+                                    <span class="product-sku-pill">${escapeHtml(p.sku || 'NO-SKU')}</span>
+                                    ${p.barcode ? `<span class="product-sku-pill" style="opacity: 0.8;" title="Barcode">#${escapeHtml(p.barcode)}</span>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="product-category-tag">${escapeHtml(p.category || 'General')}</span>
+                    </td>
+                    <td>
+                        <div class="product-price-val">${priceFormatted}</div>
+                        <div style="font-size: 10.5px; color: var(--text-secondary); margin-top: 2px;">per ${escapeHtml(p.unit || 'unit')}</div>
+                    </td>
+                    <td>
+                        <div class="stock-qty-control">
+                            <button type="button" class="stock-qty-btn" onclick="quickAdjustStock('${p.id}', -1)" title="Decrease stock by 1">-</button>
+                            <span class="stock-qty-num" id="stock-num-${p.id}">${p.stock_quantity}</span>
+                            <button type="button" class="stock-qty-btn" onclick="quickAdjustStock('${p.id}', 1)" title="Increase stock by 1">+</button>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="stock-status-pill ${stockStatusClass}">${stockStatusLabel}</span>
+                    </td>
+                    <td>
+                        ${imgUrlCol}
+                    </td>
+                    <td>
+                        ${statusBadge}
+                    </td>
+                    <td class="text-right">
+                        <div class="product-actions-cell">
+                            <button type="button" class="hud-btn outline small" onclick="openEditProductModal('${p.id}')" title="Edit Item Details">
+                                <span class="icon">✏️</span> Edit
+                            </button>
+                            <button type="button" class="hud-btn outline small" onclick="openShareCatalogModal('${escapeHtml(p.category || '')}')" title="Share via WhatsApp">
+                                <span class="icon">💬</span>
+                            </button>
+                            <button type="button" class="hud-btn red-btn small" onclick="confirmDeleteProduct('${p.id}', '${encodeURIComponent(p.name)}')" title="Delete or Archive Product">
+                                <span class="icon">🗑️</span>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        });
+        tbody.innerHTML = rowsHtml;
+    }
+
+    // 2. Render Grid Cards
+    if (gridContainer) {
+        let gridHtml = '';
+        products.forEach(p => {
+            const hasImg = p.image_url && p.image_url.trim().length > 0;
+            const priceFormatted = `${escapeHtml(p.currency || 'PKR')} ${Number(p.price || 0).toLocaleString()}`;
+            
+            let stockStatusClass = 'in-stock';
+            let stockStatusLabel = 'In Stock';
+            if (p.stock_quantity <= 0 || p.stock_status === 'out_of_stock') {
+                stockStatusClass = 'out-of-stock';
+                stockStatusLabel = 'Out of Stock';
+            } else if (p.stock_quantity <= 5 || p.stock_status === 'low_stock') {
+                stockStatusClass = 'low-stock';
+                stockStatusLabel = `${p.stock_quantity} Left`;
+            }
+
+            const mediaMarkup = hasImg
+                ? `<img src="${escapeHtml(p.image_url)}" alt="${escapeHtml(p.name)}" onerror="this.onerror=null; this.parentElement.innerHTML='<span style=\'font-size:42px;\'>🛍️</span>';">`
+                : `<span style="font-size: 42px;">🛍️</span>`;
+
+            gridHtml += `
+                <div class="product-card">
+                    <div class="product-card-media" onclick="openProductImagePreview('${encodeURIComponent(p.image_url || '')}', '${encodeURIComponent(p.name)}')">
+                        ${mediaMarkup}
+                        <span class="product-category-tag product-card-badge">${escapeHtml(p.category || 'General')}</span>
+                        <span class="stock-status-pill ${stockStatusClass} product-card-status-pill">${stockStatusLabel}</span>
+                    </div>
+                    <div class="product-card-body">
+                        <div class="product-card-title">${escapeHtml(p.name)}</div>
+                        <div class="product-card-desc">${escapeHtml(p.description || 'No description provided')}</div>
+                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: auto;">
+                            <div>
+                                <span style="font-size: 11px; color: var(--text-secondary);">SKU:</span>
+                                <span class="product-sku-pill">${escapeHtml(p.sku || 'N/A')}</span>
+                            </div>
+                            <div class="product-price-val" style="color: #38bdf8;">${priceFormatted}</div>
+                        </div>
+                    </div>
+                    <div class="product-card-footer" style="padding: 12px 16px; background: rgba(0,0,0,0.15);">
+                        <div style="font-size: 11.5px; color: var(--text-secondary);">Stock: <strong style="color: var(--text-primary);">${p.stock_quantity} ${escapeHtml(p.unit || 'units')}</strong></div>
+                        <div style="display: flex; gap: 6px;">
+                            <button type="button" class="hud-btn outline small" onclick="openEditProductModal('${p.id}')">Edit</button>
+                            <button type="button" class="hud-btn red-btn small" onclick="confirmDeleteProduct('${p.id}', '${encodeURIComponent(p.name)}')">🗑️</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        gridContainer.innerHTML = gridHtml;
+    }
+}
+
+function debounceFilterProducts() {
+    if (productSearchDebounceTimer) clearTimeout(productSearchDebounceTimer);
+    productSearchDebounceTimer = setTimeout(() => {
+        filterProductsTable();
+    }, 250);
+}
+
+function filterProductsTable() {
+    loadProductsCatalog();
+}
+
+function setProductViewMode(mode) {
+    state.productViewMode = mode;
+    const btnTable = document.getElementById('btnProductViewTable');
+    const btnGrid = document.getElementById('btnProductViewGrid');
+    const tableContainer = document.getElementById('productTableViewContainer');
+    const gridContainer = document.getElementById('productGridViewContainer');
+
+    if (mode === 'grid') {
+        if (btnTable) { btnTable.classList.remove('active'); btnTable.classList.add('outline'); }
+        if (btnGrid) { btnGrid.classList.add('active'); btnGrid.classList.remove('outline'); }
+        if (tableContainer) tableContainer.style.display = 'none';
+        if (gridContainer) gridContainer.style.display = 'grid';
+    } else {
+        if (btnTable) { btnTable.classList.add('active'); btnTable.classList.remove('outline'); }
+        if (btnGrid) { btnGrid.classList.remove('active'); btnGrid.classList.add('outline'); }
+        if (tableContainer) tableContainer.style.display = 'block';
+        if (gridContainer) gridContainer.style.display = 'none';
+    }
+}
+
+// --------------------------------------------------------------------------
+// ADD PRODUCT WORKFLOW
+// --------------------------------------------------------------------------
+
+function openAddProductModal() {
+    const form = document.getElementById('addProductForm');
+    if (form) form.reset();
+
+    generateRandomSku('addProdSku');
+    document.getElementById('addProdIsActive').checked = true;
+    document.getElementById('addProdStock').value = '10';
+    document.getElementById('addProdUnit').value = 'piece';
+    updateAddProductPreview();
+
+    const modal = document.getElementById('modalAddProduct');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeAddProductModal() {
+    const modal = document.getElementById('modalAddProduct');
+    if (modal) modal.style.display = 'none';
+}
+
+function updateAddProductPreview() {
+    const name = document.getElementById('addProdName')?.value.trim() || 'Product Name';
+    const cat = document.getElementById('addProdCategory')?.value.trim() || 'General';
+    const price = parseFloat(document.getElementById('addProdPrice')?.value) || 0;
+    const curr = document.getElementById('addProdCurrency')?.value || 'PKR';
+    const stock = parseInt(document.getElementById('addProdStock')?.value, 10) || 0;
+    const imgUrl = document.getElementById('addProdImageUrl')?.value.trim() || '';
+
+    const titleEl = document.getElementById('addPreviewTitle');
+    const catEl = document.getElementById('addPreviewCategory');
+    const priceEl = document.getElementById('addPreviewPrice');
+    const stockEl = document.getElementById('addPreviewStockPill');
+    const imgEl = document.getElementById('addPreviewImg');
+    const fallbackEl = document.getElementById('addPreviewFallback');
+
+    if (titleEl) titleEl.textContent = name;
+    if (catEl) catEl.textContent = cat;
+    if (priceEl) priceEl.textContent = `${curr} ${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    
+    if (stockEl) {
+        stockEl.textContent = `${stock} in Stock`;
+        stockEl.className = 'stock-status-pill ' + (stock <= 0 ? 'out-of-stock' : (stock <= 5 ? 'low-stock' : 'in-stock'));
+    }
+
+    if (imgEl && fallbackEl) {
+        if (imgUrl) {
+            imgEl.src = imgUrl;
+            imgEl.style.display = 'block';
+            fallbackEl.style.display = 'none';
+        } else {
+            imgEl.style.display = 'none';
+            fallbackEl.style.display = 'block';
+        }
+    }
+}
+
+function setPresetImageUrl(inputId, url) {
+    const el = document.getElementById(inputId);
+    if (el) {
+        el.value = url;
+        if (inputId.includes('add')) updateAddProductPreview();
+        else updateEditProductPreview();
+    }
+}
+
+function generateRandomSku(inputId) {
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    const code = `PRD-${rand}`;
+    const el = document.getElementById(inputId);
+    if (el) el.value = code;
+}
+
+function submitCreateProduct() {
+    const btn = document.getElementById('btnAddProdSubmit');
+    const name = document.getElementById('addProdName')?.value.trim();
+    if (!name) {
+        showToast('Please enter a product name.', 'error');
+        return;
+    }
+
+    const payload = {
+        name: name,
+        category: document.getElementById('addProdCategory')?.value.trim() || 'General',
+        sku: document.getElementById('addProdSku')?.value.trim() || null,
+        barcode: document.getElementById('addProdBarcode')?.value.trim() || null,
+        price: parseFloat(document.getElementById('addProdPrice')?.value) || 0.0,
+        currency: document.getElementById('addProdCurrency')?.value || 'PKR',
+        stock_quantity: parseInt(document.getElementById('addProdStock')?.value, 10) || 0,
+        unit: document.getElementById('addProdUnit')?.value.trim() || 'piece',
+        image_url: document.getElementById('addProdImageUrl')?.value.trim() || null,
+        description: document.getElementById('addProdDescription')?.value.trim() || '',
+        is_active: document.getElementById('addProdIsActive')?.checked ?? true
+    };
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="icon spinning">🔄</span> Saving...';
+    }
+
+    fetch('/api/v1/ecommerce/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            showToast(`Product "${payload.name}" successfully added to catalog!`, 'success');
+            closeAddProductModal();
+            loadProductsCatalog();
+        } else {
+            showToast(data.error || 'Failed to create product', 'error');
+        }
+    })
+    .catch(err => {
+        showToast(`Error creating product: ${err.message}`, 'error');
+    })
+    .finally(() => {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span class="icon">💾</span> Save &amp; Add Product';
+        }
+    });
+}
+
+// --------------------------------------------------------------------------
+// EDIT PRODUCT WORKFLOW
+// --------------------------------------------------------------------------
+
+function openEditProductModal(productId) {
+    const p = state.products ? state.products.find(item => item.id === productId) : null;
+    if (!p) {
+        showToast('Product not found in catalog.', 'error');
+        return;
+    }
+
+    document.getElementById('editProdId').value = p.id;
+    document.getElementById('editProdName').value = p.name || '';
+    document.getElementById('editProdCategory').value = p.category || 'General';
+    document.getElementById('editProdSku').value = p.sku || '';
+    document.getElementById('editProdBarcode').value = p.barcode || '';
+    document.getElementById('editProdPrice').value = p.price !== undefined ? p.price : 0;
+    document.getElementById('editProdCurrency').value = p.currency || 'PKR';
+    document.getElementById('editProdStock').value = p.stock_quantity !== undefined ? p.stock_quantity : 0;
+    document.getElementById('editProdUnit').value = p.unit || 'piece';
+    document.getElementById('editProdImageUrl').value = p.image_url || '';
+    document.getElementById('editProdDescription').value = p.description || '';
+    document.getElementById('editProdIsActive').checked = Boolean(p.is_active);
+
+    updateEditProductPreview();
+
+    const modal = document.getElementById('modalEditProduct');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeEditProductModal() {
+    const modal = document.getElementById('modalEditProduct');
+    if (modal) modal.style.display = 'none';
+}
+
+function updateEditProductPreview() {
+    const name = document.getElementById('editProdName')?.value.trim() || 'Product Name';
+    const cat = document.getElementById('editProdCategory')?.value.trim() || 'General';
+    const price = parseFloat(document.getElementById('editProdPrice')?.value) || 0;
+    const curr = document.getElementById('editProdCurrency')?.value || 'PKR';
+    const stock = parseInt(document.getElementById('editProdStock')?.value, 10) || 0;
+    const imgUrl = document.getElementById('editProdImageUrl')?.value.trim() || '';
+
+    const titleEl = document.getElementById('editPreviewTitle');
+    const catEl = document.getElementById('editPreviewCategory');
+    const priceEl = document.getElementById('editPreviewPrice');
+    const stockEl = document.getElementById('editPreviewStockPill');
+    const imgEl = document.getElementById('editPreviewImg');
+    const fallbackEl = document.getElementById('editPreviewFallback');
+
+    if (titleEl) titleEl.textContent = name;
+    if (catEl) catEl.textContent = cat;
+    if (priceEl) priceEl.textContent = `${curr} ${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    
+    if (stockEl) {
+        stockEl.textContent = `${stock} in Stock`;
+        stockEl.className = 'stock-status-pill ' + (stock <= 0 ? 'out-of-stock' : (stock <= 5 ? 'low-stock' : 'in-stock'));
+    }
+
+    if (imgEl && fallbackEl) {
+        if (imgUrl) {
+            imgEl.src = imgUrl;
+            imgEl.style.display = 'block';
+            fallbackEl.style.display = 'none';
+        } else {
+            imgEl.style.display = 'none';
+            fallbackEl.style.display = 'block';
+        }
+    }
+}
+
+function submitUpdateProduct() {
+    const productId = document.getElementById('editProdId')?.value;
+    if (!productId) return;
+
+    const btn = document.getElementById('btnEditProdSubmit');
+    const name = document.getElementById('editProdName')?.value.trim();
+    if (!name) {
+        showToast('Product name is required.', 'error');
+        return;
+    }
+
+    const payload = {
+        name: name,
+        category: document.getElementById('editProdCategory')?.value.trim() || 'General',
+        sku: document.getElementById('editProdSku')?.value.trim() || null,
+        barcode: document.getElementById('editProdBarcode')?.value.trim() || null,
+        price: parseFloat(document.getElementById('editProdPrice')?.value) || 0.0,
+        currency: document.getElementById('editProdCurrency')?.value || 'PKR',
+        stock_quantity: parseInt(document.getElementById('editProdStock')?.value, 10) || 0,
+        unit: document.getElementById('editProdUnit')?.value.trim() || 'piece',
+        image_url: document.getElementById('editProdImageUrl')?.value.trim() || null,
+        description: document.getElementById('editProdDescription')?.value.trim() || '',
+        is_active: document.getElementById('editProdIsActive')?.checked ?? true
+    };
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="icon spinning">🔄</span> Updating...';
+    }
+
+    fetch(`/api/v1/ecommerce/products/${encodeURIComponent(productId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            showToast(`Product "${payload.name}" updated successfully!`, 'success');
+            closeEditProductModal();
+            loadProductsCatalog();
+        } else {
+            showToast(data.error || 'Failed to update product', 'error');
+        }
+    })
+    .catch(err => {
+        showToast(`Update error: ${err.message}`, 'error');
+    })
+    .finally(() => {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span class="icon">💾</span> Update Product';
+        }
+    });
+}
+
+function quickAdjustStock(productId, delta) {
+    const p = state.products ? state.products.find(item => item.id === productId) : null;
+    if (!p) return;
+
+    const newStock = Math.max(0, (p.stock_quantity || 0) + delta);
+    p.stock_quantity = newStock;
+
+    const numEl = document.getElementById(`stock-num-${productId}`);
+    if (numEl) numEl.textContent = newStock;
+
+    fetch(`/api/v1/ecommerce/products/${encodeURIComponent(productId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stock_quantity: newStock })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            showToast(`Stock updated for ${p.name}: ${newStock} units`, 'success');
+            loadProductsCatalog();
+        }
+    })
+    .catch(err => {
+        showToast(`Stock update error: ${err.message}`, 'error');
+    });
+}
+
+function confirmDeleteProduct(productId, encodedName) {
+    const name = decodeURIComponent(encodedName);
+    openSafetyConfirmModal({
+        title: 'Delete Product from Catalog',
+        message: `Are you sure you want to remove "${name}" from your store catalog?`,
+        detail: `Product ID: ${productId}\nThis item will no longer appear in WhatsApp AI inquiries or store searches.`,
+        confirmBtnText: 'Archive / Delete',
+        onConfirm: () => {
+            fetch(`/api/v1/ecommerce/products/${encodeURIComponent(productId)}?hard=false`, {
+                method: 'DELETE'
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showToast(`Product "${name}" successfully removed.`, 'success');
+                    loadProductsCatalog();
+                } else {
+                    showToast(data.error || 'Failed to remove product', 'error');
+                }
+            })
+            .catch(err => {
+                showToast(`Delete error: ${err.message}`, 'error');
+            });
+        }
+    });
+}
+
+function seedDemoProducts() {
+    showToast('Populating sample online store catalog...', 'info');
+    fetch('/api/v1/ecommerce/products/seed-demo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            showToast(`Successfully loaded demo items into your shop catalog!`, 'success');
+            loadProductsCatalog();
+        } else {
+            showToast(data.error || 'Failed to load demo items', 'error');
+        }
+    })
+    .catch(err => {
+        showToast(`Seed demo error: ${err.message}`, 'error');
+    });
+}
+
+// --------------------------------------------------------------------------
+// WHATSAPP CATALOG DISPATCH WORKFLOW
+// --------------------------------------------------------------------------
+
+function openShareCatalogModal(category = '') {
+    const select = document.getElementById('shareCatalogCategory');
+    if (select && category) {
+        select.value = category;
+    }
+    const modal = document.getElementById('modalShareCatalog');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeShareCatalogModal() {
+    const modal = document.getElementById('modalShareCatalog');
+    if (modal) modal.style.display = 'none';
+}
+
+function submitShareCatalog() {
+    const phone = document.getElementById('shareCatalogPhone')?.value.trim();
+    if (!phone) {
+        showToast('Please enter a recipient phone number.', 'error');
+        return;
+    }
+
+    const category = document.getElementById('shareCatalogCategory')?.value || null;
+    const header = document.getElementById('shareCatalogHeader')?.value.trim() || null;
+    const btn = document.getElementById('btnShareCatalogSubmit');
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="icon spinning">🔄</span> Sending...';
+    }
+
+    fetch('/api/v1/ecommerce/catalog/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            to_phone: phone,
+            category: category,
+            header_text: header
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            showToast(`Interactive catalog sent to WhatsApp: ${phone}`, 'success');
+            closeShareCatalogModal();
+        } else {
+            showToast(data.error || data.message || 'Failed to send catalog', 'error');
+        }
+    })
+    .catch(err => {
+        showToast(`Dispatch error: ${err.message}`, 'error');
+    })
+    .finally(() => {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span class="icon">🚀</span> Dispatch via WhatsApp';
+        }
+    });
+}
+
+// --------------------------------------------------------------------------
+// IMAGE LIGHTBOX PREVIEW
+// --------------------------------------------------------------------------
+
+function openProductImagePreview(encodedUrl, encodedTitle) {
+    const url = decodeURIComponent(encodedUrl);
+    const title = decodeURIComponent(encodedTitle || 'Product Image');
+
+    if (!url || url === 'undefined') return;
+
+    const modal = document.getElementById('modalProductImagePreview');
+    const img = document.getElementById('imagePreviewImg');
+    const titleEl = document.getElementById('imagePreviewTitle');
+    const urlText = document.getElementById('imagePreviewUrlText');
+
+    if (img) img.src = url;
+    if (titleEl) titleEl.textContent = title;
+    if (urlText) urlText.innerHTML = `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: underline;">Open Full Resolution in New Tab ↗</a>`;
+
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeProductImagePreview() {
+    const modal = document.getElementById('modalProductImagePreview');
+    if (modal) modal.style.display = 'none';
 }

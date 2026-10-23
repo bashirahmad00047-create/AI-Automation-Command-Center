@@ -82,6 +82,11 @@
                 <span class="tab-label">CRM Leads</span>
                 <span class="nav-counter-pill" id="tabLeadCount" style="display:none;">0</span>
             </button>
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" id="tabNavProducts" onclick="switchTab('products')" title="Products Catalog &amp; Online Shop Management">
+                <span class="tab-icon">🛍️</span>
+                <span class="tab-label">Products Catalog</span>
+                <span class="nav-counter-pill success" id="tabProductCount" style="display:none;">0</span>
+            </button>
 
             <!-- GROUP 4: INTEGRATIONS -->
             <div class="nav-category-header text-gray-500 dark:text-slate-400">
@@ -2370,6 +2375,173 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
             </div>
         </section>
 
+        <!-- TAB: PRODUCTS CATALOG & SHOP MANAGEMENT -->
+        <section id="tab-products" class="tab-panel">
+            <div class="panel-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 24px;">
+                <div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 26px;">🛍️</span>
+                        <h2 style="margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em;">PRODUCTS CATALOG &amp; ONLINE SHOP</h2>
+                    </div>
+                    <p style="color: var(--text-secondary); margin-top: 6px; font-size: 0.92rem; max-width: 780px;">
+                        Manage shop inventory, live pricing, product images, and live WhatsApp sales auto-grounding directly from OpsFlow Cloud.
+                    </p>
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <button type="button" class="hud-btn outline small" onclick="seedDemoProducts()" title="Populate catalog with sample online store products">
+                        <span class="icon">✨</span> Load Demo Items
+                    </button>
+                    <button type="button" class="hud-btn outline small" onclick="openShareCatalogModal()" title="Share live product catalog with WhatsApp lead">
+                        <span class="icon">💬</span> Share Catalog via WhatsApp
+                    </button>
+                    <button type="button" class="hud-btn outline small" onclick="loadProductsCatalog()" title="Refresh Catalog">
+                        <span class="icon">🔄</span> Refresh
+                    </button>
+                    <button type="button" class="hud-btn primary" onclick="openAddProductModal()" style="font-weight: 600; display: inline-flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 1.1rem; line-height: 1;">+</span> Add Product
+                    </button>
+                </div>
+            </div>
+
+            <!-- KPI Summary Cards -->
+            <div class="products-catalog-kpi-grid">
+                <div class="product-kpi-card">
+                    <div class="product-kpi-icon blue">📦</div>
+                    <div class="product-kpi-details">
+                        <div class="val" id="prodMetricTotal">0</div>
+                        <div class="lbl">Total Products</div>
+                    </div>
+                </div>
+                <div class="product-kpi-card">
+                    <div class="product-kpi-icon emerald">✅</div>
+                    <div class="product-kpi-details">
+                        <div class="val" id="prodMetricInStock">0</div>
+                        <div class="lbl">In Stock (>5)</div>
+                    </div>
+                </div>
+                <div class="product-kpi-card">
+                    <div class="product-kpi-icon amber">⚠️</div>
+                    <div class="product-kpi-details">
+                        <div class="val" id="prodMetricLowStock">0</div>
+                        <div class="lbl">Low Stock (&le;5)</div>
+                    </div>
+                </div>
+                <div class="product-kpi-card">
+                    <div class="product-kpi-icon rose">🚫</div>
+                    <div class="product-kpi-details">
+                        <div class="val" id="prodMetricOutOfStock">0</div>
+                        <div class="lbl">Out of Stock</div>
+                    </div>
+                </div>
+                <div class="product-kpi-card">
+                    <div class="product-kpi-icon purple">💰</div>
+                    <div class="product-kpi-details">
+                        <div class="val" id="prodMetricValuation">PKR 0</div>
+                        <div class="lbl">Catalog Stock Value</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Products Filter & Search Bar Toolbar -->
+            <div class="hud-panel" style="padding: 16px; margin-bottom: 20px; border-radius: 10px;">
+                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                    <!-- Search Input -->
+                    <div style="flex: 2; min-width: 240px; position: relative;">
+                        <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 14px; color: var(--text-secondary); pointer-events: none;">🔍</span>
+                        <input type="text" id="productSearchInput" class="hud-input" placeholder="Search by product name, SKU, category..." style="width: 100%; padding-left: 36px;" oninput="debounceFilterProducts()">
+                    </div>
+
+                    <!-- Category Filter Dropdown -->
+                    <div style="flex: 1; min-width: 160px;">
+                        <select id="productCategoryFilter" class="hud-input" onchange="filterProductsTable()" style="width: 100%;">
+                            <option value="all">All Categories</option>
+                        </select>
+                    </div>
+
+                    <!-- Stock Status Filter Dropdown -->
+                    <div style="flex: 1; min-width: 150px;">
+                        <select id="productStockStatusFilter" class="hud-input" onchange="filterProductsTable()" style="width: 100%;">
+                            <option value="all">All Stock Statuses</option>
+                            <option value="in_stock">In Stock (&gt;5)</option>
+                            <option value="low_stock">Low Stock (1-5)</option>
+                            <option value="out_of_stock">Out of Stock (0)</option>
+                        </select>
+                    </div>
+
+                    <!-- Active Status Filter -->
+                    <div style="flex: 1; min-width: 140px;">
+                        <select id="productActiveFilter" class="hud-input" onchange="filterProductsTable()" style="width: 100%;">
+                            <option value="active">Active Only</option>
+                            <option value="all">All Items (Active + Archived)</option>
+                            <option value="archived">Archived Only</option>
+                        </select>
+                    </div>
+
+                    <!-- Sort Dropdown -->
+                    <div style="flex: 1; min-width: 150px;">
+                        <select id="productSortFilter" class="hud-input" onchange="filterProductsTable()" style="width: 100%;">
+                            <option value="name_asc">Name (A-Z)</option>
+                            <option value="name_desc">Name (Z-A)</option>
+                            <option value="price_asc">Price: Low to High</option>
+                            <option value="price_desc">Price: High to Low</option>
+                            <option value="stock_desc">Stock: High to Low</option>
+                            <option value="stock_asc">Stock: Low to High</option>
+                            <option value="newest">Recently Added</option>
+                        </select>
+                    </div>
+
+                    <!-- View Switcher -->
+                    <div style="display: flex; gap: 4px; border: 1px solid var(--border-color); border-radius: 6px; padding: 2px;">
+                        <button type="button" class="hud-btn small active" id="btnProductViewTable" onclick="setProductViewMode('table')" title="Table View" style="padding: 4px 8px;">
+                            📋 Table
+                        </button>
+                        <button type="button" class="hud-btn small outline" id="btnProductViewGrid" onclick="setProductViewMode('grid')" title="Card Grid View" style="padding: 4px 8px;">
+                            🔲 Grid
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Table View Container -->
+            <div id="productTableViewContainer" class="table-container hud-panel" style="padding: 0; overflow-x: auto; border-radius: 10px;">
+                <table class="hud-table" id="productsTable" style="margin: 0;">
+                    <thead>
+                        <tr>
+                            <th style="min-width: 280px;">PRODUCT &amp; DETAILS</th>
+                            <th style="min-width: 110px;">CATEGORY</th>
+                            <th style="min-width: 110px;">PRICE</th>
+                            <th style="min-width: 130px;">STOCK LEVEL</th>
+                            <th style="min-width: 110px;">STATUS</th>
+                            <th style="min-width: 130px;">IMAGE PREVIEW</th>
+                            <th style="min-width: 90px;">STORE</th>
+                            <th class="text-right" style="min-width: 150px;">ACTIONS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="productsTableBody">
+                        <tr><td colspan="8" class="text-center" style="padding: 30px; color: var(--text-secondary);">Loading product catalog...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Card Grid View Container -->
+            <div id="productGridViewContainer" class="product-grid-view" style="display: none;">
+                <!-- Populated dynamically via JS -->
+            </div>
+
+            <!-- Empty State Container -->
+            <div id="productsEmptyState" class="hud-panel" style="display: none; text-align: center; padding: 48px 24px; border-radius: 12px; margin-top: 16px;">
+                <div style="font-size: 48px; margin-bottom: 12px;">🛍️</div>
+                <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 6px;">No Products Found</h3>
+                <p style="color: var(--text-secondary); max-width: 480px; margin: 0 auto 20px auto; font-size: 13.5px;">
+                    No products match your current search and filter settings. You can add a new product or seed demo online shop items.
+                </p>
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button type="button" class="hud-btn primary" onclick="openAddProductModal()">+ Add New Product</button>
+                    <button type="button" class="hud-btn outline" onclick="seedDemoProducts()">✨ Load Sample Store Items</button>
+                </div>
+            </div>
+        </section>
+
         <!-- TAB 13: API DOCUMENTATION -->
         <section id="tab-apidocs" class="tab-panel">
             <div class="blueprints-intro" style="margin-bottom: 24px;">
@@ -3983,6 +4155,317 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: ADD PRODUCT -->
+    <div class="hud-modal-overlay" id="modalAddProduct" style="display:none;" onclick="if(event.target===this) closeAddProductModal()">
+        <div class="hud-modal" style="max-width: 720px; width: 95vw;">
+            <div class="modal-header">
+                <div class="hud-flex-row hud-gap-md" style="align-items: center;">
+                    <span style="font-size: 22px;">🛍️</span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 16px;">Add New Shop Product</h3>
+                        <p style="font-size: 11.5px; color: var(--text-dim, #888); margin: 2px 0 0 0;">Create an online store item with live stock, pricing, and WhatsApp AI discovery</p>
+                    </div>
+                </div>
+                <button type="button" class="close-btn" onclick="closeAddProductModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px; max-height: 75vh; overflow-y: auto;">
+                <form id="addProductForm" onsubmit="event.preventDefault(); submitCreateProduct();">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <!-- Left column: Main Product Info -->
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Product Name <span style="color: #f87171;">*</span></label>
+                                <input type="text" id="addProdName" class="hud-input" placeholder="e.g. Wireless Noise-Cancelling Earbuds" required oninput="updateAddProductPreview()" style="width: 100%;">
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Category</label>
+                                    <input type="text" id="addProdCategory" class="hud-input" placeholder="e.g. Audio, Wearables" list="addProdCategoryDatalist" oninput="updateAddProductPreview()" style="width: 100%;">
+                                    <datalist id="addProdCategoryDatalist"></datalist>
+                                </div>
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">SKU Code</label>
+                                    <div style="display: flex; gap: 6px;">
+                                        <input type="text" id="addProdSku" class="hud-input mono" placeholder="SKU-..." style="flex: 1; font-size: 12px;">
+                                        <button type="button" class="hud-btn outline small" onclick="generateRandomSku('addProdSku')" title="Generate SKU">Auto</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Price <span style="color: #f87171;">*</span></label>
+                                    <input type="number" id="addProdPrice" class="hud-input" placeholder="0.00" step="0.01" min="0" required oninput="updateAddProductPreview()" style="width: 100%;">
+                                </div>
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Currency</label>
+                                    <select id="addProdCurrency" class="hud-input" onchange="updateAddProductPreview()" style="width: 100%;">
+                                        <option value="PKR" selected>PKR (Rs.)</option>
+                                        <option value="USD">USD ($)</option>
+                                        <option value="EUR">EUR (€)</option>
+                                        <option value="GBP">GBP (£)</option>
+                                        <option value="AED">AED (AED)</option>
+                                        <option value="SAR">SAR (SAR)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Stock Quantity <span style="color: #f87171;">*</span></label>
+                                    <input type="number" id="addProdStock" class="hud-input" placeholder="0" min="0" value="10" required oninput="updateAddProductPreview()" style="width: 100%;">
+                                </div>
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Unit</label>
+                                    <input type="text" id="addProdUnit" class="hud-input" placeholder="piece, box, pack" value="piece" style="width: 100%;">
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Barcode / EAN (Optional)</label>
+                                <input type="text" id="addProdBarcode" class="hud-input mono" placeholder="e.g. 890123456789" style="width: 100%;">
+                            </div>
+                        </div>
+
+                        <!-- Right column: Media, Description & Live Preview -->
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Image URL</label>
+                                <input type="url" id="addProdImageUrl" class="hud-input" placeholder="https://images.unsplash.com/... or /static/..." oninput="updateAddProductPreview()" style="width: 100%;">
+                                <div style="display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap;">
+                                    <span style="font-size: 10.5px; color: var(--text-secondary); margin-right: 2px;">Presets:</span>
+                                    <button type="button" class="hud-btn outline" style="font-size: 10px; padding: 2px 6px;" onclick="setPresetImageUrl('addProdImageUrl', 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&auto=format&fit=crop&q=60')">Headphones</button>
+                                    <button type="button" class="hud-btn outline" style="font-size: 10px; padding: 2px 6px;" onclick="setPresetImageUrl('addProdImageUrl', 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&auto=format&fit=crop&q=60')">Smartwatch</button>
+                                    <button type="button" class="hud-btn outline" style="font-size: 10px; padding: 2px 6px;" onclick="setPresetImageUrl('addProdImageUrl', 'https://images.unsplash.com/photo-1583863788434-e58a36330cf0?w=500&auto=format&fit=crop&q=60')">Charger</button>
+                                    <button type="button" class="hud-btn outline" style="font-size: 10px; padding: 2px 6px;" onclick="setPresetImageUrl('addProdImageUrl', 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=500&auto=format&fit=crop&q=60')">Keyboard</button>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Description</label>
+                                <textarea id="addProdDescription" class="hud-input" rows="3" placeholder="Detailed product specifications, key features, and warranty..." oninput="updateAddProductPreview()" style="width: 100%; resize: vertical;"></textarea>
+                            </div>
+
+                            <!-- Live Shop Card Preview -->
+                            <div style="border-top: 1px solid var(--border-color); padding-top: 10px;">
+                                <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Live Catalog Card Preview</div>
+                                <div class="live-card-preview" id="addProdLivePreview">
+                                    <div class="live-card-preview-thumb">
+                                        <img id="addPreviewImg" src="" alt="Thumbnail" style="display: none;" onerror="this.style.display='none'; document.getElementById('addPreviewFallback').style.display='block';">
+                                        <span id="addPreviewFallback" style="font-size: 26px;">🛍️</span>
+                                    </div>
+                                    <div style="flex: 1; min-width: 0;">
+                                        <div id="addPreviewTitle" style="font-weight: 700; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary);">Product Name</div>
+                                        <div style="display: flex; gap: 6px; align-items: center; margin: 3px 0;">
+                                            <span id="addPreviewCategory" class="product-category-tag">General</span>
+                                            <span id="addPreviewStockPill" class="stock-status-pill in-stock">10 In Stock</span>
+                                        </div>
+                                        <div id="addPreviewPrice" style="font-weight: 700; font-size: 13px; color: #38bdf8;">PKR 0.00</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                                <input type="checkbox" id="addProdIsActive" checked style="cursor: pointer; width: 16px; height: 16px;">
+                                <label for="addProdIsActive" style="font-size: 12px; font-weight: 600; cursor: pointer;">Product is Active &amp; Ready for Sale</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-footer" style="padding: 16px 0 0 0; margin-top: 18px; border-top: 1px solid var(--border-color, #2a2e3d); display: flex; justify-content: flex-end; gap: 10px;">
+                        <button type="button" class="hud-btn outline" onclick="closeAddProductModal()">Cancel</button>
+                        <button type="submit" class="hud-btn primary" id="btnAddProdSubmit">
+                            <span class="icon">💾</span> Save &amp; Add Product
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: EDIT PRODUCT -->
+    <div class="hud-modal-overlay" id="modalEditProduct" style="display:none;" onclick="if(event.target===this) closeEditProductModal()">
+        <div class="hud-modal" style="max-width: 720px; width: 95vw;">
+            <div class="modal-header">
+                <div class="hud-flex-row hud-gap-md" style="align-items: center;">
+                    <span style="font-size: 22px;">✏️</span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 16px;">Edit Shop Product</h3>
+                        <p style="font-size: 11.5px; color: var(--text-dim, #888); margin: 2px 0 0 0;">Update stock levels, price, image URL, and specifications</p>
+                    </div>
+                </div>
+                <button type="button" class="close-btn" onclick="closeEditProductModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px; max-height: 75vh; overflow-y: auto;">
+                <form id="editProductForm" onsubmit="event.preventDefault(); submitUpdateProduct();">
+                    <input type="hidden" id="editProdId">
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <!-- Left column -->
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Product Name <span style="color: #f87171;">*</span></label>
+                                <input type="text" id="editProdName" class="hud-input" required oninput="updateEditProductPreview()" style="width: 100%;">
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Category</label>
+                                    <input type="text" id="editProdCategory" class="hud-input" list="editProdCategoryDatalist" oninput="updateEditProductPreview()" style="width: 100%;">
+                                    <datalist id="editProdCategoryDatalist"></datalist>
+                                </div>
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">SKU Code</label>
+                                    <input type="text" id="editProdSku" class="hud-input mono" style="width: 100%; font-size: 12px;">
+                                </div>
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Price <span style="color: #f87171;">*</span></label>
+                                    <input type="number" id="editProdPrice" class="hud-input" step="0.01" min="0" required oninput="updateEditProductPreview()" style="width: 100%;">
+                                </div>
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Currency</label>
+                                    <select id="editProdCurrency" class="hud-input" onchange="updateEditProductPreview()" style="width: 100%;">
+                                        <option value="PKR">PKR (Rs.)</option>
+                                        <option value="USD">USD ($)</option>
+                                        <option value="EUR">EUR (€)</option>
+                                        <option value="GBP">GBP (£)</option>
+                                        <option value="AED">AED (AED)</option>
+                                        <option value="SAR">SAR (SAR)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Stock Quantity <span style="color: #f87171;">*</span></label>
+                                    <input type="number" id="editProdStock" class="hud-input" min="0" required oninput="updateEditProductPreview()" style="width: 100%;">
+                                </div>
+                                <div class="form-group">
+                                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Unit</label>
+                                    <input type="text" id="editProdUnit" class="hud-input" style="width: 100%;">
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Barcode / EAN</label>
+                                <input type="text" id="editProdBarcode" class="hud-input mono" style="width: 100%;">
+                            </div>
+                        </div>
+
+                        <!-- Right column -->
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Image URL</label>
+                                <input type="url" id="editProdImageUrl" class="hud-input" oninput="updateEditProductPreview()" style="width: 100%;">
+                                <div style="display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap;">
+                                    <span style="font-size: 10.5px; color: var(--text-secondary); margin-right: 2px;">Presets:</span>
+                                    <button type="button" class="hud-btn outline" style="font-size: 10px; padding: 2px 6px;" onclick="setPresetImageUrl('editProdImageUrl', 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&auto=format&fit=crop&q=60')">Headphones</button>
+                                    <button type="button" class="hud-btn outline" style="font-size: 10px; padding: 2px 6px;" onclick="setPresetImageUrl('editProdImageUrl', 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&auto=format&fit=crop&q=60')">Smartwatch</button>
+                                    <button type="button" class="hud-btn outline" style="font-size: 10px; padding: 2px 6px;" onclick="setPresetImageUrl('editProdImageUrl', 'https://images.unsplash.com/photo-1583863788434-e58a36330cf0?w=500&auto=format&fit=crop&q=60')">Charger</button>
+                                    <button type="button" class="hud-btn outline" style="font-size: 10px; padding: 2px 6px;" onclick="setPresetImageUrl('editProdImageUrl', 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=500&auto=format&fit=crop&q=60')">Keyboard</button>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Description</label>
+                                <textarea id="editProdDescription" class="hud-input" rows="3" oninput="updateEditProductPreview()" style="width: 100%; resize: vertical;"></textarea>
+                            </div>
+
+                            <!-- Live Card Preview -->
+                            <div style="border-top: 1px solid var(--border-color); padding-top: 10px;">
+                                <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Live Catalog Card Preview</div>
+                                <div class="live-card-preview" id="editProdLivePreview">
+                                    <div class="live-card-preview-thumb">
+                                        <img id="editPreviewImg" src="" alt="Thumbnail" style="display: none;" onerror="this.style.display='none'; document.getElementById('editPreviewFallback').style.display='block';">
+                                        <span id="editPreviewFallback" style="font-size: 26px;">🛍️</span>
+                                    </div>
+                                    <div style="flex: 1; min-width: 0;">
+                                        <div id="editPreviewTitle" style="font-weight: 700; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary);">Product Name</div>
+                                        <div style="display: flex; gap: 6px; align-items: center; margin: 3px 0;">
+                                            <span id="editPreviewCategory" class="product-category-tag">General</span>
+                                            <span id="editPreviewStockPill" class="stock-status-pill in-stock">0 In Stock</span>
+                                        </div>
+                                        <div id="editPreviewPrice" style="font-weight: 700; font-size: 13px; color: #38bdf8;">PKR 0.00</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                                <input type="checkbox" id="editProdIsActive" style="cursor: pointer; width: 16px; height: 16px;">
+                                <label for="editProdIsActive" style="font-size: 12px; font-weight: 600; cursor: pointer;">Product is Active &amp; Visible in Shop</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-footer" style="padding: 16px 0 0 0; margin-top: 18px; border-top: 1px solid var(--border-color, #2a2e3d); display: flex; justify-content: flex-end; gap: 10px;">
+                        <button type="button" class="hud-btn outline" onclick="closeEditProductModal()">Cancel</button>
+                        <button type="submit" class="hud-btn primary" id="btnEditProdSubmit">
+                            <span class="icon">💾</span> Update Product
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: SHARE CATALOG VIA WHATSAPP -->
+    <div class="hud-modal-overlay" id="modalShareCatalog" style="display:none;" onclick="if(event.target===this) closeShareCatalogModal()">
+        <div class="hud-modal" style="max-width: 520px;">
+            <div class="modal-header">
+                <div class="hud-flex-row hud-gap-md" style="align-items: center;">
+                    <span style="font-size: 22px;">💬</span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 16px;">Share Catalog via WhatsApp</h3>
+                        <p style="font-size: 11.5px; color: var(--text-dim, #888); margin: 2px 0 0 0;">Dispatch interactive shop items and pricing directly to customer chats</p>
+                    </div>
+                </div>
+                <button type="button" class="close-btn" onclick="closeShareCatalogModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <form id="shareCatalogForm" onsubmit="event.preventDefault(); submitShareCatalog();">
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Customer WhatsApp Phone <span style="color: #f87171;">*</span></label>
+                        <input type="text" id="shareCatalogPhone" class="hud-input mono" placeholder="+923001234567 or 03001234567" required style="width: 100%;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Filter Category (Optional)</label>
+                        <select id="shareCatalogCategory" class="hud-input" style="width: 100%;">
+                            <option value="">All Categories (Full Catalog)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Custom Header Text (Optional)</label>
+                        <input type="text" id="shareCatalogHeader" class="hud-input" placeholder="e.g. Assalam-o-Alaikum! Here is our latest product catalog:" style="width: 100%;">
+                    </div>
+                    <div class="modal-footer" style="padding: 14px 0 0 0; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 10px;">
+                        <button type="button" class="hud-btn outline" onclick="closeShareCatalogModal()">Cancel</button>
+                        <button type="submit" class="hud-btn primary" id="btnShareCatalogSubmit">
+                            <span class="icon">🚀</span> Dispatch via WhatsApp
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: IMAGE LIGHTBOX PREVIEW -->
+    <div class="hud-modal-overlay" id="modalProductImagePreview" style="display:none;" onclick="if(event.target===this) closeProductImagePreview()">
+        <div class="hud-modal" style="max-width: 600px; text-align: center; background: rgba(15, 23, 42, 0.95); border: 1px solid var(--cyan-glow);">
+            <div class="modal-header" style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                <h3 id="imagePreviewTitle" style="margin: 0; font-size: 15px; color: #ffffff;">Product Image Preview</h3>
+                <button type="button" class="close-btn" onclick="closeProductImagePreview()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <img id="imagePreviewImg" src="" alt="Full Product Image" style="max-width: 100%; max-height: 65vh; border-radius: 8px; object-fit: contain; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+                <div id="imagePreviewUrlText" style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px; color: #94a3b8; word-break: break-all;"></div>
             </div>
         </div>
     </div>

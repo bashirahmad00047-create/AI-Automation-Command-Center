@@ -4542,15 +4542,67 @@ def list_ecommerce_products():
     query_term = request.args.get("query") or request.args.get("q")
     category = request.args.get("category")
     in_stock_only = request.args.get("in_stock_only", "").lower() in ("true", "1", "yes")
-    limit = min(int(request.args.get("limit", 50)), 200)
+    include_inactive = request.args.get("include_inactive", "").lower() in ("true", "1", "yes")
+    stock_status_filter = request.args.get("stock_status")
+    limit = min(int(request.args.get("limit", 100)), 500)
 
-    products = WhatsAppService.query_product_catalog(
-        organization_id=org.id,
-        search_query=query_term,
-        category=category,
-        in_stock_only=in_stock_only,
-        limit=limit
-    )
+    # Base query for tenant products
+    query = Product.query.filter(Product.organization_id == org.id)
+    if not include_inactive:
+        status_filter = (request.args.get("status") or "").lower()
+        if status_filter == "archived" or status_filter == "inactive":
+            query = query.filter(Product.is_active.is_(False))
+        elif status_filter != "all":
+            query = query.filter(Product.is_active.is_(True))
+
+    if category and category.strip() and category.strip().lower() != "all":
+        query = query.filter(Product.category.ilike(f"%{category.strip()}%"))
+
+    if in_stock_only:
+        query = query.filter(Product.stock_quantity > 0)
+
+    if stock_status_filter and stock_status_filter.lower() != "all":
+        query = query.filter(Product.stock_status == stock_status_filter.strip())
+
+    if query_term and query_term.strip():
+        clean_term = query_term.strip()
+        tokens = [t for t in clean_term.split() if len(t) >= 2][:4]
+        if tokens:
+            conditions = []
+            for t in tokens:
+                conditions.append(
+                    db.or_(
+                        Product.name.ilike(f"%{t}%"),
+                        Product.description.ilike(f"%{t}%"),
+                        Product.sku.ilike(f"%{t}%"),
+                        Product.category.ilike(f"%{t}%")
+                    )
+                )
+            query = query.filter(db.and_(*conditions))
+        else:
+            query = query.filter(
+                db.or_(
+                    Product.name.ilike(f"%{clean_term}%"),
+                    Product.description.ilike(f"%{clean_term}%"),
+                    Product.sku.ilike(f"%{clean_term}%")
+                )
+            )
+
+    sort_param = request.args.get("sort", "name_asc")
+    if sort_param == "price_asc":
+        query = query.order_by(Product.price.asc())
+    elif sort_param == "price_desc":
+        query = query.order_by(Product.price.desc())
+    elif sort_param == "stock_asc":
+        query = query.order_by(Product.stock_quantity.asc())
+    elif sort_param == "stock_desc":
+        query = query.order_by(Product.stock_quantity.desc())
+    elif sort_param == "newest":
+        query = query.order_by(Product.created_at.desc())
+    else:
+        query = query.order_by(Product.name.asc())
+
+    products = [p.to_dict() for p in query.limit(limit).all()]
 
     categories = [
         c[0] for c in db.session.query(Product.category)
@@ -4558,13 +4610,39 @@ def list_ecommerce_products():
         .distinct().all() if c[0]
     ]
 
+    all_tenant_products = Product.query.filter(Product.organization_id == org.id).all()
+    stats = {
+        "total": len(all_tenant_products),
+        "active": sum(1 for p in all_tenant_products if p.is_active),
+        "in_stock": sum(1 for p in all_tenant_products if p.is_active and p.stock_quantity > 5),
+        "low_stock": sum(1 for p in all_tenant_products if p.is_active and 0 < p.stock_quantity <= 5),
+        "out_of_stock": sum(1 for p in all_tenant_products if p.is_active and p.stock_quantity <= 0),
+        "total_inventory_value": round(sum((p.price or 0.0) * (p.stock_quantity or 0) for p in all_tenant_products if p.is_active), 2)
+    }
+
     return jsonify({
         "status": "success",
         "organization_id": org.id,
         "count": len(products),
         "categories": categories,
-        "products": products
+        "products": products,
+        "stats": stats
     }), 200
+
+
+@api_v1.route("/ecommerce/products/<product_id>", methods=["GET"])
+@require_auth
+def get_ecommerce_product(product_id: str):
+    """Retrieve single product details."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    product = Product.query.filter_by(id=product_id, organization_id=org.id).first()
+    if not product:
+        return jsonify({"error": "Product not found.", "code": "NOT_FOUND"}), 404
+
+    return jsonify({"status": "success", "product": product.to_dict()}), 200
 
 
 @api_v1.route("/ecommerce/products", methods=["POST"])
@@ -4629,6 +4707,10 @@ def update_ecommerce_product(product_id: str):
         product.description = str(data["description"]).strip()
     if "sku" in data:
         product.sku = str(data["sku"]).strip() or None
+    if "barcode" in data:
+        product.barcode = str(data["barcode"]).strip() or None
+    if "unit" in data:
+        product.unit = str(data["unit"]).strip() or "piece"
     if "image_url" in data:
         product.image_url = str(data["image_url"]).strip() or None
     if "price" in data:
@@ -4650,7 +4732,157 @@ def update_ecommerce_product(product_id: str):
         product.is_active = bool(data["is_active"])
 
     db.session.commit()
+    log_audit_event("ecommerce.product_updated", "product", product.id, {"name": product.name, "price": product.price})
     return jsonify({"status": "success", "product": product.to_dict()}), 200
+
+
+@api_v1.route("/ecommerce/products/<product_id>", methods=["DELETE"])
+@require_auth
+def delete_ecommerce_product(product_id: str):
+    """Deletes or archives an existing product in the tenant catalog."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    product = Product.query.filter_by(id=product_id, organization_id=org.id).first()
+    if not product:
+        return jsonify({"error": "Product not found.", "code": "NOT_FOUND"}), 404
+
+    hard_delete = request.args.get("hard", "").lower() in ("true", "1", "yes")
+    prod_name = product.name
+    prod_id = product.id
+
+    if hard_delete:
+        db.session.delete(product)
+    else:
+        product.is_active = False
+
+    db.session.commit()
+    log_audit_event("ecommerce.product_deleted", "product", prod_id, {"name": prod_name, "hard_delete": hard_delete})
+    return jsonify({"status": "success", "message": f"Product '{prod_name}' successfully removed."}), 200
+
+
+@api_v1.route("/ecommerce/products/seed-demo", methods=["POST"])
+@require_auth
+def seed_demo_ecommerce_products():
+    """Populates initial sample commerce items for instant dashboard preview and testing."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    demo_items = [
+        # --- Online Store Categories ---
+        {
+            "name": "Noise-Cancelling Wireless Pro Headphones",
+            "category": "Online - Audio",
+            "description": "Active Noise Cancelling over-ear headphones with 40h playtime and fast Type-C charging.",
+            "sku": "AUD-NC-700",
+            "barcode": "8901234567891",
+            "image_url": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&auto=format&fit=crop&q=60",
+            "unit": "piece",
+            "price": 8999.0,
+            "currency": "PKR",
+            "stock_quantity": 18
+        },
+        {
+            "name": "Smart Fitness & Health Tracker Watch V2",
+            "category": "Online - Wearables",
+            "description": "Waterproof smart smartwatch with heart-rate monitoring, SpO2 sensor, and 14-day battery.",
+            "sku": "WAT-SM-202",
+            "barcode": "8901234567892",
+            "image_url": "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&auto=format&fit=crop&q=60",
+            "unit": "piece",
+            "price": 12500.0,
+            "currency": "PKR",
+            "stock_quantity": 4
+        },
+        {
+            "name": "65W GaN Dual-Port Fast Wall Charger",
+            "category": "Online - Accessories",
+            "description": "Ultra-compact Gallium Nitride power adapter for laptops, tablets, and phones.",
+            "sku": "PWR-GAN-065",
+            "barcode": "8901234567893",
+            "image_url": "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?w=500&auto=format&fit=crop&q=60",
+            "unit": "piece",
+            "price": 3850.0,
+            "currency": "PKR",
+            "stock_quantity": 32
+        },
+        {
+            "name": "Mechanical RGB Gaming Keyboard (Blue Switches)",
+            "category": "Online - Peripherals",
+            "description": "Tenkeyless mechanical keyboard with customizable RGB backlighting and tactile switches.",
+            "sku": "KBD-MECH-RGB",
+            "barcode": "8901234567894",
+            "image_url": "https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=500&auto=format&fit=crop&q=60",
+            "unit": "piece",
+            "price": 7200.0,
+            "currency": "PKR",
+            "stock_quantity": 0
+        },
+        # --- Offline & Retail In-Store Categories ---
+        {
+            "name": "POS Thermal Receipt Paper Rolls (Pack of 50)",
+            "category": "Offline - Store Supplies",
+            "description": "BPA-free high-density thermal paper rolls for in-store point of sale registers and terminals.",
+            "sku": "RET-PAP-050",
+            "barcode": "8901234567896",
+            "image_url": "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=500&auto=format&fit=crop&q=60",
+            "unit": "pack",
+            "price": 2500.0,
+            "currency": "PKR",
+            "stock_quantity": 80
+        },
+        {
+            "name": "Handheld Wireless POS Barcode Scanner",
+            "category": "Offline - Retail Hardware",
+            "description": "Plug-and-play Bluetooth & 2.4G laser barcode scanner with charging cradle for walk-in checkout counters.",
+            "sku": "RET-SCN-101",
+            "barcode": "8901234567897",
+            "image_url": "https://images.unsplash.com/photo-1556742049-0a67e5572263?w=500&auto=format&fit=crop&q=60",
+            "unit": "piece",
+            "price": 4800.0,
+            "currency": "PKR",
+            "stock_quantity": 15
+        },
+        {
+            "name": "Store Branded Cotton Canvas Shopping Tote",
+            "category": "Offline - In-Store Merchandise",
+            "description": "Eco-friendly reusable shopping bags for retail shop customers and physical checkout counters.",
+            "sku": "RET-BAG-001",
+            "barcode": "8901234567898",
+            "image_url": "https://images.unsplash.com/photo-1544816155-12df9643f363?w=500&auto=format&fit=crop&q=60",
+            "unit": "piece",
+            "price": 650.0,
+            "currency": "PKR",
+            "stock_quantity": 120
+        }
+    ]
+
+    created = 0
+    for item in demo_items:
+        existing = Product.query.filter_by(organization_id=org.id, name=item["name"]).first()
+        if not existing:
+            p = Product(
+                organization_id=org.id,
+                name=item["name"],
+                category=item["category"],
+                description=item["description"],
+                sku=item["sku"],
+                barcode=item["barcode"],
+                image_url=item["image_url"],
+                unit=item["unit"],
+                price=item["price"],
+                currency=item["currency"],
+                stock_quantity=item["stock_quantity"],
+                stock_status="out_of_stock" if item["stock_quantity"] <= 0 else ("low_stock" if item["stock_quantity"] <= 5 else "in_stock"),
+                is_active=True
+            )
+            db.session.add(p)
+            created += 1
+
+    db.session.commit()
+    return jsonify({"status": "success", "message": f"Successfully created {created} demo products.", "created_count": created}), 201
 
 
 @api_v1.route("/ecommerce/catalog/share", methods=["POST"])

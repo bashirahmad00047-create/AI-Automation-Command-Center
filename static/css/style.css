@@ -6772,3 +6772,370 @@ html.dark .dark\:hover\:bg-slate-800:hover, .dark .dark\:hover\:bg-slate-800:hov
 
 
 
+
+
+/* ==========================================================================
+   OPSFLOW CLOUD: PRODUCTS CATALOG & SHOP MANAGEMENT MODULE
+   ========================================================================== */
+
+.products-catalog-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.product-kpi-card {
+    background: var(--bg-card, rgba(22, 27, 34, 0.7));
+    border: 1px solid var(--border-color, #2a2e3d);
+    border-radius: 12px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.product-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    border-color: var(--border-highlight, #3b82f6);
+}
+
+.product-kpi-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    flex-shrink: 0;
+}
+
+.product-kpi-icon.blue { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+.product-kpi-icon.emerald { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+.product-kpi-icon.amber { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+.product-kpi-icon.rose { background: rgba(244, 63, 94, 0.15); color: #fb7185; }
+.product-kpi-icon.purple { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+
+.product-kpi-details .val {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary, #ffffff);
+    line-height: 1.2;
+}
+
+.product-kpi-details .lbl {
+    font-size: 12px;
+    color: var(--text-secondary, #94a3b8);
+    margin-top: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+
+.product-thumb-container {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-color, #2a2e3d);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+    position: relative;
+}
+
+.product-thumb-container:hover {
+    border-color: var(--cyan-glow, #00f0ff);
+}
+
+.product-thumb-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.2s ease;
+}
+
+.product-thumb-container:hover .product-thumb-img {
+    transform: scale(1.1);
+}
+
+.product-item-cell {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.product-item-title {
+    font-weight: 600;
+    font-size: 13.5px;
+    color: var(--text-primary, #ffffff);
+    margin-bottom: 2px;
+}
+
+.product-item-desc {
+    font-size: 11.5px;
+    color: var(--text-secondary, #8b949e);
+    max-width: 260px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.product-sku-pill {
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border-color, #2a2e3d);
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: var(--text-secondary, #cbd5e1);
+    display: inline-block;
+}
+
+.stock-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.stock-status-pill.in-stock {
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.stock-status-pill.low-stock {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.stock-status-pill.out-of-stock {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.stock-qty-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color, #2a2e3d);
+    border-radius: 6px;
+    padding: 2px 4px;
+}
+
+.stock-qty-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary, #94a3b8);
+    font-weight: 700;
+    cursor: pointer;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.stock-qty-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #ffffff);
+}
+
+.stock-qty-num {
+    font-weight: 700;
+    font-size: 13px;
+    min-width: 28px;
+    text-align: center;
+    color: var(--text-primary, #ffffff);
+}
+
+.product-image-url-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    color: #38bdf8;
+    text-decoration: none;
+    max-width: 150px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: rgba(56, 189, 248, 0.08);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    cursor: pointer;
+}
+
+.product-image-url-link:hover {
+    background: rgba(56, 189, 248, 0.18);
+    text-decoration: underline;
+}
+
+.product-category-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(99, 102, 241, 0.12);
+    color: #818cf8;
+    border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+.product-price-val {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--text-primary, #ffffff);
+}
+
+.product-price-curr {
+    font-size: 11px;
+    color: var(--text-secondary, #94a3b8);
+    margin-left: 2px;
+}
+
+.product-actions-cell {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.product-grid-view {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 18px;
+    margin-top: 16px;
+}
+
+.product-card {
+    background: var(--bg-card, rgba(22, 27, 34, 0.7));
+    border: 1px solid var(--border-color, #2a2e3d);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.product-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    border-color: var(--border-highlight, #3b82f6);
+}
+
+.product-card-media {
+    width: 100%;
+    height: 160px;
+    background: rgba(0, 0, 0, 0.2);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.product-card-media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.product-card:hover .product-card-media img {
+    transform: scale(1.05);
+}
+
+.product-card-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+}
+
+.product-card-status-pill {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+}
+
+.product-card-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.product-card-title {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text-primary, #ffffff);
+    margin-bottom: 6px;
+    line-height: 1.3;
+}
+
+.product-card-desc {
+    font-size: 12px;
+    color: var(--text-secondary, #94a3b8);
+    line-height: 1.4;
+    margin-bottom: 14px;
+    flex: 1;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.product-card-footer {
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color, #2a2e3d);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.live-card-preview {
+    background: var(--bg-card, rgba(22, 27, 34, 0.8));
+    border: 1px solid var(--border-color, #334155);
+    border-radius: 12px;
+    padding: 14px;
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin-top: 10px;
+}
+
+.live-card-preview-thumb {
+    width: 72px;
+    height: 72px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color, #334155);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.live-card-preview-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
