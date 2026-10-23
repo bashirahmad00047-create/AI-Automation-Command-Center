@@ -64,3 +64,4 @@ backup_*.py
 *_dump*.json
 targeted_cleanup_backup.json
 
+fix_*.py

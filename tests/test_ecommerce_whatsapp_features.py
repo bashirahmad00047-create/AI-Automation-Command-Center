@@ -357,6 +357,27 @@ class TestEcommerceWhatsAppFeatures(unittest.TestCase):
             })
             self.assertEqual(share_resp.status_code, 200)
 
+        # 4. Get product by ID
+        get_resp = self.client.get(f"/api/v1/ecommerce/products/{prd_data['id']}")
+        self.assertEqual(get_resp.status_code, 200)
+        self.assertEqual(get_resp.get_json()["product"]["sku"], "CAB-002")
+
+        # 5. Update product
+        upd_resp = self.client.put(f"/api/v1/ecommerce/products/{prd_data['id']}", json={
+            "price": 1350.0,
+            "stock_quantity": 40
+        })
+        self.assertEqual(upd_resp.status_code, 200)
+        self.assertEqual(upd_resp.get_json()["product"]["price"], 1350.0)
+
+        # 6. Delete product
+        del_resp = self.client.delete(f"/api/v1/ecommerce/products/{prd_data['id']}")
+        self.assertEqual(del_resp.status_code, 200)
+
+        # 7. Seed demo products
+        seed_resp = self.client.post("/api/v1/ecommerce/products/seed-demo")
+        self.assertEqual(seed_resp.status_code, 201)
+
     def test_api_ecommerce_orders_and_tracking(self):
         """Verifies order creation, WhatsApp notification endpoint, and public tracking lookup."""
         with self.client.session_transaction() as sess:
