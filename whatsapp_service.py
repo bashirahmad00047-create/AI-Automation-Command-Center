@@ -3188,8 +3188,29 @@ class WhatsAppService:
                         body = msg.get("button", {}).get("text", "")
                     elif msg_type == "interactive":
                         body = msg.get("interactive", {}).get("button_reply", {}).get("title", "") or msg.get("interactive", {}).get("list_reply", {}).get("title", "")
+                    elif msg_type == "location":
+                        loc_obj = msg.get("location", {})
+                        lat = loc_obj.get("latitude")
+                        lng = loc_obj.get("longitude")
+                        loc_name = loc_obj.get("name", "")
+                        loc_addr = loc_obj.get("address", "")
+                        maps_url = f"https://www.google.com/maps?q={lat},{lng}"
+                        desc = f"{loc_name} - {loc_addr}".strip(" -") or "Pinned Location"
+                        body = f"📍 Location shared: {desc} (Lat: {lat}, Lng: {lng})\nMap: {maps_url}"
                     else:
                         body = f"[{msg_type.upper()} message]"
+
+                    loc_meta = None
+                    if msg_type == "location":
+                        loc_obj = msg.get("location", {})
+                        if loc_obj.get("latitude") is not None:
+                            loc_meta = {
+                                "latitude": float(loc_obj.get("latitude")),
+                                "longitude": float(loc_obj.get("longitude", 0.0)),
+                                "name": str(loc_obj.get("name", "")).strip(),
+                                "address": str(loc_obj.get("address", "")).strip(),
+                                "maps_url": f"https://www.google.com/maps?q={loc_obj.get('latitude')},{loc_obj.get('longitude')}"
+                            }
 
                     messages.append({
                         "message_id": msg_id,
@@ -3201,6 +3222,7 @@ class WhatsAppService:
                         "timestamp": timestamp,
                         "message_type": msg_type,
                         "body": body,
+                        "location": loc_meta,
                         "raw": msg
                     })
 
@@ -3241,13 +3263,29 @@ class WhatsAppService:
                 reply_text = text_data.get("textMessage") or text_data.get("text") or ""
 
         if not reply_text:
-            reply_text = (
-                message_data_or_item.get("textMessage")
-                or message_data_or_item.get("text")
-                or message_data_or_item.get("body")
-                or message_data_or_item.get("message")
-                or ""
+            # Check for locationMessageData (Green-API / Meta)
+            loc_data = (
+                message_data_or_item.get("locationMessageData")
+                or message_data_or_item.get("location")
+                or message_data_or_item.get("locationData")
+                or {}
             )
+            if isinstance(loc_data, dict) and (loc_data.get("latitude") is not None or loc_data.get("lat") is not None):
+                lat = loc_data.get("latitude") if loc_data.get("latitude") is not None else loc_data.get("lat")
+                lng = loc_data.get("longitude") if loc_data.get("longitude") is not None else loc_data.get("lng")
+                loc_name = loc_data.get("nameLocation") or loc_data.get("name") or ""
+                loc_addr = loc_data.get("address") or ""
+                maps_url = f"https://www.google.com/maps?q={lat},{lng}"
+                desc = f"{loc_name} - {loc_addr}".strip(" -") or "Pinned Location"
+                reply_text = f"📍 Location shared: {desc} (Lat: {lat}, Lng: {lng})\nMap: {maps_url}"
+            else:
+                reply_text = (
+                    message_data_or_item.get("textMessage")
+                    or message_data_or_item.get("text")
+                    or message_data_or_item.get("body")
+                    or message_data_or_item.get("message")
+                    or ""
+                )
 
         # 2. Extract quoted message object if present
         quoted_obj = (
@@ -3454,6 +3492,28 @@ class WhatsAppService:
         if not download_url:
             download_url = data.get("downloadUrl", "") or data.get("urlFile", "") or (message_data.get("downloadUrl", "") if isinstance(message_data, dict) else "")
 
+        # Extract structured location if present
+        loc_data = (
+            message_data.get("locationMessageData")
+            or message_data.get("location")
+            or message_data.get("locationData")
+            or data.get("location")
+            or {}
+        )
+        location_info = None
+        if isinstance(loc_data, dict) and (loc_data.get("latitude") is not None or loc_data.get("lat") is not None):
+            lat = loc_data.get("latitude") if loc_data.get("latitude") is not None else loc_data.get("lat")
+            lng = loc_data.get("longitude") if loc_data.get("longitude") is not None else loc_data.get("lng")
+            loc_name = loc_data.get("nameLocation") or loc_data.get("name") or ""
+            loc_addr = loc_data.get("address") or ""
+            location_info = {
+                "latitude": float(lat),
+                "longitude": float(lng),
+                "name": str(loc_name).strip(),
+                "address": str(loc_addr).strip(),
+                "maps_url": f"https://www.google.com/maps?q={lat},{lng}"
+            }
+
         messages.append({
             "message_id": msg_id,
             "from_phone": from_phone,
@@ -3465,6 +3525,7 @@ class WhatsAppService:
             "message_type": type_message,
             "body": body,
             "download_url": download_url,
+            "location": location_info,
             "provider": "green_api",
             "raw": data
         })
@@ -5497,6 +5558,153 @@ class WhatsAppService:
                 logger.error(f"Error persisting order status update: {ord_err}")
 
         return dispatch_res
+
+    # --- Feature: Fleet Truck Dispatch & Live Delivery Tracking ---
+
+    @classmethod
+    def dispatch_truck_for_order(
+        cls,
+        organization_id: str,
+        order_id_or_number: str,
+        truck_id: str,
+        driver_name: str,
+        driver_phone: str,
+        destination: Optional[str] = None,
+        estimated_arrival: Optional[str] = None,
+        tracking_url: Optional[str] = None,
+        notes: Optional[str] = None,
+        notify_whatsapp: bool = True
+    ) -> Dict[str, Any]:
+        """Dispatches a fleet truck delivery assignment, updates tracking in DB, and dispatches WhatsApp alerts."""
+        import urllib.parse
+        if not has_app_context():
+            return {"success": False, "error": "Application context required."}
+
+        order = EcommerceOrder.query.filter(
+            db.or_(EcommerceOrder.id == order_id_or_number, EcommerceOrder.order_number == order_id_or_number),
+            EcommerceOrder.organization_id == organization_id
+        ).first()
+
+        if not order:
+            return {"success": False, "error": f"Order '{order_id_or_number}' not found."}
+
+        # Update order status & courier details
+        order.order_status = "shipped"
+        order.courier_name = f"Fleet Truck ({truck_id})"
+        order.tracking_number = f"TRK-{truck_id}"
+
+        dest_clean = destination or order.shipping_address or "Delivery Destination"
+        dest_query = urllib.parse.quote_plus(dest_clean)
+        live_track_url = tracking_url or f"https://www.google.com/maps/search/?api=1&query={dest_query}"
+        order.tracking_url = live_track_url
+
+        dispatch_stamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        dispatch_note = f"[Truck Dispatch {dispatch_stamp}] Truck: {truck_id} | Driver: {driver_name} ({driver_phone}) | ETA: {estimated_arrival or 'In Transit'}"
+        if notes:
+            dispatch_note += f" | Notes: {notes}"
+        order.notes = f"{order.notes}\n{dispatch_note}".strip() if order.notes else dispatch_note
+
+        db.session.commit()
+
+        # WhatsApp Customer Notification
+        whatsapp_res = None
+        if notify_whatsapp and order.customer_phone:
+            c_name = order.customer_name or "Valued Customer"
+            item_list = [it.get("name", "Item") for it in order.get_items()]
+            items_str = ", ".join(item_list) if item_list else "Package Items"
+            eta_display = estimated_arrival or "Today (In Transit)"
+
+            msg_text = (
+                f"🚚 *TRUCK DISPATCH & LIVE DELIVERY TRACKING*\n\n"
+                f"Assalam-o-Alaikum *{c_name}*!\n"
+                f"Your order *#{order.order_number}* has been loaded onto Fleet Truck *{truck_id}* and is on the way for delivery!\n\n"
+                f"📦 *Items:* {items_str}\n"
+                f"🚚 *Truck ID:* {truck_id}\n"
+                f"👤 *Driver:* {driver_name} ({driver_phone})\n"
+                f"📍 *Destination:* {dest_clean}\n"
+                f"⏱️ *Estimated Delivery:* {eta_display}\n"
+                f"🗺️ *Live Tracking Route:* {live_track_url}\n\n"
+                f"For delivery inquiries, contact driver {driver_name} directly at {driver_phone} or reply here."
+            )
+            whatsapp_res = cls.send_message(
+                organization_id=organization_id,
+                to_phone=order.customer_phone,
+                message=msg_text
+            )
+
+        return {
+            "success": True,
+            "order": order.to_dict(),
+            "truck_id": truck_id,
+            "driver_name": driver_name,
+            "driver_phone": driver_phone,
+            "destination": dest_clean,
+            "estimated_arrival": estimated_arrival or "In Transit",
+            "tracking_url": live_track_url,
+            "dispatch_id": f"DSP-{truck_id}-{order.order_number}",
+            "whatsapp_result": whatsapp_res
+        }
+
+    @classmethod
+    def send_location(
+        cls,
+        organization_id: str,
+        to_phone: str,
+        latitude: float,
+        longitude: float,
+        name: Optional[str] = None,
+        address: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Dispatches a pinned GPS location map point to a customer or driver over WhatsApp."""
+        clean_phone = cls.format_phone_number(to_phone)
+        conf = cls.get_config(organization_id=organization_id)
+        provider = conf.get("provider", "green_api")
+
+        chat_id = f"{clean_phone}@c.us" if "@" not in clean_phone else clean_phone
+        loc_name = name or "Delivery Location"
+        loc_addr = address or f"{latitude}, {longitude}"
+
+        if provider == "green_api":
+            id_inst = conf.get("green_api_id_instance")
+            tok_inst = conf.get("green_api_token_instance")
+            host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
+            if id_inst and tok_inst:
+                url = f"{host}/waInstance{id_inst}/sendLocation/{tok_inst}"
+                payload = {
+                    "chatId": chat_id,
+                    "latitude": float(latitude),
+                    "longitude": float(longitude),
+                    "nameLocation": loc_name,
+                    "address": loc_addr
+                }
+                try:
+                    with cls.get_http_session(retries=1) as session:
+                        resp = session.post(url, json=payload, timeout=cls.get_timeout_tuple())
+                        if resp.status_code in (200, 201):
+                            res_data = resp.json()
+                            msg_id = res_data.get("idMessage", f"loc-{int(time.time())}")
+                            cls.record_message(
+                                organization_id=organization_id,
+                                sender="system",
+                                recipient=clean_phone,
+                                direction="outbound",
+                                body=f"📍 Pinned Location: {loc_name} ({loc_addr})",
+                                status="sent",
+                                whatsapp_message_id=msg_id,
+                                message_type="locationMessage"
+                            )
+                            return {"success": True, "message_id": msg_id, "provider": "green_api"}
+                except Exception as e:
+                    logger.error(f"Error sending Green-API location to {clean_phone}: {e}")
+
+        # Fallback / Meta Cloud / Simulator format:
+        maps_link = f"https://www.google.com/maps?q={latitude},{longitude}"
+        body_text = f"📍 *{loc_name}*\n{loc_addr}\n\nMap Link: {maps_link}"
+        return cls.send_message(
+            organization_id=organization_id,
+            to_phone=clean_phone,
+            message=body_text
+        )
 
     # --- Feature 3: Abandoned Cart Recovery Alerts ---
 

@@ -1720,6 +1720,176 @@ def create_lead():
     return jsonify({"success": True, "lead": saved}), 201
 
 
+@api_v1.route("/leads/bulk-import", methods=["POST"])
+@require_auth
+def bulk_import_leads():
+    """Bulk imports leads from JSON array or CSV text with field normalization and deduplication."""
+    import csv
+    import io
+
+    org = g.current_org
+    storage = get_storage()
+    engine = get_engine()
+    ai_provider = get_ai_provider()
+
+    raw_data = request.get_json(silent=True) or {}
+    leads_input = raw_data.get("leads") or []
+
+    # Check for raw CSV text or uploaded file
+    csv_text = raw_data.get("csv_content") or raw_data.get("csv_data")
+    if not csv_text and "file" in request.files:
+        try:
+            uploaded_file = request.files["file"]
+            csv_text = uploaded_file.read().decode("utf-8", errors="replace")
+        except Exception as e:
+            return jsonify({"error": f"Failed to read uploaded file: {e}", "code": "FILE_READ_ERROR"}), 400
+
+    if csv_text and isinstance(csv_text, str):
+        reader = csv.DictReader(io.StringIO(csv_text.strip()))
+        leads_input = []
+        for row in reader:
+            normalized_row = {str(k).strip().lower().replace(" ", "_"): v for k, v in row.items() if k}
+            name = (
+                normalized_row.get("name")
+                or normalized_row.get("full_name")
+                or normalized_row.get("customer_name")
+                or normalized_row.get("lead_name")
+                or "Bulk Lead"
+            )
+            phone = (
+                normalized_row.get("phone")
+                or normalized_row.get("phone_number")
+                or normalized_row.get("mobile")
+                or normalized_row.get("whatsapp")
+                or ""
+            )
+            email = (
+                normalized_row.get("email")
+                or normalized_row.get("email_address")
+                or ""
+            )
+            company = (
+                normalized_row.get("company")
+                or normalized_row.get("company_name")
+                or normalized_row.get("organization")
+                or "N/A"
+            )
+            message = (
+                normalized_row.get("message")
+                or normalized_row.get("notes")
+                or normalized_row.get("inquiry")
+                or normalized_row.get("text")
+                or "Imported via Bulk Leads Importer"
+            )
+            category = normalized_row.get("category") or normalized_row.get("channel") or "Online"
+            status = normalized_row.get("status") or "new"
+
+            leads_input.append({
+                "name": str(name).strip(),
+                "phone": str(phone).strip(),
+                "email": str(email).strip(),
+                "company": str(company).strip(),
+                "message": str(message).strip(),
+                "category": str(category).strip(),
+                "status": str(status).strip()
+            })
+
+    if not isinstance(leads_input, list) or len(leads_input) == 0:
+        return jsonify({
+            "error": "No leads provided. Supply a JSON list 'leads' or a CSV payload under 'csv_content'.",
+            "code": "EMPTY_PAYLOAD"
+        }), 400
+
+    # Fetch existing leads to deduplicate
+    existing_leads = storage.get_leads(organization_id=org.id, limit=5000) or []
+    existing_phones = {
+        WhatsAppService.format_phone_number(l.get("phone", ""))[-9:]
+        for l in existing_leads if l.get("phone") and len(WhatsAppService.format_phone_number(l.get("phone", ""))) >= 9
+    }
+    existing_emails = {
+        str(l.get("email", "")).strip().lower()
+        for l in existing_leads if l.get("email")
+    }
+
+    imported = []
+    skipped = []
+
+    for item in leads_input:
+        if not isinstance(item, dict):
+            continue
+
+        raw_phone = str(item.get("phone") or "").strip()
+        raw_email = str(item.get("email") or "").strip().lower()
+        name = str(item.get("name") or "Imported Lead").strip()
+
+        clean_phone = WhatsAppService.format_phone_number(raw_phone) if raw_phone else ""
+        phone_suffix = clean_phone[-9:] if len(clean_phone) >= 9 else clean_phone
+
+        # Deduplication
+        if (phone_suffix and phone_suffix in existing_phones) or (raw_email and raw_email in existing_emails):
+            skipped.append({
+                "name": name,
+                "phone": raw_phone,
+                "email": raw_email,
+                "reason": "Duplicate phone or email in organization leads."
+            })
+            continue
+
+        message = str(item.get("message") or "Imported via Bulk Leads Importer").strip()
+
+        lead_record = {
+            "name": name,
+            "email": raw_email or None,
+            "phone": clean_phone or raw_phone or None,
+            "company": str(item.get("company") or "N/A").strip(),
+            "message": message,
+            "intent": str(item.get("intent") or "lead_inquiry"),
+            "sentiment": "neutral",
+            "urgency_score": 25,
+            "lead_score": int(item.get("lead_score") or 55),
+            "route_department": str(item.get("route_department") or item.get("department") or "Sales"),
+            "status": str(item.get("status") or "new").strip().lower(),
+            "category": str(item.get("category") or "Online").strip(),
+            "organization_id": org.id
+        }
+
+        saved = storage.save_lead(lead_record, organization_id=org.id)
+        imported.append(saved)
+
+        if phone_suffix:
+            existing_phones.add(phone_suffix)
+        if raw_email:
+            existing_emails.add(raw_email)
+
+    # Ingest event if engine is present
+    if engine and imported:
+        try:
+            engine.ingest_event(
+                event_name="leads.bulk_imported",
+                payload={"count": len(imported), "source": "bulk_importer"},
+                source="bulk_leads_importer",
+                dry_run=False,
+                organization_id=org.id
+            )
+        except Exception as e:
+            logger.warning(f"Error ingesting bulk_import event: {e}")
+
+    log_audit_event("lead.bulk_import", "lead", "bulk", {
+        "imported_count": len(imported),
+        "skipped_count": len(skipped),
+        "total": len(leads_input)
+    })
+
+    return jsonify({
+        "status": "success",
+        "imported_count": len(imported),
+        "skipped_count": len(skipped),
+        "total_processed": len(leads_input),
+        "leads": imported[:20],
+        "skipped_samples": skipped[:10]
+    }), 201
+
+
 @api_v1.route("/leads/<lead_id>", methods=["GET"])
 @require_auth
 def get_lead_detail(lead_id: str):
@@ -2937,6 +3107,43 @@ def whatsapp_send_message():
     except Exception as e:
         logger.error(f"Failed to send WhatsApp message: {e}")
         return jsonify({"error": "Internal error sending WhatsApp message", "detail": str(e)}), 500
+
+
+@api_v1.route("/whatsapp/messages/location", methods=["POST"])
+@require_auth
+def send_whatsapp_location():
+    """Dispatches a pinned location map point to a customer or driver on WhatsApp."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    to_phone = data.get("to_phone") or data.get("phone")
+    if not to_phone:
+        return jsonify({"error": "'to_phone' is required.", "code": "MISSING_PHONE"}), 400
+
+    try:
+        lat = float(data.get("latitude") or data.get("lat"))
+        lng = float(data.get("longitude") or data.get("lng"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Valid numeric 'latitude' and 'longitude' required.", "code": "INVALID_COORDINATES"}), 400
+
+    name = data.get("name") or "Delivery / Destination Pin"
+    address = data.get("address") or ""
+
+    res = WhatsAppService.send_location(
+        organization_id=org.id,
+        to_phone=to_phone,
+        latitude=lat,
+        longitude=lng,
+        name=name,
+        address=address
+    )
+
+    return jsonify({
+        "status": "success" if res.get("success") else "failed",
+        "result": res
+    }), 200 if res.get("success") else 400
 
 
 @api_v1.route("/whatsapp/messages", methods=["GET"])
@@ -5077,6 +5284,112 @@ def notify_order_status(order_id: str):
         "status": "success" if res.get("success") else "failed",
         "order": order.to_dict(),
         "whatsapp_result": res
+    }), 200
+
+
+# --- Feature: Fleet Truck Dispatch & Live Route Tracking ---
+
+@api_v1.route("/ecommerce/orders/<order_id>/dispatch-truck", methods=["POST"])
+@require_auth
+def dispatch_order_truck(order_id: str):
+    """Assigns a fleet delivery truck, updates order tracking, and alerts customer via WhatsApp."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    data = request.get_json(silent=True) or {}
+    truck_id = (data.get("truck_id") or data.get("vehicle_id") or "TRK-01").strip().upper()
+    driver_name = (data.get("driver_name") or "Fleet Driver").strip()
+    driver_phone = (data.get("driver_phone") or "").strip()
+    destination = (data.get("destination") or data.get("shipping_address") or "").strip()
+    estimated_arrival = (data.get("estimated_arrival") or data.get("eta") or "Today (In Transit)").strip()
+    tracking_url = (data.get("tracking_url") or "").strip() or None
+    notes = (data.get("notes") or "").strip() or None
+    notify_whatsapp = bool(data.get("notify_whatsapp", True))
+
+    res = WhatsAppService.dispatch_truck_for_order(
+        organization_id=org.id,
+        order_id_or_number=order_id,
+        truck_id=truck_id,
+        driver_name=driver_name,
+        driver_phone=driver_phone,
+        destination=destination,
+        estimated_arrival=estimated_arrival,
+        tracking_url=tracking_url,
+        notes=notes,
+        notify_whatsapp=notify_whatsapp
+    )
+
+    if not res.get("success"):
+        return jsonify({"status": "failed", "error": res.get("error", "Dispatch failed")}), 400
+
+    log_audit_event("ecommerce.truck_dispatched", "order", order_id, {
+        "truck_id": truck_id,
+        "driver": driver_name,
+        "destination": destination
+    })
+
+    return jsonify({
+        "status": "success",
+        "message": f"Order successfully dispatched on Truck {truck_id}.",
+        "dispatch": res
+    }), 200
+
+
+@api_v1.route("/logistics/truck-dispatches", methods=["GET"])
+@require_auth
+def list_truck_dispatches():
+    """Lists active and historical truck deliveries for the tenant organization."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    dispatched_orders = EcommerceOrder.query.filter(
+        EcommerceOrder.organization_id == org.id,
+        db.or_(
+            EcommerceOrder.courier_name.ilike("%Truck%"),
+            EcommerceOrder.order_status.in_(["shipped", "delivered"])
+        )
+    ).order_by(EcommerceOrder.updated_at.desc()).limit(100).all()
+
+    total_dispatches = len(dispatched_orders)
+    in_transit = sum(1 for o in dispatched_orders if o.order_status == "shipped")
+    delivered = sum(1 for o in dispatched_orders if o.order_status == "delivered")
+
+    return jsonify({
+        "status": "success",
+        "total_dispatches": total_dispatches,
+        "in_transit_count": in_transit,
+        "delivered_count": delivered,
+        "dispatches": [o.to_dict() for o in dispatched_orders]
+    }), 200
+
+
+@api_v1.route("/logistics/truck-dispatches/<dispatch_ref>", methods=["GET"])
+def get_truck_dispatch_status(dispatch_ref: str):
+    """Public live tracking route lookup by truck ID, order number, or tracking number."""
+    clean_ref = dispatch_ref.strip().replace("#", "").upper()
+    order = EcommerceOrder.query.filter(
+        db.or_(
+            EcommerceOrder.order_number.ilike(f"%{clean_ref}%"),
+            EcommerceOrder.tracking_number.ilike(f"%{clean_ref}%"),
+            EcommerceOrder.id == dispatch_ref
+        )
+    ).first()
+
+    if not order:
+        return jsonify({"error": f"Dispatch or tracking record '{dispatch_ref}' not found.", "code": "NOT_FOUND"}), 404
+
+    return jsonify({
+        "status": "success",
+        "order_number": order.order_number,
+        "order_status": order.order_status,
+        "courier_name": order.courier_name,
+        "tracking_number": order.tracking_number,
+        "tracking_url": order.tracking_url,
+        "customer_name": order.customer_name,
+        "destination": order.shipping_address or "Customer Destination",
+        "updated_at": order.updated_at.strftime("%Y-%m-%d %H:%M:%S") if order.updated_at else None
     }), 200
 
 
