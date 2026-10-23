@@ -31,6 +31,7 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
         self.client = self.app.test_client()
 
     def tearDown(self):
+        WhatsAppService.clear_recent_replied_trigger_ids()
         db.session.rollback()
         self.ctx.pop()
 
