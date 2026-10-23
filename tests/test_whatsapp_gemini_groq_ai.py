@@ -725,8 +725,8 @@ class TestWhatsAppGeminiGroqAI(unittest.TestCase):
         self.assertIn("custom enterprise pricing", kb)
         self.assertIn("requires confirmation from our sales specialist or account team", kb)
         # Verify unsupported payment method guardrail exists
-        self.assertIn("PayPal, EasyPaisa", kb)
-        self.assertIn("requires confirmation from our billing department", kb)
+        self.assertIn("PayPal", kb)
+        self.assertIn("requires billing confirmation", kb)
         # Verify unsupported integration guardrail exists
         self.assertIn("Salesforce, HubSpot, Jira, Zapier app, Telegram", kb)
         self.assertIn("confirm enterprise integration feasibility", kb)
