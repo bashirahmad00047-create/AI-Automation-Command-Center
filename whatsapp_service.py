@@ -238,7 +238,65 @@ class WhatsAppService:
             audio_fn = "voice_note.ogg"
             audio_mt = "audio/ogg"
 
-        # 1. Primary: OpenAI Whisper API (whisper-1) with 6.0s fast timeout
+        call_timeout = min(float(timeout or 3.0), 3.0)
+
+        # 1. Primary: Groq Whisper API (distil-whisper-large-v3) for instant sub-second transcription
+        groq_key = cls.get_groq_api_key(organization_id=organization_id)
+        if groq_key and str(groq_key).strip():
+            try:
+                import requests
+                files = {
+                    "file": (audio_fn, audio_bytes, audio_mt)
+                }
+                data = {
+                    "model": "distil-whisper-large-v3",
+                    "response_format": "json",
+                    "prompt": transcription_prompt[:250]
+                }
+                headers = {
+                    "Authorization": f"Bearer {str(groq_key).strip()}"
+                }
+                resp = requests.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers=headers,
+                    files=files,
+                    data=data,
+                    timeout=call_timeout
+                )
+                if resp.status_code == 200:
+                    whisper_res = resp.json()
+                    whisper_text = (whisper_res.get("text") or "").strip()
+                    if whisper_text:
+                        logger.info(f"Groq distil-whisper-large-v3 transcription successful: {whisper_text[:60]}...")
+                        if message_id:
+                            with cls._media_cache_lock:
+                                cls._transcription_cache[message_id] = (time.time(), whisper_text)
+                        return whisper_text
+                else:
+                    # Fallback to Groq whisper-large-v3 if distil model is unavailable or status non-200
+                    logger.debug(f"Groq distil-whisper-large-v3 status {resp.status_code}, falling back to whisper-large-v3")
+                    data_fallback = dict(data)
+                    data_fallback["model"] = "whisper-large-v3"
+                    resp = requests.post(
+                        "https://api.groq.com/openai/v1/audio/transcriptions",
+                        headers=headers,
+                        files=files,
+                        data=data_fallback,
+                        timeout=call_timeout
+                    )
+                    if resp.status_code == 200:
+                        whisper_res = resp.json()
+                        whisper_text = (whisper_res.get("text") or "").strip()
+                        if whisper_text:
+                            logger.info(f"Groq whisper-large-v3 fallback transcription successful: {whisper_text[:60]}...")
+                            if message_id:
+                                with cls._media_cache_lock:
+                                    cls._transcription_cache[message_id] = (time.time(), whisper_text)
+                            return whisper_text
+            except Exception as groq_err:
+                logger.debug(f"Groq Whisper transcription notice: {groq_err}")
+
+        # 2. Secondary: OpenAI Whisper API (whisper-1) with fast timeout
         openai_key = cls.get_openai_api_key(organization_id=organization_id)
         if openai_key and str(openai_key).strip():
             try:
@@ -259,7 +317,7 @@ class WhatsAppService:
                     headers=headers,
                     files=files,
                     data=data,
-                    timeout=min(float(timeout or 3.0), 3.0)
+                    timeout=call_timeout
                 )
                 if resp.status_code == 200:
                     openai_res = resp.json()
@@ -272,40 +330,6 @@ class WhatsAppService:
                         return openai_text
             except Exception as openai_err:
                 logger.debug(f"OpenAI Whisper transcription notice: {openai_err}")
-
-        # 2. Secondary: Groq Whisper transcription (whisper-large-v3) with 5.0s fast timeout
-        groq_key = cls.get_groq_api_key(organization_id=organization_id)
-        if groq_key:
-            try:
-                import requests
-                files = {
-                    "file": (audio_fn, audio_bytes, audio_mt)
-                }
-                data = {
-                    "model": "whisper-large-v3",
-                    "response_format": "json"
-                }
-                headers = {
-                    "Authorization": f"Bearer {groq_key}"
-                }
-                resp = requests.post(
-                    "https://api.groq.com/openai/v1/audio/transcriptions",
-                    headers=headers,
-                    files=files,
-                    data=data,
-                    timeout=min(float(timeout or 3.0), 3.0)
-                )
-                if resp.status_code == 200:
-                    whisper_res = resp.json()
-                    whisper_text = (whisper_res.get("text") or "").strip()
-                    if whisper_text:
-                        logger.info(f"Groq Whisper transcription successful: {whisper_text[:60]}...")
-                        if message_id:
-                            with cls._media_cache_lock:
-                                cls._transcription_cache[message_id] = (time.time(), whisper_text)
-                        return whisper_text
-            except Exception as groq_err:
-                logger.debug(f"Groq Whisper transcription notice: {groq_err}")
 
         # 3. Tertiary: Gemini Generative AI transcription (lean single attempt)
         gemini_key = cls.get_gemini_api_key(organization_id=organization_id)
@@ -3057,37 +3081,67 @@ class WhatsAppService:
         try:
             audio_dispatch_res = None
             text_dispatch_res = None
+
+            def _synthesize_and_send_voice():
+                try:
+                    audio_res = cls.generate_spoken_audio(
+                        text=reply_body,
+                        language="ur",
+                        organization_id=org_id,
+                        output_format="oga"
+                    )
+                    if audio_res:
+                        audio_b, audio_fn, audio_mt = audio_res
+                        logger.info(f"Synthesized {len(audio_b)} bytes of Urdu .oga audio for voice note reply to {clean_phone}.")
+                        active_prov = cls.get_active_provider(organization_id=org_id)
+                        if active_prov == "green_api" or cls.is_green_api_configured(organization_id=org_id):
+                            return cls.send_green_api_file(
+                                organization_id=org_id,
+                                to_phone=clean_phone,
+                                file_bytes=audio_b,
+                                filename=audio_fn,
+                                mime_type=audio_mt,
+                                caption=reply_body,
+                                quoted_message_id=message_id
+                            )
+                    else:
+                        logger.info(f"TTS audio synthesis unavailable for voice note reply to {clean_phone}; delivering text reply.")
+                except Exception as tts_err:
+                    logger.debug(f"Voice synthesis and dispatch error: {tts_err}")
+                return None
+
             if is_voice or is_voice_inbound:
-                # Synthesize Urdu audio (.oga format) using TTS
-                audio_res = cls.generate_spoken_audio(
-                    text=reply_body,
-                    language="ur",
-                    organization_id=org_id,
-                    output_format="oga"
-                )
-                if audio_res:
-                    audio_b, audio_fn, audio_mt = audio_res
-                    logger.info(f"Synthesized {len(audio_b)} bytes of Urdu .oga audio for voice note reply to {clean_phone}.")
-                    active_prov = cls.get_active_provider(organization_id=org_id)
-                    if active_prov == "green_api" or cls.is_green_api_configured(organization_id=org_id):
-                        audio_dispatch_res = cls.send_green_api_file(
+                if has_app_context() and current_app.config.get("TESTING"):
+                    audio_dispatch_res = _synthesize_and_send_voice()
+                    text_dispatch_res = cls.send_message(
+                        organization_id=org_id,
+                        to_phone=clean_phone,
+                        message_text=reply_body
+                    )
+                else:
+                    # Parallel non-blocking execution: synthesize audio and send text concurrently
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                        fut_audio = executor.submit(_synthesize_and_send_voice)
+                        fut_text = executor.submit(
+                            cls.send_message,
                             organization_id=org_id,
                             to_phone=clean_phone,
-                            file_bytes=audio_b,
-                            filename=audio_fn,
-                            mime_type=audio_mt,
-                            caption=reply_body,
-                            quoted_message_id=message_id
+                            message_text=reply_body
                         )
-                else:
-                    logger.info(f"TTS audio synthesis unavailable for voice note reply to {clean_phone}; delivering text reply.")
-
-            # Send text reply back via Green-API (delivering both audio and text to user)
-            text_dispatch_res = cls.send_message(
-                organization_id=org_id,
-                to_phone=clean_phone,
-                message_text=reply_body
-            )
+                        try:
+                            text_dispatch_res = fut_text.result(timeout=2.0)
+                        except Exception as text_e:
+                            logger.error(f"Error during parallel text dispatch: {text_e}")
+                        try:
+                            audio_dispatch_res = fut_audio.result(timeout=3.0)
+                        except Exception as audio_e:
+                            logger.debug(f"Audio dispatch notice: {audio_e}")
+            else:
+                text_dispatch_res = cls.send_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    message_text=reply_body
+                )
             dispatch_res = audio_dispatch_res if (audio_dispatch_res and audio_dispatch_res.get("success")) else text_dispatch_res
             # Tag the newly recorded outbound message with AI metadata
             outbound_record_id = dispatch_res.get("record_id") or dispatch_res.get("message_record_id")
@@ -3901,7 +3955,7 @@ class WhatsAppService:
         if not id_inst or not tok_inst:
             return None
 
-        url = f"{host}/waInstance{id_inst}/receiveNotification/{tok_inst}"
+        url = f"{host}/waInstance{id_inst}/receiveNotification/{tok_inst}?receiveTimeout=0"
         timeouts = cls.get_timeout_tuple()
         try:
             with cls.get_http_session(retries=1) as session:
