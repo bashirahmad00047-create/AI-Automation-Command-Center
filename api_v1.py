@@ -2725,6 +2725,19 @@ def whatsapp_webhook_ingress():
             raw_payload=msg
         )
 
+        # Automatically ingest a new record into CRM Leads if phone number is not already present
+        try:
+            WhatsAppService.auto_ingest_crm_lead(
+                organization_id=target_org.id,
+                from_phone=msg.get("from_phone"),
+                sender_name=msg.get("sender_name"),
+                message_body=msg.get("body"),
+                location_data=msg.get("location"),
+                raw_payload=msg
+            )
+        except Exception as lead_err:
+            logger.warning(f"Error auto-ingesting CRM lead in webhook: {lead_err}")
+
         # Automatic Consent & Opt-Out handling (STOP / UNSUBSCRIBE / START)
         inbound_body_clean = (msg.get("body") or "").strip().lower()
         if inbound_body_clean in ("stop", "unsubscribe", "opt out", "optout", "cancel", "halt"):
@@ -2904,6 +2917,19 @@ def green_api_webhook_ingress():
                 message_type=msg.get("message_type", "text"),
                 raw_payload=msg
             )
+
+            # Automatically ingest a new record into CRM Leads if phone number is not already present
+            try:
+                WhatsAppService.auto_ingest_crm_lead(
+                    organization_id=target_org_id,
+                    from_phone=msg.get("from_phone"),
+                    sender_name=msg.get("sender_name"),
+                    message_body=msg.get("body"),
+                    location_data=msg.get("location"),
+                    raw_payload=msg
+                )
+            except Exception as lead_err:
+                logger.warning(f"Error auto-ingesting CRM lead in Green-API webhook: {lead_err}")
 
             rule_replied = False
             if engine:
