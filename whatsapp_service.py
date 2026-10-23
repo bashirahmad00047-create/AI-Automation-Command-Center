@@ -34,7 +34,7 @@ from urllib3.util.retry import Retry
 from flask import current_app, has_app_context
 
 from database import db
-from models import Organization, SystemSetting, WhatsAppMessage, generate_uuid, Product, EcommerceOrder, AbandonedCart
+from models import Organization, SystemSetting, WhatsAppMessage, generate_uuid, Product, EcommerceOrder, AbandonedCart, Lead
 
 logger = logging.getLogger("opsflow.whatsapp")
 
@@ -4381,6 +4381,169 @@ class WhatsAppService:
             return False
 
     @classmethod
+    def extract_google_maps_links(cls, text: Optional[str]) -> List[str]:
+        """Extracts all Google Maps URLs from text string."""
+        if not text:
+            return []
+        pattern = r'https?://(?:www\.)?(?:google\.com/maps|maps\.google\.com|maps\.app\.goo\.gl|goo\.gl/maps)\S+'
+        return re.findall(pattern, str(text))
+
+    @classmethod
+    def extract_coordinates(cls, text: Optional[str]) -> Optional[Tuple[float, float]]:
+        """Extracts latitude and longitude from text if coordinates are explicitly provided."""
+        if not text:
+            return None
+        coord_pattern = r'(?:lat(?:itude)?[:\s=]+)?(-?\d{1,2}\.\d{3,})[,\s]+(?:lng|long(?:itude)?[:\s=]+)?(-?\d{1,3}\.\d{3,})'
+        m = re.search(coord_pattern, str(text), re.IGNORECASE)
+        if m:
+            try:
+                lat = float(m.group(1))
+                lng = float(m.group(2))
+                if -90 <= lat <= 90 and -180 <= lng <= 180:
+                    return (lat, lng)
+            except (ValueError, TypeError):
+                pass
+        return None
+
+    @classmethod
+    def auto_ingest_crm_lead(
+        cls,
+        organization_id: Optional[str],
+        from_phone: str,
+        sender_name: Optional[str] = None,
+        message_body: Optional[str] = None,
+        location_data: Optional[Dict[str, Any]] = None,
+        raw_payload: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Automatically ingests a new record into CRM Leads if the phone number is not already present.
+        
+        Extracts Google Maps links directly into the lead inquiry message or notes.
+        """
+        if not has_app_context() or not from_phone:
+            return None
+
+        clean_phone = cls.format_phone_number(str(from_phone).strip())
+        if not clean_phone or len(clean_phone) < 7:
+            return None
+
+        org_id = organization_id or "org-enterprise-default"
+
+        # Check if lead already exists for this phone number in this tenant
+        phone_suffix = clean_phone[-9:] if len(clean_phone) >= 9 else clean_phone
+        existing_lead = Lead.query.filter(
+            Lead.organization_id == org_id,
+            db.or_(
+                Lead.phone == clean_phone,
+                Lead.phone.like(f"%{phone_suffix}%")
+            )
+        ).first()
+
+        # Extract or construct Google Maps link
+        maps_url = None
+        loc_label = None
+
+        if location_data and isinstance(location_data, dict):
+            lat = location_data.get("latitude") if location_data.get("latitude") is not None else location_data.get("lat")
+            lng = location_data.get("longitude") if location_data.get("longitude") is not None else location_data.get("lng")
+            if lat is not None and lng is not None:
+                maps_url = location_data.get("maps_url") or f"https://www.google.com/maps?q={lat},{lng}"
+                loc_name = location_data.get("name") or location_data.get("nameLocation") or ""
+                loc_addr = location_data.get("address") or ""
+                loc_label = f"{loc_name} - {loc_addr}".strip(" -") or f"Coordinates ({lat}, {lng})"
+
+        # Check message body or raw payload for maps links if not found in location_data
+        body_str = str(message_body or "").strip()
+        if not maps_url and body_str:
+            extracted_links = cls.extract_google_maps_links(body_str)
+            if extracted_links:
+                maps_url = extracted_links[0]
+            else:
+                coords = cls.extract_coordinates(body_str)
+                if coords:
+                    maps_url = f"https://www.google.com/maps?q={coords[0]},{coords[1]}"
+                    loc_label = f"Pinned Coordinates ({coords[0]}, {coords[1]})"
+
+        # If lead already exists:
+        if existing_lead:
+            # If a new location was shared, append it directly into the existing lead's inquiry message
+            if maps_url and maps_url not in (existing_lead.message or ""):
+                try:
+                    loc_note = f"\n\n📍 Updated Location: {loc_label + ' | ' if loc_label else ''}Google Maps: {maps_url}"
+                    existing_lead.message = f"{existing_lead.message or ''}{loc_note}".strip()
+                    db.session.commit()
+                except Exception as e:
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+                    logger.debug(f"Could not append location to existing lead: {e}")
+            return existing_lead.to_dict()
+
+        # Build clean inquiry message with Google Maps link directly included
+        inquiry_parts = []
+        if body_str and body_str not in ("[Location]", "📍 Location shared:"):
+            inquiry_parts.append(body_str)
+
+        if maps_url:
+            loc_entry = f"📍 Google Maps: {maps_url}"
+            if loc_label:
+                loc_entry = f"📍 Pinned Location: {loc_label}\nGoogle Maps: {maps_url}"
+            if maps_url not in body_str:
+                inquiry_parts.append(loc_entry)
+
+        final_message = "\n\n".join(inquiry_parts).strip()
+        if not final_message:
+            final_message = f"Inbound inquiry received from WhatsApp contact {clean_phone}."
+
+        contact_name = (sender_name or "").strip()
+        if not contact_name or contact_name.lower() in ("whatsapp contact", "unknown"):
+            contact_name = f"WhatsApp Lead {clean_phone[-4:]}"
+
+        lead_record = Lead(
+            id=generate_uuid("lead"),
+            organization_id=org_id,
+            name=contact_name,
+            phone=clean_phone,
+            email=None,
+            company="WhatsApp Inquiry",
+            message=final_message,
+            intent="location_shared" if maps_url else "whatsapp_inquiry",
+            sentiment="neutral",
+            urgency_score=35 if maps_url else 20,
+            lead_score=65 if maps_url else 50,
+            route_department="Sales",
+            status="new"
+        )
+
+        try:
+            db.session.add(lead_record)
+            db.session.commit()
+            logger.info(f"Auto-ingested new CRM Lead for WhatsApp contact {clean_phone} (Lead ID: {lead_record.id})")
+
+            # Ingest event into automation engine if active
+            engine = current_app.config.get("AUTOMATION_ENGINE") if has_app_context() else None
+            if engine:
+                try:
+                    engine.ingest_event(
+                        event_name="lead.created",
+                        payload=lead_record.to_dict(),
+                        source="whatsapp_auto_ingest",
+                        dry_run=False,
+                        organization_id=org_id
+                    )
+                except Exception as eng_err:
+                    logger.debug(f"Engine notification error for auto-ingested lead: {eng_err}")
+
+            return lead_record.to_dict()
+        except Exception as e:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            logger.error(f"Error auto-ingesting CRM lead for {clean_phone}: {e}")
+            return None
+
+    @classmethod
     def record_message(
         cls,
         organization_id: Optional[str] = None,
@@ -4418,6 +4581,23 @@ class WhatsAppService:
                 if whatsapp_message_id:
                     with cls._processed_ids_lock:
                         cls._processed_message_ids[str(whatsapp_message_id).strip()] = time.time()
+
+                # Automatically ingest a new record into CRM Leads if phone number is not already present
+                if direction == "inbound" and sender and sender != "system":
+                    try:
+                        loc_data = None
+                        if isinstance(raw_payload, dict):
+                            loc_data = raw_payload.get("location") or raw_payload.get("locationMessageData") or raw_payload.get("locationData")
+                        cls.auto_ingest_crm_lead(
+                            organization_id=organization_id or "org-enterprise-default",
+                            from_phone=sender,
+                            sender_name=(raw_payload.get("sender_name") if isinstance(raw_payload, dict) else None),
+                            message_body=body,
+                            location_data=loc_data,
+                            raw_payload=raw_payload
+                        )
+                    except Exception as ingest_err:
+                        logger.warning(f"Failed to auto-ingest CRM lead in record_message: {ingest_err}")
             except Exception as e:
                 try:
                     db.session.rollback()
