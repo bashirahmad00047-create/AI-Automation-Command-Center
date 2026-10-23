@@ -807,6 +807,48 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             self.assertTrue(res["success"])
             self.assertEqual(res["reply_body"], "Hum 24/7 technical support faraham karte hain.")
 
+    def test_generate_spoken_audio_uses_edge_neural_hd_voice(self):
+        """Verifies generate_spoken_audio uses Microsoft Edge Neural HD human voice when enabled."""
+        fake_edge_audio = b"\xff\xf3\x84\xc4" + b"\x00" * 300
+        with patch.object(WhatsAppService, "get_openai_api_key", return_value=None), \
+             patch.object(WhatsAppService, "_synthesize_edge_tts", return_value=fake_edge_audio) as mock_edge:
+            try:
+                WhatsAppService._force_test_edge_tts = True
+                res = WhatsAppService.generate_spoken_audio(
+                    "Aap ka khush amdeed. Hum aap ki poori madad karenge.",
+                    language="urdu",
+                    output_format="oga"
+                )
+                self.assertIsNotNone(res)
+                audio_bytes, fn, mime = res
+                self.assertEqual(audio_bytes, fake_edge_audio)
+                mock_edge.assert_called_once()
+                self.assertEqual(mock_edge.call_args[1]["language"], "urdu")
+            finally:
+                WhatsAppService._force_test_edge_tts = False
+
+    def test_verify_green_api_instance_credentials(self):
+        """Verifies Green-API instance credentials validation and authorized status reporting."""
+        with patch.object(WhatsAppService, "get_config", return_value={
+            "green_api_id_instance": "710722761603",
+            "green_api_token_instance": "30cf60_mock_token",
+            "green_api_host": "https://7107.api.greenapi.com"
+        }), patch.object(WhatsAppService, "get_http_session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value.__enter__.return_value = mock_session
+
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.text = json.dumps({"stateInstance": "authorized"})
+            mock_resp.json.return_value = {"stateInstance": "authorized"}
+            mock_session.get.return_value = mock_resp
+
+            status_res = WhatsAppService.test_green_api_connection(organization_id=self.org.id)
+            self.assertTrue(status_res["success"])
+            self.assertEqual(status_res["status"], "authorized")
+            self.assertEqual(status_res["id_instance"], "710722761603")
+            self.assertIn("ONLINE and AUTHORIZED", status_res["message"])
+
 if __name__ == "__main__":
     unittest.main()
 
