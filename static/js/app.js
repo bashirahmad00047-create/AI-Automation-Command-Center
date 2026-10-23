@@ -6521,6 +6521,8 @@ const COMMAND_PALETTE_ITEMS = [
     { id: 'act-new-rule', category: 'Quick Actions', icon: '➕', title: 'Create New Workflow Rule', shortcut: 'N W', action: () => { switchTab('rules'); openRuleModal(); } },
     { id: 'act-new-webhook', category: 'Quick Actions', icon: '🔌', title: 'Register Inbound Webhook', shortcut: 'N H', action: () => { switchTab('webhooks'); openWebhookModal(); } },
     { id: 'act-new-apikey', category: 'Quick Actions', icon: '🔑', title: 'Generate Scoped API Key', shortcut: 'N K', action: () => { switchTab('apikeys'); openApiKeyModal(); } },
+    { id: 'act-bulk-leads', category: 'Quick Actions', icon: '📥', title: 'Bulk Import Leads (CSV/JSON)', shortcut: 'B L', action: () => openBulkLeadImportModal() },
+    { id: 'act-truck-dispatch', category: 'Quick Actions', icon: '🚚', title: 'Dispatch Fleet Delivery Truck', shortcut: 'D T', action: () => openTruckDispatchModal() },
     { id: 'act-export-csv', category: 'Quick Actions', icon: '📥', title: 'Export Compliance Audit Trail (CSV)', shortcut: 'E C', action: () => { window.location.href = '/api/v1/audit-trail/export?format=csv'; } },
     { id: 'act-export-json', category: 'Quick Actions', icon: '📥', title: 'Export Compliance Audit Trail (JSON)', shortcut: 'E J', action: () => { window.location.href = '/api/v1/audit-trail/export?format=json'; } },
     { id: 'act-readiness', category: 'Quick Actions', icon: '🩺', title: 'Run System Health & Readiness Probe', shortcut: 'S H', action: () => checkSystemReadiness(true) },
@@ -9332,4 +9334,267 @@ function openProductImagePreview(encodedUrl, encodedTitle) {
 function closeProductImagePreview() {
     const modal = document.getElementById('modalProductImagePreview');
     if (modal) modal.style.display = 'none';
+}
+
+
+// ==========================================================================
+// OPSFLOW CLOUD: BULK LEADS IMPORTER, WHATSAPP LOCATION & TRUCK DISPATCH
+// ==========================================================================
+
+// --- 1. Bulk Leads Importer ---
+
+function openBulkLeadImportModal() {
+    let modal = document.getElementById('modalBulkLeadImport');
+    if (!modal) {
+        // Dynamically inject modal into body
+        const div = document.createElement('div');
+        div.id = 'modalBulkLeadImport';
+        div.className = 'hud-modal-overlay';
+        div.style.display = 'flex';
+        div.onclick = function(e) { if (e.target === this) closeBulkLeadImportModal(); };
+        div.innerHTML = `
+            <div class="hud-modal" style="max-width: 680px; width: 95vw;">
+                <div class="modal-header">
+                    <div class="hud-flex-row hud-gap-md" style="align-items: center;">
+                        <span style="font-size: 22px;">📥</span>
+                        <div>
+                            <h3 style="margin: 0; font-size: 16px;">Bulk Leads Importer</h3>
+                            <p style="font-size: 11.5px; color: var(--text-dim, #888); margin: 2px 0 0 0;">Import hundreds of prospective customer leads via CSV or JSON with automatic deduplication</p>
+                        </div>
+                    </div>
+                    <button type="button" class="close-btn" onclick="closeBulkLeadImportModal()">&times;</button>
+                </div>
+                <div class="modal-body" style="padding: 20px;">
+                    <div style="margin-bottom: 14px;">
+                        <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px;">Upload CSV File or Paste Records</label>
+                        <input type="file" id="bulkLeadFileInput" accept=".csv,.txt" onchange="handleBulkLeadFileUpload(event)" style="font-size: 12px; margin-bottom: 10px; display: block;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <textarea id="bulkLeadTextarea" class="hud-input mono" rows="8" placeholder="name,phone,email,company,message,category\nAli Khan,+923001234567,ali@example.com,Acme,Interested in enterprise tier,Online\nZainab Ahmed,+923219876543,zainab@retail.pk,Retail Hub,Physical store inquiry,Offline" style="width: 100%; font-size: 12px; resize: vertical;"></textarea>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.4; margin-bottom: 16px;">
+                        Supported columns: <code>name</code>, <code>phone</code>, <code>email</code>, <code>company</code>, <code>message</code>, <code>category</code> (Online/Offline). Duplicate phone numbers are automatically detected and safely skipped.
+                    </div>
+                    <div id="bulkImportPreviewStatus" style="display: none; padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 14px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.2); color: #38bdf8;"></div>
+                    <div class="modal-footer" style="padding: 12px 0 0 0; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 10px;">
+                        <button type="button" class="hud-btn outline" onclick="closeBulkLeadImportModal()">Cancel</button>
+                        <button type="button" class="hud-btn primary" id="btnSubmitBulkLeads" onclick="submitBulkLeadImport()">
+                            <span class="icon">🚀</span> Start Bulk Import
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(div);
+    } else {
+        modal.style.display = 'flex';
+    }
+}
+
+function closeBulkLeadImportModal() {
+    const modal = document.getElementById('modalBulkLeadImport');
+    if (modal) modal.style.display = 'none';
+}
+
+function handleBulkLeadFileUpload(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        const textarea = document.getElementById('bulkLeadTextarea');
+        if (textarea) textarea.value = text;
+        const lineCount = (text.match(/\n/g) || []).length;
+        const statusBox = document.getElementById('bulkImportPreviewStatus');
+        if (statusBox) {
+            statusBox.style.display = 'block';
+            statusBox.textContent = `Loaded ${file.name} (~${lineCount} records ready for processing).`;
+        }
+    };
+    reader.readAsText(file);
+}
+
+function submitBulkLeadImport() {
+    const textarea = document.getElementById('bulkLeadTextarea');
+    const content = textarea ? textarea.value.trim() : '';
+    if (!content) {
+        showToast('Please paste CSV text or select a CSV file.', 'error');
+        return;
+    }
+
+    const btn = document.getElementById('btnSubmitBulkLeads');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="icon spinning">🔄</span> Importing Leads...';
+    }
+
+    fetch('/api/v1/leads/bulk-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv_content: content })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            showToast(`Bulk Import complete: ${data.imported_count} imported, ${data.skipped_count} duplicates skipped!`, 'success');
+            closeBulkLeadImportModal();
+            if (typeof loadLeads === 'function') loadLeads();
+        } else {
+            showToast(data.error || 'Failed to import leads', 'error');
+        }
+    })
+    .catch(err => {
+        showToast(`Import error: ${err.message}`, 'error');
+    })
+    .finally(() => {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span class="icon">🚀</span> Start Bulk Import';
+        }
+    });
+}
+
+// --- 2. Truck Dispatch Tracking Workflow ---
+
+function openTruckDispatchModal(orderId, orderNumber, customerPhone, customerName) {
+    let modal = document.getElementById('modalTruckDispatch');
+    if (!modal) {
+        const div = document.createElement('div');
+        div.id = 'modalTruckDispatch';
+        div.className = 'hud-modal-overlay';
+        div.style.display = 'flex';
+        div.onclick = function(e) { if (e.target === this) closeTruckDispatchModal(); };
+        div.innerHTML = `
+            <div class="hud-modal" style="max-width: 580px; width: 95vw;">
+                <div class="modal-header">
+                    <div class="hud-flex-row hud-gap-md" style="align-items: center;">
+                        <span style="font-size: 22px;">🚚</span>
+                        <div>
+                            <h3 style="margin: 0; font-size: 16px;">Dispatch Delivery Truck</h3>
+                            <p style="font-size: 11.5px; color: var(--text-dim, #888); margin: 2px 0 0 0;">Assign fleet vehicle, driver details, and dispatch live WhatsApp tracking route</p>
+                        </div>
+                    </div>
+                    <button type="button" class="close-btn" onclick="closeTruckDispatchModal()">&times;</button>
+                </div>
+                <div class="modal-body" style="padding: 20px;">
+                    <form id="truckDispatchForm" onsubmit="event.preventDefault(); submitTruckDispatch();">
+                        <input type="hidden" id="truckDispatchOrderId">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Order Number</label>
+                                <input type="text" id="truckDispatchOrderNumber" class="hud-input mono" readonly style="width: 100%;">
+                            </div>
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Customer WhatsApp</label>
+                                <input type="text" id="truckDispatchCustomerPhone" class="hud-input mono" readonly style="width: 100%;">
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Truck / Vehicle ID <span style="color: #f87171;">*</span></label>
+                                <input type="text" id="truckDispatchTruckId" class="hud-input mono" placeholder="TRK-04" required value="TRK-01" style="width: 100%;">
+                            </div>
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Driver Name <span style="color: #f87171;">*</span></label>
+                                <input type="text" id="truckDispatchDriverName" class="hud-input" placeholder="e.g. Rashid Ahmed" required value="Rashid Ahmed" style="width: 100%;">
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Driver Phone <span style="color: #f87171;">*</span></label>
+                                <input type="text" id="truckDispatchDriverPhone" class="hud-input mono" placeholder="03001234567" required value="03001234567" style="width: 100%;">
+                            </div>
+                            <div class="form-group">
+                                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Estimated Delivery (ETA)</label>
+                                <input type="text" id="truckDispatchEta" class="hud-input" placeholder="e.g. Today by 4:30 PM" value="Today by 4:00 PM" style="width: 100%;">
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Destination Address</label>
+                            <input type="text" id="truckDispatchDestination" class="hud-input" placeholder="Customer address or delivery coordinates..." style="width: 100%;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px;">Live GPS Tracking Link (Optional)</label>
+                            <input type="url" id="truckDispatchTrackingUrl" class="hud-input mono" placeholder="https://maps.google.com/?q=..." style="width: 100%;">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+                            <input type="checkbox" id="truckDispatchNotifyWa" checked style="cursor: pointer; width: 16px; height: 16px;">
+                            <label for="truckDispatchNotifyWa" style="font-size: 12px; font-weight: 600; cursor: pointer;">Send Live WhatsApp Route Tracking Alert to Customer</label>
+                        </div>
+                        <div class="modal-footer" style="padding: 12px 0 0 0; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 10px;">
+                            <button type="button" class="hud-btn outline" onclick="closeTruckDispatchModal()">Cancel</button>
+                            <button type="submit" class="hud-btn primary" id="btnSubmitTruckDispatch">
+                                <span class="icon">🚚</span> Confirm &amp; Dispatch Truck
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(div);
+    } else {
+        modal.style.display = 'flex';
+    }
+
+    if (orderId) document.getElementById('truckDispatchOrderId').value = orderId;
+    if (orderNumber) document.getElementById('truckDispatchOrderNumber').value = orderNumber;
+    if (customerPhone) document.getElementById('truckDispatchCustomerPhone').value = customerPhone;
+    if (customerName) {
+        const dest = document.getElementById('truckDispatchDestination');
+        if (dest && !dest.value) dest.value = `Delivery for ${customerName}`;
+    }
+}
+
+function closeTruckDispatchModal() {
+    const modal = document.getElementById('modalTruckDispatch');
+    if (modal) modal.style.display = 'none';
+}
+
+function submitTruckDispatch() {
+    const orderId = document.getElementById('truckDispatchOrderId')?.value || document.getElementById('truckDispatchOrderNumber')?.value;
+    if (!orderId) {
+        showToast('Please specify an Order ID or Order Number.', 'error');
+        return;
+    }
+
+    const payload = {
+        truck_id: document.getElementById('truckDispatchTruckId')?.value.trim() || 'TRK-01',
+        driver_name: document.getElementById('truckDispatchDriverName')?.value.trim() || 'Fleet Driver',
+        driver_phone: document.getElementById('truckDispatchDriverPhone')?.value.trim() || '',
+        destination: document.getElementById('truckDispatchDestination')?.value.trim() || '',
+        estimated_arrival: document.getElementById('truckDispatchEta')?.value.trim() || 'In Transit',
+        tracking_url: document.getElementById('truckDispatchTrackingUrl')?.value.trim() || null,
+        notify_whatsapp: document.getElementById('truckDispatchNotifyWa')?.checked ?? true
+    };
+
+    const btn = document.getElementById('btnSubmitTruckDispatch');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="icon spinning">🔄</span> Dispatching Truck...';
+    }
+
+    fetch(`/api/v1/ecommerce/orders/${encodeURIComponent(orderId)}/dispatch-truck`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            showToast(`Truck ${payload.truck_id} dispatched! Live tracking route sent to customer.`, 'success');
+            closeTruckDispatchModal();
+        } else {
+            showToast(data.error || 'Truck dispatch failed', 'error');
+        }
+    })
+    .catch(err => {
+        showToast(`Dispatch error: ${err.message}`, 'error');
+    })
+    .finally(() => {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span class="icon">🚚</span> Confirm &amp; Dispatch Truck';
+        }
+    });
 }
