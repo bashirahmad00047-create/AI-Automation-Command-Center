@@ -5673,6 +5673,67 @@ def get_order_payment_link(order_id: str):
     }), 200
 
 
+@api_v1.route("/ecommerce/payment-methods", methods=["GET"])
+@require_auth
+def get_ecommerce_payment_methods():
+    """Returns active payment methods with default details (JazzCash, EasyPaisa, Bank Transfer IBAN, Card)."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    pay_info = WhatsAppService.generate_payment_instructions(
+        organization_id=org.id,
+        order_number=None,
+        amount=None
+    )
+    return jsonify({
+        "status": "success",
+        "payment_methods": pay_info
+    }), 200
+
+
+@api_v1.route("/ecommerce/orders/<order_id>/send-payment-instructions", methods=["POST"])
+@require_auth
+def send_order_payment_instructions(order_id: str):
+    """Dispatches structured payment instructions over WhatsApp directly to the order customer."""
+    org = get_current_org()
+    if not org:
+        return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
+
+    order = EcommerceOrder.query.filter(
+        db.or_(EcommerceOrder.id == order_id, EcommerceOrder.order_number == order_id),
+        EcommerceOrder.organization_id == org.id
+    ).first()
+    if not order:
+        return jsonify({"error": "Order not found.", "code": "NOT_FOUND"}), 404
+
+    pay_info = WhatsAppService.generate_payment_instructions(
+        organization_id=org.id,
+        order_number=order.order_number,
+        amount=order.total_amount,
+        currency=order.currency,
+        customer_phone=order.customer_phone
+    )
+
+    clean_phone = WhatsAppService.format_phone_number(order.customer_phone or "")
+    if not clean_phone:
+        return jsonify({"error": "Order has no valid customer phone number.", "code": "INVALID_PHONE"}), 400
+
+    send_res = WhatsAppService.send_message(
+        organization_id=org.id,
+        to_phone=clean_phone,
+        message_text=pay_info["formatted_text"]
+    )
+
+    return jsonify({
+        "status": "success",
+        "order_number": order.order_number,
+        "recipient": clean_phone,
+        "payment_info": pay_info,
+        "dispatch_result": send_res
+    }), 200
+
+
 # --- 4. Broadcast Marketing Module Endpoints ---
 
 @api_v1.route("/marketing/broadcast/dispatch", methods=["POST"])

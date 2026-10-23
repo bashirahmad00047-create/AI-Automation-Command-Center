@@ -1403,15 +1403,18 @@ class WhatsAppService:
                 f"- Enterprise: ${ent_usd}/mo (PKR {int(ent_pkr):,}/mo) - 250 automated rules, 1,000,000 monthly events, dedicated SLA, audit trail.\n\n"
                 "VERIFIED TRIAL TERMS:\n"
                 f"- {trial_days}-Day Free Trial ({TRIAL_DURATION_HOURS} hours) available for exploring subscription tiers.\n\n"
-                "VERIFIED PAYMENT METHODS:\n"
-                "- Stripe: International credit and debit card payments in USD.\n"
-                "- JazzCash: Pakistan local payments in PKR (Direct Mobile Wallet MWALLET, hosted Web Checkout, and manual Transaction ID verification).\n\n"
+                "VERIFIED PAYMENT METHODS & DEFAULT PAYMENT DETAILS:\n"
+                "- JazzCash (Mobile Wallet): Account 03209350858, Title: OpsFlow Cloud Commerce.\n"
+                "- EasyPaisa (Mobile Wallet): Account 03471000668, Title: OpsFlow Cloud Commerce.\n"
+                "- Bank Transfer (IBAN): Meezan Bank Limited, Title: OpsFlow Technologies (Pvt) Ltd, Account: 02010108934521, IBAN: PK64MEZN0002010108934521.\n"
+                "- Stripe / Card: International credit and debit card payments via secure online checkout link.\n"
+                "- Cash on Delivery (COD): Supported upon customer confirmation.\n\n"
                 "VERIFIED INTEGRATIONS:\n"
                 "- Supported natively: WhatsApp (Green-API / Meta Cloud API), Slack, Email (SMTP), and custom incoming/outgoing REST Webhooks.\n\n"
                 "GROUNDING & ANTI-HALLUCINATION GUARDRAILS:\n"
                 "1. ONLY state facts, pricing, trial terms, payment methods, and integrations that are explicitly listed above.\n"
                 "2. Unknown / Custom Pricing: If a customer asks about custom enterprise pricing, bulk discounts, unlisted currencies, or negotiated quotes, DO NOT invent numbers. Politely inform them that custom pricing requires confirmation from our sales specialist or account team.\n"
-                "3. Unsupported / Unverified Payment Methods: If asked about payment methods other than Stripe or JazzCash (e.g. PayPal, EasyPaisa, Cash on Delivery, Bank Transfer, Crypto), explain that OpsFlow currently supports Stripe and JazzCash, and that any alternative method requires confirmation from our billing department.\n"
+                "3. Payment Methods & Structured Payment Details: OpsFlow officially supports JazzCash (Account: 03209350858), EasyPaisa (Account: 03471000668), Bank Transfer IBAN (Meezan Bank - IBAN: PK64MEZN0002010108934521), and Stripe/Card. Whenever a customer asks for payment options or completes/confirms a deal, provide these structured account details clearly so they can transfer funds and share their transaction screenshot. For any other unlisted method (e.g. PayPal, Crypto), inform them it requires billing confirmation.\n"
                 "4. Unsupported / Unverified Integrations: If asked about third-party apps not natively listed above (e.g. native Salesforce, HubSpot, Jira, Zapier app, Telegram), explain that they are not pre-configured natively but can connect via standard REST Webhooks, or that our engineering team can confirm enterprise integration feasibility.\n"
                 "5. Missing Facts: When any policy, feature, or service capability is not explicitly detailed in this knowledge base, NEVER guess or make commitments. Politely state that you need confirmation from our team and a specialist will follow up.\n"
                 "6. Language Matching (Critical): Detect and match the customer's language naturally across Pashto, Urdu, and English. If the customer writes in Pashto (Arabic script), reply in natural Pashto (پښتو). If in Roman Pashto (Latin script), reply in natural Roman Pashto. If in Urdu (Arabic/Nastaliq script), reply in natural Urdu (اردو). If in Roman Urdu, reply in natural Roman Urdu. If in English, reply in professional English.\n"
@@ -1425,11 +1428,13 @@ class WhatsAppService:
         return (
             f"Business Name: {b_name}\n\n"
             "STATUS: Business knowledge catalog has not yet been populated by organization administrators.\n\n"
+            "VERIFIED PAYMENT METHODS: JazzCash (03209350858), EasyPaisa (03471000668), Bank Transfer IBAN (Meezan Bank: PK64MEZN0002010108934521), Debit/Credit Card.\n\n"
             "STRICT GROUNDING & ANTI-HALLUCINATION GUARDRAILS:\n"
             f"1. Greet the customer warmly and politely on behalf of {b_name}.\n"
             "2. Because specific product catalogs, verified pricing, and delivery policies have not been loaded, DO NOT invent or assume any products, prices, or policies.\n"
             "3. If the customer asks for prices, products, or quotes, politely ask for clarification or state that our customer specialist will contact them directly with confirmed details.\n"
-            "4. Match the customer's language (Roman Urdu or English) and keep responses brief."
+            "4. If the customer asks for payment details or confirms a deal, provide the verified payment options listed above.\n"
+            "5. Match the customer's language (Roman Urdu or English) and keep responses brief."
         )
 
     @classmethod
@@ -2643,6 +2648,8 @@ class WhatsAppService:
             message_text=message_body
         )
         if tracking_action and tracking_action.get("message"):
+            with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
+                getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
             cls.send_message(
                 organization_id=org_id,
                 to_phone=clean_phone,
@@ -2653,6 +2660,57 @@ class WhatsAppService:
                 "action": "order_tracked",
                 "order": tracking_action.get("order"),
                 "reply_body": tracking_action["message"]
+            }
+
+        # 3. Check for customer asking for payment options or completing a deal
+        payment_action = cls.handle_payment_query_or_deal_closure(
+            organization_id=org_id,
+            sender_phone=clean_phone,
+            message_text=message_body,
+            sender_name=sender_name
+        )
+        if payment_action and payment_action.get("message"):
+            with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
+                getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
+            if auto_conf.get("auto_lead_capture") and has_app_context():
+                try:
+                    from models import Lead
+                    existing_lead = Lead.query.filter(
+                        Lead.organization_id == org_id,
+                        Lead.phone.like(f"%{clean_phone[-9:]}%")
+                    ).first()
+                    if not existing_lead:
+                        clean_name = sender_name or f"WhatsApp {clean_phone}"
+                        if "@c.us" in clean_name or "@s.whatsapp.net" in clean_name:
+                            clean_name = clean_name.split("@")[0].strip()
+                        new_lead = Lead(
+                            organization_id=org_id,
+                            name=clean_name,
+                            phone=clean_phone,
+                            company="",
+                            message=message_body[:500],
+                            intent="payment_or_deal_closure",
+                            urgency_score=90,
+                            lead_score=95,
+                            route_department="Sales",
+                            draft_response=payment_action["message"]
+                        )
+                        db.session.add(new_lead)
+                        db.session.commit()
+                        logger.info(f"Auto-captured CRM Lead for payment query/deal closure: {clean_phone}")
+                except Exception as lead_err:
+                    logger.error(f"Failed to auto-capture CRM Lead on payment query: {lead_err}")
+            cls.send_message(
+                organization_id=org_id,
+                to_phone=clean_phone,
+                message_text=payment_action["message"]
+            )
+            return {
+                "success": True,
+                "action": "payment_instructions_dispatched",
+                "payment_info": payment_action.get("payment_info"),
+                "reply_body": payment_action["message"],
+                "trigger_type": payment_action.get("trigger_type")
             }
 
         # Generate response
@@ -6185,25 +6243,38 @@ class WhatsAppService:
         currency: str = "PKR",
         customer_phone: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Generates automated payment instructions and checkout links for EasyPaisa, JazzCash, and Card/Stripe."""
+        """Generates automated payment instructions and checkout links for JazzCash, EasyPaisa, Bank Transfer IBAN, and Card/Stripe."""
         org_id = organization_id or "org-enterprise-default"
         amt_str = f"{currency} {amount:,.2f}" if amount is not None else ""
         ord_no = order_number or "ORD-DEFAULT"
         clean_phone = cls.format_phone_number(customer_phone or "")
 
+        jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "03209350858"
+        jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "OpsFlow Cloud Commerce"
+
         ep_acc = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_NUMBER", org_id) or "03471000668"
         ep_title = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_TITLE", org_id) or "OpsFlow Cloud Commerce"
 
-        jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "03209350858"
-        jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "OpsFlow Cloud Commerce"
+        bank_name = cls._get_tenant_or_global_setting("BANK_NAME", org_id) or "Meezan Bank Limited"
+        bank_title = cls._get_tenant_or_global_setting("BANK_ACCOUNT_TITLE", org_id) or "OpsFlow Technologies (Pvt) Ltd"
+        bank_acc = cls._get_tenant_or_global_setting("BANK_ACCOUNT_NUMBER", org_id) or "02010108934521"
+        bank_iban = cls._get_tenant_or_global_setting("BANK_IBAN", org_id) or "PK64MEZN0002010108934521"
 
         base_url = cls._get_tenant_or_global_setting("CHECKOUT_BASE_URL", org_id) or "https://opsflow.cloud"
         card_link = f"{base_url}/checkout/pay?order={ord_no}&amount={amount or 0}&phone={clean_phone}"
 
+        header_lines = []
+        if amount is not None:
+            header_lines.append(f"💰 *Amount Payable:* {amt_str}")
+        if order_number and order_number != "ORD-DEFAULT":
+            header_lines.append(f"📋 *Order Ref:* `{ord_no}`")
+        header_text = ("\n" + "\n".join(header_lines) + "\n") if header_lines else "\n"
+
         formatted = (
-            "💳 *Payment Options (EasyPaisa / JazzCash / Card):*\n"
-            f"• *EasyPaisa:* `{ep_acc}` (Title: *{ep_title}*)\n"
+            f"💳 *Payment Options (JazzCash / EasyPaisa / Bank Transfer IBAN):*{header_text}\n"
             f"• *JazzCash:* `{jc_acc}` (Title: *{jc_title}*)\n"
+            f"• *EasyPaisa:* `{ep_acc}` (Title: *{ep_title}*)\n"
+            f"• *Bank Transfer (IBAN):* Bank: *{bank_name}*, Title: *{bank_title}*, Acc #: `{bank_acc}`, IBAN: `{bank_iban}`\n"
             f"• *Debit/Credit Card / Stripe:* {card_link}\n\n"
             "Payment ke baad transaction ID ya screenshot yahan share karein. "
             "Agar aap Cash on Delivery (COD) chahte hain to 'COD' reply karein."
@@ -6213,16 +6284,116 @@ class WhatsAppService:
             "order_number": ord_no,
             "amount": amount,
             "currency": currency,
-            "easypaisa": {
-                "account_number": ep_acc,
-                "account_title": ep_title
-            },
             "jazzcash": {
                 "account_number": jc_acc,
                 "account_title": jc_title
             },
+            "easypaisa": {
+                "account_number": ep_acc,
+                "account_title": ep_title
+            },
+            "bank_transfer": {
+                "bank_name": bank_name,
+                "account_title": bank_title,
+                "account_number": bank_acc,
+                "iban": bank_iban
+            },
             "card_payment_link": card_link,
             "formatted_text": formatted
+        }
+
+    @classmethod
+    def handle_payment_query_or_deal_closure(
+        cls,
+        organization_id: str,
+        sender_phone: str,
+        message_text: str,
+        sender_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detects if customer asks for payment options or completes a deal,
+        and generates structured payment instructions (JazzCash, EasyPaisa, Bank Transfer IBAN).
+        """
+        if not message_text:
+            return None
+
+        clean_text = str(message_text).strip()
+        lower = clean_text.lower()
+        clean_phone = cls.format_phone_number(sender_phone or "")
+        org_id = organization_id or "org-enterprise-default"
+
+        deal_patterns = [
+            "deal done", "done deal", "deal confirm", "confirm deal", "finalize deal",
+            "deal pakki", "deal final", "deal locked", "lock deal", "deal finalized",
+            "order confirm", "confirm order", "order final", "pack kar do", "final kar do",
+            "final kar dein", "bhej do", "send invoice", "booked", "deal closed", "close deal"
+        ]
+
+        payment_patterns = [
+            "payment", "pay", "jazzcash", "easypaisa", "easy paisa", "jazz cash",
+            "bank transfer", "iban", "account number", "account details", "how to pay",
+            "kahan pay", "paise kahan", "payment method", "payment option", "bank account",
+            "transfer kahan", "bhejne ka tareeqa", "send account", "account info",
+            "payment details", "jazzcash number", "easypaisa number", "bank details",
+            "payment link", "online pay"
+        ]
+
+        is_deal_done = any(p in lower for p in deal_patterns)
+        is_payment_query = any(p in lower for p in payment_patterns)
+
+        if not (is_deal_done or is_payment_query):
+            return None
+
+        recent_order = None
+        if has_app_context():
+            try:
+                from models import EcommerceOrder, Order
+                recent_order = EcommerceOrder.query.filter(
+                    EcommerceOrder.organization_id == org_id,
+                    EcommerceOrder.customer_phone.like(f"%{clean_phone[-9:]}%")
+                ).order_by(EcommerceOrder.created_at.desc()).first()
+                if not recent_order:
+                    recent_order = Order.query.filter(
+                        Order.organization_id == org_id,
+                        Order.customer_phone.like(f"%{clean_phone[-9:]}%")
+                    ).order_by(Order.created_at.desc()).first()
+            except Exception as e:
+                logger.debug(f"Could not fetch recent order for payment instructions: {e}")
+
+        order_no = getattr(recent_order, "order_number", None)
+        amount = getattr(recent_order, "total_amount", None)
+        currency = getattr(recent_order, "currency", "PKR") or "PKR"
+
+        pay_info = cls.generate_payment_instructions(
+            organization_id=org_id,
+            order_number=order_no,
+            amount=amount,
+            currency=currency,
+            customer_phone=clean_phone
+        )
+
+        customer_label = sender_name or "Valued Customer"
+        trigger_type = "deal_closed" if is_deal_done else "payment_inquiry"
+
+        if is_deal_done:
+            intro = (
+                f"🤝 *Deal Confirmed! Thank you, {customer_label}.*\n\n"
+                "Aapki deal finalize kar di gayi hai. Order complete karne ke liye mandarja zail payment methods istemal karein:\n\n"
+            )
+        else:
+            intro = (
+                f"Salam {customer_label}! OpsFlow Cloud ke official payment options mandarja zail hain:\n\n"
+            )
+
+        full_message = intro + pay_info["formatted_text"]
+
+        return {
+            "success": True,
+            "trigger_type": trigger_type,
+            "order_number": order_no,
+            "amount": amount,
+            "payment_info": pay_info,
+            "message": full_message
         }
 
     @classmethod
