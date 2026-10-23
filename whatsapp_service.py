@@ -16,6 +16,7 @@ Architecture:
 
 from __future__ import annotations
 
+import concurrent.futures
 import datetime
 import hashlib
 import hmac
@@ -154,7 +155,7 @@ class WhatsAppService:
                 if cached:
                     return cached[1]
 
-        timeouts = (2.5, 6.0)
+        timeouts = (1.5, 3.0)
         # 2. Fast direct fetch if direct download URL is available from payload
         if download_url and str(download_url).startswith("http"):
             try:
@@ -197,7 +198,7 @@ class WhatsAppService:
         return None
 
     @classmethod
-    def _transcribe_audio(cls, audio_bytes: bytes, organization_id: Optional[str] = None, message_id: Optional[str] = None) -> Optional[str]:
+    def _transcribe_audio(cls, audio_bytes: bytes, organization_id: Optional[str] = None, message_id: Optional[str] = None, timeout: float = 3.0) -> Optional[str]:
         """Transcribe audio using OpenAI Whisper API, Groq Whisper, or Gemini with fast timeouts and caching.
         Returns the transcript string or None on failure.
         """
@@ -258,7 +259,7 @@ class WhatsAppService:
                     headers=headers,
                     files=files,
                     data=data,
-                    timeout=6.0
+                    timeout=min(float(timeout or 3.0), 3.0)
                 )
                 if resp.status_code == 200:
                     openai_res = resp.json()
@@ -292,7 +293,7 @@ class WhatsAppService:
                     headers=headers,
                     files=files,
                     data=data,
-                    timeout=5.0
+                    timeout=min(float(timeout or 3.0), 3.0)
                 )
                 if resp.status_code == 200:
                     whisper_res = resp.json()
@@ -341,6 +342,201 @@ class WhatsAppService:
                 logger.debug(f"Gemini audio transcription notice: {e}")
 
         return None
+
+    @classmethod
+    def is_audio_message(
+        cls,
+        message_type=None,
+        body=None,
+        download_url=None,
+        file_name=None
+    ) -> bool:
+        """Determines if an incoming message is an audio / voice note message (.oga, .ogg, audioMessage, etc.)."""
+        m_type = str(message_type or "").strip()
+        b_str = str(body or "").strip().lower()
+        dl_url = str(download_url or "").strip().lower()
+        fn = str(file_name or "").strip().lower()
+        return bool(
+            m_type in ("audioMessage", "voiceMessage", "ptt", "audio")
+            or b_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]")
+            or dl_url.endswith((".oga", ".ogg", ".opus", ".mp3", ".wav", ".m4a", ".aac"))
+            or fn.endswith((".oga", ".ogg", ".opus", ".mp3", ".wav", ".m4a", ".aac"))
+            or ".oga" in dl_url
+        )
+
+    @classmethod
+    def update_crm_lead_with_transcript(
+        cls,
+        organization_id,
+        phone,
+        transcript,
+        message_id=None
+    ):
+        """Updates or creates a Lead in the CRM dashboard with transcribed audio text."""
+        if not has_app_context() or not phone or not transcript:
+            return None
+
+        clean_phone = cls.format_phone_number(str(phone).strip())
+        if not clean_phone or len(clean_phone) < 7:
+            return None
+
+        org_id = organization_id or "org-enterprise-default"
+        phone_suffix = clean_phone[-9:] if len(clean_phone) >= 9 else clean_phone
+
+        try:
+            lead = Lead.query.filter(
+                Lead.organization_id == org_id,
+                db.or_(
+                    Lead.phone == clean_phone,
+                    Lead.phone.like(f"%{phone_suffix}%")
+                )
+            ).first()
+
+            transcribed_note = f"🎙️ Voice Note Transcript: {transcript.strip()}"
+
+            if lead:
+                curr_msg = (lead.message or "").strip()
+                if not curr_msg or curr_msg in ("[Voice note]", "[voice message]", f"Inbound inquiry received from WhatsApp contact {clean_phone}."):
+                    lead.message = transcribed_note
+                elif transcript.strip() not in curr_msg:
+                    lead.message = f"{curr_msg}\n\n{transcribed_note}".strip()
+                lead.status = "new"
+                db.session.commit()
+                logger.info(f"Updated CRM Lead {lead.id} with voice note transcription for {clean_phone}: '{transcript[:60]}'")
+                return lead.to_dict()
+            else:
+                contact_name = f"WhatsApp Lead {clean_phone[-4:]}"
+                new_lead = Lead(
+                    id=generate_uuid("lead"),
+                    organization_id=org_id,
+                    name=contact_name,
+                    phone=clean_phone,
+                    email=None,
+                    company="WhatsApp Voice Inquiry",
+                    message=transcribed_note,
+                    intent="lead_inquiry",
+                    urgency_score=75,
+                    lead_score=80,
+                    route_department="Sales",
+                    status="new"
+                )
+                db.session.add(new_lead)
+                db.session.commit()
+                logger.info(f"Created new CRM Lead {new_lead.id} with voice note transcription for {clean_phone}: '{transcript[:60]}'")
+                return new_lead.to_dict()
+        except Exception as e:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            logger.error(f"Error updating CRM Lead with transcript: {e}")
+            return None
+
+    @classmethod
+    def async_transcribe_and_log_crm(
+        cls,
+        organization_id,
+        sender_phone,
+        message_id=None,
+        download_url=None,
+        sender_name=None,
+        app_obj=None
+    ):
+        """Transcribes incoming audio (.oga, voice note) asynchronously in a background thread
+        with a strict 3-second timeout, and logs the transcribed text to the CRM dashboard
+        (WhatsAppMessage and Lead models) without blocking the auto-reply gateway.
+        """
+        if not app_obj and has_app_context():
+            try:
+                from flask import current_app
+                app_obj = current_app._get_current_object()
+            except Exception:
+                app_obj = None
+
+        def _worker():
+            def _execute_transcription():
+                clean_phone = cls.format_phone_number(sender_phone)
+                org_id = organization_id or "org-enterprise-default"
+                audio_bytes = cls._download_media(
+                    chat_id=sender_phone,
+                    message_id=message_id,
+                    download_url=download_url,
+                    organization_id=org_id
+                )
+                if not audio_bytes:
+                    return None
+
+                return cls._transcribe_audio(
+                    audio_bytes,
+                    organization_id=org_id,
+                    message_id=message_id,
+                    timeout=3.0
+                )
+
+            transcript = None
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(_execute_transcription)
+                    try:
+                        transcript = future.result(timeout=3.0)
+                    except concurrent.futures.TimeoutError:
+                        logger.warning(f"Voice note transcription strictly timed out (>3.0s) for {sender_phone} ({message_id}); preventing Render hang.")
+                        transcript = None
+                    except Exception as ex:
+                        logger.debug(f"Voice note transcription worker error: {ex}")
+                        transcript = None
+            except Exception as e:
+                logger.debug(f"Async transcription execution error: {e}")
+
+            if not transcript or not transcript.strip():
+                return
+
+            transcript = transcript.strip()
+            clean_phone = cls.format_phone_number(sender_phone)
+            org_id = organization_id or "org-enterprise-default"
+
+            def _persist_to_crm():
+                try:
+                    if message_id:
+                        msg_rec = WhatsAppMessage.query.filter_by(
+                            organization_id=org_id,
+                            whatsapp_message_id=message_id
+                        ).first()
+                        if msg_rec:
+                            msg_rec.body = transcript
+                            existing_payload = {}
+                            if msg_rec.raw_payload_json:
+                                try:
+                                    existing_payload = json.loads(msg_rec.raw_payload_json)
+                                except Exception:
+                                    pass
+                            existing_payload["transcription"] = transcript
+                            existing_payload["transcription_status"] = "completed"
+                            msg_rec.raw_payload_json = json.dumps(existing_payload)
+                            db.session.commit()
+
+                    cls.update_crm_lead_with_transcript(
+                        organization_id=org_id,
+                        phone=clean_phone,
+                        transcript=transcript,
+                        message_id=message_id
+                    )
+                except Exception as db_err:
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+                    logger.error(f"Failed to log transcribed audio to CRM dashboard: {db_err}")
+
+            if app_obj:
+                with app_obj.app_context():
+                    _persist_to_crm()
+            elif has_app_context():
+                _persist_to_crm()
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        return t
 
     @classmethod
     def generate_spoken_audio(
@@ -2455,7 +2651,8 @@ class WhatsAppService:
         engine_res: Optional[Dict[str, Any]] = None,
         message_timestamp: Optional[Any] = None,
         is_voice: bool = False,
-        download_url: Optional[str] = None
+        download_url: Optional[str] = None,
+        sync_transcribe: bool = False
     ) -> Optional[Dict[str, Any]]:
         """Handles automated AI response to an inbound message if enabled and not debounced."""
         if not sender_phone:
@@ -2492,44 +2689,146 @@ class WhatsAppService:
         clean_phone = cls.format_phone_number(sender_phone)
         org_id = organization_id or "org-enterprise-default"
 
-        # If incoming message is a voice note and text is still a placeholder, download and transcribe via fast Whisper/Gemini
-        if is_voice_inbound and (not clean_body or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]")):
+        # Stale timestamp guard
+        if message_timestamp:
             try:
-                logger.info(f"Downloading incoming voice note for {clean_phone} (message_id={message_id})...")
-                audio_bytes = cls._download_media(
-                    chat_id=sender_phone,
-                    message_id=message_id,
-                    download_url=download_url,
-                    organization_id=org_id
-                )
-                if audio_bytes:
-                    transcript = cls._transcribe_audio(audio_bytes, organization_id=org_id)
-                    if transcript and transcript.strip():
-                        logger.info(f"Successfully transcribed voice note for {clean_phone} ({message_id}): '{transcript}'")
-                        message_body = transcript.strip()
-                        body_clean_str = message_body.lower()
-                        clean_body = message_body
-                        # Update persisted message in DB if present
-                        if has_app_context() and message_id:
-                            try:
-                                rec_obj = WhatsAppMessage.query.filter_by(
-                                    organization_id=org_id,
-                                    whatsapp_message_id=message_id
-                                ).first()
-                                if rec_obj:
-                                    rec_obj.body = message_body
-                                    db.session.commit()
-                            except Exception as rec_err:
+                msg_ts = float(message_timestamp)
+                now_ts = time.time()
+                if msg_ts > 1e11:
+                    msg_ts = msg_ts / 1000.0
+                if now_ts - msg_ts > 900:
+                    logger.info(f"Ignoring stale message {message_id} ({int(now_ts - msg_ts)}s old) for auto-reply.")
+                    return None
+            except (ValueError, TypeError):
+                pass
+
+        # Deduplication guard
+        if message_id:
+            with cls._processed_ids_lock:
+                now = time.time()
+                cls._recent_replied_trigger_ids = {k: v for k, v in cls._recent_replied_trigger_ids.items() if v > now - 3600}
+                if message_id in cls._recent_replied_trigger_ids:
+                    logger.info(f"AI Auto-Reply already generated for message {message_id} (in-memory deduplication), skipping duplicate webhook.")
+                    return {"success": True, "duplicate": True, "message_id": message_id}
+            if has_app_context():
+                already_replied = WhatsAppMessage.query.filter(
+                    WhatsAppMessage.organization_id == org_id,
+                    WhatsAppMessage.direction == "outbound",
+                    WhatsAppMessage.raw_payload_json.like(f'%"triggered_by_message_id": "{message_id}"%')
+                ).first()
+                if already_replied:
+                    logger.info(f"AI Auto-Reply already recorded in DB for message {message_id}, skipping duplicate webhook.")
+                    return {
+                        "success": True,
+                        "duplicate": True,
+                        "message_id": message_id,
+                        "reply_body": already_replied.body
+                    }
+
+        # Prevent self-reply loops if webhook echoes our own sent messages or instance WID
+        conf = cls.get_config(organization_id=org_id)
+        own_candidates = [
+            conf.get("green_api_wid"),
+            SystemSetting.get_val("GREEN_API_WID"),
+            os.environ.get("GREEN_API_WID"),
+            conf.get("display_phone_number"),
+            SystemSetting.get_val("WHATSAPP_DISPLAY_PHONE_NUMBER"),
+        ]
+        bot_numbers = set()
+        for cand in own_candidates:
+            if cand:
+                cleaned = cls.format_phone_number(str(cand).replace("@c.us", "").replace("@g.us", "").strip())
+                if cleaned and len(cleaned) >= 8:
+                    bot_numbers.add(cleaned)
+
+        if clean_phone in bot_numbers:
+            logger.debug(f"Ignoring inbound message from self/instance bot WID {clean_phone}")
+            return None
+
+        # Check if incoming message is an audio / voice note message (.oga, audioMessage, etc.)
+        if is_voice_inbound and (not clean_body or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]")):
+            if sync_transcribe:
+                try:
+                    logger.info(f"Synchronously downloading incoming voice note for {clean_phone} (message_id={message_id})...")
+                    audio_bytes = cls._download_media(
+                        chat_id=sender_phone,
+                        message_id=message_id,
+                        download_url=download_url,
+                        organization_id=org_id
+                    )
+                    if audio_bytes:
+                        transcript = cls._transcribe_audio(audio_bytes, organization_id=org_id, timeout=3.0)
+                        if transcript and transcript.strip():
+                            logger.info(f"Successfully transcribed voice note for {clean_phone} ({message_id}): '{transcript}'")
+                            message_body = transcript.strip()
+                            body_clean_str = message_body.lower()
+                            clean_body = message_body
+                            if has_app_context() and message_id:
                                 try:
-                                    db.session.rollback()
+                                    rec_obj = WhatsAppMessage.query.filter_by(
+                                        organization_id=org_id,
+                                        whatsapp_message_id=message_id
+                                    ).first()
+                                    if rec_obj:
+                                        rec_obj.body = message_body
+                                        db.session.commit()
                                 except Exception:
                                     pass
-                    else:
-                        logger.info(f"Voice note transcription unavailable for {clean_phone}; handling with conversational voice acknowledgement.")
-                else:
-                    logger.debug(f"Could not download audio bytes for voice note ({message_id}) from {clean_phone}.")
-            except Exception as v_err:
-                logger.debug(f"Voice note download/transcription notice: {v_err}")
+                            cls.update_crm_lead_with_transcript(org_id, clean_phone, message_body, message_id)
+                except Exception as v_err:
+                    logger.debug(f"Sync voice note download/transcription notice: {v_err}")
+            else:
+                # FAST-PATH NON-BLOCKING REPLY: Dispatch instant acknowledgment within 1-2 seconds
+                ack_res = cls.generate_ai_auto_response(
+                    organization_id=org_id,
+                    message_body="[Voice note]",
+                    sender_name=sender_name,
+                    sender_phone=clean_phone
+                )
+                ack_body = (
+                    ack_res.get("reply_body")
+                    or "Aapka voice note receive ho gaya hai, shukriya! Humari team isay sun kar follow-up karegi. / We received your voice note, thank you! Our team will listen and follow up shortly."
+                )
+
+                if message_id:
+                    with cls._processed_ids_lock:
+                        cls._recent_replied_trigger_ids[message_id] = time.time()
+
+                # Dispatch instant acknowledgment text reply
+                dispatch_res = cls.send_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    message_text=ack_body
+                )
+
+                # Mark triggering message as read
+                try:
+                    cls.mark_message_as_read(
+                        message_id=message_id,
+                        chat_id=clean_phone,
+                        organization_id=org_id
+                    )
+                except Exception:
+                    pass
+
+                # Offload Whisper/STT processing to background thread with strict 3-second timeout & CRM logging
+                cls.async_transcribe_and_log_crm(
+                    organization_id=org_id,
+                    sender_phone=clean_phone,
+                    message_id=message_id,
+                    download_url=download_url,
+                    sender_name=sender_name
+                )
+
+                logger.info(f"Instant acknowledgment fast-path reply dispatched for voice note ({message_id}) to {clean_phone}")
+                return {
+                    "success": True,
+                    "action": "fast_path_voice_ack",
+                    "reply_body": ack_body,
+                    "fast_path": True,
+                    "message_id": message_id,
+                    "dispatch": dispatch_res
+                }
 
         # Ignore stale / historical messages (older than 15 minutes) to prevent delayed reply bursts on login/startup
         if message_timestamp:

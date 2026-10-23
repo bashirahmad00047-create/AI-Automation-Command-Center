@@ -2791,9 +2791,10 @@ def whatsapp_webhook_ingress():
 
         # Trigger AI Auto-Responder if configured and active
         if not rule_replied:
-            is_v_meta = (
-                msg.get("message_type") in ("audioMessage", "voiceMessage", "ptt", "audio")
-                or "[voice note]" in str(msg.get("body", "")).lower()
+            is_v_meta = WhatsAppService.is_audio_message(
+                message_type=msg.get("message_type"),
+                body=msg.get("body"),
+                download_url=msg.get("download_url")
             )
             d_url_meta = msg.get("download_url")
             if current_app.config.get("TESTING"):
@@ -2960,9 +2961,10 @@ def green_api_webhook_ingress():
 
             # Trigger AI Auto-Responder if configured and active
             if not rule_replied:
-                is_v_green = (
-                    msg.get("message_type") in ("audioMessage", "voiceMessage", "ptt")
-                    or "[voice note]" in str(msg.get("body", "")).lower()
+                is_v_green = WhatsAppService.is_audio_message(
+                    message_type=msg.get("message_type"),
+                    body=msg.get("body"),
+                    download_url=msg.get("download_url")
                 )
                 d_url_green = msg.get("download_url")
                 # Under unit test execution, run synchronously for deterministic assertions
@@ -2985,30 +2987,7 @@ def green_api_webhook_ingress():
                     def _async_webhook_reply(app_ref, org_id, from_p, body_txt, s_name, m_id, m_ts, d_url, m_type, rec_id):
                         with app_ref.app_context():
                             try:
-                                # For voice notes, attempt background transcription before generating AI reply
-                                if m_type in ("audioMessage", "voiceMessage", "ptt") and body_txt == "[Voice note]":
-                                    try:
-                                        audio_b = WhatsAppService._download_media(chat_id=from_p, message_id=m_id, download_url=d_url, organization_id=org_id)
-                                        if audio_b:
-                                            transcript = WhatsAppService._transcribe_audio(audio_b, organization_id=org_id)
-                                            if transcript:
-                                                body_txt = transcript
-                                                if rec_id:
-                                                    rec_obj = db.session.get(WhatsAppMessage, rec_id)
-                                                    if rec_obj:
-                                                        rec_obj.body = transcript
-                                                        db.session.commit()
-                                    except Exception as tr_err:
-                                        try:
-                                            db.session.rollback()
-                                        except Exception:
-                                            pass
-                                        logger.debug(f"Background audio transcription failed: {tr_err}")
-
-                                is_voice_inbound = (
-                                    m_type in ("audioMessage", "voiceMessage", "ptt")
-                                    or "[voice note]" in str(body_txt or "").lower()
-                                )
+                                is_voice_inbound = WhatsAppService.is_audio_message(m_type, body_txt, d_url)
                                 WhatsAppService.handle_inbound_auto_response(
                                     organization_id=org_id,
                                     sender_phone=from_p,

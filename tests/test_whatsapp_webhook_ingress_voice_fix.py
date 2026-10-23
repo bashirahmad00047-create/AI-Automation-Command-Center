@@ -460,7 +460,8 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
                 message_body="[Voice note]",
                 message_id="VOICE_INBOUND_999",
                 is_voice=True,
-                download_url="https://do-media.com/test_audio.oga"
+                download_url="https://do-media.com/test_audio.oga",
+                sync_transcribe=True
             )
 
             mock_dl.assert_called_once_with(
@@ -469,11 +470,119 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
                 download_url="https://do-media.com/test_audio.oga",
                 organization_id=self.org.id
             )
-            mock_tr.assert_called_once_with(fake_audio_bytes, organization_id=self.org.id)
+            mock_tr.assert_called_once_with(fake_audio_bytes, organization_id=self.org.id, timeout=3.0)
             mock_gen.assert_called_once()
             # The AI generation should have received the transcribed text!
             self.assertEqual(mock_gen.call_args[1]["message_body"], "What are your service packages?")
 
+
+
+    def test_voice_note_fast_path_dispatches_instant_acknowledgment(self):
+        """Verifies audio (.oga) handling is non-blocking and dispatches instant acknowledgment in 1-2s."""
+        WhatsAppService.clear_recent_replied_trigger_ids()
+        with patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "FAST_ACK_01"}) as mock_send,              patch.object(WhatsAppService, "async_transcribe_and_log_crm") as mock_async_crm,              patch.object(WhatsAppService, "mark_message_as_read"):
+
+            t0 = time.time()
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_body="[Voice note]",
+                message_id="FAST_VOICE_001",
+                is_voice=True,
+                download_url="https://do-media-7107.fra1.digitaloceanspaces.com/voice.oga"
+            )
+            elapsed = time.time() - t0
+
+            # Fast-path reply is non-blocking and completes within < 1-2 seconds
+            self.assertLess(elapsed, 2.0)
+            self.assertIsNotNone(res)
+            self.assertTrue(res.get("success"))
+            self.assertTrue(res.get("fast_path"))
+            self.assertEqual(res.get("action"), "fast_path_voice_ack")
+            self.assertIn("voice note", res.get("reply_body", "").lower())
+
+            # send_message was dispatched immediately
+            mock_send.assert_called_once()
+            # Background transcription and CRM logger was triggered
+            mock_async_crm.assert_called_once_with(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_id="FAST_VOICE_001",
+                download_url="https://do-media-7107.fra1.digitaloceanspaces.com/voice.oga",
+                sender_name=None
+            )
+
+    def test_async_transcribe_and_logs_text_to_crm_dashboard(self):
+        """Verifies asynchronous audio transcription updates WhatsAppMessage and logs text to CRM Lead dashboard."""
+        fake_audio_bytes = b"OggS" + b"\x00" * 60
+        transcript_text = "Mujhe enterprise automation package ki details chaheye."
+
+        # Create inbound WhatsAppMessage record
+        inbound_msg = WhatsAppMessage(
+            organization_id=self.org.id,
+            whatsapp_message_id="ASYNC_VOICE_MSG_777",
+            sender="923209350858",
+            recipient="bot",
+            direction="inbound",
+            message_type="audioMessage",
+            body="[Voice note]",
+            status="received"
+        )
+        db.session.add(inbound_msg)
+
+        # Create existing Lead in CRM dashboard
+        from models import Lead
+        lead = Lead(
+            organization_id=self.org.id,
+            name="Ahmad Khan",
+            phone="923209350858",
+            message="[Voice note]",
+            intent="lead_inquiry"
+        )
+        db.session.add(lead)
+        db.session.commit()
+
+        with patch.object(WhatsAppService, "_download_media", return_value=fake_audio_bytes),              patch.object(WhatsAppService, "_transcribe_audio", return_value=transcript_text):
+
+            t = WhatsAppService.async_transcribe_and_log_crm(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_id="ASYNC_VOICE_MSG_777",
+                download_url="https://do-media.com/test.oga",
+                sender_name="Ahmad Khan",
+                app_obj=self.app
+            )
+            # Wait for background thread to complete
+            t.join(timeout=4.0)
+
+            # Check that WhatsAppMessage was updated with transcript
+            db.session.expire_all()
+            updated_msg = WhatsAppMessage.query.filter_by(whatsapp_message_id="ASYNC_VOICE_MSG_777").first()
+            self.assertEqual(updated_msg.body, transcript_text)
+
+            # Check that CRM Lead was updated with transcript
+            updated_lead = Lead.query.filter_by(phone="923209350858").first()
+            self.assertIn(transcript_text, updated_lead.message)
+
+    def test_transcribe_audio_strict_3_second_timeout(self):
+        """Verifies _transcribe_audio passes strict 3-second timeout to OpenAI and Groq APIs."""
+        fake_audio = b"OggS" + b"\x00" * 40
+        with patch.object(WhatsAppService, "get_openai_api_key", return_value="fake_openai"),              patch("requests.post") as mock_post:
+            mock_post.return_value.status_code = 200
+            mock_post.return_value.json.return_value = {"text": "Test transcript"}
+
+            WhatsAppService._transcribe_audio(fake_audio, organization_id=self.org.id, timeout=3.0)
+            mock_post.assert_called_once()
+            call_timeout = mock_post.call_args[1].get("timeout")
+            self.assertLessEqual(call_timeout, 3.0)
+
+    def test_is_audio_message_detects_all_voice_and_oga_variants(self):
+        """Verifies is_audio_message detects .oga URLs, audioMessage, ptt, and voice note bodies."""
+        self.assertTrue(WhatsAppService.is_audio_message("audioMessage", "[Voice note]", None))
+        self.assertTrue(WhatsAppService.is_audio_message("fileMessage", None, "https://storage.com/audio.oga"))
+        self.assertTrue(WhatsAppService.is_audio_message(None, "[voice note]", None))
+        self.assertTrue(WhatsAppService.is_audio_message("ptt", None, None))
+        self.assertFalse(WhatsAppService.is_audio_message("textMessage", "Hello there", None))
 
 if __name__ == "__main__":
     unittest.main()
