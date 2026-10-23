@@ -650,8 +650,8 @@ class WhatsAppService:
         """Synthesizes text into spoken audio bytes if a TTS engine/provider is available.
 
         Supported providers in order of precedence:
-        1. Local gTTS (Google Text-to-Speech) if 'gtts' is installed
-        2. OpenAI Audio Speech API if OPENAI_API_KEY is configured
+        1. OpenAI Audio Speech API if OPENAI_API_KEY is configured (native Opus & MP3)
+        2. Local gTTS (Google Text-to-Speech) if 'gtts' is installed
         3. ElevenLabs Text-to-Speech API if ELEVENLABS_API_KEY is configured
 
         Returns (audio_bytes, filename, mime_type) or None if no TTS capability is available.
@@ -662,6 +662,9 @@ class WhatsAppService:
         clean_text = str(text).strip()
         import re
         clean_text = re.sub(r"\[.*?\]", "", clean_text).strip()
+        # Clean markdown formatting so TTS engine does not awkwardly verbalize symbols
+        clean_text = re.sub(r"[*_~`#]", "", clean_text)
+        clean_text = re.sub(r"\s+", " ", clean_text).strip()
         if not clean_text:
             clean_text = str(text).strip()
 
@@ -672,7 +675,33 @@ class WhatsAppService:
         audio_fn = "voice_reply.oga" if is_oga else "voice_reply.mp3"
         audio_mt = "audio/ogg; codecs=opus" if is_oga else "audio/mpeg"
 
-        # 1. Local gTTS synthesis (if installed)
+        # 1. OpenAI Audio Speech API (if OPENAI_API_KEY configured) - supports native Opus & ultra-natural voices
+        openai_key = cls.get_openai_api_key(organization_id=organization_id)
+        if openai_key and str(openai_key).strip():
+            try:
+                import requests
+                openai_payload = {
+                    "model": "tts-1",
+                    "input": clean_text[:1000],
+                    "voice": "alloy"
+                }
+                if is_oga:
+                    openai_payload["response_format"] = "opus"
+                resp = requests.post(
+                    "https://api.openai.com/v1/audio/speech",
+                    headers={
+                        "Authorization": f"Bearer {str(openai_key).strip()}",
+                        "Content-Type": "application/json"
+                    },
+                    json=openai_payload,
+                    timeout=5.0
+                )
+                if resp.status_code == 200 and resp.content:
+                    return (resp.content, audio_fn, audio_mt)
+            except Exception as e:
+                logger.debug(f"OpenAI TTS synthesis failed: {e}")
+
+        # 2. Local gTTS synthesis (if installed)
         try:
             from gtts import gTTS
             import io
@@ -687,6 +716,8 @@ class WhatsAppService:
                     lang_code = "es"
                 elif "french" in l_lower or l_lower == "fr":
                     lang_code = "fr"
+                elif "hindi" in l_lower or l_lower == "hi":
+                    lang_code = "hi"
             tts = gTTS(text=clean_text[:1000], lang=lang_code)
             buf = io.BytesIO()
             tts.write_to_fp(buf)
@@ -697,35 +728,6 @@ class WhatsAppService:
             pass
         except Exception as e:
             logger.debug(f"gTTS audio synthesis failed: {e}")
-
-        # 2. OpenAI Audio Speech API (if OPENAI_API_KEY configured)
-        openai_key = (
-            cls._get_tenant_or_global_setting("OPENAI_API_KEY", organization_id=organization_id)
-            or os.environ.get("OPENAI_API_KEY")
-        )
-        if openai_key:
-            try:
-                import requests
-                openai_payload = {
-                    "model": "tts-1",
-                    "input": clean_text[:1000],
-                    "voice": "alloy"
-                }
-                if is_oga:
-                    openai_payload["response_format"] = "opus"
-                resp = requests.post(
-                    "https://api.openai.com/v1/audio/speech",
-                    headers={
-                        "Authorization": f"Bearer {openai_key.strip()}",
-                        "Content-Type": "application/json"
-                    },
-                    json=openai_payload,
-                    timeout=4.0
-                )
-                if resp.status_code == 200 and resp.content:
-                    return (resp.content, audio_fn, audio_mt)
-            except Exception as e:
-                logger.debug(f"OpenAI TTS synthesis failed: {e}")
 
         # 3. ElevenLabs Text-to-Speech API (if ELEVENLABS_API_KEY configured)
         eleven_key = (
@@ -3038,9 +3040,9 @@ class WhatsAppService:
             sender_name=sender_name,
             sender_phone=clean_phone
         )
-        reply_body = generated["reply_body"]
-        intent = generated["intent"]
-        lead_score = generated["lead_score"]
+        reply_body = (generated.get("reply_body") or "").strip()
+        intent = generated.get("intent") or "general_chat"
+        lead_score = generated.get("lead_score", 0)
 
         # If auto_lead_capture is True and intent is lead_inquiry or score >= 50, ensure Lead exists in CRM
         if auto_conf.get("auto_lead_capture") and has_app_context() and (intent == "lead_inquiry" or lead_score >= 50):
@@ -3077,12 +3079,25 @@ class WhatsAppService:
             with cls._processed_ids_lock:
                 cls._recent_replied_trigger_ids[message_id] = time.time()
 
-        # Dispatch outbound message (synthesized Urdu audio .oga and text reply)
+        # Dispatch outbound message: Gemini/Groq AI text response immediately sent, with strict error-handled TTS voice audio
         try:
-            audio_dispatch_res = None
+            # 1. Guarantee immediate dispatch of AI text response back to customer via Green-API send_message()
             text_dispatch_res = None
+            try:
+                text_dispatch_res = cls.send_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    message_text=reply_body
+                )
+                logger.info(f"AI text response immediately dispatched to {clean_phone}: '{reply_body[:60]}...'")
+            except Exception as txt_err:
+                logger.error(f"Failed to dispatch text reply to {clean_phone}: {txt_err}")
+                text_dispatch_res = None
 
-            def _synthesize_and_send_voice():
+            # 2. If inbound was a voice note, synthesize Urdu .oga audio and dispatch via send_green_api_file()
+            # Strict error handling and fallback ensures any TTS failure NEVER impacts or silences the text response
+            audio_dispatch_res = None
+            if is_voice or is_voice_inbound:
                 try:
                     audio_res = cls.generate_spoken_audio(
                         text=reply_body,
@@ -3095,7 +3110,7 @@ class WhatsAppService:
                         logger.info(f"Synthesized {len(audio_b)} bytes of Urdu .oga audio for voice note reply to {clean_phone}.")
                         active_prov = cls.get_active_provider(organization_id=org_id)
                         if active_prov == "green_api" or cls.is_green_api_configured(organization_id=org_id):
-                            return cls.send_green_api_file(
+                            audio_dispatch_res = cls.send_green_api_file(
                                 organization_id=org_id,
                                 to_phone=clean_phone,
                                 file_bytes=audio_b,
@@ -3105,50 +3120,18 @@ class WhatsAppService:
                                 quoted_message_id=message_id
                             )
                     else:
-                        logger.info(f"TTS audio synthesis unavailable for voice note reply to {clean_phone}; delivering text reply.")
+                        logger.info(f"TTS audio synthesis unavailable for voice note reply to {clean_phone}; text response is already safely delivered.")
                 except Exception as tts_err:
-                    logger.debug(f"Voice synthesis and dispatch error: {tts_err}")
-                return None
+                    logger.warning(f"TTS voice synthesis/dispatch notice for {clean_phone}: {tts_err}. Text reply safely delivered.")
+                    audio_dispatch_res = None
 
-            if is_voice or is_voice_inbound:
-                if has_app_context() and current_app.config.get("TESTING"):
-                    audio_dispatch_res = _synthesize_and_send_voice()
-                    text_dispatch_res = cls.send_message(
-                        organization_id=org_id,
-                        to_phone=clean_phone,
-                        message_text=reply_body
-                    )
-                else:
-                    # Parallel non-blocking execution: synthesize audio and send text concurrently
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                        fut_audio = executor.submit(_synthesize_and_send_voice)
-                        fut_text = executor.submit(
-                            cls.send_message,
-                            organization_id=org_id,
-                            to_phone=clean_phone,
-                            message_text=reply_body
-                        )
-                        try:
-                            text_dispatch_res = fut_text.result(timeout=2.0)
-                        except Exception as text_e:
-                            logger.error(f"Error during parallel text dispatch: {text_e}")
-                        try:
-                            audio_dispatch_res = fut_audio.result(timeout=3.0)
-                        except Exception as audio_e:
-                            logger.debug(f"Audio dispatch notice: {audio_e}")
-            else:
-                text_dispatch_res = cls.send_message(
-                    organization_id=org_id,
-                    to_phone=clean_phone,
-                    message_text=reply_body
-                )
-            dispatch_res = audio_dispatch_res if (audio_dispatch_res and audio_dispatch_res.get("success")) else text_dispatch_res
+            dispatch_res = audio_dispatch_res if (audio_dispatch_res and audio_dispatch_res.get("success")) else (text_dispatch_res or {})
             # Tag the newly recorded outbound message with AI metadata
-            outbound_record_id = dispatch_res.get("record_id") or dispatch_res.get("message_record_id")
+            outbound_record_id = (dispatch_res.get("record_id") or dispatch_res.get("message_record_id")) if isinstance(dispatch_res, dict) else None
             msg_rec = None
             if outbound_record_id and has_app_context():
                 msg_rec = db.session.get(WhatsAppMessage, outbound_record_id)
-            if not msg_rec and dispatch_res.get("whatsapp_message_id") and has_app_context():
+            if not msg_rec and isinstance(dispatch_res, dict) and dispatch_res.get("whatsapp_message_id") and has_app_context():
                 msg_rec = WhatsAppMessage.query.filter_by(whatsapp_message_id=dispatch_res["whatsapp_message_id"]).first()
 
             is_gemini = (generated.get("mode") == "gemini_ai") or bool(generated.get("is_gemini"))
@@ -5151,7 +5134,17 @@ class WhatsAppService:
                 "recipient": clean_to
             }
 
-        chat_id = f"{clean_to}@c.us"
+        raw_to = str(to_phone or "").strip()
+        if raw_to.endswith("@g.us"):
+            chat_id = raw_to
+            clean_to = raw_to.replace("@g.us", "")
+        elif raw_to.endswith("@c.us"):
+            chat_id = raw_to
+            clean_to = cls.format_phone_number(raw_to.replace("@c.us", ""))
+        else:
+            clean_to = cls.format_phone_number(raw_to)
+            chat_id = f"{clean_to}@c.us"
+
         url = f"{host}/waInstance{id_inst}/sendMessage/{tok_inst}"
         payload = {
             "chatId": chat_id,
@@ -5388,14 +5381,28 @@ class WhatsAppService:
         allow_fallback: bool = True
     ) -> Dict[str, Any]:
         """Dispatches an outbound WhatsApp file/audio message via Green-API (uploadFile + sendFileByUrl)."""
-        if to_phone is not None and file_bytes is None and isinstance(organization_id, (bytes, bytearray)):
+        if isinstance(to_phone, (bytes, bytearray)) and file_bytes is None:
+            file_bytes = to_phone
+            to_phone = organization_id
+            organization_id = "org-enterprise-default"
+        elif to_phone is not None and file_bytes is None and isinstance(organization_id, (bytes, bytearray)):
             file_bytes = organization_id
             organization_id = "org-enterprise-default"
         elif organization_id is None:
             organization_id = "org-enterprise-default"
 
         conf = cls.get_config(organization_id=organization_id)
-        clean_to = cls.format_phone_number(to_phone or "")
+        raw_to = str(to_phone or "").strip()
+        if raw_to.endswith("@g.us"):
+            chat_id = raw_to
+            clean_to = raw_to.replace("@g.us", "")
+        elif raw_to.endswith("@c.us"):
+            chat_id = raw_to
+            clean_to = cls.format_phone_number(raw_to.replace("@c.us", ""))
+        else:
+            clean_to = cls.format_phone_number(raw_to)
+            chat_id = f"{clean_to}@c.us"
+
         if not clean_to or len(clean_to) < 7:
             raise ValueError(f"Invalid recipient phone number: '{to_phone}'.")
 
@@ -5409,7 +5416,6 @@ class WhatsAppService:
 
         fn = filename or "voice_reply.mp3"
         mt = mime_type or "audio/mpeg"
-        chat_id = f"{clean_to}@c.us"
         timeouts = cls.get_timeout_tuple()
 
         try:
