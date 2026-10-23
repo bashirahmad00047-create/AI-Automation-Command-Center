@@ -2988,7 +2988,7 @@ def green_api_webhook_ingress():
                                 # For voice notes, attempt background transcription before generating AI reply
                                 if m_type in ("audioMessage", "voiceMessage", "ptt") and body_txt == "[Voice note]":
                                     try:
-                                        audio_b = WhatsAppService._download_media(from_p, m_id, download_url=d_url)
+                                        audio_b = WhatsAppService._download_media(chat_id=from_p, message_id=m_id, download_url=d_url, organization_id=org_id)
                                         if audio_b:
                                             transcript = WhatsAppService._transcribe_audio(audio_b, organization_id=org_id)
                                             if transcript:

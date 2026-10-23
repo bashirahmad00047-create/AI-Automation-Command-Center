@@ -89,6 +89,9 @@ class WhatsAppService:
     _processed_ids_lock = threading.Lock()
     _in_flight_phones: Set[str] = set()
     _in_flight_phones_lock = threading.Lock()
+    _downloaded_media_cache: Dict[str, Tuple[float, bytes]] = {}
+    _transcription_cache: Dict[str, Tuple[float, str]] = {}
+    _media_cache_lock = threading.Lock()
 
     # --- Media download and voice transcription helpers ---
     @classmethod
@@ -139,26 +142,31 @@ class WhatsAppService:
         download_url: Optional[str] = None,
         organization_id: Optional[str] = None
     ) -> Optional[bytes]:
-        """Download media file (audio, image, etc.) from Green-API or direct storage URL.
-        Returns raw bytes or None on failure.
-        """
-        timeouts = (4.0, 10.0)
-        # 1. If direct download URL is available from payload, fetch directly
+        """Download media file (audio, image, etc.) from direct storage URL or Green-API with in-memory caching and fast timeouts."""
+        # 1. Check in-memory cache
+        if message_id:
+            with cls._media_cache_lock:
+                now = time.time()
+                cls._downloaded_media_cache = {
+                    k: v for k, v in cls._downloaded_media_cache.items() if v[0] > now - 600
+                }
+                cached = cls._downloaded_media_cache.get(message_id)
+                if cached:
+                    return cached[1]
+
+        timeouts = (2.5, 6.0)
+        # 2. Fast direct fetch if direct download URL is available from payload
         if download_url and str(download_url).startswith("http"):
             try:
-                with cls.get_http_session(retries=2) as session:
+                with cls.get_http_session(retries=1) as session:
                     file_resp = session.get(download_url, timeout=timeouts)
                     if file_resp.status_code == 200 and file_resp.content:
+                        if message_id:
+                            with cls._media_cache_lock:
+                                cls._downloaded_media_cache[message_id] = (time.time(), file_resp.content)
                         return file_resp.content
             except Exception as e:
                 logger.debug(f"Direct media download failed: {e}")
-            try:
-                import requests
-                resp = requests.get(download_url, timeout=timeouts)
-                if resp.status_code == 200 and resp.content:
-                    return resp.content
-            except Exception as req_err:
-                logger.debug(f"Requests direct media download failed: {req_err}")
 
         conf = cls.get_config(organization_id=organization_id)
         id_inst = conf.get("green_api_id_instance")
@@ -171,14 +179,17 @@ class WhatsAppService:
         url = f"{host}/waInstance{id_inst}/downloadFile/{token}"
         try:
             target_chat = f"{chat_id}@c.us" if "@" not in str(chat_id) else chat_id
-            with cls.get_http_session(retries=2) as session:
+            with cls.get_http_session(retries=1) as session:
                 resp = session.post(url, json={"chatId": target_chat, "idMessage": message_id}, timeout=timeouts)
                 if resp.status_code == 200:
                     data = resp.json()
                     dl_url = data.get("downloadUrl")
                     if dl_url:
                         file_resp = session.get(dl_url, timeout=timeouts)
-                        if file_resp.status_code == 200:
+                        if file_resp.status_code == 200 and file_resp.content:
+                            if message_id:
+                                with cls._media_cache_lock:
+                                    cls._downloaded_media_cache[message_id] = (time.time(), file_resp.content)
                             return file_resp.content
                 logger.debug(f"Media download failed, status {resp.status_code}: {resp.text}")
         except Exception as e:
@@ -186,12 +197,23 @@ class WhatsAppService:
         return None
 
     @classmethod
-    def _transcribe_audio(cls, audio_bytes: bytes, organization_id: Optional[str] = None) -> Optional[str]:
-        """Transcribe audio using OpenAI Whisper API, Groq Whisper, or Gemini with language awareness.
+    def _transcribe_audio(cls, audio_bytes: bytes, organization_id: Optional[str] = None, message_id: Optional[str] = None) -> Optional[str]:
+        """Transcribe audio using OpenAI Whisper API, Groq Whisper, or Gemini with fast timeouts and caching.
         Returns the transcript string or None on failure.
         """
         if not audio_bytes or len(audio_bytes) < 32:
             return None
+
+        # Check transcription cache
+        if message_id:
+            with cls._media_cache_lock:
+                now = time.time()
+                cls._transcription_cache = {
+                    k: v for k, v in cls._transcription_cache.items() if v[0] > now - 600
+                }
+                cached = cls._transcription_cache.get(message_id)
+                if cached:
+                    return cached[1]
 
         transcription_prompt = (
             "Provide an accurate, verbatim transcription of this WhatsApp voice message. "
@@ -215,7 +237,7 @@ class WhatsAppService:
             audio_fn = "voice_note.ogg"
             audio_mt = "audio/ogg"
 
-        # 1. Primary: OpenAI Whisper API (whisper-1)
+        # 1. Primary: OpenAI Whisper API (whisper-1) with 6.0s fast timeout
         openai_key = cls.get_openai_api_key(organization_id=organization_id)
         if openai_key and str(openai_key).strip():
             try:
@@ -236,20 +258,21 @@ class WhatsAppService:
                     headers=headers,
                     files=files,
                     data=data,
-                    timeout=15.0
+                    timeout=6.0
                 )
                 if resp.status_code == 200:
                     openai_res = resp.json()
                     openai_text = (openai_res.get("text") or "").strip()
                     if openai_text:
-                        logger.info(f"OpenAI Whisper transcription successful ({len(openai_text)} chars): {openai_text[:60]}...")
+                        logger.info(f"OpenAI Whisper transcription successful: {openai_text[:60]}...")
+                        if message_id:
+                            with cls._media_cache_lock:
+                                cls._transcription_cache[message_id] = (time.time(), openai_text)
                         return openai_text
-                else:
-                    logger.debug(f"OpenAI Whisper API failed with HTTP {resp.status_code}: {resp.text[:200]}")
             except Exception as openai_err:
-                logger.debug(f"OpenAI Whisper transcription exception: {openai_err}")
+                logger.debug(f"OpenAI Whisper transcription notice: {openai_err}")
 
-        # 2. Secondary: Groq Whisper transcription (whisper-large-v3)
+        # 2. Secondary: Groq Whisper transcription (whisper-large-v3) with 5.0s fast timeout
         groq_key = cls.get_groq_api_key(organization_id=organization_id)
         if groq_key:
             try:
@@ -269,20 +292,21 @@ class WhatsAppService:
                     headers=headers,
                     files=files,
                     data=data,
-                    timeout=10.0
+                    timeout=5.0
                 )
                 if resp.status_code == 200:
                     whisper_res = resp.json()
                     whisper_text = (whisper_res.get("text") or "").strip()
                     if whisper_text:
-                        logger.info(f"Groq Whisper transcription successful ({len(whisper_text)} chars): {whisper_text[:60]}...")
+                        logger.info(f"Groq Whisper transcription successful: {whisper_text[:60]}...")
+                        if message_id:
+                            with cls._media_cache_lock:
+                                cls._transcription_cache[message_id] = (time.time(), whisper_text)
                         return whisper_text
-                else:
-                    logger.debug(f"Groq Whisper API returned HTTP {resp.status_code}: {resp.text[:200]}")
             except Exception as groq_err:
-                logger.debug(f"Groq Whisper transcription failed: {groq_err}")
+                logger.debug(f"Groq Whisper transcription notice: {groq_err}")
 
-        # 3. Tertiary: Gemini Generative AI transcription
+        # 3. Tertiary: Gemini Generative AI transcription (lean single attempt)
         gemini_key = cls.get_gemini_api_key(organization_id=organization_id)
         if gemini_key:
             try:
@@ -295,41 +319,26 @@ class WhatsAppService:
                     tmp_path = tmp.name
                 try:
                     uploaded = genai.upload_file(path=tmp_path)
-                    candidate_models = [
-                        cls.get_gemini_model_name(organization_id=organization_id),
-                        "gemini-2.5-flash",
-                        "gemini-2.0-flash",
-                        "gemini-1.5-flash",
-                        "gemini-1.5-flash-8b"
-                    ]
-                    models_to_try = [m for m in candidate_models if m and m != "gemini-3.8-flash"]
-                    if "gemini-1.5-flash" not in models_to_try:
-                        models_to_try.append("gemini-1.5-flash")
-
-                    for m_name in models_to_try:
-                        try:
-                            model = genai.GenerativeModel(m_name)
-                            response = model.generate_content([uploaded, transcription_prompt])
-                            if hasattr(response, "text") and response.text:
-                                res_txt = response.text.strip()
-                                if res_txt:
-                                    logger.info(f"Gemini transcription successful ({len(res_txt)} chars): {res_txt[:60]}...")
-                                    return res_txt
-                            if getattr(response, "candidates", None):
-                                parts = response.candidates[0].content.parts
-                                for p in parts:
-                                    if getattr(p, "text", None) and p.text.strip():
-                                        return p.text.strip()
-                        except Exception as model_err:
-                            logger.debug(f"Gemini transcription model {m_name} failed: {model_err}")
-                            continue
+                    fast_m = cls.get_gemini_model_name(organization_id=organization_id) or "gemini-1.5-flash"
+                    if fast_m == "gemini-3.8-flash":
+                        fast_m = "gemini-1.5-flash"
+                    model = genai.GenerativeModel(fast_m)
+                    response = model.generate_content([uploaded, transcription_prompt])
+                    if hasattr(response, "text") and response.text:
+                        res_txt = response.text.strip()
+                        if res_txt:
+                            logger.info(f"Gemini transcription successful: {res_txt[:60]}...")
+                            if message_id:
+                                with cls._media_cache_lock:
+                                    cls._transcription_cache[message_id] = (time.time(), res_txt)
+                            return res_txt
                 finally:
                     try:
                         os.remove(tmp_path)
                     except Exception:
                         pass
             except Exception as e:
-                logger.debug(f"Gemini audio transcription failed: {e}")
+                logger.debug(f"Gemini audio transcription notice: {e}")
 
         return None
 
@@ -403,7 +412,7 @@ class WhatsAppService:
                         "input": clean_text[:1000],
                         "voice": "alloy"
                     },
-                    timeout=15.0
+                    timeout=4.0
                 )
                 if resp.status_code == 200 and resp.content:
                     return (resp.content, "voice_reply.mp3", "audio/mpeg")
@@ -433,7 +442,7 @@ class WhatsAppService:
                         "text": clean_text[:1000],
                         "model_id": "eleven_multilingual_v2"
                     },
-                    timeout=15.0
+                    timeout=4.0
                 )
                 if resp.status_code == 200 and resp.content:
                     return (resp.content, "voice_reply.mp3", "audio/mpeg")
@@ -453,6 +462,9 @@ class WhatsAppService:
         with cls._processed_ids_lock:
             cls._processed_message_ids.clear()
             cls._recent_replied_trigger_ids.clear()
+        with cls._media_cache_lock:
+            cls._downloaded_media_cache.clear()
+            cls._transcription_cache.clear()
         with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
             cls._in_flight_phones.clear()
 
@@ -2450,16 +2462,18 @@ class WhatsAppService:
             return None
 
         # Determine if message is an incoming audio/voice note
-        body_clean_str = str(message_body or "").strip().lower()
+        clean_body = str(message_body or "").strip()
+        body_clean_str = clean_body.lower()
         is_voice_inbound = bool(
             is_voice
             or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]")
-            or (not message_body and bool(download_url))
+            or (not clean_body and bool(download_url))
         )
-        if not message_body:
+        if not clean_body:
             if is_voice_inbound or download_url:
                 message_body = "[Voice note]"
                 body_clean_str = "[voice note]"
+                clean_body = "[Voice note]"
             else:
                 return None
 
@@ -2478,8 +2492,8 @@ class WhatsAppService:
         clean_phone = cls.format_phone_number(sender_phone)
         org_id = organization_id or "org-enterprise-default"
 
-        # If incoming message is a voice note and text is still a placeholder, download and transcribe via OpenAI Whisper
-        if is_voice_inbound and (not message_body or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]")):
+        # If incoming message is a voice note and text is still a placeholder, download and transcribe via fast Whisper/Gemini
+        if is_voice_inbound and (not clean_body or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]")):
             try:
                 logger.info(f"Downloading incoming voice note for {clean_phone} (message_id={message_id})...")
                 audio_bytes = cls._download_media(
@@ -2494,6 +2508,7 @@ class WhatsAppService:
                         logger.info(f"Successfully transcribed voice note for {clean_phone} ({message_id}): '{transcript}'")
                         message_body = transcript.strip()
                         body_clean_str = message_body.lower()
+                        clean_body = message_body
                         # Update persisted message in DB if present
                         if has_app_context() and message_id:
                             try:
@@ -2510,11 +2525,11 @@ class WhatsAppService:
                                 except Exception:
                                     pass
                     else:
-                        logger.warning(f"Voice note transcription returned empty for {clean_phone}.")
+                        logger.info(f"Voice note transcription unavailable for {clean_phone}; handling with conversational voice acknowledgement.")
                 else:
-                    logger.warning(f"Could not download audio bytes for voice note ({message_id}) from {clean_phone}.")
+                    logger.debug(f"Could not download audio bytes for voice note ({message_id}) from {clean_phone}.")
             except Exception as v_err:
-                logger.error(f"Error downloading or transcribing voice note: {v_err}")
+                logger.debug(f"Voice note download/transcription notice: {v_err}")
 
         # Ignore stale / historical messages (older than 15 minutes) to prevent delayed reply bursts on login/startup
         if message_timestamp:
@@ -2542,7 +2557,7 @@ class WhatsAppService:
         for cand in own_candidates:
             if cand:
                 cleaned = cls.format_phone_number(str(cand).replace("@c.us", "").replace("@g.us", "").strip())
-                if cleaned:
+                if cleaned and len(cleaned) >= 8:
                     bot_numbers.add(cleaned)
 
         if clean_phone in bot_numbers:
