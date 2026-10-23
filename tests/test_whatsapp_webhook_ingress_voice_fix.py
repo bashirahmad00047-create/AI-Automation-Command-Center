@@ -213,22 +213,43 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
         )
         self.assertEqual(msg2.to_dict()["media_url"], "https://media.test/audio2.oga")
 
-    def test_transcribe_audio_uses_groq_whisper_fallback(self):
-        """Verifies _transcribe_audio falls back to Groq Whisper when Gemini key is not configured."""
+    def test_transcribe_audio_uses_groq_distil_whisper_primary(self):
+        """Verifies _transcribe_audio uses Groq Whisper API (distil-whisper-large-v3) as primary for sub-second STT."""
         fake_audio = b"\x00" * 100
-        with patch.object(WhatsAppService, "get_gemini_api_key", return_value=None), \
-             patch.object(WhatsAppService, "get_groq_api_key", return_value="gsk_test_key"), \
+        with patch.object(WhatsAppService, "get_groq_api_key", return_value="gsk_test_key"), \
              patch("requests.post") as mock_groq_post:
             mock_resp = MagicMock()
             mock_resp.status_code = 200
-            mock_resp.json.return_value = {"text": "السلام علیکم، پکیج قیمت څه ده؟"}
+            mock_resp.json.return_value = {"text": "Aap ki subscription details kya hain?"}
             mock_groq_post.return_value = mock_resp
 
             transcript = WhatsAppService._transcribe_audio(fake_audio, organization_id=self.org.id)
-            self.assertEqual(transcript, "السلام علیکم، پکیج قیمت څه ده؟")
+            self.assertEqual(transcript, "Aap ki subscription details kya hain?")
             mock_groq_post.assert_called_once()
+            call_url = mock_groq_post.call_args[0][0]
+            self.assertEqual(call_url, "https://api.groq.com/openai/v1/audio/transcriptions")
             call_kwargs = mock_groq_post.call_args[1]
-            self.assertEqual(call_kwargs["data"]["model"], "whisper-large-v3")
+            self.assertEqual(call_kwargs["data"]["model"], "distil-whisper-large-v3")
+
+    def test_transcribe_audio_uses_groq_whisper_fallback(self):
+        """Verifies _transcribe_audio falls back to Groq whisper-large-v3 when distil model fails."""
+        fake_audio = b"\x00" * 100
+        with patch.object(WhatsAppService, "get_groq_api_key", return_value="gsk_test_key"), \
+             patch("requests.post") as mock_groq_post:
+            fail_resp = MagicMock()
+            fail_resp.status_code = 503
+            ok_resp = MagicMock()
+            ok_resp.status_code = 200
+            ok_resp.json.return_value = {"text": "السلام علیکم، پکیج قیمت څه ده؟"}
+            mock_groq_post.side_effect = [fail_resp, ok_resp]
+
+            transcript = WhatsAppService._transcribe_audio(fake_audio, organization_id=self.org.id)
+            self.assertEqual(transcript, "السلام علیکم، پکیج قیمت څه ده؟")
+            self.assertEqual(mock_groq_post.call_count, 2)
+            first_call_model = mock_groq_post.call_args_list[0][1]["data"]["model"]
+            second_call_model = mock_groq_post.call_args_list[1][1]["data"]["model"]
+            self.assertEqual(first_call_model, "distil-whisper-large-v3")
+            self.assertEqual(second_call_model, "whisper-large-v3")
 
 
     def test_generate_spoken_audio_synthesizes_mp3_when_available(self):
@@ -421,9 +442,10 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
 
 
     def test_transcribe_audio_uses_openai_whisper_primary(self):
-        """Verifies _transcribe_audio calls OpenAI Whisper API (whisper-1) when OPENAI_API_KEY is configured."""
+        """Verifies _transcribe_audio calls OpenAI Whisper API (whisper-1) when Groq is unconfigured and OPENAI_API_KEY is set."""
         fake_audio = b"\x00" * 100
-        with patch.object(WhatsAppService, "get_openai_api_key", return_value="sk-test-openai-key"), \
+        with patch.object(WhatsAppService, "get_groq_api_key", return_value=None), \
+             patch.object(WhatsAppService, "get_openai_api_key", return_value="sk-test-openai-key"), \
              patch("requests.post") as mock_openai_post:
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -587,7 +609,23 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
     def test_transcribe_audio_strict_3_second_timeout(self):
         """Verifies _transcribe_audio passes strict 3-second timeout to OpenAI and Groq APIs."""
         fake_audio = b"OggS" + b"\x00" * 40
-        with patch.object(WhatsAppService, "get_openai_api_key", return_value="fake_openai"),              patch("requests.post") as mock_post:
+        with patch.object(WhatsAppService, "get_groq_api_key", return_value="fake_groq"), \
+             patch("requests.post") as mock_post:
+            mock_post.return_value.status_code = 200
+            mock_post.return_value.json.return_value = {"text": "Test transcript"}
+
+            WhatsAppService._transcribe_audio(fake_audio, organization_id=self.org.id, timeout=3.0)
+            mock_post.assert_called_once()
+            call_timeout = mock_post.call_args[1].get("timeout")
+            self.assertLessEqual(call_timeout, 3.0)
+            self.assertEqual(mock_post.call_args[1]["data"]["model"], "distil-whisper-large-v3")
+
+    def test_transcribe_audio_strict_3_second_timeout_openai(self):
+        """Verifies _transcribe_audio passes strict 3-second timeout to OpenAI when Groq not set."""
+        fake_audio = b"OggS" + b"\x00" * 40
+        with patch.object(WhatsAppService, "get_groq_api_key", return_value=None), \
+             patch.object(WhatsAppService, "get_openai_api_key", return_value="fake_openai"), \
+             patch("requests.post") as mock_post:
             mock_post.return_value.status_code = 200
             mock_post.return_value.json.return_value = {"text": "Test transcript"}
 
