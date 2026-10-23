@@ -671,6 +671,142 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
                 message_text="Starter is $29/mo."
             )
 
+    def test_send_green_api_file_supports_two_arg_calling(self):
+        """Verifies send_green_api_file works when called as send_green_api_file(to_phone, file_bytes)."""
+        fake_audio_bytes = b"OggS\x00" * 20
+        with patch.object(WhatsAppService, "get_config", return_value={
+            "green_api_id_instance": "710722761603",
+            "green_api_token_instance": "mock_token_123",
+            "green_api_host": "https://7107.api.greenapi.com"
+        }), patch.object(WhatsAppService, "get_http_session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value.__enter__.return_value = mock_session
+
+            mock_up_resp = MagicMock()
+            mock_up_resp.status_code = 200
+            mock_up_resp.text = json.dumps({"urlFile": "https://storage.greenapi.com/reply.oga"})
+            mock_up_resp.json.return_value = {"urlFile": "https://storage.greenapi.com/reply.oga"}
+
+            mock_send_resp = MagicMock()
+            mock_send_resp.status_code = 200
+            mock_send_resp.text = json.dumps({"idMessage": "GREEN_OUT_2_ARG_001"})
+            mock_send_resp.json.return_value = {"idMessage": "GREEN_OUT_2_ARG_001"}
+
+            mock_session.post.side_effect = [mock_up_resp, mock_send_resp]
+
+            result = WhatsAppService.send_green_api_file(
+                "923209350858",
+                fake_audio_bytes,
+                filename="voice_reply.oga",
+                mime_type="audio/ogg; codecs=opus"
+            )
+
+            self.assertTrue(result["success"])
+            self.assertEqual(result["recipient"], "923209350858")
+            self.assertEqual(result["whatsapp_message_id"], "GREEN_OUT_2_ARG_001")
+
+    def test_send_green_api_preserves_group_chat_ids(self):
+        """Verifies Green-API message and file dispatching preserve @g.us group chat IDs."""
+        fake_audio_bytes = b"OggS\x00" * 20
+        group_id = "120363024848@g.us"
+        with patch.object(WhatsAppService, "get_config", return_value={
+            "green_api_id_instance": "710722761603",
+            "green_api_token_instance": "mock_token_123",
+            "green_api_host": "https://7107.api.greenapi.com"
+        }), patch.object(WhatsAppService, "get_http_session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value.__enter__.return_value = mock_session
+
+            # 1. Test message dispatch
+            mock_msg_resp = MagicMock()
+            mock_msg_resp.status_code = 200
+            mock_msg_resp.text = json.dumps({"idMessage": "GROUP_MSG_001"})
+            mock_msg_resp.json.return_value = {"idMessage": "GROUP_MSG_001"}
+            mock_session.post.return_value = mock_msg_resp
+
+            msg_res = WhatsAppService.send_green_api_message(
+                to_phone=group_id,
+                message_text="Hello team"
+            )
+            self.assertTrue(msg_res["success"])
+            call_payload = mock_session.post.call_args[1]["json"]
+            self.assertEqual(call_payload["chatId"], group_id)
+
+    def test_generate_spoken_audio_cleans_markdown_and_prioritizes_openai(self):
+        """Verifies generate_spoken_audio strips Markdown formatting and prioritizes OpenAI TTS when key is set."""
+        fake_opus = b"OggS\x01\x02\x03"
+        with patch.object(WhatsAppService, "get_openai_api_key", return_value="sk-test-openai"), \
+             patch("requests.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.content = fake_opus
+            mock_post.return_value = mock_resp
+
+            raw_markdown = "**OpsFlow Cloud** automation, *WhatsApp* alerts, and [packages] are ready!"
+            res = WhatsAppService.generate_spoken_audio(raw_markdown, language="ur", output_format="oga")
+            self.assertIsNotNone(res)
+            audio_bytes, fn, mime = res
+            self.assertEqual(audio_bytes, fake_opus)
+            self.assertEqual(fn, "voice_reply.oga")
+            self.assertEqual(mime, "audio/ogg; codecs=opus")
+
+            # Assert cleaned text was sent to OpenAI
+            mock_post.assert_called_once()
+            called_json = mock_post.call_args[1]["json"]
+            self.assertNotIn("**", called_json["input"])
+            self.assertNotIn("*", called_json["input"])
+            self.assertEqual(called_json["response_format"], "opus")
+
+    def test_handle_inbound_auto_response_graceful_when_dispatch_empty(self):
+        """Verifies handle_inbound_auto_response handles None dispatch result gracefully without raising AttributeError."""
+        WhatsAppService.clear_recent_replied_trigger_ids()
+        with patch.dict(os.environ, {"AI_AUTO_REPLY_ENABLED": "true"}), \
+             patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake_key"), \
+             patch.object(WhatsAppService, "generate_ai_auto_response", return_value={"reply_body": "Sample reply", "intent": "general_inquiry"}), \
+             patch.object(WhatsAppService, "send_message", return_value=None):
+
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_body="Can you help me?",
+                message_id="TEST_GRACEFUL_DISPATCH_001"
+            )
+            self.assertIsNotNone(res)
+            self.assertTrue(res["success"])
+
+    def test_voice_note_text_dispatched_instantly_even_if_tts_raises_exception(self):
+        """Verifies that if TTS audio synthesis raises an unexpected exception, the Gemini AI text reply is GUARANTEED to dispatch instantly without failing."""
+        WhatsAppService.clear_recent_replied_trigger_ids()
+        fake_audio_bytes = b"OggS\x00" * 40
+        with patch.dict(os.environ, {"AI_AUTO_REPLY_ENABLED": "true"}), \
+             patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake_key"), \
+             patch.object(WhatsAppService, "_download_media", return_value=fake_audio_bytes), \
+             patch.object(WhatsAppService, "_transcribe_audio", return_value="Aap ki support timings kya hain?"), \
+             patch.object(WhatsAppService, "generate_ai_auto_response", return_value={
+                 "reply_body": "Hum 24/7 technical support faraham karte hain.",
+                 "intent": "support_inquiry"
+             }), \
+             patch.object(WhatsAppService, "generate_spoken_audio", side_effect=RuntimeError("TTS engine crashed")), \
+             patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "TXT_GUARANTEED_123"}) as mock_send_text:
+
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_body="[Voice note]",
+                message_id="VOICE_TTS_FAIL_GUARANTEE_001",
+                is_voice=True
+            )
+
+            # Text response is GUARANTEED to be dispatched instantly via Green-API
+            mock_send_text.assert_called_once_with(
+                organization_id=self.org.id,
+                to_phone="923209350858",
+                message_text="Hum 24/7 technical support faraham karte hain."
+            )
+            self.assertIsNotNone(res)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["reply_body"], "Hum 24/7 technical support faraham karte hain.")
+
 if __name__ == "__main__":
     unittest.main()
 
