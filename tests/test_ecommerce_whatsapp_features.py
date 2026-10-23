@@ -509,7 +509,7 @@ class TestEcommerceWhatsAppFeatures(unittest.TestCase):
         self.assertIn("easypaisa", pay_info)
         self.assertIn("jazzcash", pay_info)
         self.assertIn("card_payment_link", pay_info)
-        self.assertIn("EasyPaisa", res["message"])
+        self.assertNotIn("EasyPaisa", res["message"])
         self.assertIn("JazzCash", res["message"])
 
     def test_customer_order_placement_by_index_selection(self):
@@ -568,7 +568,7 @@ class TestEcommerceWhatsAppFeatures(unittest.TestCase):
         self.assertIn("SHIPPED", msg)
         self.assertIn("Trax Express", msg)
         self.assertIn("TRX-998877", msg)
-        self.assertIn("EasyPaisa", msg)
+        self.assertNotIn("EasyPaisa", msg)
         self.assertIn("JazzCash", msg)
 
     def test_send_promotional_broadcast_marketing(self):

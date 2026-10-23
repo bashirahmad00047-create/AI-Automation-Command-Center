@@ -5645,7 +5645,7 @@ def mark_cart_recovered(cart_id: str):
 @api_v1.route("/ecommerce/orders/<order_id>/payment-link", methods=["POST", "GET"])
 @require_auth
 def get_order_payment_link(order_id: str):
-    """Generates automated payment instructions & links (EasyPaisa/JazzCash/Card) for an order."""
+    """Generates automated payment instructions & links (JazzCash/Card) for an order."""
     org = get_current_org()
     if not org:
         return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
@@ -5676,7 +5676,7 @@ def get_order_payment_link(order_id: str):
 @api_v1.route("/ecommerce/payment-methods", methods=["GET"])
 @require_auth
 def get_ecommerce_payment_methods():
-    """Returns active payment methods with default details (JazzCash, EasyPaisa, Bank Transfer IBAN, Card)."""
+    """Returns active payment methods with default details (JazzCash, Card)."""
     org = get_current_org()
     if not org:
         return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400

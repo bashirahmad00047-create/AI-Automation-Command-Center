@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 from app import create_app
 from database import db
-from models import Organization, User, Membership, EcommerceOrder, Lead, SystemSetting
+from models import Organization, User, Membership, EcommerceOrder, Lead
 from whatsapp_service import WhatsAppService
 
 
@@ -55,7 +55,7 @@ class TestWhatsAppPaymentInstructions(unittest.TestCase):
         self.ctx.pop()
 
     def test_generate_payment_instructions_default_details(self):
-        """Verifies default custom accounts template for JazzCash, EasyPaisa, and Bank Transfer IBAN."""
+        """Verifies default active JazzCash (03209350858 / Bashir Uddin) and Render checkout base URL."""
         pay_info = WhatsAppService.generate_payment_instructions(
             organization_id=self.org.id,
             order_number="ORD-TEST-101",
@@ -65,72 +65,46 @@ class TestWhatsAppPaymentInstructions(unittest.TestCase):
         )
 
         self.assertIn("jazzcash", pay_info)
-        self.assertEqual(pay_info["jazzcash"]["account_number"], "[Aapka JazzCash Number]")
-        self.assertEqual(pay_info["jazzcash"]["account_title"], "[Aapka Naam]")
+        self.assertEqual(pay_info["jazzcash"]["account_number"], "03209350858")
+        self.assertEqual(pay_info["jazzcash"]["account_title"], "Bashir Uddin")
 
-        self.assertIn("easypaisa", pay_info)
-        self.assertEqual(pay_info["easypaisa"]["account_number"], "[Aapka EasyPaisa Number]")
-        self.assertEqual(pay_info["easypaisa"]["account_title"], "[Aapka Naam]")
+        # Verify EasyPaisa and Meezan Bank are completely removed
+        self.assertIsNone(pay_info["easypaisa"])
+        self.assertIsNone(pay_info["bank_transfer"])
 
-        self.assertIn("bank_transfer", pay_info)
-        self.assertEqual(pay_info["bank_transfer"]["bank_name"], "[Bank Name]")
-        self.assertEqual(pay_info["bank_transfer"]["account_title"], "[Account Title]")
-        self.assertEqual(pay_info["bank_transfer"]["iban"], "[Aapka IBAN Number]")
+        # Verify Render base URL
+        self.assertIn("https://ai-automation-command-center-4.onrender.com", pay_info["card_payment_link"])
 
         fmt = pay_info["formatted_text"]
-        self.assertIn("[Aapka JazzCash Number]", fmt)
-        self.assertIn("[Aapka EasyPaisa Number]", fmt)
-        self.assertIn("[Aapka IBAN Number]", fmt)
-        self.assertIn("[Bank Name]", fmt)
-        self.assertIn("[Account Title]", fmt)
+        self.assertIn("03209350858", fmt)
+        self.assertIn("Bashir Uddin", fmt)
+        self.assertIn("https://ai-automation-command-center-4.onrender.com", fmt)
         self.assertIn("ORD-TEST-101", fmt)
 
-    def test_generate_payment_instructions_with_configured_settings(self):
-        """Verifies custom settings override the default template when configured."""
-        with patch.object(WhatsAppService, "_get_tenant_or_global_setting") as mock_get:
-            def mock_setting_lookup(key, org_id):
-                mapping = {
-                    "JAZZCASH_ACCOUNT_NUMBER": "03009998877",
-                    "JAZZCASH_ACCOUNT_TITLE": "Muhammad Ali",
-                    "EASYPAISA_ACCOUNT_NUMBER": "03451112233",
-                    "EASYPAISA_ACCOUNT_TITLE": "Muhammad Ali",
-                    "BANK_NAME": "HBL Pakistan",
-                    "BANK_ACCOUNT_TITLE": "Ali Enterprises",
-                    "BANK_ACCOUNT_NUMBER": "0011223344",
-                    "BANK_IBAN": "PK12HABB000011223344"
-                }
-                return mapping.get(key)
-            mock_get.side_effect = mock_setting_lookup
-
-            pay_info = WhatsAppService.generate_payment_instructions(
-                organization_id=self.org.id,
-                order_number="ORD-CUSTOM-001",
-                amount=5000.0
-            )
-
-            self.assertEqual(pay_info["jazzcash"]["account_number"], "03009998877")
-            self.assertEqual(pay_info["easypaisa"]["account_number"], "03451112233")
-            self.assertEqual(pay_info["bank_transfer"]["iban"], "PK12HABB000011223344")
-            self.assertIn("03009998877", pay_info["formatted_text"])
-            self.assertIn("PK12HABB000011223344", pay_info["formatted_text"])
+        # Confirm no placeholders or removed methods exist in formatted auto-reply
+        self.assertNotIn("EasyPaisa", fmt)
+        self.assertNotIn("Meezan Bank", fmt)
+        self.assertNotIn("[Aapka", fmt)
 
     def test_handle_payment_query_detection(self):
-        """Verifies detection of payment inquiry query and generation of structured payment details."""
+        """Verifies detection of payment inquiry query and generation of structured JazzCash payment details."""
         res = WhatsAppService.handle_payment_query_or_deal_closure(
             organization_id=self.org.id,
             sender_phone="923001234567",
-            message_text="Aapke payment options kya hain? JazzCash ya bank IBAN bhej dein",
+            message_text="Aapke payment options kya hain? JazzCash bhej dein",
             sender_name="Ahmed"
         )
         self.assertIsNotNone(res)
         self.assertTrue(res["success"])
         self.assertEqual(res["trigger_type"], "payment_inquiry")
-        self.assertIn("[Aapka JazzCash Number]", res["message"])
-        self.assertIn("[Aapka EasyPaisa Number]", res["message"])
-        self.assertIn("[Aapka IBAN Number]", res["message"])
+        self.assertIn("03209350858", res["message"])
+        self.assertIn("Bashir Uddin", res["message"])
+        self.assertNotIn("EasyPaisa", res["message"])
+        self.assertNotIn("Meezan Bank", res["message"])
+        self.assertNotIn("[Aapka", res["message"])
 
     def test_handle_deal_closure_detection(self):
-        """Verifies detection of deal completion query and auto-dispatch of payment instructions."""
+        """Verifies detection of deal completion query and auto-dispatch of JazzCash payment instructions."""
         res = WhatsAppService.handle_payment_query_or_deal_closure(
             organization_id=self.org.id,
             sender_phone="923007654321",
@@ -141,8 +115,10 @@ class TestWhatsAppPaymentInstructions(unittest.TestCase):
         self.assertTrue(res["success"])
         self.assertEqual(res["trigger_type"], "deal_closed")
         self.assertIn("Deal Confirmed", res["message"])
-        self.assertIn("[Aapka IBAN Number]", res["message"])
-        self.assertIn("[Aapka JazzCash Number]", res["message"])
+        self.assertIn("03209350858", res["message"])
+        self.assertIn("Bashir Uddin", res["message"])
+        self.assertNotIn("EasyPaisa", res["message"])
+        self.assertNotIn("Meezan Bank", res["message"])
 
     @patch("whatsapp_service.WhatsAppService.send_message")
     def test_inbound_auto_response_payment_query_dispatches_and_captures_lead(self, mock_send):
@@ -163,8 +139,10 @@ class TestWhatsAppPaymentInstructions(unittest.TestCase):
         self.assertEqual(res["trigger_type"], "payment_inquiry")
         mock_send.assert_called_once()
         sent_body = mock_send.call_args[1]["message_text"]
-        self.assertIn("[Aapka JazzCash Number]", sent_body)
-        self.assertIn("[Aapka IBAN Number]", sent_body)
+        self.assertIn("03209350858", sent_body)
+        self.assertIn("Bashir Uddin", sent_body)
+        self.assertNotIn("EasyPaisa", sent_body)
+        self.assertNotIn("Meezan Bank", sent_body)
 
         # Verify CRM Lead ingestion
         lead = Lead.query.filter(
@@ -195,10 +173,11 @@ class TestWhatsAppPaymentInstructions(unittest.TestCase):
         mock_send.assert_called_once()
         sent_body = mock_send.call_args[1]["message_text"]
         self.assertIn("Deal Confirmed", sent_body)
-        self.assertIn("[Aapka EasyPaisa Number]", sent_body)
+        self.assertIn("03209350858", sent_body)
+        self.assertIn("Bashir Uddin", sent_body)
 
     def test_api_get_ecommerce_payment_methods(self):
-        """Verifies GET /api/v1/ecommerce/payment-methods returns configured payment options."""
+        """Verifies GET /api/v1/ecommerce/payment-methods returns active JazzCash options."""
         with self.client.session_transaction() as sess:
             sess["user_id"] = self.user.id
             sess["org_id"] = self.org.id
@@ -208,9 +187,10 @@ class TestWhatsAppPaymentInstructions(unittest.TestCase):
         data = resp.get_json()
         self.assertEqual(data["status"], "success")
         methods = data["payment_methods"]
-        self.assertEqual(methods["jazzcash"]["account_number"], "[Aapka JazzCash Number]")
-        self.assertEqual(methods["easypaisa"]["account_number"], "[Aapka EasyPaisa Number]")
-        self.assertEqual(methods["bank_transfer"]["iban"], "[Aapka IBAN Number]")
+        self.assertEqual(methods["jazzcash"]["account_number"], "03209350858")
+        self.assertEqual(methods["jazzcash"]["account_title"], "Bashir Uddin")
+        self.assertIsNone(methods["easypaisa"])
+        self.assertIsNone(methods["bank_transfer"])
 
     @patch("whatsapp_service.WhatsAppService.send_message")
     def test_api_send_order_payment_instructions(self, mock_send):
@@ -242,7 +222,10 @@ class TestWhatsAppPaymentInstructions(unittest.TestCase):
         mock_send.assert_called_once()
         call_kwargs = mock_send.call_args[1]
         self.assertEqual(call_kwargs["to_phone"], "923219876543")
-        self.assertIn("[Aapka IBAN Number]", call_kwargs["message_text"])
+        self.assertIn("03209350858", call_kwargs["message_text"])
+        self.assertIn("Bashir Uddin", call_kwargs["message_text"])
+        self.assertNotIn("EasyPaisa", call_kwargs["message_text"])
+        self.assertNotIn("Meezan Bank", call_kwargs["message_text"])
 
 
 if __name__ == "__main__":
