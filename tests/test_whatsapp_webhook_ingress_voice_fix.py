@@ -740,6 +740,7 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             mock_resp = MagicMock()
             mock_resp.status_code = 200
             mock_resp.content = fake_opus
+            mock_resp.iter_content.return_value = [fake_opus]
             mock_post.return_value = mock_resp
 
             raw_markdown = "**OpsFlow Cloud** automation, *WhatsApp* alerts, and [packages] are ready!"
@@ -848,6 +849,78 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             self.assertEqual(status_res["status"], "authorized")
             self.assertEqual(status_res["id_instance"], "710722761603")
             self.assertIn("ONLINE and AUTHORIZED", status_res["message"])
+
+    def test_generate_spoken_audio_uses_openai_tts_1_hd_streaming_nova_and_onyx(self):
+        """Verifies OpenAI HD TTS uses model tts-1-hd, streaming bytes, and defaults to nova with onyx override support."""
+        fake_stream_chunks = [b"OggS\x01\x00", b"\x02\x03chunk2", b"\x04\x05chunk3"]
+        combined_expected = b"".join(fake_stream_chunks)
+
+        with patch.object(WhatsAppService, "get_openai_api_key", return_value="sk-test-openai-key"), \
+             patch("requests.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.iter_content.return_value = fake_stream_chunks
+            mock_post.return_value = mock_resp
+
+            # Default voice is nova
+            res = WhatsAppService.generate_spoken_audio(
+                "Aap ka hukum sar ankhon par, hum tayyar hain.",
+                language="urdu",
+                output_format="oga"
+            )
+            self.assertIsNotNone(res)
+            audio_bytes, fn, mime = res
+            self.assertEqual(audio_bytes, combined_expected)
+            self.assertEqual(fn, "voice_reply.oga")
+            self.assertEqual(mime, "audio/ogg; codecs=opus")
+
+            payload = mock_post.call_args[1]["json"]
+            self.assertEqual(payload["model"], "tts-1-hd")
+            self.assertEqual(payload["voice"], "nova")
+            self.assertEqual(payload["response_format"], "opus")
+            self.assertTrue(mock_post.call_args[1]["stream"])
+
+        # Test onyx voice override via environment variable
+        with patch.object(WhatsAppService, "get_openai_api_key", return_value="sk-test-openai-key"), \
+             patch.dict(os.environ, {"OPENAI_TTS_VOICE": "onyx"}), \
+             patch("requests.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.iter_content.return_value = fake_stream_chunks
+            mock_post.return_value = mock_resp
+
+            res2 = WhatsAppService.generate_spoken_audio(
+                "Hum aap ki khidmat ke liye hazir hain.",
+                language="urdu",
+                output_format="oga"
+            )
+            self.assertIsNotNone(res2)
+            payload2 = mock_post.call_args[1]["json"]
+            self.assertEqual(payload2["voice"], "onyx")
+
+    def test_call_gemini_ai_direct_model_without_list_models_delay(self):
+        """Verifies call_gemini_ai directly invokes fast target models without blocking on list_models()."""
+        mock_genai = MagicMock()
+        mock_model_inst = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = "OpsFlow Cloud CRM aur automation services faraham karta hai."
+        mock_model_inst.generate_content.return_value = mock_resp
+        mock_genai.GenerativeModel.return_value = mock_model_inst
+
+        with patch.object(WhatsAppService, "get_gemini_api_key", return_value="AIzaSyMockKey"), \
+             patch.object(WhatsAppService, "get_gemini_model_name", return_value="gemini-1.5-flash"), \
+             patch.dict("sys.modules", {"google.generativeai": mock_genai}):
+
+            reply = WhatsAppService.call_gemini_ai(
+                user_message="Aap kaun si service de rahe hain?",
+                organization_id=self.org.id
+            )
+
+            self.assertEqual(reply, "OpsFlow Cloud CRM aur automation services faraham karta hai.")
+            mock_genai.configure.assert_called_with(api_key="AIzaSyMockKey")
+            # Verify list_models() is NOT called, ensuring fast sub-second execution
+            self.assertFalse(mock_genai.list_models.called)
+            mock_genai.GenerativeModel.assert_called_with("gemini-1.5-flash")
 
 if __name__ == "__main__":
     unittest.main()

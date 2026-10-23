@@ -726,29 +726,49 @@ class WhatsAppService:
         audio_fn = "voice_reply.oga" if is_oga else "voice_reply.mp3"
         audio_mt = "audio/ogg; codecs=opus" if is_oga else "audio/mpeg"
 
-        # 1. OpenAI Audio Speech API (tts-1-hd) - ultra-realistic studio HD voice
+        # 1. OpenAI HD Audio Speech API (model 'tts-1-hd', voice 'nova' or 'onyx') with optimized streaming bytes
         openai_key = cls.get_openai_api_key(organization_id=organization_id)
         if openai_key and str(openai_key).strip():
             try:
                 import requests
+                voice_choice = (
+                    cls._get_tenant_or_global_setting("OPENAI_TTS_VOICE", organization_id=organization_id)
+                    or os.environ.get("OPENAI_TTS_VOICE")
+                    or "nova"
+                ).strip().lower()
+                if voice_choice not in ("nova", "onyx", "alloy", "echo", "fable", "shimmer"):
+                    voice_choice = "nova"
+
                 openai_payload = {
                     "model": "tts-1-hd",
                     "input": clean_text[:1000],
-                    "voice": "nova"
+                    "voice": voice_choice,
+                    "response_format": "opus" if is_oga else "mp3"
                 }
-                if is_oga:
-                    openai_payload["response_format"] = "opus"
+                headers = {
+                    "Authorization": f"Bearer {str(openai_key).strip()}",
+                    "Content-Type": "application/json"
+                }
                 resp = requests.post(
                     "https://api.openai.com/v1/audio/speech",
-                    headers={
-                        "Authorization": f"Bearer {str(openai_key).strip()}",
-                        "Content-Type": "application/json"
-                    },
+                    headers=headers,
                     json=openai_payload,
+                    stream=True,
                     timeout=5.0
                 )
-                if resp.status_code == 200 and resp.content:
-                    return (resp.content, audio_fn, audio_mt)
+                if resp.status_code == 200:
+                    chunks = []
+                    if hasattr(resp, "iter_content"):
+                        try:
+                            for chunk in resp.iter_content(chunk_size=4096):
+                                if chunk:
+                                    chunks.append(chunk)
+                        except Exception:
+                            pass
+                    audio_bytes = b"".join(chunks) if chunks else getattr(resp, "content", b"")
+                    if audio_bytes and len(audio_bytes) > 0:
+                        logger.info(f"OpenAI tts-1-hd voice '{voice_choice}' successfully synthesized {len(audio_bytes)} streaming bytes of natural Urdu audio.")
+                        return (audio_bytes, audio_fn, audio_mt)
             except Exception as e:
                 logger.debug(f"OpenAI TTS-1-HD synthesis failed: {e}")
 
@@ -2132,42 +2152,25 @@ class WhatsAppService:
         )
 
         configured_model = cls.get_gemini_model_name(organization_id=organization_id)
-        models_to_try = []
-
-        dynamic_gemini_models = []
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
-            for m_info in genai.list_models():
-                supported = getattr(m_info, "supported_generation_methods", [])
-                if "generateContent" in supported:
-                    m_id = getattr(m_info, "name", "").replace("models/", "")
-                    if m_id:
-                        dynamic_gemini_models.append(m_id)
-        except Exception:
-            pass
-
-        preferred_candidates = [
+        # Direct, ultra-fast candidate models eliminating list_models() overhead and invalid models
+        primary_candidates = [
             configured_model,
-            "gemini-3.8-flash",
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
             "gemini-1.5-flash",
-            "gemini-1.5-flash-8b",
-            "gemini-1.5-pro"
-        ] + dynamic_gemini_models
-        for m in preferred_candidates:
-            if m and m not in models_to_try:
-                models_to_try.append(m)
+            "gemini-2.0-flash",
+            "gemini-1.5-flash-8b"
+        ]
+        models_to_try = []
+        for m in primary_candidates:
+            if m and m not in models_to_try and m not in ("gemini-3.8-flash", "gemini-2.5-flash"):
+                models_to_try.append(m.replace("models/", ""))
 
         diagnostics: List[str] = []
 
-        # 1. Try google.generativeai SDK if available
+        # 1. Fast google.generativeai SDK call (sub-second target)
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
-            for m_name in models_to_try:
-                clean_m = m_name.replace("models/", "")
+            for clean_m in models_to_try:
                 try:
                     model = genai.GenerativeModel(clean_m)
                     response = model.generate_content(prompt)
@@ -2192,68 +2195,47 @@ class WhatsAppService:
                 except Exception as model_err:
                     err_str = str(model_err)
                     diagnostics.append(f"sdk/{clean_m}: {err_str}")
-                    logger.warning(f"[WhatsApp AI Auto-Responder] google.generativeai error with model '{clean_m}': {model_err}")
+                    logger.debug(f"[WhatsApp AI Auto-Responder] Gemini model notice '{clean_m}': {model_err}")
                     if "quota" in err_str.lower() or "429" in err_str or "exhausted" in err_str.lower():
                         break
-                    continue
         except Exception as genai_err:
             diagnostics.append(f"sdk_setup: {genai_err}")
-            logger.warning(f"[WhatsApp AI Auto-Responder] google.generativeai setup failed: {genai_err}")
+            logger.debug(f"[WhatsApp AI Auto-Responder] google.generativeai setup notice: {genai_err}")
 
-        # 2. Direct HTTP REST API via requests across v1beta and v1
-        quota_exhausted = any("quota" in d.lower() or "429" in d or "exhausted" in d.lower() for d in diagnostics)
-        if not quota_exhausted:
-            for api_ver in ["v1beta", "v1"]:
-                for m_name in models_to_try:
-                    clean_m = m_name.replace("models/", "")
-                    try:
-                        url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{clean_m}:generateContent"
-                        payload = {
-                            "contents": [{"parts": [{"text": prompt}]}]
-                        }
-                        headers = {
-                            "Content-Type": "application/json",
-                            "x-goog-api-key": api_key,
-                            "User-Agent": "OpsFlow-Cloud/2.4 (WhatsApp-Auto-Responder)"
-                        }
-                        resp = requests.post(
-                            url,
-                            params={"key": api_key},
-                            json=payload,
-                            headers=headers,
-                            timeout=8
-                        )
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            candidates = data.get("candidates", [])
-                            if candidates:
-                                parts = candidates[0].get("content", {}).get("parts", [])
-                                if parts and "text" in parts[0]:
-                                    text = parts[0]["text"].strip()
-                                    if text:
-                                        cls._last_gemini_error = None
-                                        cls._last_gemini_diagnostics = []
-                                        logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via HTTP REST Gemini model '{clean_m}' ({api_ver})")
-                                        return text
-                        else:
-                            detail = ""
-                            try:
-                                detail = resp.text[:250].replace("\n", " ").strip()
-                            except Exception:
-                                pass
-                            err_msg = f"{api_ver}/{clean_m}: HTTP {resp.status_code} ({detail})"
-                            diagnostics.append(err_msg)
-                            logger.error(f"[WhatsApp AI Auto-Responder] {err_msg}")
-                            if resp.status_code in (401, 403, 429) or "RESOURCE_EXHAUSTED" in detail or "quota" in detail.lower():
-                                quota_exhausted = True
-                                break
-                    except Exception as req_err:
-                        err_msg = f"{api_ver}/{clean_m}: network error: {req_err}"
-                        diagnostics.append(err_msg)
-                        logger.error(f"[WhatsApp AI Auto-Responder] {err_msg}")
-                        continue
-                if quota_exhausted:
-                    break
+        # 2. Fast single HTTP REST fallback (3.0s fast timeout)
+        target_m = models_to_try[0] if models_to_try else "gemini-1.5-flash"
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_m}:generateContent"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}]
+            }
+            headers = {
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key,
+                "User-Agent": "OpsFlow-Cloud/2.4 (WhatsApp-Auto-Responder)"
+            }
+            resp = requests.post(
+                url,
+                params={"key": api_key},
+                json=payload,
+                headers=headers,
+                timeout=3.0
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts and "text" in parts[0]:
+                        text = parts[0]["text"].strip()
+                        if text:
+                            cls._last_gemini_error = None
+                            cls._last_gemini_diagnostics = []
+                            logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via fast HTTP REST Gemini '{target_m}'")
+                            return text
+        except Exception as rest_err:
+            diagnostics.append(f"http/{target_m}: {rest_err}")
+            logger.debug(f"[WhatsApp AI Auto-Responder] Fast REST Gemini notice: {rest_err}")
 
         cls._last_gemini_diagnostics = diagnostics
         cls._last_gemini_error = " | ".join(diagnostics[-3:]) if diagnostics else "Unknown error"
