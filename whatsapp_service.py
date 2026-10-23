@@ -1388,6 +1388,14 @@ class WhatsAppService:
 
             trial_days = int(TRIAL_DURATION_HOURS // 24) if TRIAL_DURATION_HOURS else 2
 
+            jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "[Aapka JazzCash Number]"
+            jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "[Aapka Naam]"
+            ep_acc = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_NUMBER", org_id) or "[Aapka EasyPaisa Number]"
+            ep_title = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_TITLE", org_id) or "[Aapka Naam]"
+            bank_name = cls._get_tenant_or_global_setting("BANK_NAME", org_id) or "[Bank Name]"
+            bank_iban = cls._get_tenant_or_global_setting("BANK_IBAN", org_id) or "[Aapka IBAN Number]"
+            bank_title = cls._get_tenant_or_global_setting("BANK_ACCOUNT_TITLE", org_id) or "[Account Title]"
+
             kb = (
                 "Business Name: OpsFlow Cloud (AI Automation Command Center & IT Operations Platform).\n\n"
                 "VERIFIED CORE CAPABILITIES & SERVICES:\n"
@@ -1404,9 +1412,9 @@ class WhatsAppService:
                 "VERIFIED TRIAL TERMS:\n"
                 f"- {trial_days}-Day Free Trial ({TRIAL_DURATION_HOURS} hours) available for exploring subscription tiers.\n\n"
                 "VERIFIED PAYMENT METHODS & DEFAULT PAYMENT DETAILS:\n"
-                "- JazzCash (Mobile Wallet): Account 03209350858, Title: OpsFlow Cloud Commerce.\n"
-                "- EasyPaisa (Mobile Wallet): Account 03471000668, Title: OpsFlow Cloud Commerce.\n"
-                "- Bank Transfer (IBAN): Meezan Bank Limited, Title: OpsFlow Technologies (Pvt) Ltd, Account: 02010108934521, IBAN: PK64MEZN0002010108934521.\n"
+                f"- JazzCash: {jc_acc} (Title: {jc_title})\n"
+                f"- EasyPaisa: {ep_acc} (Title: {ep_title})\n"
+                f"- Bank Transfer: {bank_name}, IBAN: {bank_iban}, Title: {bank_title}\n"
                 "- Stripe / Card: International credit and debit card payments via secure online checkout link.\n"
                 "- Cash on Delivery (COD): Supported upon customer confirmation.\n\n"
                 "VERIFIED INTEGRATIONS:\n"
@@ -1414,7 +1422,7 @@ class WhatsAppService:
                 "GROUNDING & ANTI-HALLUCINATION GUARDRAILS:\n"
                 "1. ONLY state facts, pricing, trial terms, payment methods, and integrations that are explicitly listed above.\n"
                 "2. Unknown / Custom Pricing: If a customer asks about custom enterprise pricing, bulk discounts, unlisted currencies, or negotiated quotes, DO NOT invent numbers. Politely inform them that custom pricing requires confirmation from our sales specialist or account team.\n"
-                "3. Payment Methods & Structured Payment Details: OpsFlow officially supports JazzCash (Account: 03209350858), EasyPaisa (Account: 03471000668), Bank Transfer IBAN (Meezan Bank - IBAN: PK64MEZN0002010108934521), and Stripe/Card. Whenever a customer asks for payment options or completes/confirms a deal, provide these structured account details clearly so they can transfer funds and share their transaction screenshot. For any other unlisted method (e.g. PayPal, Crypto), inform them it requires billing confirmation.\n"
+                f"3. Payment Methods & Structured Payment Details: OpsFlow supports JazzCash ({jc_acc}), EasyPaisa ({ep_acc}), Bank Transfer ({bank_name} - IBAN: {bank_iban}), and Stripe/Card. Whenever a customer asks for payment options or completes/confirms a deal, provide these structured account details clearly so they can transfer funds and share their transaction screenshot. For any other unlisted method (e.g. PayPal, Crypto), inform them it requires billing confirmation.\n"
                 "4. Unsupported / Unverified Integrations: If asked about third-party apps not natively listed above (e.g. native Salesforce, HubSpot, Jira, Zapier app, Telegram), explain that they are not pre-configured natively but can connect via standard REST Webhooks, or that our engineering team can confirm enterprise integration feasibility.\n"
                 "5. Missing Facts: When any policy, feature, or service capability is not explicitly detailed in this knowledge base, NEVER guess or make commitments. Politely state that you need confirmation from our team and a specialist will follow up.\n"
                 "6. Language Matching (Critical): Detect and match the customer's language naturally across Pashto, Urdu, and English. If the customer writes in Pashto (Arabic script), reply in natural Pashto (پښتو). If in Roman Pashto (Latin script), reply in natural Roman Pashto. If in Urdu (Arabic/Nastaliq script), reply in natural Urdu (اردو). If in Roman Urdu, reply in natural Roman Urdu. If in English, reply in professional English.\n"
@@ -1425,10 +1433,17 @@ class WhatsAppService:
 
         # 3. Unconfigured tenant fallback with strict grounding:
         b_name = tenant_kb.get("business_name") or "Our Organization"
+        jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "[Aapka JazzCash Number]"
+        jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "[Aapka Naam]"
+        ep_acc = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_NUMBER", org_id) or "[Aapka EasyPaisa Number]"
+        ep_title = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_TITLE", org_id) or "[Aapka Naam]"
+        bank_name = cls._get_tenant_or_global_setting("BANK_NAME", org_id) or "[Bank Name]"
+        bank_iban = cls._get_tenant_or_global_setting("BANK_IBAN", org_id) or "[Aapka IBAN Number]"
+        bank_title = cls._get_tenant_or_global_setting("BANK_ACCOUNT_TITLE", org_id) or "[Account Title]"
         return (
             f"Business Name: {b_name}\n\n"
             "STATUS: Business knowledge catalog has not yet been populated by organization administrators.\n\n"
-            "VERIFIED PAYMENT METHODS: JazzCash (03209350858), EasyPaisa (03471000668), Bank Transfer IBAN (Meezan Bank: PK64MEZN0002010108934521), Debit/Credit Card.\n\n"
+            f"VERIFIED PAYMENT METHODS: JazzCash: {jc_acc} (Title: {jc_title}), EasyPaisa: {ep_acc} (Title: {ep_title}), Bank Transfer: {bank_name}, IBAN: {bank_iban}, Title: {bank_title}, Debit/Credit Card.\n\n"
             "STRICT GROUNDING & ANTI-HALLUCINATION GUARDRAILS:\n"
             f"1. Greet the customer warmly and politely on behalf of {b_name}.\n"
             "2. Because specific product catalogs, verified pricing, and delivery policies have not been loaded, DO NOT invent or assume any products, prices, or policies.\n"
@@ -6249,16 +6264,16 @@ class WhatsAppService:
         ord_no = order_number or "ORD-DEFAULT"
         clean_phone = cls.format_phone_number(customer_phone or "")
 
-        jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "03209350858"
-        jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "OpsFlow Cloud Commerce"
+        jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "[Aapka JazzCash Number]"
+        jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "[Aapka Naam]"
 
-        ep_acc = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_NUMBER", org_id) or "03471000668"
-        ep_title = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_TITLE", org_id) or "OpsFlow Cloud Commerce"
+        ep_acc = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_NUMBER", org_id) or "[Aapka EasyPaisa Number]"
+        ep_title = cls._get_tenant_or_global_setting("EASYPAISA_ACCOUNT_TITLE", org_id) or "[Aapka Naam]"
 
-        bank_name = cls._get_tenant_or_global_setting("BANK_NAME", org_id) or "Meezan Bank Limited"
-        bank_title = cls._get_tenant_or_global_setting("BANK_ACCOUNT_TITLE", org_id) or "OpsFlow Technologies (Pvt) Ltd"
-        bank_acc = cls._get_tenant_or_global_setting("BANK_ACCOUNT_NUMBER", org_id) or "02010108934521"
-        bank_iban = cls._get_tenant_or_global_setting("BANK_IBAN", org_id) or "PK64MEZN0002010108934521"
+        bank_name = cls._get_tenant_or_global_setting("BANK_NAME", org_id) or "[Bank Name]"
+        bank_iban = cls._get_tenant_or_global_setting("BANK_IBAN", org_id) or "[Aapka IBAN Number]"
+        bank_title = cls._get_tenant_or_global_setting("BANK_ACCOUNT_TITLE", org_id) or "[Account Title]"
+        bank_acc = cls._get_tenant_or_global_setting("BANK_ACCOUNT_NUMBER", org_id) or ""
 
         base_url = cls._get_tenant_or_global_setting("CHECKOUT_BASE_URL", org_id) or "https://opsflow.cloud"
         card_link = f"{base_url}/checkout/pay?order={ord_no}&amount={amount or 0}&phone={clean_phone}"
@@ -6271,10 +6286,10 @@ class WhatsAppService:
         header_text = ("\n" + "\n".join(header_lines) + "\n") if header_lines else "\n"
 
         formatted = (
-            f"💳 *Payment Options (JazzCash / EasyPaisa / Bank Transfer IBAN):*{header_text}\n"
+            f"💳 *Payment Options:*{header_text}\n"
             f"• *JazzCash:* `{jc_acc}` (Title: *{jc_title}*)\n"
             f"• *EasyPaisa:* `{ep_acc}` (Title: *{ep_title}*)\n"
-            f"• *Bank Transfer (IBAN):* Bank: *{bank_name}*, Title: *{bank_title}*, Acc #: `{bank_acc}`, IBAN: `{bank_iban}`\n"
+            f"• *Bank Transfer:* *{bank_name}*, IBAN: `{bank_iban}`, Title: *{bank_title}*\n"
             f"• *Debit/Credit Card / Stripe:* {card_link}\n\n"
             "Payment ke baad transaction ID ya screenshot yahan share karein. "
             "Agar aap Cash on Delivery (COD) chahte hain to 'COD' reply karein."
