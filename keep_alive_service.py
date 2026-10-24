@@ -21,7 +21,7 @@ logger = logging.getLogger("opsflow.keep_alive")
 class KeepAliveService:
     DEFAULT_INTERVAL_SECONDS = 540  # 9 minutes (well within Render's 15-minute idle cutoff)
     DEFAULT_RENDER_URL = "https://ai-automation-command-center-4.onrender.com"
-    PING_PATH = "/api/v1/ping"
+    PING_PATH = os.environ.get("KEEP_ALIVE_PING_PATH", "/health")
 
     _thread: Optional[threading.Thread] = None
     _stop_event = threading.Event()
@@ -147,8 +147,8 @@ class KeepAliveService:
         logger.info("[Render Keep-Alive] Background pinger daemon stopped.")
 
     @classmethod
-    def start(cls, app=None, interval_seconds: Optional[int] = None) -> bool:
-        """Starts the background keep-alive pinger daemon thread if not already running."""
+    def should_run(cls, app=None) -> bool:
+        """Determines if the keep-alive background worker should run."""
         # Never run during unit tests
         if app and app.config.get("TESTING"):
             return False
@@ -156,9 +156,22 @@ class KeepAliveService:
         if os.environ.get("FLASK_ENV") == "testing" or os.environ.get("TESTING") == "1":
             return False
 
-        # Only run if on Render or explicitly enabled
-        if not cls.is_render_environment():
-            logger.debug("[Render Keep-Alive] Not on Render environment; keep-alive pinger inactive.")
+        if os.environ.get("DISABLE_KEEP_ALIVE", "").lower() in ("1", "true", "yes"):
+            return False
+
+        # Run if on Render, explicitly enabled, or running in a deployed environment
+        return (
+            cls.is_render_environment()
+            or os.environ.get("FLASK_ENV") == "production"
+            or bool(os.environ.get("PORT"))
+            or bool(os.environ.get("RENDER_EXTERNAL_URL"))
+        )
+
+    @classmethod
+    def start(cls, app=None, interval_seconds: Optional[int] = None) -> bool:
+        """Starts the background keep-alive pinger daemon thread if not already running."""
+        if not cls.should_run(app):
+            logger.debug("[Render Keep-Alive] Conditions not met for keep-alive pinger; inactive.")
             return False
 
         with cls._lock:
