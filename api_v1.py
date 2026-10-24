@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from flask import Blueprint, current_app, g, jsonify, request, session, Response, url_for
@@ -2638,7 +2639,7 @@ def whatsapp_webhook_verification():
 
 
 @api_v1.route("/webhooks/whatsapp", methods=["POST"])
-@rate_limit(limit=120, window=60, message="Too many WhatsApp webhook requests.")
+@rate_limit(limit=1200, window=60, message="Too many WhatsApp webhook requests.")
 def whatsapp_webhook_ingress():
     """Universal Incoming WhatsApp Webhook Gateway (Meta Cloud API & Green-API).
     
@@ -2725,79 +2726,77 @@ def whatsapp_webhook_ingress():
             raw_payload=msg
         )
 
-        # Automatically ingest a new record into CRM Leads if phone number is not already present
-        try:
-            WhatsAppService.auto_ingest_crm_lead(
-                organization_id=target_org.id,
-                from_phone=msg.get("from_phone"),
-                sender_name=msg.get("sender_name"),
-                message_body=msg.get("body"),
-                location_data=msg.get("location"),
-                raw_payload=msg
-            )
-        except Exception as lead_err:
-            logger.warning(f"Error auto-ingesting CRM lead in webhook: {lead_err}")
-
-        # Automatic Consent & Opt-Out handling (STOP / UNSUBSCRIBE / START)
-        inbound_body_clean = (msg.get("body") or "").strip().lower()
-        if inbound_body_clean in ("stop", "unsubscribe", "opt out", "optout", "cancel", "halt"):
+        # In production on Render, offload post-ingest processing (CRM lead, rules engine, and AI auto-response)
+        # to a daemon background worker to guarantee sub-30ms HTTP 200 response to Meta / webhook gateways.
+        # Under testing, run synchronously for deterministic assertions.
+        if current_app.config.get("TESTING"):
             try:
-                from campaign_service import CampaignService
-                CampaignService.handle_opt_out(
+                WhatsAppService.auto_ingest_crm_lead(
                     organization_id=target_org.id,
-                    phone=msg.get("from_phone", ""),
-                    channel="whatsapp",
-                    reason=f"Inbound trigger: {inbound_body_clean.upper()}"
+                    from_phone=msg.get("from_phone"),
+                    sender_name=msg.get("sender_name"),
+                    message_body=msg.get("body"),
+                    location_data=msg.get("location"),
+                    raw_payload=msg
                 )
-            except Exception as opt_err:
-                logger.warning(f"Failed to record automatic opt-out: {opt_err}")
-        elif inbound_body_clean in ("start", "unstop", "resume"):
-            try:
-                from campaign_service import CampaignService
-                CampaignService.handle_opt_in(
-                    organization_id=target_org.id,
-                    phone=msg.get("from_phone", ""),
-                    channel="whatsapp"
-                )
-            except Exception as opt_err:
-                logger.warning(f"Failed to record automatic opt-in: {opt_err}")
+            except Exception as lead_err:
+                logger.warning(f"Error auto-ingesting CRM lead in webhook: {lead_err}")
 
-        rule_replied = False
-        if engine:
-            event_data = {
-                "from": msg.get("from_phone"),
-                "sender_name": msg.get("sender_name", ""),
-                "message": msg.get("body", ""),
-                "text": msg.get("body", ""),
-                "whatsapp_message_id": msg_id,
-                "recipient_phone_id": msg.get("recipient_phone_id", ""),
-                "direction": "inbound",
-                "record_id": record.id,
-                "provider": provider_name
-            }
-            try:
-                engine_res = engine.ingest_event(
-                    event_name="whatsapp.message",
-                    payload=event_data,
-                    source=f"whatsapp_{provider_name}_webhook",
-                    dry_run=False,
-                    organization_id=target_org.id
-                )
-                if WhatsAppService.engine_dispatched_reply(engine_res):
-                    rule_replied = True
-                    logger.info(f"Automation rule already dispatched WhatsApp reply for Meta message {msg_id}; skipping auto-responder.")
-            except Exception as e:
-                logger.error(f"Error triggering engine for WhatsApp message {msg_id}: {e}")
+            inbound_body_clean = (msg.get("body") or "").strip().lower()
+            if inbound_body_clean in ("stop", "unsubscribe", "opt out", "optout", "cancel", "halt"):
+                try:
+                    from campaign_service import CampaignService
+                    CampaignService.handle_opt_out(
+                        organization_id=target_org.id,
+                        phone=msg.get("from_phone", ""),
+                        channel="whatsapp",
+                        reason=f"Inbound trigger: {inbound_body_clean.upper()}"
+                    )
+                except Exception as opt_err:
+                    logger.warning(f"Failed to record automatic opt-out: {opt_err}")
+            elif inbound_body_clean in ("start", "unstop", "resume"):
+                try:
+                    from campaign_service import CampaignService
+                    CampaignService.handle_opt_in(
+                        organization_id=target_org.id,
+                        phone=msg.get("from_phone", ""),
+                        channel="whatsapp"
+                    )
+                except Exception as opt_err:
+                    logger.warning(f"Failed to record automatic opt-in: {opt_err}")
 
-        # Trigger AI Auto-Responder if configured and active
-        if not rule_replied:
-            is_v_meta = WhatsAppService.is_audio_message(
-                message_type=msg.get("message_type"),
-                body=msg.get("body"),
-                download_url=msg.get("download_url")
-            )
-            d_url_meta = msg.get("download_url")
-            if current_app.config.get("TESTING"):
+            rule_replied = False
+            if engine:
+                event_data = {
+                    "from": msg.get("from_phone"),
+                    "sender_name": msg.get("sender_name", ""),
+                    "message": msg.get("body", ""),
+                    "text": msg.get("body", ""),
+                    "whatsapp_message_id": msg_id,
+                    "recipient_phone_id": msg.get("recipient_phone_id", ""),
+                    "direction": "inbound",
+                    "record_id": record.id,
+                    "provider": provider_name
+                }
+                try:
+                    engine_res = engine.ingest_event(
+                        event_name="whatsapp.message",
+                        payload=event_data,
+                        source=f"whatsapp_{provider_name}_webhook",
+                        dry_run=False,
+                        organization_id=target_org.id
+                    )
+                    if WhatsAppService.engine_dispatched_reply(engine_res):
+                        rule_replied = True
+                except Exception as e:
+                    logger.error(f"Error triggering engine for WhatsApp message {msg_id}: {e}")
+
+            if not rule_replied:
+                is_v_meta = WhatsAppService.is_audio_message(
+                    message_type=msg.get("message_type"),
+                    body=msg.get("body"),
+                    download_url=msg.get("download_url")
+                )
                 try:
                     WhatsAppService.handle_inbound_auto_response(
                         organization_id=target_org.id,
@@ -2807,50 +2806,111 @@ def whatsapp_webhook_ingress():
                         message_id=msg_id,
                         message_timestamp=msg.get("timestamp"),
                         is_voice=is_v_meta,
-                        download_url=d_url_meta
+                        download_url=msg.get("download_url")
                     )
                 except Exception as auto_err:
                     logger.error(f"AI Auto-Responder error in Meta webhook: {auto_err}")
-            else:
-                def _async_meta_reply(app_ref, org_id, from_p, body_txt, s_name, m_id, m_ts, m_type, d_url):
-                    with app_ref.app_context():
+        else:
+            def _async_process_inbound_post_record(app_ref, org_id, msg_dict, rec_id, prov_name):
+                with app_ref.app_context():
+                    try:
+                        # 1. CRM Lead auto-ingest
                         try:
-                            is_v = m_type in ("audioMessage", "voiceMessage", "ptt", "audio") or "[voice note]" in str(body_txt or "").lower()
+                            WhatsAppService.auto_ingest_crm_lead(
+                                organization_id=org_id,
+                                from_phone=msg_dict.get("from_phone"),
+                                sender_name=msg_dict.get("sender_name"),
+                                message_body=msg_dict.get("body"),
+                                location_data=msg_dict.get("location"),
+                                raw_payload=msg_dict
+                            )
+                        except Exception as lead_err:
+                            logger.warning(f"Error auto-ingesting CRM lead in webhook: {lead_err}")
+
+                        # 2. Consent & Opt-Out handling
+                        inbound_body_clean = (msg_dict.get("body") or "").strip().lower()
+                        if inbound_body_clean in ("stop", "unsubscribe", "opt out", "optout", "cancel", "halt"):
+                            try:
+                                from campaign_service import CampaignService
+                                CampaignService.handle_opt_out(
+                                    organization_id=org_id,
+                                    phone=msg_dict.get("from_phone", ""),
+                                    channel="whatsapp",
+                                    reason=f"Inbound trigger: {inbound_body_clean.upper()}"
+                                )
+                            except Exception as opt_err:
+                                logger.warning(f"Failed to record automatic opt-out: {opt_err}")
+                        elif inbound_body_clean in ("start", "unstop", "resume"):
+                            try:
+                                from campaign_service import CampaignService
+                                CampaignService.handle_opt_in(
+                                    organization_id=org_id,
+                                    phone=msg_dict.get("from_phone", ""),
+                                    channel="whatsapp"
+                                )
+                            except Exception as opt_err:
+                                logger.warning(f"Failed to record automatic opt-in: {opt_err}")
+
+                        # 3. Engine event evaluation
+                        rule_replied = False
+                        eng = get_engine()
+                        if eng:
+                            event_data = {
+                                "from": msg_dict.get("from_phone"),
+                                "sender_name": msg_dict.get("sender_name", ""),
+                                "message": msg_dict.get("body", ""),
+                                "text": msg_dict.get("body", ""),
+                                "whatsapp_message_id": msg_dict.get("message_id"),
+                                "recipient_phone_id": msg_dict.get("recipient_phone_id", ""),
+                                "direction": "inbound",
+                                "record_id": rec_id,
+                                "provider": prov_name
+                            }
+                            try:
+                                engine_res = eng.ingest_event(
+                                    event_name="whatsapp.message",
+                                    payload=event_data,
+                                    source=f"whatsapp_{prov_name}_webhook",
+                                    dry_run=False,
+                                    organization_id=org_id
+                                )
+                                if WhatsAppService.engine_dispatched_reply(engine_res):
+                                    rule_replied = True
+                                    logger.info(f"Automation rule already dispatched WhatsApp reply for message {msg_dict.get('message_id')}; skipping auto-responder.")
+                            except Exception as e:
+                                logger.error(f"Error triggering engine for WhatsApp message {msg_dict.get('message_id')}: {e}")
+
+                        # 4. AI Auto-Responder if not replied by rule
+                        if not rule_replied:
+                            is_v = WhatsAppService.is_audio_message(
+                                message_type=msg_dict.get("message_type"),
+                                body=msg_dict.get("body"),
+                                download_url=msg_dict.get("download_url")
+                            )
                             WhatsAppService.handle_inbound_auto_response(
                                 organization_id=org_id,
-                                sender_phone=from_p,
-                                message_body=body_txt,
-                                sender_name=s_name,
-                                message_id=m_id,
-                                message_timestamp=m_ts,
+                                sender_phone=msg_dict.get("from_phone", "unknown"),
+                                message_body=msg_dict.get("body", ""),
+                                sender_name=msg_dict.get("sender_name", ""),
+                                message_id=msg_dict.get("message_id"),
+                                message_timestamp=msg_dict.get("timestamp"),
                                 is_voice=is_v,
-                                download_url=d_url
+                                download_url=msg_dict.get("download_url")
                             )
-                        except Exception as err:
-                            logger.error(f"Async AI Auto-Responder error in Meta webhook: {err}")
-                        finally:
-                            try:
-                                db.session.remove()
-                            except Exception:
-                                pass
+                    except Exception as err:
+                        logger.error(f"Async inbound webhook processing error: {err}")
+                    finally:
+                        try:
+                            db.session.remove()
+                        except Exception:
+                            pass
 
-                app_obj = current_app._get_current_object()
-                t = threading.Thread(
-                    target=_async_meta_reply,
-                    args=(
-                        app_obj,
-                        target_org.id,
-                        msg.get("from_phone", "unknown"),
-                        msg.get("body", ""),
-                        msg.get("sender_name", ""),
-                        msg_id,
-                        msg.get("timestamp"),
-                        msg.get("message_type"),
-                        msg.get("download_url")
-                    ),
-                    daemon=True
-                )
-                t.start()
+            app_obj = current_app._get_current_object()
+            threading.Thread(
+                target=_async_process_inbound_post_record,
+                args=(app_obj, target_org.id, msg, record.id, provider_name),
+                daemon=True
+            ).start()
 
         processed_count += 1
 
@@ -2866,7 +2926,7 @@ def whatsapp_voice_call_ingress():
 
 
 @api_v1.route("/webhooks/whatsapp/green-api", methods=["GET", "POST"])
-@rate_limit(limit=120, window=60, message="Too many Green-API webhook requests.")
+@rate_limit(limit=1200, window=60, message="Too many Green-API webhook requests.")
 def green_api_webhook_ingress():
     """Dedicated Production-Ready Green-API Inbound Webhook Endpoint."""
     if request.method == "GET":
@@ -2933,56 +2993,54 @@ def green_api_webhook_ingress():
                 raw_payload=msg
             )
 
-            # Automatically ingest a new record into CRM Leads if phone number is not already present
-            try:
-                WhatsAppService.auto_ingest_crm_lead(
-                    organization_id=target_org_id,
-                    from_phone=msg.get("from_phone"),
-                    sender_name=msg.get("sender_name"),
-                    message_body=msg.get("body"),
-                    location_data=msg.get("location"),
-                    raw_payload=msg
-                )
-            except Exception as lead_err:
-                logger.warning(f"Error auto-ingesting CRM lead in Green-API webhook: {lead_err}")
-
-            rule_replied = False
-            if engine:
-                event_data = {
-                    "from": msg.get("from_phone"),
-                    "sender_name": msg.get("sender_name", ""),
-                    "message": msg.get("body", ""),
-                    "text": msg.get("body", ""),
-                    "whatsapp_message_id": msg_id,
-                    "recipient_phone_id": msg.get("recipient_phone_id", ""),
-                    "direction": "inbound",
-                    "record_id": record.id if record else None,
-                    "provider": "green_api"
-                }
+            # In production, offload lead ingestion, engine rules, and auto-responder to background thread
+            # so the webhook returns HTTP 200 to Green-API immediately (< 20ms).
+            # Under test execution, run synchronously for deterministic assertions.
+            if current_app.config.get("TESTING"):
                 try:
-                    engine_res = engine.ingest_event(
-                        event_name="whatsapp.message",
-                        payload=event_data,
-                        source="green_api_webhook",
-                        dry_run=False,
-                        organization_id=target_org_id
+                    WhatsAppService.auto_ingest_crm_lead(
+                        organization_id=target_org_id,
+                        from_phone=msg.get("from_phone"),
+                        sender_name=msg.get("sender_name"),
+                        message_body=msg.get("body"),
+                        location_data=msg.get("location"),
+                        raw_payload=msg
                     )
-                    if WhatsAppService.engine_dispatched_reply(engine_res):
-                        rule_replied = True
-                        logger.info(f"Automation rule already dispatched WhatsApp reply for Green-API message {msg_id}; skipping auto-responder.")
-                except Exception as e:
-                    logger.error(f"Error triggering engine for Green-API message {msg_id}: {e}")
+                except Exception as lead_err:
+                    logger.warning(f"Error auto-ingesting CRM lead in Green-API webhook: {lead_err}")
 
-            # Trigger AI Auto-Responder if configured and active
-            if not rule_replied:
-                is_v_green = WhatsAppService.is_audio_message(
-                    message_type=msg.get("message_type"),
-                    body=msg.get("body"),
-                    download_url=msg.get("download_url")
-                )
-                d_url_green = msg.get("download_url")
-                # Under unit test execution, run synchronously for deterministic assertions
-                if current_app.config.get("TESTING"):
+                rule_replied = False
+                if engine:
+                    event_data = {
+                        "from": msg.get("from_phone"),
+                        "sender_name": msg.get("sender_name", ""),
+                        "message": msg.get("body", ""),
+                        "text": msg.get("body", ""),
+                        "whatsapp_message_id": msg_id,
+                        "recipient_phone_id": msg.get("recipient_phone_id", ""),
+                        "direction": "inbound",
+                        "record_id": record.id if record else None,
+                        "provider": "green_api"
+                    }
+                    try:
+                        engine_res = engine.ingest_event(
+                            event_name="whatsapp.message",
+                            payload=event_data,
+                            source="green_api_webhook",
+                            dry_run=False,
+                            organization_id=target_org_id
+                        )
+                        if WhatsAppService.engine_dispatched_reply(engine_res):
+                            rule_replied = True
+                    except Exception as e:
+                        logger.error(f"Error triggering engine for Green-API message {msg_id}: {e}")
+
+                if not rule_replied:
+                    is_v_green = WhatsAppService.is_audio_message(
+                        message_type=msg.get("message_type"),
+                        body=msg.get("body"),
+                        download_url=msg.get("download_url")
+                    )
                     try:
                         WhatsAppService.handle_inbound_auto_response(
                             organization_id=target_org_id,
@@ -2992,52 +3050,87 @@ def green_api_webhook_ingress():
                             message_id=msg_id,
                             message_timestamp=msg.get("timestamp"),
                             is_voice=is_v_green,
-                            download_url=d_url_green
+                            download_url=msg.get("download_url")
                         )
                     except Exception as auto_err:
                         logger.error(f"AI Auto-Responder error in Green-API webhook: {auto_err}")
-                else:
-                    # In production, dispatch asynchronously so webhook returns HTTP 200 to Green-API immediately (<50ms)
-                    def _async_webhook_reply(app_ref, org_id, from_p, body_txt, s_name, m_id, m_ts, d_url, m_type, rec_id):
-                        with app_ref.app_context():
+            else:
+                def _async_process_green_api_post_record(app_ref, org_id, msg_dict, rec_id):
+                    with app_ref.app_context():
+                        try:
+                            # 1. CRM Lead auto-ingest
                             try:
-                                is_voice_inbound = WhatsAppService.is_audio_message(m_type, body_txt, d_url)
+                                WhatsAppService.auto_ingest_crm_lead(
+                                    organization_id=org_id,
+                                    from_phone=msg_dict.get("from_phone"),
+                                    sender_name=msg_dict.get("sender_name"),
+                                    message_body=msg_dict.get("body"),
+                                    location_data=msg_dict.get("location"),
+                                    raw_payload=msg_dict
+                                )
+                            except Exception as lead_err:
+                                logger.warning(f"Error auto-ingesting CRM lead in Green-API webhook: {lead_err}")
+
+                            # 2. Automation engine rules
+                            rule_replied = False
+                            eng = get_engine()
+                            if eng:
+                                event_data = {
+                                    "from": msg_dict.get("from_phone"),
+                                    "sender_name": msg_dict.get("sender_name", ""),
+                                    "message": msg_dict.get("body", ""),
+                                    "text": msg_dict.get("body", ""),
+                                    "whatsapp_message_id": msg_dict.get("message_id"),
+                                    "recipient_phone_id": msg_dict.get("recipient_phone_id", ""),
+                                    "direction": "inbound",
+                                    "record_id": rec_id,
+                                    "provider": "green_api"
+                                }
+                                try:
+                                    engine_res = eng.ingest_event(
+                                        event_name="whatsapp.message",
+                                        payload=event_data,
+                                        source="green_api_webhook",
+                                        dry_run=False,
+                                        organization_id=org_id
+                                    )
+                                    if WhatsAppService.engine_dispatched_reply(engine_res):
+                                        rule_replied = True
+                                        logger.info(f"Automation rule dispatched reply for Green-API msg {msg_dict.get('message_id')}.")
+                                except Exception as e:
+                                    logger.error(f"Error triggering engine for Green-API msg {msg_dict.get('message_id')}: {e}")
+
+                            # 3. AI Auto-Responder
+                            if not rule_replied:
+                                is_v = WhatsAppService.is_audio_message(
+                                    message_type=msg_dict.get("message_type"),
+                                    body=msg_dict.get("body"),
+                                    download_url=msg_dict.get("download_url")
+                                )
                                 WhatsAppService.handle_inbound_auto_response(
                                     organization_id=org_id,
-                                    sender_phone=from_p,
-                                    message_body=body_txt,
-                                    sender_name=s_name,
-                                    message_id=m_id,
-                                    message_timestamp=m_ts,
-                                    is_voice=is_voice_inbound,
-                                    download_url=d_url
+                                    sender_phone=msg_dict.get("from_phone", "unknown"),
+                                    message_body=msg_dict.get("body", ""),
+                                    sender_name=msg_dict.get("sender_name", ""),
+                                    message_id=msg_dict.get("message_id"),
+                                    message_timestamp=msg_dict.get("timestamp"),
+                                    is_voice=is_v,
+                                    download_url=msg_dict.get("download_url")
                                 )
-                            except Exception as err:
-                                logger.error(f"Async AI Auto-Responder error: {err}")
-                            finally:
-                                try:
-                                    db.session.remove()
-                                except Exception:
-                                    pass
+                        except Exception as err:
+                            logger.error(f"Async Green-API webhook error: {err}")
+                        finally:
+                            try:
+                                db.session.remove()
+                            except Exception:
+                                pass
 
-                    app_obj = current_app._get_current_object()
-                    t = threading.Thread(
-                        target=_async_webhook_reply,
-                        args=(
-                            app_obj,
-                            target_org_id,
-                            msg.get("from_phone", "unknown"),
-                            msg.get("body", ""),
-                            msg.get("sender_name", ""),
-                            msg_id,
-                            msg.get("timestamp"),
-                            msg.get("download_url"),
-                            msg.get("message_type"),
-                            record.id if record else None
-                        ),
-                        daemon=True
-                    )
-                    t.start()
+                app_obj = current_app._get_current_object()
+                threading.Thread(
+                    target=_async_process_green_api_post_record,
+                    args=(app_obj, target_org_id, msg, record.id if record else None),
+                    daemon=True
+                ).start()
 
             processed_count += 1
         except Exception as item_err:
@@ -3503,6 +3596,34 @@ def test_whatsapp_connection():
     result = WhatsAppService.test_live_connection(provider=provider, organization_id=org_id)
     status_code = 200 if result.get("success") else 400
     return jsonify(result), status_code
+
+
+@api_v1.route("/ping", methods=["GET"])
+def api_ping():
+    """Ultra-fast, zero-overhead health ping for Render anti-spindown keep-alive."""
+    from keep_alive_service import KeepAliveService
+    return jsonify({
+        "status": "ok",
+        "service": "OpsFlow Cloud",
+        "render_keep_alive": True,
+        "is_render": KeepAliveService.is_render_environment(),
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+    }), 200
+
+
+@api_v1.route("/keep-alive/status", methods=["GET"])
+def keep_alive_status():
+    """Returns diagnostics and telemetry for the Render anti-spindown keep-alive service."""
+    from keep_alive_service import KeepAliveService
+    return jsonify(KeepAliveService.get_status()), 200
+
+
+@api_v1.route("/keep-alive/ping-now", methods=["POST"])
+def keep_alive_ping_now():
+    """Triggers an on-demand heartbeat ping to prevent Render free tier sleep."""
+    from keep_alive_service import KeepAliveService
+    res = KeepAliveService.ping_now()
+    return jsonify(res), (200 if res.get("success") else 502)
 
 
 @api_v1.route("/whatsapp/qr", methods=["GET"])
