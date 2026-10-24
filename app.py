@@ -307,6 +307,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "service": "opsflow-enterprise",
             "database": dialect,
             "engine_online": eng.is_running if eng else True,
+            "keep_alive": True,
             "timestamp": datetime.datetime.utcnow().isoformat(),
             "version": "2.4.0-enterprise"
         }), 200
@@ -1009,6 +1010,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/ping", methods=["GET"])
     @application.route("/healthz", methods=["GET"])
+    @application.route("/api/ping", methods=["GET"])
     def render_health_ping():
         """Ultra-fast, zero-overhead health ping for Render keep-alive and cloud monitors."""
         return jsonify({

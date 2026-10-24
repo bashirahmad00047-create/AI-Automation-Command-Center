@@ -1570,7 +1570,7 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
         with patch.dict(os.environ, {"RENDER_EXTERNAL_URL": "https://custom-app.onrender.com"}):
             self.assertTrue(KeepAliveService.is_render_environment())
             self.assertEqual(KeepAliveService.resolve_target_url(), "https://custom-app.onrender.com")
-            self.assertEqual(KeepAliveService.get_ping_url(), "https://custom-app.onrender.com/api/v1/ping")
+            self.assertEqual(KeepAliveService.get_ping_url(), "https://custom-app.onrender.com/health")
 
         # 2. Ping now with mocked HTTP request
         mock_resp = MagicMock()
@@ -1581,6 +1581,11 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             self.assertEqual(res["status_code"], 200)
 
         # 3. HTTP endpoints
+        resp_health = self.client.get("/health")
+        self.assertEqual(resp_health.status_code, 200)
+        self.assertEqual(resp_health.get_json()["status"], "healthy")
+        self.assertTrue(resp_health.get_json().get("keep_alive"))
+
         resp_root = self.client.get("/ping")
         self.assertEqual(resp_root.status_code, 200)
         self.assertEqual(resp_root.get_json()["status"], "ok")
@@ -1647,6 +1652,66 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
                 # Confirms background thread was spawned to offload work
                 mock_thread_cls.assert_called()
                 mock_t_instance.start.assert_called()
+
+
+    def test_external_sender_mubi_triggers_gemini_immediately_without_dropping(self):
+        """Verifies messages from external senders (e.g., Mubi) trigger Gemini AI immediately and clear in-flight debounce."""
+        payload_mubi = {
+            "typeWebhook": "incomingMessageReceived",
+            "idMessage": "MUBI_MSG_GEMINI_001",
+            "timestamp": int(time.time()),
+            "senderData": {
+                "chatId": "923009876543@c.us",
+                "chatName": "Mubi",
+                "sender": "923009876543@c.us",
+                "senderName": "Mubi"
+            },
+            "messageData": {
+                "typeMessage": "textMessage",
+                "textMessageData": {
+                    "textMessage": "Salam OpsFlow, mujhay logistics rates aur delivery timing maloom karni hai."
+                }
+            }
+        }
+
+        # Clear any existing in-flight locks
+        WhatsAppService.clear_in_flight_phones()
+
+        with patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake-gemini-key"), \
+             patch.object(WhatsAppService, "call_gemini_ai", return_value="Salam Mubi! Humari logistics rates 250 PKR hain aur delivery 24 ghantay mein hoti hai.") as mock_gemini, \
+             patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "OUT_MUBI_001"}) as mock_send:
+
+            # First message from Mubi
+            resp = self.client.post("/api/v1/webhooks/whatsapp/green-api", json=payload_mubi)
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.get_json()["status"], "ok")
+
+            # Verify Gemini AI was invoked with Mubi's name and intent
+            mock_gemini.assert_called_once()
+            call_kwargs = mock_gemini.call_args[1]
+            self.assertEqual(call_kwargs.get("customer_name"), "Mubi")
+
+            # Verify response was dispatched
+            mock_send.assert_called_once()
+
+            # Verify in-flight lock was cleanly cleared and not left hanging
+            clean_phone = "923009876543"
+            self.assertNotIn(clean_phone, getattr(WhatsAppService, "_in_flight_phones", set()))
+
+            # Second message from Mubi immediately afterwards: must NOT be dropped by stale in-flight debounce
+            mock_gemini.reset_mock()
+            mock_send.reset_mock()
+            payload_mubi_2 = dict(payload_mubi)
+            payload_mubi_2["idMessage"] = "MUBI_MSG_GEMINI_002"
+            payload_mubi_2["messageData"] = {
+                "typeMessage": "textMessage",
+                "textMessageData": {"textMessage": "Payment kis account mein transfer karni hai?"}
+            }
+
+            resp2 = self.client.post("/api/v1/webhooks/whatsapp/green-api", json=payload_mubi_2)
+            self.assertEqual(resp2.status_code, 200)
+            # Confirms second message was processed without in_flight_debounce dropping
+            self.assertEqual(resp2.get_json()["processed"], 1)
 
 
 if __name__ == "__main__":

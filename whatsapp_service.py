@@ -467,6 +467,7 @@ class WhatsAppService:
     _recent_replied_trigger_ids: Dict[str, float] = {}
     _processed_ids_lock = threading.Lock()
     _in_flight_phones: Set[str] = set()
+    _in_flight_phones_ts: Dict[str, float] = {}
     _in_flight_phones_lock = threading.Lock()
     _downloaded_media_cache: Dict[str, Tuple[float, bytes]] = {}
     _transcription_cache: Dict[str, Tuple[float, str]] = {}
@@ -951,6 +952,10 @@ class WhatsAppService:
                         sender_name=sender_name
                     )
                     if order_action and order_action.get("message"):
+                        with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
+                            getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
+                            if hasattr(cls, "_in_flight_phones_ts"):
+                                cls._in_flight_phones_ts.pop(clean_phone, None)
                         cls.send_message(
                             organization_id=org_id,
                             to_phone=clean_phone,
@@ -1241,12 +1246,16 @@ class WhatsAppService:
             cls._transcription_cache.clear()
         with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
             cls._in_flight_phones.clear()
+            if hasattr(cls, "_in_flight_phones_ts"):
+                cls._in_flight_phones_ts.clear()
 
     @classmethod
     def clear_in_flight_phones(cls) -> None:
         """Cleans in-memory tracking of in-flight active response phones (useful for test isolation)."""
         with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
             cls._in_flight_phones.clear()
+            if hasattr(cls, "_in_flight_phones_ts"):
+                cls._in_flight_phones_ts.clear()
 
     @classmethod
     def engine_dispatched_reply(cls, engine_res: Any) -> bool:
@@ -2578,7 +2587,10 @@ class WhatsAppService:
             for clean_m in models_to_try:
                 try:
                     model = genai.GenerativeModel(clean_m)
-                    response = model.generate_content(prompt)
+                    try:
+                        response = model.generate_content(prompt, request_options={"timeout": 8.0})
+                    except (TypeError, ValueError):
+                        response = model.generate_content(prompt)
                     if response:
                         text = None
                         try:
@@ -3458,10 +3470,21 @@ class WhatsAppService:
 
         # Concurrency guard: Prevent parallel duplicate AI replies for the same phone number (message storms)
         with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
-            if clean_phone in getattr(cls, "_in_flight_phones", set()):
+            # Evict stale in-flight phone locks older than 25 seconds
+            now_ts = time.time()
+            in_flight = getattr(cls, "_in_flight_phones", set())
+            in_flight_ts = getattr(cls, "_in_flight_phones_ts", {})
+            stale_p = [p for p in list(in_flight) if (now_ts - in_flight_ts.get(p, now_ts)) > 25.0]
+            for sp in stale_p:
+                in_flight.discard(sp)
+                in_flight_ts.pop(sp, None)
+
+            if clean_phone in in_flight:
                 logger.info(f"AI Auto-Reply already in-flight for {clean_phone}; debouncing concurrent trigger.")
                 return {"success": True, "skipped": True, "reason": "in_flight_debounce", "phone": clean_phone}
             cls._in_flight_phones.add(clean_phone)
+            if hasattr(cls, "_in_flight_phones_ts"):
+                cls._in_flight_phones_ts[clean_phone] = time.time()
 
         # Prevent duplicate reply storm / loop: Check if an outbound message was already sent to this phone recently
         if not has_ai:
@@ -3486,6 +3509,10 @@ class WhatsAppService:
             sender_name=sender_name
         )
         if order_action and order_action.get("message"):
+            with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
+                getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
+                if hasattr(cls, "_in_flight_phones_ts"):
+                    cls._in_flight_phones_ts.pop(clean_phone, None)
             cls.send_message(
                 organization_id=org_id,
                 to_phone=clean_phone,
@@ -3507,6 +3534,8 @@ class WhatsAppService:
         if tracking_action and tracking_action.get("message"):
             with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
                 getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
+                if hasattr(cls, "_in_flight_phones_ts"):
+                    cls._in_flight_phones_ts.pop(clean_phone, None)
             cls.send_message(
                 organization_id=org_id,
                 to_phone=clean_phone,
@@ -3529,6 +3558,8 @@ class WhatsAppService:
         if payment_action and payment_action.get("message"):
             with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
                 getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
+                if hasattr(cls, "_in_flight_phones_ts"):
+                    cls._in_flight_phones_ts.pop(clean_phone, None)
             if auto_conf.get("auto_lead_capture") and has_app_context():
                 try:
                     from models import Lead
@@ -3800,6 +3831,8 @@ class WhatsAppService:
         finally:
             with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
                 getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
+                if hasattr(cls, "_in_flight_phones_ts"):
+                    cls._in_flight_phones_ts.pop(clean_phone, None)
 
     @classmethod
     def format_phone_number(cls, phone: str) -> str:
