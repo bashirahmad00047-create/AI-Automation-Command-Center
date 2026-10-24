@@ -79,7 +79,7 @@ if os.path.exists("/etc/secrets") and os.path.isdir("/etc/secrets"):
 class WhatsAppService:
     @classmethod
     def preprocess_text_for_human_speech(cls, text: str, language: Optional[str] = None) -> str:
-        """Tunes and pre-processes text into ultra-expressive, natural human speech with pauses and conversational Urdu phrasing.
+        """Tunes and pre-processes text into colloquial, warm, soft-spoken local Pakistani Urdu with short natural pauses.
         Eliminates robotic artifacts, rigid bullets, URLs, and introduces natural punctuation pauses.
         """
         if not text or not str(text).strip():
@@ -96,24 +96,32 @@ class WhatsAppService:
         t = re.sub(r"https?://\S+", "ہماری ویب سائٹ", t)
         t = re.sub(r"www\.\S+", "ہماری ویب سائٹ", t)
 
-        # 3. Clean rigid bullet structures (e.g., '1.', '2.', '-', '•') into fluid spoken phrasing
+        # 3. Clean rigid bullet structures and colons into fluid spoken phrasing with pauses
         t = re.sub(r"^\s*[\d\.\-\*,\•]+\s*", "", t, flags=re.MULTILINE)
         t = re.sub(r"\n+\s*[\d\.\-\*,\•]+\s*", "، ", t)
         t = re.sub(r"\n+", "، ", t)
+        t = re.sub(r"\s*[:;]\s*", "، ", t)
 
-        # 4. Spoken expansion of symbols and common terminology
+        # 4. Spoken expansion of symbols, payment terms, and common terminology
         t = re.sub(r"\b24/7\b", "چوبیس گھنٹے", t)
         t = re.sub(r"\bPKR\b|\bRs\.?\b", "روپے", t, flags=re.IGNORECASE)
         t = re.sub(r"\bUSD\b|\$", "ڈالر ", t, flags=re.IGNORECASE)
         t = re.sub(r"%", " فیصد ", t)
+        t = re.sub(r"\bCOD\b", "کیش آن ڈیلیوری", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bJazzCash\b", "جاز کیش", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bEasyPaisa\b", "ایزی پیسہ", t, flags=re.IGNORECASE)
 
         # 5. Natural pause tuning for greetings and Urdu conversational markers
         greetings_map = [
             (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|salam|slam)\b[,.]?", "السلام علیکم،"),
             (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*)\b[,.]?", "وعلیکم السلام،"),
-            (r"(?i)\b(ji bilkul|ji haan)\b[,.]?", "جی بالکل،"),
-            (r"(?i)\b(shukriya|bohot shukriya|dera manana)\b[,.]?", "بہت شکریہ،"),
-            (r"(?i)\b(khush[\s\-]?[a-z]*)\b[,.]?", "خوش آمدید،")
+            (r"(?i)\b(ji bilkul|ji haan|ji han)\b[,.]?", "جی بالکل،"),
+            (r"(?i)\b(shukriya|bohot shukriya|dera manana|thank you|thanks)\b[,.]?", "بہت شکریہ،"),
+            (r"(?i)\b(khush[\s\-]?[a-z]*|welcome|you'?re welcome)\b[,.]?", "خوش آمدید،"),
+            (r"(?i)\b(inshallah|in sha allah)\b[,.]?", "انشاءاللہ،"),
+            (r"(?i)\b(fikr na karein|pareshan na hon|koi masla nahi)\b[,.]?", "آپ بے فکر رہیں،"),
+            (r"(?i)\b(theek hai|okay|ok)\b[,.]?", "جی ٹھیک ہے،"),
+            (r"(?i)\b(barah[\s\-]?e[\s\-]?karam|please)\b[,.]?", "مہربانی فرما کر،")
         ]
         for pattern, replacement in greetings_map:
             t = re.sub(pattern, replacement, t, count=1)
@@ -121,6 +129,7 @@ class WhatsAppService:
         # 6. Smooth out redundant commas or spaces
         t = re.sub(r"[,\،]{2,}", "،", t)
         t = re.sub(r"\s+([,\،\.\!\؟])", r"\1", t)
+        t = re.sub(r"([,\،])\s*", r"\1 ", t)
         t = re.sub(r"\s+", " ", t).strip()
 
         # 7. Ensure clean sentence termination
@@ -950,7 +959,7 @@ class WhatsAppService:
                 voice = "en-US-JennyNeural"
 
             async def _run():
-                comm = edge_tts.Communicate(text, voice)
+                comm = edge_tts.Communicate(text, voice, rate="-5%")
                 chunks = []
                 async for chunk in comm.stream():
                     if chunk.get("type") == "audio":
@@ -1005,7 +1014,7 @@ class WhatsAppService:
         audio_fn = "voice_reply.oga" if is_oga else "voice_reply.mp3"
         audio_mt = "audio/ogg; codecs=opus" if is_oga else "audio/mpeg"
 
-        # 1. OpenAI HD Audio Speech API (model 'tts-1-hd', voice 'nova' or 'onyx') with optimized streaming bytes
+        # 1. OpenAI HD Audio Speech API (model 'tts-1-hd', voice 'nova' or 'alloy') with optimized streaming bytes
         openai_key = cls.get_openai_api_key(organization_id=organization_id)
         if openai_key and str(openai_key).strip():
             try:
@@ -1015,13 +1024,26 @@ class WhatsAppService:
                     or os.environ.get("OPENAI_TTS_VOICE")
                     or "nova"
                 ).strip().lower()
-                if voice_choice not in ("nova", "onyx", "alloy", "echo", "fable", "shimmer"):
+                if voice_choice not in ("nova", "alloy", "onyx", "echo", "fable", "shimmer"):
                     voice_choice = "nova"
+
+                # Tuned for minimum speed (-5% -> 0.95) for maximum clarity and warm, calm articulation
+                speed_val = 0.95
+                speed_str = (
+                    cls._get_tenant_or_global_setting("OPENAI_TTS_SPEED", organization_id=organization_id)
+                    or os.environ.get("OPENAI_TTS_SPEED")
+                )
+                if speed_str:
+                    try:
+                        speed_val = float(speed_str)
+                    except (ValueError, TypeError):
+                        speed_val = 0.95
 
                 openai_payload = {
                     "model": "tts-1-hd",
                     "input": clean_text[:1000],
                     "voice": voice_choice,
+                    "speed": speed_val,
                     "response_format": "opus" if is_oga else "mp3"
                 }
                 headers = {

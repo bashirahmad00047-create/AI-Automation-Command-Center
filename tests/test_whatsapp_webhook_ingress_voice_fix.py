@@ -876,8 +876,28 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             payload = mock_post.call_args[1]["json"]
             self.assertEqual(payload["model"], "tts-1-hd")
             self.assertEqual(payload["voice"], "nova")
+            self.assertEqual(payload.get("speed"), 0.95)
             self.assertEqual(payload["response_format"], "opus")
             self.assertTrue(mock_post.call_args[1]["stream"])
+
+        # Test alloy voice override via environment variable
+        with patch.object(WhatsAppService, "get_openai_api_key", return_value="sk-test-openai-key"), \
+             patch.dict(os.environ, {"OPENAI_TTS_VOICE": "alloy"}), \
+             patch("requests.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.iter_content.return_value = fake_stream_chunks
+            mock_post.return_value = mock_resp
+
+            res_alloy = WhatsAppService.generate_spoken_audio(
+                "Hum aap ki khidmat ke liye hazir hain.",
+                language="urdu",
+                output_format="oga"
+            )
+            self.assertIsNotNone(res_alloy)
+            payload_alloy = mock_post.call_args[1]["json"]
+            self.assertEqual(payload_alloy["voice"], "alloy")
+            self.assertEqual(payload_alloy.get("speed"), 0.95)
 
         # Test onyx voice override via environment variable
         with patch.object(WhatsAppService, "get_openai_api_key", return_value="sk-test-openai-key"), \
@@ -1113,6 +1133,14 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
         self.assertNotIn("2.", spoken)
         # Natural pause punctuation at greeting
         self.assertIn("السلام علیکم،", spoken)
+
+        # Colloquial warm Urdu phrase tuning and payment terminology expansion
+        warm_text = "Salam! JazzCash and COD available. Thank you, please let us know."
+        warm_spoken = WhatsAppService.preprocess_text_for_human_speech(warm_text, language="ur")
+        self.assertIn("جاز کیش", warm_spoken)
+        self.assertIn("کیش آن ڈیلیوری", warm_spoken)
+        self.assertIn("بہت شکریہ،", warm_spoken)
+        self.assertIn("مہربانی فرما کر،", warm_spoken)
 
     def test_quoted_message_reply_context_parent_msg_id(self):
         """Verifies inbound messages quoting previous messages capture parent_msg_id and ground AI generation in context."""
