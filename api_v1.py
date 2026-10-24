@@ -3287,31 +3287,22 @@ def forward_whatsapp_message(message_id: str):
 @require_auth
 @require_role(["owner", "admin", "member"])
 def clear_whatsapp_conversation(contact_phone: str):
-    """Clears all messages with a given contact from tenant records."""
+    """Permanently hard-deletes all messages associated with a contact or conversation from tenant records."""
     org = get_current_org()
     if not org:
         return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
 
-    clean_phone = contact_phone.replace("@c.us", "").replace("@g.us", "").strip()
-    msgs = WhatsAppMessage.query.filter(
-        WhatsAppMessage.organization_id == org.id,
-        (WhatsAppMessage.sender == clean_phone) |
-        (WhatsAppMessage.sender == contact_phone) |
-        (WhatsAppMessage.recipient == clean_phone) |
-        (WhatsAppMessage.recipient == contact_phone)
-    ).all()
-
-    count = len(msgs)
-    for m in msgs:
-        db.session.delete(m)
-    db.session.commit()
+    result = WhatsAppService.clear_conversation(
+        contact_phone=contact_phone,
+        organization_id=org.id
+    )
 
     log_audit_event("whatsapp.conversation_cleared", "whatsapp", contact_phone, {
         "contact": contact_phone,
-        "deleted_count": count
+        "deleted_count": result.get("deleted_count", 0)
     })
 
-    return jsonify({"success": True, "message": f"Cleared {count} messages.", "deleted_count": count}), 200
+    return jsonify(result), 200
 
 
 @api_v1.route("/whatsapp/messages/<message_id>/read", methods=["POST"])

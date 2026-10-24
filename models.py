@@ -888,6 +888,46 @@ class WhatsAppMessage(db.Model):
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
         }
 
+    @classmethod
+    def hard_delete_conversation(cls, organization_id: str, contact_phone: str) -> int:
+        """Permanently hard-deletes all messages associated with contact_phone from database records.
+        Matches all phone variants (clean digits, with/without '+', with/without '@c.us', and last 8 digits).
+        Ensures deleted chats never reappear in UI after page refresh.
+        """
+        clean_contact = str(contact_phone or "").replace("@c.us", "").replace("@g.us", "").strip()
+        digits_only = "".join(filter(str.isdigit, clean_contact))
+        last_digits = digits_only[-8:] if len(digits_only) >= 8 else digits_only
+
+        candidates = {contact_phone, clean_contact}
+        if clean_contact:
+            bare = clean_contact.lstrip("+")
+            candidates.add(bare)
+            candidates.add(f"+{bare}")
+            candidates.add(f"{bare}@c.us")
+            candidates.add(f"+{bare}@c.us")
+
+        conditions = [
+            cls.sender.in_(list(candidates)),
+            cls.recipient.in_(list(candidates))
+        ]
+        if last_digits:
+            conditions.extend([
+                cls.sender.like(f"%{last_digits}"),
+                cls.sender.like(f"%{last_digits}@c.us"),
+                cls.recipient.like(f"%{last_digits}"),
+                cls.recipient.like(f"%{last_digits}@c.us")
+            ])
+
+        matches = cls.query.filter(
+            cls.organization_id == organization_id,
+            db.or_(*conditions)
+        ).all()
+        count = len(matches)
+        for m in matches:
+            db.session.delete(m)
+        db.session.commit()
+        return count
+
 
 class SystemSetting(db.Model):
     """Dynamic configuration settings stored in database for gateways & integrations."""
