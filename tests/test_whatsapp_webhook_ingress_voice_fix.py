@@ -1833,6 +1833,196 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
                 # Confirms two attempts were made (quoted then unquoted)
                 self.assertEqual(mock_session.post.call_count, 2)
 
+    def test_contact_b_inbound_chat_dispatches_text_response_without_skipping(self):
+        """Verifies inbound chat from contact 'B' triggers Gemini AI Pakistani Urdu response and dispatches immediately."""
+        payload_b = {
+            "typeWebhook": "incomingMessageReceived",
+            "idMessage": "MSG_B_INBOUND_001",
+            "timestamp": int(time.time()),
+            "senderData": {
+                "chatId": "923001122334@c.us",
+                "chatName": "B",
+                "sender": "923001122334@c.us",
+                "senderName": "B"
+            },
+            "messageData": {
+                "typeMessage": "textMessage",
+                "textMessageData": {
+                    "textMessage": "Salam OpsFlow! Mujhe urgent shipment delivery rates janni hain."
+                }
+            }
+        }
+        WhatsAppService.clear_in_flight_phones()
+        WhatsAppService.clear_recent_replied_trigger_ids()
+
+        with patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake-gemini-key"), \
+             patch.object(WhatsAppService, "call_gemini_ai", return_value="Salam B! Urgent shipment rates 300 PKR hain aur 12 ghantay mein delivery hoti hai.") as mock_gemini, \
+             patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "OUT_B_001"}) as mock_send:
+
+            resp = self.client.post("/api/v1/webhooks/whatsapp/green-api", json=payload_b)
+            self.assertEqual(resp.status_code, 200)
+
+            # Gemini invoked with customer_name='B'
+            mock_gemini.assert_called_once()
+            self.assertEqual(mock_gemini.call_args[1].get("customer_name"), "B")
+
+            # Dispatched immediately via Green-API
+            mock_send.assert_called_once()
+            self.assertEqual(mock_send.call_args[1]["to_phone"], "923001122334")
+            self.assertIn("Salam B!", mock_send.call_args[1]["message_text"])
+            self.assertEqual(mock_send.call_args[1]["quoted_message_id"], "MSG_B_INBOUND_001")
+
+    def test_contact_mubi_inbound_transcribed_voice_dispatches_text_response_without_skipping(self):
+        """Verifies transcribed voice note from contact 'Mubi' triggers Gemini AI Pakistani Urdu response and dispatches immediately."""
+        payload_mubi_voice = {
+            "typeWebhook": "incomingMessageReceived",
+            "idMessage": "MSG_MUBI_VOICE_001",
+            "timestamp": int(time.time()),
+            "senderData": {
+                "chatId": "923009876543@c.us",
+                "chatName": "Mubi",
+                "sender": "923009876543@c.us",
+                "senderName": "Mubi"
+            },
+            "messageData": {
+                "typeMessage": "audioMessage",
+                "fileMessageData": {
+                    "downloadUrl": "https://media.opsflow.test/mubi_note.oga",
+                    "caption": "",
+                    "fileName": "mubi_note.oga",
+                    "mimeType": "audio/ogg; codecs=opus"
+                }
+            }
+        }
+        WhatsAppService.clear_in_flight_phones()
+        WhatsAppService.clear_recent_replied_trigger_ids()
+
+        with patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake-gemini-key"), \
+             patch.object(WhatsAppService, "_download_media", return_value=b"OggS_MUBI_VOICE"), \
+             patch.object(WhatsAppService, "_transcribe_audio", return_value="Salam, delivery timing aur shipment tracking status kya hai?"), \
+             patch.object(WhatsAppService, "call_gemini_ai", return_value="Salam Mubi! Delivery 24 ghantay mein hoti hai aur payment JazzCash ya Bank Transfer ke zariye kar saktay hain.") as mock_gemini, \
+             patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "OUT_MUBI_V001"}) as mock_send:
+
+            resp = self.client.post("/api/v1/webhooks/whatsapp/green-api", json=payload_mubi_voice)
+            self.assertEqual(resp.status_code, 200)
+
+            # Gemini invoked with customer_name='Mubi' and transcribed body
+            mock_gemini.assert_called_once()
+            self.assertEqual(mock_gemini.call_args[1].get("customer_name"), "Mubi")
+
+            # Outbound text response dispatched immediately via Green-API without skipping
+            mock_send.assert_called_once()
+            self.assertEqual(mock_send.call_args[1]["to_phone"], "923009876543")
+            self.assertIn("Salam Mubi!", mock_send.call_args[1]["message_text"])
+
+    def test_self_message_filter_allows_test_from_linked_number_and_prevents_loop(self):
+        """Verifies incoming tests from linked numbers are processed, while outbound echoes and reflected text are dropped."""
+        linked_wid = "923007766554"
+        WhatsAppService.clear_in_flight_phones()
+        WhatsAppService.clear_recent_replied_trigger_ids()
+
+        with patch.object(WhatsAppService, "get_config", return_value={"green_api_wid": f"{linked_wid}@c.us"}), \
+             patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake-gemini-key"), \
+             patch.object(WhatsAppService, "call_gemini_ai", return_value="Salam! Yeh self-linked number se aane wala test response hai.") as mock_gemini, \
+             patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "OUT_SELF_TEST_001"}) as mock_send:
+
+            # 1. Genuine test from linked number: MUST NOT BE DROPPED
+            test_payload = {
+                "typeWebhook": "incomingMessageReceived",
+                "idMessage": "SELF_TEST_MSG_001",
+                "timestamp": int(time.time()),
+                "senderData": {
+                    "chatId": f"{linked_wid}@c.us",
+                    "chatName": "OpsFlow Owner",
+                    "sender": f"{linked_wid}@c.us",
+                    "senderName": "OpsFlow Owner"
+                },
+                "messageData": {
+                    "typeMessage": "textMessage",
+                    "textMessageData": {"textMessage": "Salam, bot working status check kar raha hoon."}
+                }
+            }
+
+            resp = self.client.post("/api/v1/webhooks/whatsapp/green-api", json=test_payload)
+            self.assertEqual(resp.status_code, 200)
+            mock_gemini.assert_called_once()
+            mock_send.assert_called_once()
+
+            # Record the outbound ID and reply text
+            WhatsAppService.record_outbound_sent_id("OUT_SELF_TEST_001")
+            WhatsAppService.record_bot_reply_body("Salam! Yeh self-linked number se aane wala test response hai.")
+
+            # 2. Outbound echo arrives (idMessage matches bot's own outbound message): MUST BE DROPPED
+            mock_gemini.reset_mock()
+            mock_send.reset_mock()
+            echo_payload = {
+                "typeWebhook": "incomingMessageReceived",
+                "idMessage": "OUT_SELF_TEST_001",
+                "timestamp": int(time.time()),
+                "senderData": {
+                    "chatId": f"{linked_wid}@c.us",
+                    "sender": f"{linked_wid}@c.us"
+                },
+                "messageData": {
+                    "typeMessage": "textMessage",
+                    "textMessageData": {"textMessage": "Salam! Yeh self-linked number se aane wala test response hai."}
+                }
+            }
+
+            res_filter = WhatsAppService.handle_inbound_auto_response(
+                organization_id="org-enterprise-default",
+                sender_phone=linked_wid,
+                message_body="Salam! Yeh self-linked number se aane wala test response hai.",
+                message_id="OUT_SELF_TEST_001"
+            )
+            self.assertIsNone(res_filter)
+            mock_gemini.assert_not_called()
+            mock_send.assert_not_called()
+
+            # 3. Reflected text arrives with new ID: MUST BE DROPPED TO PREVENT LOOP
+            res_text_filter = WhatsAppService.handle_inbound_auto_response(
+                organization_id="org-enterprise-default",
+                sender_phone=linked_wid,
+                message_body="Salam! Yeh self-linked number se aane wala test response hai.",
+                message_id="DIFFERENT_ID_999"
+            )
+            self.assertIsNone(res_text_filter)
+            mock_gemini.assert_not_called()
+            mock_send.assert_not_called()
+
+    def test_live_log_audit_payload_and_instant_dispatch(self):
+        """Verifies outbound sendMessage payload logging and immediate delivery."""
+        from unittest.mock import MagicMock
+        with patch.object(WhatsAppService, "get_config", return_value={
+            "green_api_id_instance": "7107123",
+            "green_api_token_instance": "secret_tok_456",
+            "green_api_host": "https://7107.api.greenapi.com"
+        }):
+            mock_session = MagicMock()
+            mock_session.__enter__.return_value = mock_session
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.text = '{"idMessage": "AUDIT_MSG_SUCCESS_001"}'
+            mock_resp.json.return_value = {"idMessage": "AUDIT_MSG_SUCCESS_001"}
+            mock_session.post.return_value = mock_resp
+
+            from whatsapp_service import logger as wa_logger
+            with patch.object(WhatsAppService, "get_http_session", return_value=mock_session), \
+                 patch.object(wa_logger, "info") as mock_wa_log:
+
+                res = WhatsAppService.send_green_api_message(
+                    to_phone="923001234567",
+                    message_text="Salam! Live audit test payload delivery.",
+                    quoted_message_id="INBOUND_REF_001"
+                )
+                self.assertTrue(res["success"])
+                self.assertEqual(res["whatsapp_message_id"], "AUDIT_MSG_SUCCESS_001")
+
+                # Verify live audit log statements
+                logs_str = " ".join(str(c) for c in mock_wa_log.call_args_list)
+                self.assertIn("[Outbound Live Audit] Green-API sendMessage payload", logs_str)
+                self.assertIn("[Outbound Live Audit] Green-API sendMessage response", logs_str)
+
 if __name__ == "__main__":
     unittest.main()
 

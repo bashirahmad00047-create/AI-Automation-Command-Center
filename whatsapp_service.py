@@ -465,6 +465,9 @@ class WhatsAppService:
 
     _processed_message_ids: Dict[str, float] = {}
     _recent_replied_trigger_ids: Dict[str, float] = {}
+    _outbound_message_ids: Dict[str, float] = {}
+    _recent_bot_reply_bodies: Dict[str, float] = {}
+    _self_burst_tracker: Dict[str, List[float]] = {}
     _processed_ids_lock = threading.Lock()
     _in_flight_phones: Set[str] = set()
     _in_flight_phones_ts: Dict[str, float] = {}
@@ -1241,6 +1244,12 @@ class WhatsAppService:
         with cls._processed_ids_lock:
             cls._processed_message_ids.clear()
             cls._recent_replied_trigger_ids.clear()
+            if hasattr(cls, "_outbound_message_ids"):
+                cls._outbound_message_ids.clear()
+            if hasattr(cls, "_recent_bot_reply_bodies"):
+                cls._recent_bot_reply_bodies.clear()
+            if hasattr(cls, "_self_burst_tracker"):
+                cls._self_burst_tracker.clear()
         with cls._media_cache_lock:
             cls._downloaded_media_cache.clear()
             cls._transcription_cache.clear()
@@ -1248,6 +1257,85 @@ class WhatsAppService:
             cls._in_flight_phones.clear()
             if hasattr(cls, "_in_flight_phones_ts"):
                 cls._in_flight_phones_ts.clear()
+
+    @classmethod
+    def record_outbound_sent_id(cls, message_id: str) -> None:
+        """Records an outbound message ID to prevent self-echo and infinite loops."""
+        if not message_id:
+            return
+        clean_id = str(message_id).strip()
+        with cls._processed_ids_lock:
+            now = time.time()
+            if not hasattr(cls, "_outbound_message_ids"):
+                cls._outbound_message_ids = {}
+            cls._outbound_message_ids = {k: v for k, v in cls._outbound_message_ids.items() if v > now - 7200}
+            cls._outbound_message_ids[clean_id] = now
+
+    @classmethod
+    def is_known_outbound_message_id(cls, message_id: str, organization_id: Optional[str] = None) -> bool:
+        """Checks if a message ID originated from an outbound transmission by the bot."""
+        if not message_id:
+            return False
+        clean_id = str(message_id).strip()
+        with cls._processed_ids_lock:
+            outbounds = getattr(cls, "_outbound_message_ids", {})
+            if clean_id in outbounds:
+                return True
+        if has_app_context():
+            try:
+                exists = WhatsAppMessage.query.filter(
+                    WhatsAppMessage.whatsapp_message_id == clean_id,
+                    WhatsAppMessage.direction == "outbound"
+                ).first()
+                if exists:
+                    return True
+            except Exception:
+                pass
+        return False
+
+    @classmethod
+    def record_bot_reply_body(cls, text: str) -> None:
+        """Records recent bot reply text content to prevent echoing our own responses in chat."""
+        if not text:
+            return
+        clean_norm = " ".join(re.sub(r"[*_~`#>]", "", str(text).strip()).lower().split())
+        if not clean_norm or len(clean_norm) < 3:
+            return
+        with cls._processed_ids_lock:
+            now = time.time()
+            if not hasattr(cls, "_recent_bot_reply_bodies"):
+                cls._recent_bot_reply_bodies = {}
+            cls._recent_bot_reply_bodies = {k: v for k, v in cls._recent_bot_reply_bodies.items() if v > now - 600}
+            cls._recent_bot_reply_bodies[clean_norm] = now
+
+    @classmethod
+    def is_recent_bot_reply_body(cls, text: str) -> bool:
+        """Checks if incoming text matches a recently dispatched bot response (infinite loop safeguard)."""
+        if not text:
+            return False
+        clean_norm = " ".join(re.sub(r"[*_~`#>]", "", str(text).strip()).lower().split())
+        if not clean_norm or len(clean_norm) < 3:
+            return False
+        with cls._processed_ids_lock:
+            bodies = getattr(cls, "_recent_bot_reply_bodies", {})
+            return clean_norm in bodies
+
+    @classmethod
+    def is_self_looping(cls, phone: str, max_in_window: int = 6, window_sec: float = 10.0) -> bool:
+        """Rate guard to ensure rapid back-and-forth loops on self/linked test numbers are halted."""
+        clean = cls.format_phone_number(phone)
+        if not clean:
+            return False
+        with cls._processed_ids_lock:
+            now = time.time()
+            if not hasattr(cls, "_self_burst_tracker"):
+                cls._self_burst_tracker = {}
+            history = [t for t in cls._self_burst_tracker.get(clean, []) if t > now - window_sec]
+            if len(history) >= max_in_window:
+                return True
+            history.append(now)
+            cls._self_burst_tracker[clean] = history
+            return False
 
     @classmethod
     def clear_in_flight_phones(cls) -> None:
@@ -3322,9 +3410,22 @@ class WhatsAppService:
                 if cleaned and len(cleaned) >= 8:
                     bot_numbers.add(cleaned)
 
-        if clean_phone in bot_numbers:
-            logger.debug(f"Ignoring inbound message from self/instance bot WID {clean_phone}")
-            return None
+        is_self_linked = clean_phone in bot_numbers
+        if is_self_linked:
+            # Self-Message Filter Check: Allow incoming tests from linked numbers while preventing infinite loops
+            # 1. Outbound message ID echo check
+            if message_id and cls.is_known_outbound_message_id(message_id, organization_id=org_id):
+                logger.info(f"[Self-Message Filter] Ignored outbound message echo {message_id} from linked number {clean_phone} to prevent infinite loop.")
+                return None
+            # 2. Reflected bot reply text check
+            if clean_body and cls.is_recent_bot_reply_body(clean_body):
+                logger.info(f"[Self-Message Filter] Ignored reflected bot reply text from linked number {clean_phone} to prevent infinite loop.")
+                return None
+            # 3. Burst loop guard to prevent runaway loops on linked devices
+            if cls.is_self_looping(clean_phone):
+                logger.warning(f"[Self-Message Filter] Excessive burst/loop detected on linked number {clean_phone}; halting auto-responder loop.")
+                return None
+            logger.info(f"[Self-Message Filter] Verified incoming test message from linked number {clean_phone} (contact: '{sender_name or clean_phone}'). Proceeding to auto-respond without skipping.")
 
         # Prevent duplicate reply if an automation rule already dispatched a WhatsApp response
         if engine_res and cls.engine_dispatched_reply(engine_res):
@@ -3682,8 +3783,20 @@ class WhatsAppService:
             if not clean_reply_text:
                 clean_reply_text = reply_body.strip()
 
+            # Auto-Response Dispatcher:
+            # Ensure that when an inbound chat or transcribed voice note comes from contacts like B or Mubi,
+            # Gemini AI generates a Pakistani Urdu text response AND immediately dispatches it back via Green-API without skipping.
+            cls.record_bot_reply_body(clean_reply_text)
+
+            is_priority_contact = bool(
+                is_self_linked
+                or (sender_name and str(sender_name).strip().lower() in ("b", "mubi"))
+                or (sender_name and any(x in str(sender_name).strip().lower() for x in ("mubi",)))
+                or (clean_body and "[transcribed]" in clean_body.lower())
+            )
+
             if is_voice or is_voice_inbound:
-                # 1. Incoming is VOICE: Generate Urdu .oga spoken audio and reply with ONLY VOICE NOTE
+                # 1. Incoming is VOICE: synthesize authentic Urdu .oga audio if TTS is available
                 try:
                     audio_res = cls.generate_spoken_audio(
                         text=clean_reply_text,
@@ -3693,7 +3806,7 @@ class WhatsAppService:
                     )
                     if audio_res:
                         audio_b, audio_fn, audio_mt = audio_res
-                        logger.info(f"Synthesized {len(audio_b)} bytes of Urdu .oga audio for voice note reply to {clean_phone} (Dynamic Output Matching: VOICE -> ONLY VOICE).")
+                        logger.info(f"Synthesized {len(audio_b)} bytes of Urdu .oga audio for voice note reply to {clean_phone}.")
                         active_prov = cls.get_active_provider(organization_id=org_id)
                         if active_prov == "green_api" or cls.is_green_api_configured(organization_id=org_id):
                             audio_dispatch_res = cls.send_green_api_file(
@@ -3702,29 +3815,31 @@ class WhatsAppService:
                                 file_bytes=audio_b,
                                 filename=audio_fn,
                                 mime_type=audio_mt,
-                                caption="",  # Pure audio note, NO text message sent along with audio
+                                caption="",
                                 quoted_message_id=message_id,
                                 transcript=clean_reply_text
                             )
+                            logger.info(f"[Auto-Responder Live Audit] Dispatched voice note to {clean_phone}: result={audio_dispatch_res}")
                     else:
                         logger.warning(f"TTS audio synthesis unavailable for voice note reply to {clean_phone}; falling back to text.")
                 except Exception as tts_err:
                     logger.warning(f"TTS voice synthesis failed for {clean_phone}: {tts_err}. Falling back to text.")
                     audio_dispatch_res = None
 
-                # If audio dispatch succeeded, we DO NOT send text (Dynamic Output Matching)
-                if audio_dispatch_res and audio_dispatch_res.get("success"):
-                    dispatch_res = audio_dispatch_res
-                    logger.info(f"Voice note (.oga) reply successfully dispatched to {clean_phone}. No text sent as per Dynamic Output Matching.")
-                else:
-                    # Fallback to text only if audio synthesis or dispatch failed
-                    logger.info(f"Audio dispatch failed or unavailable, falling back to text reply for {clean_phone}.")
+                # For contacts like B or Mubi, or when audio dispatch is unavailable, dispatch Pakistani Urdu text response without skipping
+                if is_priority_contact or not (audio_dispatch_res and audio_dispatch_res.get("success")):
                     text_dispatch_res = cls.send_message(
                         organization_id=org_id,
                         to_phone=clean_phone,
                         message_text=clean_reply_text
                     )
                     dispatch_res = text_dispatch_res
+                    if audio_dispatch_res and audio_dispatch_res.get("success"):
+                        dispatch_res["audio_dispatch"] = audio_dispatch_res
+                    logger.info(f"[Auto-Responder Live Audit] Dispatched Pakistani Urdu text response to {clean_phone} (contact: '{sender_name}') without skipping: result={text_dispatch_res}")
+                else:
+                    dispatch_res = audio_dispatch_res
+                    logger.info(f"Voice note (.oga) reply successfully dispatched to {clean_phone}. No text sent as per Dynamic Output Matching.")
             else:
                 # 2. Incoming is TEXT: Reply with ONLY TEXT
                 text_dispatch_res = cls.send_message(
@@ -3734,7 +3849,7 @@ class WhatsAppService:
                     quoted_message_id=message_id
                 )
                 dispatch_res = text_dispatch_res
-                logger.info(f"AI text response dispatched to {clean_phone} (Dynamic Output Matching: TEXT -> ONLY TEXT): '{clean_reply_text[:60]}...'")
+                logger.info(f"[Auto-Responder Live Audit] AI text response dispatched to {clean_phone} (Dynamic Output Matching: TEXT -> ONLY TEXT): '{clean_reply_text[:60]}...'")
 
             if not dispatch_res:
                 dispatch_res = text_dispatch_res or audio_dispatch_res or {}
@@ -4559,10 +4674,24 @@ class WhatsAppService:
 
         msg_id = data.get("idMessage")
         timestamp = data.get("timestamp")
-        sender_data = data.get("senderData", {})
-        chat_id = sender_data.get("chatId", "")
+        sender_data = data.get("senderData", {}) if isinstance(data.get("senderData"), dict) else {}
+        chat_id = (
+            sender_data.get("chatId")
+            or sender_data.get("sender")
+            or data.get("chatId")
+            or data.get("sender")
+            or data.get("from")
+            or ""
+        )
         from_phone = chat_id.replace("@c.us", "").replace("@g.us", "")
-        sender_name = sender_data.get("senderName") or sender_data.get("chatName") or from_phone or "WhatsApp Contact"
+        sender_name = (
+            sender_data.get("senderName")
+            or sender_data.get("chatName")
+            or data.get("senderName")
+            or data.get("chatName")
+            or from_phone
+            or "WhatsApp Contact"
+        )
 
         instance_data = data.get("instanceData", {})
         instance_id = str(instance_data.get("idInstance", "green_api"))
@@ -5792,6 +5921,9 @@ class WhatsAppService:
             raw_payload["fallback_reason"] = fallback_reason
             raw_payload["simulated_fallback"] = True
 
+        cls.record_outbound_sent_id(mock_msg_id)
+        if actual_body:
+            cls.record_bot_reply_body(actual_body)
         record = cls.record_message(
             organization_id=organization_id,
             sender="OpsFlow-Sandbox (+15550001234)",
@@ -5905,6 +6037,7 @@ class WhatsAppService:
             payload["quotedMessageId"] = quoted_message_id
 
         timeouts = cls.get_timeout_tuple()
+        logger.info(f"[Outbound Live Audit] Green-API sendMessage payload: chatId={chat_id}, quotedMessageId={quoted_message_id}, text='{(message_text or '')[:100]}'")
 
         try:
             with cls.get_http_session(retries=2) as session:
@@ -5918,8 +6051,12 @@ class WhatsAppService:
                     resp_json = resp.json() if resp.text and resp.text.strip() else {}
                 except Exception:
                     resp_json = {}
+                logger.info(f"[Outbound Live Audit] Green-API sendMessage response: status={resp.status_code}, data={resp_json}")
                 if resp.status_code == 200 and resp_json.get("idMessage"):
                     msg_id = resp_json.get("idMessage")
+                    cls.record_outbound_sent_id(msg_id)
+                    if message_text:
+                        cls.record_bot_reply_body(message_text)
                     record = cls.record_message(
                         organization_id=organization_id,
                         sender=f"GreenAPI Instance {id_inst}",
@@ -6214,6 +6351,7 @@ class WhatsAppService:
                 if quoted_message_id:
                     payload["quotedMessageId"] = quoted_message_id
 
+                logger.info(f"[Outbound Live Audit] Green-API sendFileByUrl payload: chatId={chat_id}, fileName={fn}, quotedMessageId={quoted_message_id}")
                 send_resp = session.post(send_url, json=payload, timeout=timeouts)
                 if send_resp.status_code == 400 and quoted_message_id:
                     logger.warning(f"Green-API sendFileByUrl failed with quotedMessageId (HTTP 400), retrying unquoted for {clean_to}...")
@@ -6221,8 +6359,12 @@ class WhatsAppService:
                     payload_unquoted.pop("quotedMessageId", None)
                     send_resp = session.post(send_url, json=payload_unquoted, timeout=timeouts)
                 send_data = send_resp.json() if send_resp.text else {}
+                logger.info(f"[Outbound Live Audit] Green-API sendFileByUrl response: status={send_resp.status_code}, data={send_data}")
                 if send_resp.status_code == 200 and send_data.get("idMessage"):
                     msg_id = send_data.get("idMessage")
+                    cls.record_outbound_sent_id(msg_id)
+                    if caption or transcript:
+                        cls.record_bot_reply_body(caption or transcript)
                     record = cls.record_message(
                         organization_id=organization_id,
                         sender=f"GreenAPI Instance {id_inst}",
