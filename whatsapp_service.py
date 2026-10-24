@@ -1568,7 +1568,7 @@ class WhatsAppService:
         mappings = cls.get_instance_mappings()
         if clean_id in mappings:
             return mappings[clean_id]
-        if clean_id in ("710722761603", "71072276103") or clean_id.startswith("7107"):
+        if clean_id in ("710722761603", "71072276103"):
             return "org-enterprise-default"
 
         # Resolve against configured instance IDs across tenant / environment
@@ -1970,7 +1970,7 @@ class WhatsAppService:
 
     @classmethod
     def get_gemini_api_key(cls, organization_id: Optional[str] = None) -> Optional[str]:
-        """Resolves Gemini API key across environment, database settings, and app config."""
+        """Resolves Gemini API key across environment, database settings, app config, and secret files."""
         candidates = [
             "GEMINI_API_KEY",
             "GOOGLE_API_KEY",
@@ -1987,17 +1987,51 @@ class WhatsAppService:
             if val and str(val).strip():
                 api_key = str(val).strip()
                 break
-            # 2. Environment variable
+            # 2. Environment variable (exact)
             val = os.environ.get(k)
             if val and str(val).strip():
                 api_key = str(val).strip()
                 break
-            # 3. Flask app config
+            # 3. Environment variable (case-insensitive)
+            for env_k, env_v in os.environ.items():
+                if env_k.strip().upper() == k and env_v and str(env_v).strip():
+                    api_key = str(env_v).strip()
+                    break
+            if api_key:
+                break
+            # 4. Flask app config
             if has_app_context():
                 val = current_app.config.get(k)
                 if val and str(val).strip():
                     api_key = str(val).strip()
                     break
+                for cfg_k, cfg_v in current_app.config.items():
+                    if cfg_k.strip().upper() == k and cfg_v and str(cfg_v).strip():
+                        api_key = str(cfg_v).strip()
+                        break
+            if api_key:
+                break
+
+        # 5. Dynamic .env file lookup if key is not yet in process memory
+        if not api_key:
+            try:
+                from dotenv import dotenv_values
+                env_candidates = [".env", os.path.join(_base_dir, ".env")]
+                for ep in env_candidates:
+                    if os.path.isfile(ep):
+                        parsed = dotenv_values(ep)
+                        for k in candidates:
+                            for p_k, p_v in parsed.items():
+                                if p_k and p_k.strip().upper() == k and p_v and str(p_v).strip():
+                                    api_key = str(p_v).strip()
+                                    os.environ[k] = api_key
+                                    break
+                            if api_key:
+                                break
+                    if api_key:
+                        break
+            except Exception:
+                pass
 
         if not api_key:
             for secret_dir in ["/etc/secrets", os.path.join(_base_dir, ".secrets")]:
@@ -2094,7 +2128,8 @@ class WhatsAppService:
                 time_prefix = f"[{time_str} PKT] " if time_str else ""
                 history.append({
                     "role": role,
-                    "content": f"{time_prefix}{content_body}",
+                    "content": content_body,
+                    "formatted_content": f"{time_prefix}{content_body}",
                     "is_voice": is_voice,
                     "time": time_str,
                     "created_at": m.created_at.strftime("%Y-%m-%d %H:%M:%S") if m.created_at else None
@@ -2843,6 +2878,17 @@ class WhatsAppService:
         cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
         lang_info = cls.detect_language(clean_text, conversation_history=conversation_history)
         lang_directive = cls.get_language_prompt_directive(lang_info, clean_text)
+        history_section = ""
+        if conversation_history:
+            history_lines = []
+            for item in conversation_history[-5:]:
+                r = item.get("role", "Customer")
+                c = (item.get("formatted_content") or item.get("content", "")).strip()
+                if c:
+                    history_lines.append(f"{r}: {c}")
+            if history_lines:
+                history_section = "\n\nRecent Conversation History (Past 3-5 Turns in Pakistan Time):\n" + "\n".join(history_lines)
+
         b_name = cls.get_tenant_business_name(organization_id=organization_id)
         pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
         user_prompt = (
@@ -3341,7 +3387,9 @@ class WhatsAppService:
                 body_clean_str = "[voice note]"
                 clean_body = "[Voice note]"
             else:
-                return None
+                message_body = "Salam"
+                body_clean_str = "salam"
+                clean_body = "Salam"
 
         # Ignore group messages, broadcast channels, newsletters, and status stories
         sender_str = str(sender_phone or "").strip().lower()
@@ -3416,7 +3464,7 @@ class WhatsAppService:
         if is_self_linked:
             # Self-Message Filter Check: Allow incoming tests from linked numbers while preventing infinite loops
             # 1. Outbound message ID echo check
-            if message_id and cls.is_known_outbound_message_id(message_id, organization_id=org_id):
+            if (message_id and ("echo" in str(message_id).lower() or cls.is_known_outbound_message_id(message_id, organization_id=org_id))) or ("echo" in clean_body.lower()):
                 logger.info(f"[Self-Message Filter] Ignored outbound message echo {message_id} from linked number {clean_phone} to prevent infinite loop.")
                 return None
             # 2. Reflected bot reply text check
@@ -3572,7 +3620,7 @@ class WhatsAppService:
             message_body = "Salam"
             clean_body = "Salam"
 
-        cooldown_mins = 0  # Force zero cooldown for all inbound messages
+        cooldown_mins = int(auto_conf.get("cooldown_minutes", 0))
 
         # Concurrency guard: Prevent parallel duplicate AI replies for the same phone number (message storms)
         with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
@@ -3586,14 +3634,15 @@ class WhatsAppService:
                 in_flight_ts.pop(sp, None)
 
             if clean_phone in in_flight:
-                logger.info(f"AI Auto-Reply currently marked in-flight for {clean_phone}; Force Dispatch proceeding without skipping.")
+                logger.info(f"AI Auto-Reply currently marked in-flight for {clean_phone}, skipping duplicate concurrent webhook.")
+                return {"success": True, "skipped": True, "reason": "in_flight_debounce", "phone": clean_phone}
             cls._in_flight_phones.add(clean_phone)
             if hasattr(cls, "_in_flight_phones_ts"):
                 cls._in_flight_phones_ts[clean_phone] = time.time()
 
         # Prevent duplicate reply storm / loop: Check if an outbound message was already sent to this phone recently
-        if not has_ai:
-            if has_app_context() and cooldown_mins > 0:
+        if cooldown_mins > 0:
+            if has_app_context():
                 cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=cooldown_mins)
                 recent_outbound = WhatsAppMessage.query.filter(
                     WhatsAppMessage.organization_id == org_id,
@@ -3946,7 +3995,7 @@ class WhatsAppService:
                 )
             return {
                 "success": True,
-                "reply_body": reply_body,
+                "reply_body": clean_reply_text,
                 "intent": intent,
                 "lead_score": lead_score,
                 "mode": generated.get("mode"),
