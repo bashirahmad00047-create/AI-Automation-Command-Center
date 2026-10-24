@@ -5769,7 +5769,11 @@ class WhatsAppService:
 
         clean_to = cls.format_phone_number(to_phone or "")
         actual_body = f"[Template: {template_name}] {message_text}" if template_name and message_text else (f"[Template: {template_name}]" if template_name else (message_text or ""))
-        msg_type = "template" if template_name else "text"
+        msg_type = (
+            "template" if template_name else (
+                "audioMessage" if (actual_body and "[Voice Note" in actual_body) else "text"
+            )
+        )
         mock_msg_id = f"wamid.mock_{uuid.uuid4().hex[:16]}"
         is_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_INSTANCE_ID"))
 
@@ -5905,6 +5909,11 @@ class WhatsAppService:
         try:
             with cls.get_http_session(retries=2) as session:
                 resp = session.post(url, json=payload, timeout=timeouts)
+                if resp.status_code == 400 and quoted_message_id:
+                    logger.warning(f"Green-API sendMessage failed with quotedMessageId (HTTP 400), retrying unquoted for {clean_to}...")
+                    payload_unquoted = dict(payload)
+                    payload_unquoted.pop("quotedMessageId", None)
+                    resp = session.post(url, json=payload_unquoted, timeout=timeouts)
                 try:
                     resp_json = resp.json() if resp.text and resp.text.strip() else {}
                 except Exception:
@@ -6162,6 +6171,14 @@ class WhatsAppService:
 
         if not id_inst or not tok_inst or not file_bytes:
             err_msg = "Green-API credentials or file bytes missing."
+            if allow_fallback and cls.is_simulator_fallback_enabled():
+                return cls.dispatch_simulator_message(
+                    organization_id=organization_id,
+                    to_phone=clean_to,
+                    message_text=transcript or caption or f"[Voice Note: {fn}]",
+                    execution_id=execution_id,
+                    fallback_reason=err_msg
+                )
             return {"success": False, "status": "failed", "error": err_msg, "recipient": clean_to}
 
         fn = filename or "voice_reply.mp3"
@@ -6198,6 +6215,11 @@ class WhatsAppService:
                     payload["quotedMessageId"] = quoted_message_id
 
                 send_resp = session.post(send_url, json=payload, timeout=timeouts)
+                if send_resp.status_code == 400 and quoted_message_id:
+                    logger.warning(f"Green-API sendFileByUrl failed with quotedMessageId (HTTP 400), retrying unquoted for {clean_to}...")
+                    payload_unquoted = dict(payload)
+                    payload_unquoted.pop("quotedMessageId", None)
+                    send_resp = session.post(send_url, json=payload_unquoted, timeout=timeouts)
                 send_data = send_resp.json() if send_resp.text else {}
                 if send_resp.status_code == 200 and send_data.get("idMessage"):
                     msg_id = send_data.get("idMessage")
@@ -6232,10 +6254,26 @@ class WhatsAppService:
                 else:
                     err = send_data.get("message") or send_resp.text[:200] or f"HTTP {send_resp.status_code}"
                     logger.warning(f"sendFileByUrl failed: {err}")
+                    if allow_fallback and cls.is_simulator_fallback_enabled():
+                        return cls.dispatch_simulator_message(
+                            organization_id=organization_id,
+                            to_phone=clean_to,
+                            message_text=transcript or caption or f"[Voice Note: {fn}]",
+                            execution_id=execution_id,
+                            fallback_reason=f"sendFileByUrl failed: {err}"
+                        )
                     return {"success": False, "status": "failed", "error": err, "recipient": clean_to}
         except Exception as e:
             err_msg = str(e)
             logger.error(f"Error in send_green_api_file: {err_msg}")
+            if allow_fallback and cls.is_simulator_fallback_enabled():
+                return cls.dispatch_simulator_message(
+                    organization_id=organization_id,
+                    to_phone=clean_to,
+                    message_text=transcript or caption or f"[Voice Note: {fn}]",
+                    execution_id=execution_id,
+                    fallback_reason=err_msg
+                )
             return {"success": False, "status": "failed", "error": err_msg, "recipient": clean_to}
 
     @classmethod
