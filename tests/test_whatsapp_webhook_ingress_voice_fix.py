@@ -861,7 +861,7 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             mock_resp.iter_content.return_value = fake_stream_chunks
             mock_post.return_value = mock_resp
 
-            # Default voice is nova
+            # Default voice is onyx (realistic male natural voice) at 1.0x speed
             res = WhatsAppService.generate_spoken_audio(
                 "Aap ka hukum sar ankhon par, hum tayyar hain.",
                 language="urdu",
@@ -875,29 +875,29 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
 
             payload = mock_post.call_args[1]["json"]
             self.assertEqual(payload["model"], "tts-1-hd")
-            self.assertEqual(payload["voice"], "nova")
-            self.assertEqual(payload.get("speed"), 0.95)
+            self.assertEqual(payload["voice"], "onyx")
+            self.assertEqual(payload.get("speed"), 1.0)
             self.assertEqual(payload["response_format"], "opus")
             self.assertTrue(mock_post.call_args[1]["stream"])
 
-        # Test alloy voice override via environment variable
+        # Test nova voice override via environment variable
         with patch.object(WhatsAppService, "get_openai_api_key", return_value="sk-test-openai-key"), \
-             patch.dict(os.environ, {"OPENAI_TTS_VOICE": "alloy"}), \
+             patch.dict(os.environ, {"OPENAI_TTS_VOICE": "nova"}), \
              patch("requests.post") as mock_post:
             mock_resp = MagicMock()
             mock_resp.status_code = 200
             mock_resp.iter_content.return_value = fake_stream_chunks
             mock_post.return_value = mock_resp
 
-            res_alloy = WhatsAppService.generate_spoken_audio(
+            res_nova = WhatsAppService.generate_spoken_audio(
                 "Hum aap ki khidmat ke liye hazir hain.",
                 language="urdu",
                 output_format="oga"
             )
-            self.assertIsNotNone(res_alloy)
-            payload_alloy = mock_post.call_args[1]["json"]
-            self.assertEqual(payload_alloy["voice"], "alloy")
-            self.assertEqual(payload_alloy.get("speed"), 0.95)
+            self.assertIsNotNone(res_nova)
+            payload_nova = mock_post.call_args[1]["json"]
+            self.assertEqual(payload_nova["voice"], "nova")
+            self.assertEqual(payload_nova.get("speed"), 1.0)
 
         # Test onyx voice override via environment variable
         with patch.object(WhatsAppService, "get_openai_api_key", return_value="sk-test-openai-key"), \
@@ -1367,6 +1367,102 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             mock_send_file.assert_called_once()
             self.assertEqual(mock_send_file.call_args[1]["filename"], "generated_image.png")
             self.assertEqual(mock_send_file.call_args[1]["mime_type"], "image/png")
+
+    def test_permanent_hard_deletion_matches_all_phone_variants_and_never_reappears(self):
+        """Verifies clear_conversation permanently hard-deletes all phone variants from DB so deleted chats never reappear on refresh."""
+        phone = "923209350858"
+        # 1. Create multiple messages across various format representations
+        m1 = WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender=f"+{phone}",
+            recipient="system",
+            direction="inbound",
+            body="Salam! Inquiry regarding freight.",
+            whatsapp_message_id="WAMID_DEL_TEST_001"
+        )
+        m2 = WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender="system",
+            recipient=f"{phone}@c.us",
+            direction="outbound",
+            body="وعلیکم السلام، ہم آپ کی کیا مدد کر سکتے ہیں؟",
+            whatsapp_message_id="WAMID_DEL_TEST_002"
+        )
+        m3 = WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender="03209350858",
+            recipient="system",
+            direction="inbound",
+            body="What is the shipping cost?",
+            whatsapp_message_id="WAMID_DEL_TEST_003"
+        )
+
+        # Confirm all 3 records exist in database
+        initial_count = WhatsAppMessage.query.filter(
+            WhatsAppMessage.organization_id == self.org.id,
+            WhatsAppMessage.whatsapp_message_id.in_(["WAMID_DEL_TEST_001", "WAMID_DEL_TEST_002", "WAMID_DEL_TEST_003"])
+        ).count()
+        self.assertEqual(initial_count, 3)
+
+        # 2. Call clear_conversation with standard contact phone
+        del_res = WhatsAppService.clear_conversation(
+            contact_phone=phone,
+            organization_id=self.org.id
+        )
+        self.assertTrue(del_res["success"])
+        self.assertGreaterEqual(del_res["deleted_count"], 3)
+
+        # 3. Simulate page refresh: query DB again, confirming records are PERMANENTLY deleted
+        remaining = WhatsAppMessage.query.filter(
+            WhatsAppMessage.organization_id == self.org.id,
+            WhatsAppMessage.whatsapp_message_id.in_(["WAMID_DEL_TEST_001", "WAMID_DEL_TEST_002", "WAMID_DEL_TEST_003"])
+        ).all()
+        self.assertEqual(len(remaining), 0)
+
+    def test_outbound_ai_response_persisted_to_db_and_survives_refresh(self):
+        """Verifies inbound and outbound AI auto-responses are committed to DB and reliably persist on page refresh."""
+        WhatsAppService.clear_recent_replied_trigger_ids()
+        inbound_id = "INBOUND_PERSIST_001"
+        phone = "923331234567"
+
+        # Record inbound message
+        inbound_msg = WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender=phone,
+            recipient="system",
+            direction="inbound",
+            body="Aap ke medical billing charges kya hain?",
+            whatsapp_message_id=inbound_id
+        )
+        self.assertIsNotNone(inbound_msg)
+
+        with patch.dict(os.environ, {"AI_AUTO_REPLY_ENABLED": "true"}), \
+             patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake_key"), \
+             patch.object(WhatsAppService, "call_gemini_ai", return_value="OpsFlow Cloud medical billing par 5% charges hain. Hum aap ki poori claims processing handle karte hain.") as mock_ai, \
+             patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "OUTBOUND_REPLY_001"}) as mock_send:
+
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone=phone,
+                message_body="Aap ke medical billing charges kya hain?",
+                message_id=inbound_id
+            )
+            self.assertIsNotNone(res)
+            self.assertTrue(res["success"])
+
+        # Simulate page refresh: Query DB for both inbound and outbound messages
+        history = WhatsAppMessage.query.filter(
+            WhatsAppMessage.organization_id == self.org.id,
+            (WhatsAppMessage.sender == phone) | (WhatsAppMessage.recipient == phone)
+        ).order_by(WhatsAppMessage.created_at.asc()).all()
+
+        # Both inbound and outbound message records must persist in the DB
+        self.assertGreaterEqual(len(history), 2)
+        inbounds = [m for m in history if m.direction == "inbound"]
+        outbounds = [m for m in history if m.direction == "outbound"]
+        self.assertTrue(len(inbounds) >= 1)
+        self.assertTrue(len(outbounds) >= 1)
+        self.assertIn("medical billing", outbounds[0].body)
 
 if __name__ == "__main__":
     unittest.main()

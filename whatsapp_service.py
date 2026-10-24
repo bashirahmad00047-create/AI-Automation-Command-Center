@@ -355,6 +355,78 @@ class WhatsAppService:
             logger.warning(f"Failed to delete WhatsApp message record for '{clean_id}': {e}")
             return {"success": False, "error": str(e), "message_id": clean_id}
 
+    @classmethod
+    def clear_conversation(
+        cls,
+        contact_phone: str,
+        organization_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Permanently hard-deletes all messages associated with a contact or conversation from database records.
+        Matches all phone variants (clean digits, with/without '+', with/without '@c.us', and last 8 digits).
+        Ensures deleted chats never reappear in UI after page refresh.
+        """
+        if not contact_phone:
+            return {"success": False, "deleted_count": 0, "error": "contact_phone required"}
+
+        if not has_app_context():
+            return {"success": False, "deleted_count": 0, "error": "Application context required"}
+
+        org_id = organization_id or "org-enterprise-default"
+        clean_contact = str(contact_phone or "").replace("@c.us", "").replace("@g.us", "").strip()
+        formatted_contact = cls.format_phone_number(clean_contact)
+        digits_only = "".join(filter(str.isdigit, str(clean_contact)))
+        last_digits = digits_only[-8:] if len(digits_only) >= 8 else digits_only
+
+        candidates = {contact_phone, clean_contact}
+        if formatted_contact:
+            candidates.add(formatted_contact)
+            candidates.add(f"+{formatted_contact}")
+            candidates.add(f"{formatted_contact}@c.us")
+            candidates.add(f"+{formatted_contact}@c.us")
+        if clean_contact:
+            clean_bare = clean_contact.lstrip("+")
+            candidates.add(clean_bare)
+            candidates.add(f"+{clean_bare}")
+            candidates.add(f"{clean_bare}@c.us")
+            candidates.add(f"+{clean_bare}@c.us")
+
+        filter_conditions = [
+            WhatsAppMessage.sender.in_(list(candidates)),
+            WhatsAppMessage.recipient.in_(list(candidates))
+        ]
+        if last_digits:
+            filter_conditions.extend([
+                WhatsAppMessage.sender.like(f"%{last_digits}"),
+                WhatsAppMessage.sender.like(f"%{last_digits}@c.us"),
+                WhatsAppMessage.recipient.like(f"%{last_digits}"),
+                WhatsAppMessage.recipient.like(f"%{last_digits}@c.us")
+            ])
+
+        query = WhatsAppMessage.query.filter(
+            WhatsAppMessage.organization_id == org_id,
+            db.or_(*filter_conditions)
+        )
+
+        msgs = query.all()
+        count = len(msgs)
+        for m in msgs:
+            db.session.delete(m)
+        db.session.commit()
+
+        # Clear in-memory caches and in-flight tracking
+        with cls._processed_ids_lock:
+            for m in msgs:
+                if m.whatsapp_message_id and m.whatsapp_message_id in cls._processed_message_ids:
+                    cls._processed_message_ids.pop(m.whatsapp_message_id, None)
+
+        with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
+            in_flight = getattr(cls, "_in_flight_phones", set())
+            for c in candidates:
+                in_flight.discard(c)
+
+        logger.info(f"[WhatsApp] Permanently hard-deleted {count} WhatsApp message(s) for contact '{contact_phone}'.")
+        return {"success": True, "message": f"Cleared {count} messages.", "deleted_count": count, "contact": contact_phone}
+
     PKT_TZ = datetime.timezone(datetime.timedelta(hours=5))
 
     @classmethod
@@ -944,7 +1016,7 @@ class WhatsAppService:
             import asyncio
             lang_str = str(language or "").lower()
             if "urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str:
-                voice = "ur-PK-UzmaNeural"
+                voice = "ur-PK-AsadNeural"  # Realistic Male Natural Voice
             elif "pashto" in lang_str or lang_str == "ps":
                 voice = "ps-AF-LatifaNeural"
             elif "arabic" in lang_str or lang_str == "ar":
@@ -959,7 +1031,7 @@ class WhatsAppService:
                 voice = "en-US-JennyNeural"
 
             async def _run():
-                comm = edge_tts.Communicate(text, voice, rate="-5%")
+                comm = edge_tts.Communicate(text, voice, rate="+0%")
                 chunks = []
                 async for chunk in comm.stream():
                     if chunk.get("type") == "audio":
@@ -1014,7 +1086,7 @@ class WhatsAppService:
         audio_fn = "voice_reply.oga" if is_oga else "voice_reply.mp3"
         audio_mt = "audio/ogg; codecs=opus" if is_oga else "audio/mpeg"
 
-        # 1. OpenAI HD Audio Speech API (model 'tts-1-hd', voice 'nova' or 'alloy') with optimized streaming bytes
+        # 1. OpenAI HD Audio Speech API (model 'tts-1-hd', voice 'onyx' preset) with optimized streaming bytes
         openai_key = cls.get_openai_api_key(organization_id=organization_id)
         if openai_key and str(openai_key).strip():
             try:
@@ -1022,13 +1094,13 @@ class WhatsAppService:
                 voice_choice = (
                     cls._get_tenant_or_global_setting("OPENAI_TTS_VOICE", organization_id=organization_id)
                     or os.environ.get("OPENAI_TTS_VOICE")
-                    or "nova"
+                    or "onyx"
                 ).strip().lower()
-                if voice_choice not in ("nova", "alloy", "onyx", "echo", "fable", "shimmer"):
-                    voice_choice = "nova"
+                if voice_choice not in ("onyx", "nova", "alloy", "echo", "fable", "shimmer"):
+                    voice_choice = "onyx"
 
-                # Tuned for minimum speed (-5% -> 0.95) for maximum clarity and warm, calm articulation
-                speed_val = 0.95
+                # Realistic Male Natural Voice Engine: 1.0x speed with natural conversational pacing
+                speed_val = 1.0
                 speed_str = (
                     cls._get_tenant_or_global_setting("OPENAI_TTS_SPEED", organization_id=organization_id)
                     or os.environ.get("OPENAI_TTS_SPEED")
@@ -1037,7 +1109,7 @@ class WhatsAppService:
                     try:
                         speed_val = float(speed_str)
                     except (ValueError, TypeError):
-                        speed_val = 0.95
+                        speed_val = 1.0
 
                 openai_payload = {
                     "model": "tts-1-hd",
@@ -3622,6 +3694,23 @@ class WhatsAppService:
             if not msg_rec and isinstance(dispatch_res, dict) and dispatch_res.get("whatsapp_message_id") and has_app_context():
                 msg_rec = WhatsAppMessage.query.filter_by(whatsapp_message_id=dispatch_res["whatsapp_message_id"]).first()
 
+            # Outbound Message & History Persistence: Ensure outbound AI auto-reply is committed to DB
+            if not msg_rec and has_app_context() and clean_reply_text:
+                try:
+                    msg_rec = cls.record_message(
+                        organization_id=org_id,
+                        sender="system",
+                        recipient=clean_phone,
+                        direction="outbound",
+                        body=clean_reply_text,
+                        status="sent",
+                        whatsapp_message_id=(dispatch_res.get("whatsapp_message_id") if isinstance(dispatch_res, dict) else None),
+                        message_type="audioMessage" if (is_voice or is_voice_inbound) else "text",
+                        raw_payload={"triggered_by_message_id": message_id}
+                    )
+                except Exception as rec_err:
+                    logger.debug(f"Outbound message persistence notice: {rec_err}")
+
             is_gemini = (generated.get("mode") == "gemini_ai") or bool(generated.get("is_gemini"))
             is_groq = (generated.get("mode") == "groq_ai") or bool(generated.get("is_groq"))
             is_real_ai = is_gemini or is_groq
@@ -3639,8 +3728,8 @@ class WhatsAppService:
                     "detected_script": generated.get("detected_script", "latin"),
                     "language_format": generated.get("language_format", "english"),
                     "lead_score": lead_score,
-                    "urgency": generated["urgency"],
-                    "confidence": generated["confidence"],
+                    "urgency": generated.get("urgency", 0),
+                    "confidence": generated.get("confidence", 0),
                     "triggered_by_message_id": message_id
                 }
                 existing_payload = {}

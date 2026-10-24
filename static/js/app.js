@@ -5347,22 +5347,26 @@ async function clearCurrentConversation() {
         showToast('No active conversation selected to clear', 'info');
         return;
     }
-    if (!confirm(`Are you sure you want to clear all messages for ${waActiveChatPartner}?`)) return;
+    const partner = waActiveChatPartner;
+    if (!confirm(`Are you sure you want to permanently delete all messages for ${partner}?`)) return;
     try {
-        const res = await fetch(`/api/v1/whatsapp/conversations/${encodeURIComponent(waActiveChatPartner)}`, {
-            method: 'DELETE'
+        const norm = normalizeWaPhone(partner) || partner;
+        const headers = typeof getAuthHeaders === 'function' ? getAuthHeaders() : { 'Content-Type': 'application/json' };
+        const res = await fetch(`/api/v1/whatsapp/conversations/${encodeURIComponent(norm)}`, {
+            method: 'DELETE',
+            headers: headers
         });
         const data = await res.json();
         if (res.ok && data.success) {
-            showToast(`Conversation cleared (${data.deleted_count || 0} messages removed)`, 'success');
-            waAllMessagesCache = waAllMessagesCache.filter(m => {
-                const cleanSender = (m.sender || '').replace(/@c\.us|@g\.us/g, '').trim();
-                const cleanRecipient = (m.recipient || '').replace(/@c\.us|@g\.us/g, '').trim();
-                return cleanSender !== waActiveChatPartner && cleanRecipient !== waActiveChatPartner;
+            showToast(`Conversation permanently deleted (${data.deleted_count || 0} messages removed)`, 'success');
+            waAllMessagesCache = (waAllMessagesCache || []).filter(m => {
+                const s = (m.sender || '').replace(/@c\.us|@g\.us/g, '').trim();
+                const r = (m.recipient || '').replace(/@c\.us|@g\.us/g, '').trim();
+                return !isSameWaPhone(s, partner) && !isSameWaPhone(r, partner);
             });
             waActiveChatPartner = null;
             renderWhatsAppWebUI(waAllMessagesCache, true);
-            loadWhatsAppMessagesOnly();
+            await loadWhatsAppMessagesOnly();
         } else {
             showToast(data.error || 'Failed to clear conversation', 'error');
         }
