@@ -489,6 +489,20 @@ class ExecutionStep(db.Model):
         }
 
 
+def format_phone_display(phone: Optional[str]) -> str:
+    """Formats an E.164 phone number into a standardized human-readable display string, e.g. +92 320 9350858."""
+    raw = str(phone or "").strip()
+    if not raw or raw.upper() in ("N/A", "NONE", "NULL"):
+        return ""
+    clean = "".join(filter(str.isdigit, raw))
+    if clean.startswith("03") and len(clean) == 11:
+        clean = "92" + clean[1:]
+    if clean.startswith("92") and len(clean) == 12:
+        return f"+92 {clean[2:5]} {clean[5:]}"
+    elif len(clean) >= 10:
+        return f"+{clean}"
+    return raw
+
 class Lead(db.Model):
     """Customer Inquiry & CRM Lead Record."""
     __tablename__ = "leads"
@@ -513,20 +527,28 @@ class Lead(db.Model):
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     def to_dict(self) -> Dict[str, Any]:
+        phone_clean = (self.phone or "").strip()
+        disp_phone = format_phone_display(phone_clean) if phone_clean and phone_clean.upper() != "N/A" else ""
+        raw_phone = phone_clean if (phone_clean and phone_clean.upper() != "N/A") else ""
+
+        contact_name = (self.name or "").strip()
+        if not contact_name or contact_name.lower() in ("anonymous", "anonymous lead", "whatsapp contact", "unknown", "website visitor", "n/a", "none"):
+            contact_name = disp_phone or raw_phone or "Inbound Contact"
+
         return {
             "id": self.id,
             "organization_id": self.organization_id,
-            "name": self.name or "Anonymous",
-            "email": self.email or "N/A",
-            "phone": self.phone or "N/A",
-            "company": self.company or "N/A",
+            "name": contact_name,
+            "email": self.email if (self.email and self.email.upper() != "N/A") else "",
+            "phone": disp_phone or raw_phone or "",
+            "company": self.company if (self.company and self.company.upper() != "N/A") else "",
             "message": self.message or "",
-            "intent": self.intent or "general_inquiry",
+            "intent": self.intent or "lead_inquiry",
             "sentiment": self.sentiment or "neutral",
             "urgency_score": self.urgency_score,
             "lead_score": self.lead_score,
-            "route_department": self.route_department,
-            "status": self.status,
+            "route_department": self.route_department or "Sales",
+            "status": self.status or "new",
             "draft_response": self.draft_response or "",
             "execution_id": self.execution_id,
             "is_sample": self.is_sample,

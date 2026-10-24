@@ -4026,6 +4026,21 @@ class WhatsAppService:
         return clean
 
     @classmethod
+    def format_phone_display(cls, phone: str) -> str:
+        """Formats an E.164 phone number into an attractive human-readable format, e.g. +92 320 9350858."""
+        raw = str(phone or "").strip()
+        if not raw or raw.upper() in ("N/A", "NONE", "NULL"):
+            return ""
+        clean = "".join(filter(str.isdigit, raw))
+        if clean.startswith("03") and len(clean) == 11:
+            clean = "92" + clean[1:]
+        if clean.startswith("92") and len(clean) == 12:
+            return f"+92 {clean[2:5]} {clean[5:]}"
+        elif len(clean) >= 10:
+            return f"+{clean}"
+        return raw
+
+    @classmethod
     def is_meta_configured(cls, organization_id: Optional[str] = None) -> bool:
         """Returns True if live Meta WhatsApp credentials are configured for tenant."""
         conf = cls.get_config(organization_id=organization_id)
@@ -5813,9 +5828,45 @@ class WhatsAppService:
         if not final_message:
             final_message = f"Inbound inquiry received from WhatsApp contact {clean_phone}."
 
+        disp_phone = cls.format_phone_display(clean_phone)
         contact_name = (sender_name or "").strip()
-        if not contact_name or contact_name.lower() in ("whatsapp contact", "unknown"):
-            contact_name = f"WhatsApp Lead {clean_phone[-4:]}"
+        if not contact_name and isinstance(raw_payload, dict):
+            contact_name = str(
+                raw_payload.get("sender_name")
+                or raw_payload.get("senderName")
+                or raw_payload.get("chatName")
+                or raw_payload.get("name")
+                or raw_payload.get("profile", {}).get("name")
+                or ""
+            ).strip()
+
+        if not contact_name or contact_name.lower() in ("whatsapp contact", "unknown", "website visitor", "anonymous", "none", "n/a"):
+            contact_name = disp_phone or clean_phone
+
+        # Dynamic Intent Classification
+        inferred_intent = "lead_inquiry"
+        if maps_url:
+            inferred_intent = "location_shared"
+        elif any(w in final_message.lower() for w in ("jazzcash", "easypaisa", "payment", "bank", "transfer", "pay", "paise")):
+            inferred_intent = "payment_or_deal_closure"
+        elif any(w in final_message.lower() for w in ("order", "buy", "purchase", "kharidna", "خریدنا")):
+            inferred_intent = "order_intent"
+        elif any(w in final_message.lower() for w in ("item", "delivery", "chahiye", "قیمت", "rate", "cost", "price")):
+            inferred_intent = "lead_inquiry"
+        elif any(w in final_message.lower() for w in ("help", "issue", "problem", "madad", "masla", "kharab", "شکایت", "مسئله")):
+            inferred_intent = "support_request"
+
+        calculated_score = 60
+        if inferred_intent == "payment_or_deal_closure":
+            calculated_score = 90
+        elif inferred_intent == "order_intent":
+            calculated_score = 85
+        elif inferred_intent == "location_shared":
+            calculated_score = 80
+        elif inferred_intent == "lead_inquiry":
+            calculated_score = 75
+        elif inferred_intent == "support_request":
+            calculated_score = 65
 
         lead_record = Lead(
             id=generate_uuid("lead"),
@@ -5823,13 +5874,13 @@ class WhatsAppService:
             name=contact_name,
             phone=clean_phone,
             email=None,
-            company="WhatsApp Inquiry",
+            company="WhatsApp Direct",
             message=final_message,
-            intent="location_shared" if maps_url else "whatsapp_inquiry",
+            intent=inferred_intent,
             sentiment="neutral",
-            urgency_score=35 if maps_url else 20,
-            lead_score=65 if maps_url else 50,
-            route_department="Sales",
+            urgency_score=35 if maps_url else 25,
+            lead_score=calculated_score,
+            route_department="Support" if inferred_intent == "support_request" else "Sales",
             status="new"
         )
 
