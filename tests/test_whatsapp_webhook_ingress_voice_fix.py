@@ -1464,6 +1464,105 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
         self.assertTrue(len(outbounds) >= 1)
         self.assertIn("medical billing", outbounds[0].body)
 
+    def test_gemini_system_prompt_deep_contextual_reasoning_and_accuracy(self):
+        """Verifies Gemini system prompt incorporates deep contextual reasoning, point-by-point accuracy, and warm Pakistani Urdu cadence."""
+        captured_prompts = []
+
+        class MockGenerativeModel:
+            def __init__(self, model_name):
+                self.model_name = model_name
+
+            def generate_content(self, prompt):
+                captured_prompts.append(prompt)
+                class MockResp:
+                    text = "وعلیکم السلام، آپ کا پارسل کل دوپہر تک پہنچا دیا جائے گا۔"
+                return MockResp()
+
+        mock_genai = type("MockGenAI", (), {
+            "configure": lambda api_key: None,
+            "GenerativeModel": MockGenerativeModel
+        })
+
+        with patch.dict("sys.modules", {"google.generativeai": mock_genai}), \
+             patch.object(WhatsAppService, "get_gemini_api_key", return_value="test_gemini_key_123"):
+            res = WhatsAppService.call_gemini_ai(
+                user_message="Mera parcel kab deliver hoga aur charges kitne hain?",
+                organization_id=self.org.id,
+                customer_name="Usman Ali"
+            )
+
+        self.assertIsNotNone(res)
+        self.assertGreaterEqual(len(captured_prompts), 1)
+        p = captured_prompts[0]
+        # Validates deep contextual reasoning protocol
+        self.assertIn("DEEP CONTEXTUAL REASONING & ACCURACY PROTOCOL", p)
+        self.assertIn("Point-by-Point Accurate Resolution", p)
+        self.assertIn("Natural Pakistani Urdu Cadence & Warmth", p)
+        self.assertIn("Pure Spoken Clean Text", p)
+        self.assertNotIn("**", res)
+
+    def test_get_green_api_qr_and_endpoint(self):
+        """Verifies WhatsApp Web QR pairing code service and endpoint."""
+        import requests
+        # 1. When not configured
+        with patch.object(WhatsAppService, "get_config", return_value={"green_api_id_instance": "", "green_api_token_instance": ""}):
+            qr_res = WhatsAppService.get_green_api_qr(organization_id=self.org.id)
+            self.assertFalse(qr_res["success"])
+            self.assertEqual(qr_res["type"], "not_configured")
+
+        # 2. When configured with live pairing QR response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = '{"type": "qrCode", "message": "iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAYAAACt..."}'
+        mock_response.json.return_value = {"type": "qrCode", "message": "iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAYAAACt..."}
+
+        with patch.object(WhatsAppService, "get_config", return_value={"green_api_id_instance": "110182", "green_api_token_instance": "tok123"}), \
+             patch.object(requests.Session, "get", return_value=mock_response):
+            qr_live = WhatsAppService.get_green_api_qr(organization_id=self.org.id)
+            self.assertTrue(qr_live["success"])
+            self.assertEqual(qr_live["type"], "qrCode")
+            self.assertIn("iVBORw", qr_live["qr_data"])
+
+        # 3. Via API endpoint
+        from models import User
+        user = User.query.first()
+        if not user:
+            user = User(
+                email="admin@test.local",
+                password_hash="test",
+                role="admin",
+                organization_id=self.org.id
+            )
+            db.session.add(user)
+            db.session.commit()
+
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = user.id
+            sess["org_id"] = self.org.id
+
+        with patch.object(WhatsAppService, "get_green_api_qr", return_value={"success": True, "type": "qrCode", "qr_data": "data:image/png;base64,abc"}):
+            resp = self.client.get("/api/v1/whatsapp/qr")
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data["success"])
+            self.assertEqual(data["type"], "qrCode")
+
+    def test_enhanced_urdu_voice_cadence_and_natural_pauses(self):
+        """Verifies preprocess_text_for_human_speech optimizes Pakistani Urdu cadence with natural pauses."""
+        text = "Salam! Tracking ID 992384 for TCS parcel. Jazakallah and thank you."
+        spoken = WhatsAppService.preprocess_text_for_human_speech(text, language="ur")
+        self.assertIsNotNone(spoken)
+        # Natural pause at greetings
+        self.assertIn("السلام علیکم،", spoken)
+        # Expansion of tracking and logistics terms with natural pause
+        self.assertIn("ٹریکنگ نمبر،", spoken)
+        self.assertIn("ٹی سی ایس", spoken)
+        # Natural warm phrases
+        self.assertIn("جزاک اللہ،", spoken)
+        self.assertIn("بہت شکریہ،", spoken)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

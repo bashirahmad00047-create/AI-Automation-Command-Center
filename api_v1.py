@@ -3505,6 +3505,16 @@ def test_whatsapp_connection():
     return jsonify(result), status_code
 
 
+@api_v1.route("/whatsapp/qr", methods=["GET"])
+@require_auth
+def get_whatsapp_qr():
+    """Returns WhatsApp Web QR pairing code or state from configured provider."""
+    org = get_current_org()
+    org_id = org.id if org else None
+    result = WhatsAppService.get_green_api_qr(organization_id=org_id)
+    return jsonify(result), 200
+
+
 @api_v1.route("/whatsapp/instances", methods=["GET"])
 @require_auth
 def list_whatsapp_instances():
