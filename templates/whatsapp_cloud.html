@@ -42,6 +42,117 @@
                 </div>
             </div>
 
+                        <!-- WHATSAPP WEB CONNECTION CARD (DISCONNECTED / SCAN QR STATE) -->
+            <div id="waConnectState" class="wa-connect-card" style="display: none;">
+                <!-- Left Pane: Instructions & Gateway Connection Actions -->
+                <div class="wa-connect-left">
+                    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 20px;">
+                        <div style="width: 44px; height: 44px; border-radius: 50%; background: #00a884; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #fff; box-shadow: 0 4px 12px rgba(0, 168, 132, 0.35);">
+                            💬
+                        </div>
+                        <div>
+                            <h2 style="font-size: 20px; font-weight: 600; color: #e9edef; margin: 0;">Use WhatsApp on your computer</h2>
+                            <p style="font-size: 13px; color: #8696a0; margin: 2px 0 0 0;">Unified OpsFlow WhatsApp Web &amp; Multi-Tenant Gateway</p>
+                        </div>
+                    </div>
+
+                    <ol class="wa-connect-steps">
+                        <li>Open <strong>WhatsApp</strong> on your mobile phone.</li>
+                        <li>Tap <strong>Menu</strong> (Android ⋮) or <strong>Settings</strong> (iPhone ⚙️) and select <strong>Linked Devices</strong>.</li>
+                        <li>Tap on <strong>Link a Device</strong>.</li>
+                        <li>Point your phone to this screen to capture the QR code.</li>
+                    </ol>
+
+                    <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button type="button" class="hud-btn primary" onclick="openWhatsAppConnectGuide()" style="padding: 10px 18px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px;">
+                                <span>🔗</span> Connect WhatsApp (Green-API / Meta)
+                            </button>
+                            <button type="button" class="hud-btn outline" onclick="enableWhatsAppDemoMode()" style="padding: 10px 16px; display: inline-flex; align-items: center; gap: 6px;">
+                                <span>🧪</span> Launch Local Sandbox (Demo)
+                            </button>
+                        </div>
+                        <div style="margin-top: 6px; font-size: 12px; color: #8696a0; display: flex; align-items: center; gap: 6px;">
+                            <span>💡</span>
+                            <span>Supports instant QR linking via Green-API and official Meta Cloud API WABA webhooks.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Pane: Authentic QR Code Frame -->
+                <div class="wa-connect-right">
+                    <div class="wa-qr-box" id="waQrBox">
+                        <img id="waDynamicQrImg" src="" alt="WhatsApp QR Code" style="display: none; width: 250px; height: 250px; object-fit: contain; border-radius: 8px;" />
+                        <div id="waStaticQrPlaceholder" style="width: 250px; height: 250px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative;">
+                            <!-- Authentic SVG QR Code Representation -->
+                            <svg viewBox="0 0 200 200" width="230" height="230" style="shape-rendering: crispEdges;">
+                                <rect width="200" height="200" fill="#ffffff"/>
+                                <!-- Top-left finder pattern -->
+                                <rect x="15" y="15" width="45" height="45" fill="#111b21"/>
+                                <rect x="22" y="22" width="31" height="31" fill="#ffffff"/>
+                                <rect x="29" y="29" width="17" height="17" fill="#111b21"/>
+                                <!-- Top-right finder pattern -->
+                                <rect x="140" y="15" width="45" height="45" fill="#111b21"/>
+                                <rect x="147" y="22" width="31" height="31" fill="#ffffff"/>
+                                <rect x="154" y="29" width="17" height="17" fill="#111b21"/>
+                                <!-- Bottom-left finder pattern -->
+                                <rect x="15" y="140" width="45" height="45" fill="#111b21"/>
+                                <rect x="22" y="147" width="31" height="31" fill="#ffffff"/>
+                                <rect x="29" y="154" width="17" height="17" fill="#111b21"/>
+                                <!-- Simulated authentic QR data modules -->
+                                <rect x="70" y="20" width="10" height="10" fill="#111b21"/>
+                                <rect x="90" y="20" width="15" height="10" fill="#111b21"/>
+                                <rect x="115" y="20" width="10" height="10" fill="#111b21"/>
+                                <rect x="70" y="40" width="20" height="10" fill="#111b21"/>
+                                <rect x="100" y="40" width="10" height="10" fill="#111b21"/>
+                                <rect x="120" y="40" width="10" height="10" fill="#111b21"/>
+                                <rect x="20" y="70" width="10" height="20" fill="#111b21"/>
+                                <rect x="40" y="70" width="20" height="10" fill="#111b21"/>
+                                <rect x="70" y="70" width="10" height="10" fill="#111b21"/>
+                                <rect x="90" y="70" width="20" height="10" fill="#111b21"/>
+                                <rect x="120" y="70" width="10" height="20" fill="#111b21"/>
+                                <rect x="140" y="70" width="20" height="10" fill="#111b21"/>
+                                <rect x="170" y="70" width="10" height="10" fill="#111b21"/>
+                                <rect x="20" y="100" width="20" height="10" fill="#111b21"/>
+                                <rect x="50" y="100" width="10" height="10" fill="#111b21"/>
+                                <rect x="140" y="100" width="15" height="10" fill="#111b21"/>
+                                <rect x="165" y="100" width="15" height="10" fill="#111b21"/>
+                                <rect x="20" y="120" width="10" height="10" fill="#111b21"/>
+                                <rect x="40" y="120" width="20" height="10" fill="#111b21"/>
+                                <rect x="70" y="120" width="10" height="20" fill="#111b21"/>
+                                <rect x="90" y="120" width="20" height="10" fill="#111b21"/>
+                                <rect x="120" y="120" width="10" height="10" fill="#111b21"/>
+                                <rect x="140" y="120" width="20" height="20" fill="#111b21"/>
+                                <rect x="170" y="120" width="10" height="10" fill="#111b21"/>
+                                <rect x="70" y="150" width="20" height="10" fill="#111b21"/>
+                                <rect x="100" y="150" width="10" height="20" fill="#111b21"/>
+                                <rect x="120" y="150" width="20" height="10" fill="#111b21"/>
+                                <rect x="150" y="150" width="10" height="10" fill="#111b21"/>
+                                <rect x="170" y="150" width="10" height="20" fill="#111b21"/>
+                                <rect x="70" y="170" width="10" height="10" fill="#111b21"/>
+                                <rect x="90" y="170" width="20" height="10" fill="#111b21"/>
+                                <rect x="120" y="170" width="20" height="10" fill="#111b21"/>
+                                <rect x="150" y="170" width="10" height="10" fill="#111b21"/>
+                                <!-- Center WhatsApp Emblem Badge -->
+                                <circle cx="100" cy="100" r="22" fill="#00a884" stroke="#ffffff" stroke-width="3"/>
+                                <path d="M100 86c-7.7 0-14 6.3-14 14 0 2.5.7 4.9 1.9 7L86 114l7.2-1.9c2 1.1 4.3 1.7 6.8 1.7 7.7 0 14-6.3 14-14s-6.3-13.8-14-13.8zm7.1 19.6c-.3.8-1.7 1.6-2.4 1.7-.6.1-1.4.2-4-.9-3.3-1.4-5.4-4.8-5.6-5-.2-.2-1.4-1.9-1.4-3.6 0-1.7.9-2.6 1.2-2.9.3-.3.7-.4 1-.4.2 0 .5 0 .7.1.2.1.6.2.9.8.3.7 1.1 2.7 1.2 2.9.1.2.1.4 0 .6-.1.2-.2.3-.3.5-.2.2-.3.4-.5.5-.2.2-.4.4-.2.8.2.4 1.1 1.8 2.4 3 1.6 1.5 3 1.9 3.4 2.1.4.2.7.2.9-.1.3-.3 1.1-1.3 1.4-1.8.3-.4.6-.4 1-.2.4.1 2.5 1.2 2.9 1.4.4.2.7.3.8.5.1.2.1 1.2-.2 2z" fill="#ffffff"/>
+                            </svg>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 14px; display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #aebac1; cursor: pointer; user-select: none;">
+                            <input type="checkbox" id="waStayLoggedInCheck" checked style="accent-color: #00a884; cursor: pointer;">
+                            <span>Stay logged in on this browser</span>
+                        </label>
+                        <div id="waQrStatusText" style="font-size: 11.5px; color: #00a884; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                            <span>●</span>
+                            <span>Scan with WhatsApp to link device</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- VIEW 1: WHATSAPP WEB FULL REPLICA -->
             <div id="waWebViewContainer" class="wa-web-app" style="margin-bottom: 24px;">
                 <!-- SIDEBAR: CONTACTS & SEARCH -->
@@ -60,7 +171,8 @@
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <button type="button" class="wa-icon-btn" title="Sync Inbound Messages" id="btnSyncWhatsAppWeb" onclick="syncWhatsAppMessagesNow()">🔄</button>
                             <button type="button" class="wa-icon-btn" title="Start New Conversation" onclick="promptNewConversation()">➕</button>
-                            <button type="button" class="wa-icon-btn" title="Configure Gateway" onclick="setWhatsAppViewMode('classic')">⚙️</button>
+                            <button type="button" class="wa-icon-btn" title="Configure Gateway" onclick="openWhatsAppConnectGuide()">⚙️</button>
+                            <button type="button" class="wa-icon-btn" title="Disconnect WhatsApp" id="waBtnDisconnect" onclick="disconnectWhatsApp()" style="color: #ef4444;">⏻</button>
                         </div>
                     </div>
 
@@ -318,5 +430,119 @@
 
     </main>
     <script src="/static/js/app.js"></script>
+    <!-- WHATSAPP GATEWAY CONFIG MODAL -->
+    <div class="hud-modal-overlay" id="whatsappConnectModal" style="display:none;">
+        <div class="hud-modal" style="max-width: 620px;">
+            <div class="modal-header">
+                <div class="hud-flex-row hud-gap-sm">
+                    <span style="font-size: 20px;">💬</span>
+                    <h3 id="waConnectModalTitle">WhatsApp Business Gateway Configuration</h3>
+                </div>
+                <button class="close-btn" onclick="closeWhatsAppConnectModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <p style="font-size: 0.86rem; color: #cbd5e1; margin-bottom: 14px;">
+                    Connect your WhatsApp messaging provider for automated incident dispatch, CRM outreach, and inbound webhook ingestion.
+                </p>
+
+                <!-- Provider Selector Switcher Tabs -->
+                <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color, #334155); padding-bottom: 10px;">
+                    <button type="button" class="hud-btn primary small" id="waTabBtnGreenApi" onclick="selectWaConfigProvider('green_api')">
+                        <span>⚡</span> Green-API (Instant QR / Instance)
+                    </button>
+                    <button type="button" class="hud-btn outline small" id="waTabBtnMeta" onclick="selectWaConfigProvider('meta')">
+                        <span>🏢</span> Meta Cloud API (Official WABA)
+                    </button>
+                </div>
+
+                <form id="waConfigForm" onsubmit="handleSaveWhatsAppConfig(event)">
+                    <input type="hidden" id="waSelectedProvider" value="green_api">
+
+                    <!-- GREEN-API CONFIGURATION SECTION -->
+                    <div id="waGreenApiConfigSection" style="display: block;">
+                        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; font-size: 0.82rem; color: #34d399;">
+                            <strong>Green-API Fast Setup:</strong> Copy your <code>idInstance</code> and <code>apiTokenInstance</code> from your Green-API console. No Meta app review required!
+                        </div>
+
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">Instance ID (idInstance) *</label>
+                            <input type="text" id="waConfigGreenId" class="hud-input hud-mono-text" placeholder="e.g., 1101820000">
+                            <span class="hud-subtext">Found in Green-API Instance Dashboard</span>
+                        </div>
+
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">API Token Instance (apiTokenInstance) *</label>
+                            <div style="display: flex; gap: 6px;">
+                                <input type="password" id="waConfigGreenToken" class="hud-input hud-mono-text" placeholder="e.g., d75b3a8c1f9e2..." style="flex: 1;">
+                                <button type="button" class="hud-btn small outline" onclick="toggleGreenTokenVisibility()">Show</button>
+                            </div>
+                            <span class="hud-subtext">Secret instance API token for outbound messages &amp; webhook authorization</span>
+                        </div>
+
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">API Host URL</label>
+                            <input type="text" id="waConfigGreenHost" class="hud-input hud-mono-text" value="https://api.greenapi.com" placeholder="https://api.greenapi.com">
+                            <span class="hud-subtext">Default: <code>https://api.greenapi.com</code> (or custom cluster e.g. <code>https://7103.api.greenapi.com</code>)</span>
+                        </div>
+
+                        <div class="form-group hud-mb-lg">
+                            <label class="hud-label">Green-API Webhook Callback URL</label>
+                            <div style="display: flex; gap: 6px;">
+                                <input type="text" id="waModalGreenWebhookUrl" class="hud-input" readonly value="/api/v1/webhooks/whatsapp/green-api" style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px; background: rgba(0,0,0,0.25);">
+                                <button type="button" class="hud-btn small outline" onclick="copyModalGreenWebhookUrl()">Copy</button>
+                            </div>
+                            <span class="hud-subtext">Paste this URL into your Green-API console under <em>Webhook &gt; Set Webhook</em> to receive real-time chats!</span>
+                        </div>
+                    </div>
+
+                    <!-- META CLOUD API CONFIGURATION SECTION -->
+                    <div id="waMetaConfigSection" style="display: none;">
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">Phone Number ID *</label>
+                            <input type="text" id="waConfigPhoneId" class="hud-input hud-mono-text" placeholder="e.g., 109283746509876">
+                            <span class="hud-subtext">Found in Meta App Dashboard &gt; WhatsApp &gt; API Setup</span>
+                        </div>
+
+                        <div class="form-group hud-mb-md">
+                            <label class="hud-label">System User Access Token *</label>
+                            <div style="display: flex; gap: 6px;">
+                                <input type="password" id="waConfigAccessToken" class="hud-input hud-mono-text" placeholder="EAAG..." style="flex: 1;">
+                                <button type="button" class="hud-btn small outline" onclick="toggleWaConfigTokenVisibility()">Show</button>
+                            </div>
+                            <span class="hud-subtext">Permanent System User access token with whatsapp_business_messaging permission</span>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                            <div class="form-group">
+                                <label class="hud-label">WABA ID (Account ID)</label>
+                                <input type="text" id="waConfigWabaId" class="hud-input hud-mono-text" placeholder="e.g., 987654321012345">
+                            </div>
+                            <div class="form-group">
+                                <label class="hud-label">Meta App Secret</label>
+                                <input type="password" id="waConfigAppSecret" class="hud-input hud-mono-text" placeholder="App Secret for Webhook HMAC">
+                            </div>
+                        </div>
+
+                        <div class="form-group hud-mb-lg">
+                            <label class="hud-label">Webhook Verify Token</label>
+                            <input type="text" id="waConfigVerifyToken" class="hud-input hud-mono-text" value="opsflow_whatsapp_verify_2026">
+                        </div>
+                    </div>
+
+                    <!-- Connection Diagnostics Output Box -->
+                    <div id="waConnectionTestOutput" style="display: none; padding: 12px; border-radius: 6px; font-size: 12px; margin-bottom: 16px; border: 1px solid transparent;"></div>
+
+                    <div style="display: flex; gap: 8px; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 14px;">
+                        <button type="button" class="hud-btn outline" id="btnTestWaConnection" onclick="handleTestWhatsAppConnection()">⚡ Test Connection</button>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="hud-btn outline" onclick="closeWhatsAppConnectModal()">Cancel</button>
+                            <button type="submit" class="hud-btn primary" id="btnSaveWaConfig">Save &amp; Activate</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>

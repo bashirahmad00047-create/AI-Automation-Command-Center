@@ -121,10 +121,23 @@ class WhatsAppService:
             (r"(?i)\b(inshallah|in sha allah)\b[,.]?", "انشاءاللہ،"),
             (r"(?i)\b(fikr na karein|pareshan na hon|koi masla nahi)\b[,.]?", "آپ بے فکر رہیں،"),
             (r"(?i)\b(theek hai|okay|ok)\b[,.]?", "جی ٹھیک ہے،"),
-            (r"(?i)\b(barah[\s\-]?e[\s\-]?karam|please)\b[,.]?", "مہربانی فرما کر،")
+            (r"(?i)\b(barah[\s\-]?e[\s\-]?karam|please)\b[,.]?", "مہربانی فرما کر،"),
+            (r"(?i)\b(jazakallah|jazak allah)\b[,.]?", "جزاک اللہ،"),
+            (r"(?i)\b(alhamdulillah|al-hamdu lillah)\b[,.]?", "الحمدللہ،"),
+            (r"(?i)\b(subhanallah)\b[,.]?", "سبحان اللہ،"),
+            (r"(?i)\b(yaqeenan|bilkul zaroor)\b[,.]?", "یقیناً،"),
+            (r"(?i)\b(ji zaroor|zaroor)\b[,.]?", "جی ضرور،"),
+            (r"(?i)\b(apki rehnumai|aapki rehnumai)\b[,.]?", "آپ کی مکمل رہنمائی،")
         ]
         for pattern, replacement in greetings_map:
             t = re.sub(pattern, replacement, t, count=1)
+
+        # Spoken expansion of logistics & medical terminology for fluid Pakistani Urdu cadence
+        t = re.sub(r"(?i)\b(tracking[\s\-]?(id|number|no)?|consignment[\s\-]?(id|number|no)?)\b[:\s]*", "ٹریکنگ نمبر، ", t)
+        t = re.sub(r"(?i)\b(invoice[\s\-]?(id|number|no)?)\b[:\s]*", "انوائس نمبر، ", t)
+        t = re.sub(r"(?i)\bTCS\b", "ٹی سی ایس", t)
+        t = re.sub(r"(?i)\bM&P\b", "ایم اینڈ پی", t)
+        t = re.sub(r"(?i)\bLeopards\b", "لیپرڈز", t)
 
         # 6. Smooth out redundant commas or spaces
         t = re.sub(r"[,\،]{2,}", "،", t)
@@ -159,7 +172,7 @@ class WhatsAppService:
         user_prompt = prompt.strip() if prompt and len(prompt.strip()) > 3 else "Please examine this image carefully. Provide a polite, helpful analysis addressing any logistics documents, medical invoices, prescriptions, parcels, or receipts visible in the image."
 
         full_prompt = (
-            f"You are a polite Urdu logistics and medical billing expert for {b_name}.\n"
+            f"You are a polite Urdu logistics & medical billing expert for {b_name}.\n"
             f"{cust_label} has shared an image with the inquiry: '{user_prompt}'.\n"
             "Analyze the contents of this image accurately and respond politely in 2-3 concise sentences in the customer's language (Urdu/Roman Urdu or English). Do NOT use markdown symbols (*, #)."
         )
@@ -2530,15 +2543,17 @@ class WhatsAppService:
         lang_directive = cls.get_language_prompt_directive(lang_info, clean_text)
         pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
         prompt = (
-            f"You are a polite, knowledgeable, and highly professional Urdu logistics & medical billing expert assisting customers of {b_name}.\n"
+            f"You are an empathetic, highly intelligent Urdu logistics & medical billing expert assisting customers of {b_name}.\n"
             f"Current Real-World Time: {pkt_time_str}.\n"
             f"{sys_instruct}{history_section}\n\n"
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"STRICT RESPONSE RULES:\n"
-            f"1. Persona & Tone: Polite, courteous Urdu logistics & medical billing expert (نرم گفتار، بااخلاق اور پیشہ ورانہ انداز).\n"
-            f"2. Length: Strictly keep the response short (exactly 2 to 3 sentences maximum).\n"
-            f"3. Pure Clean Text: DO NOT use markdown symbols (no asterisks '*', hashtags '#', underscores '_', backticks). Provide pure, clean conversational text ready for voice reading and WhatsApp display."
+            f"DEEP CONTEXTUAL REASONING & ACCURACY PROTOCOL (لازمی ہدایات):\n"
+            f"1. Deep Reasoning & Intent Comprehension (گہری فہم و ادراک): Thoroughly analyze every inquiry point, implied concern, invoice/order query, or logistical request in context. Use the recent conversation history to provide coherent, contextual responses.\n"
+            f"2. Point-by-Point Accurate Resolution (تمام سوالات کا جامع و درست جواب): If the customer asks multiple questions (e.g., shipping charges, delivery time, billing breakdown, or payment methods), answer every single inquiry point accurately based on verified knowledge. Do not skip any detail.\n"
+            f"3. Natural Pakistani Urdu Cadence & Warmth (پرتپاک، شائستہ اور فطری پاکستانی لہجہ): Speak in a warm, polite, reassuring colloquial Pakistani Urdu tone (شائستہ، ہمدردانہ اور باوقار انداز). Avoid stiff literal translations, rigid news-anchor cadence, or robotic corporate disclaimers.\n"
+            f"4. Concise Human Pacing: Deliver your answer in 2 to 4 smooth, well-crafted conversational sentences covering all points thoroughly.\n"
+            f"5. Pure Spoken Clean Text: DO NOT use markdown symbols (no asterisks '*', hashtags '#', underscores '_', backticks, bullet symbols). Provide pure, clean conversational text ready for natural human speech synthesis and WhatsApp messaging."
         )
 
         configured_model = cls.get_gemini_model_name(organization_id=organization_id)
@@ -2731,11 +2746,17 @@ class WhatsAppService:
         b_name = cls.get_tenant_business_name(organization_id=organization_id)
         pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
         user_prompt = (
-            f"You are a polite, knowledgeable, and highly professional Urdu logistics & medical billing expert assisting customers of {b_name}.\n"
+            f"You are an empathetic, highly intelligent Urdu logistics & medical billing expert assisting customers of {b_name}.\n"
             f"Current Real-World Time: {pkt_time_str}.\n\n"
+            f"{sys_instruct}{history_section}\n\n"
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"STRICT RULES: Respond as a polite Urdu logistics and medical billing expert in strictly 2 to 3 sentences. DO NOT use markdown symbols (*, #, _, ~). Keep text 100% clean and conversational."
+            f"DEEP CONTEXTUAL REASONING & ACCURACY PROTOCOL:\n"
+            f"1. Deep Intent Comprehension: Reason through customer needs, context, and conversation history.\n"
+            f"2. Point-by-Point Accuracy: Accurately resolve every specific inquiry point (rates, tracking, billing).\n"
+            f"3. Persona & Warmth: Polite, courteous, soft-spoken Pakistani Urdu cadence (شائستہ، بااخلاق اور ہمدردانہ انداز).\n"
+            f"4. Length & Pacing: 2 to 4 smooth sentences with natural conversational flow.\n"
+            f"5. Pure Clean Text: DO NOT use markdown symbols (*, #, _, `, bullets). Keep text 100% clean for voice reading."
         )
 
         configured_groq_model = (
@@ -3841,6 +3862,49 @@ class WhatsAppService:
     def is_configured(cls, organization_id: Optional[str] = None) -> bool:
         """Returns True if either Meta Cloud API or Green-API credentials are configured."""
         return cls.is_green_api_configured(organization_id=organization_id) or cls.is_meta_configured(organization_id=organization_id)
+
+    @classmethod
+    def get_green_api_qr(cls, organization_id: Optional[str] = None) -> Dict[str, Any]:
+        """Fetches WhatsApp Web pairing QR code or state from configured Green-API instance."""
+        conf = cls.get_config(organization_id=organization_id)
+        id_inst = conf.get("green_api_id_instance", "")
+        tok_inst = conf.get("green_api_token_instance", "")
+        host = cls.normalize_green_api_host(conf.get("green_api_host"), id_inst)
+
+        if not id_inst or not tok_inst:
+            return {
+                "success": False,
+                "type": "not_configured",
+                "message": "Green-API credentials are not configured yet."
+            }
+
+        url = f"{host}/waInstance{id_inst}/qr/{tok_inst}"
+        timeouts = cls.get_timeout_tuple()
+        try:
+            with cls.get_http_session(retries=1) as session:
+                resp = session.get(url, timeout=timeouts)
+                if resp.status_code == 200:
+                    data = resp.json() if resp.text and resp.text.strip().startswith("{") else {}
+                    t = data.get("type", "qrCode")
+                    msg = data.get("message", "")
+                    return {
+                        "success": True,
+                        "type": t,
+                        "qr_data": msg,
+                        "message": "Live QR code fetched successfully" if t == "qrCode" else msg
+                    }
+                return {
+                    "success": False,
+                    "type": "error",
+                    "status_code": resp.status_code,
+                    "message": f"HTTP {resp.status_code}: {resp.text[:200]}"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "type": "exception",
+                "message": str(e)
+            }
 
     @classmethod
     def test_green_api_connection(cls, organization_id: Optional[str] = None) -> Dict[str, Any]:

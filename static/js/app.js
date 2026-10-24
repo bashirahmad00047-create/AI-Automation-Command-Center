@@ -4928,22 +4928,78 @@ function formatAudioSeconds(sec) {
 }
 
 function setWhatsAppViewMode(mode) {
+    window._waCurrentViewMode = mode;
     const btnWeb = document.getElementById('btnViewWaWeb');
     const btnClassic = document.getElementById('btnViewWaClassic');
     const webContainer = document.getElementById('waWebViewContainer');
+    const connectContainer = document.getElementById('waConnectState');
     const classicContainer = document.getElementById('waClassicViewContainer');
+    const banner = document.getElementById('whatsappModeBanner');
+
+    const isConnected = Boolean(window._waIsConnected || window._waDemoMode);
 
     if (mode === 'web') {
         if (btnWeb) btnWeb.classList.add('active');
         if (btnClassic) btnClassic.classList.remove('active');
-        if (webContainer) webContainer.style.display = 'flex';
         if (classicContainer) classicContainer.style.display = 'none';
-        renderWhatsAppWebUI(waAllMessagesCache);
+        if (banner) banner.style.display = 'none'; // Clean unified experience without redundant top banner clutter
+
+        if (isConnected) {
+            if (connectContainer) connectContainer.style.display = 'none';
+            if (webContainer) webContainer.style.display = 'flex';
+            renderWhatsAppWebUI(waAllMessagesCache);
+        } else {
+            if (webContainer) webContainer.style.display = 'none';
+            if (connectContainer) {
+                connectContainer.style.display = 'flex';
+                fetchWhatsAppQrCode();
+            }
+        }
     } else {
         if (btnWeb) btnWeb.classList.remove('active');
         if (btnClassic) btnClassic.classList.add('active');
+        if (connectContainer) connectContainer.style.display = 'none';
         if (webContainer) webContainer.style.display = 'none';
         if (classicContainer) classicContainer.style.display = 'flex';
+        if (banner) banner.style.display = 'flex';
+    }
+}
+
+function enableWhatsAppDemoMode() {
+    window._waDemoMode = true;
+    if (typeof showToast === 'function') {
+        showToast('Local Sandbox Demo Mode activated. Full WhatsApp Web console unlocked.', 'info');
+    }
+    setWhatsAppViewMode('web');
+}
+
+async function fetchWhatsAppQrCode() {
+    const qrImg = document.getElementById('waDynamicQrImg');
+    const qrStatic = document.getElementById('waStaticQrPlaceholder');
+    const qrStatus = document.getElementById('waQrStatusText');
+    try {
+        const res = await fetch('/api/v1/whatsapp/qr');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.type === 'qrCode' && data.qr_data) {
+                if (qrImg) {
+                    qrImg.src = data.qr_data.startsWith('data:') ? data.qr_data : `data:image/png;base64,${data.qr_data}`;
+                    qrImg.style.display = 'block';
+                }
+                if (qrStatic) qrStatic.style.display = 'none';
+                if (qrStatus) qrStatus.innerHTML = '<span>●</span><span>Scan QR code with WhatsApp</span>';
+            } else if (data.type === 'alreadyLogged') {
+                if (qrStatus) qrStatus.innerHTML = '<span>●</span><span>Already linked! Transitioning...</span>';
+                window._waIsConnected = true;
+                setTimeout(() => loadWhatsAppDashboard(), 600);
+            } else {
+                if (qrImg) qrImg.style.display = 'none';
+                if (qrStatic) qrStatic.style.display = 'flex';
+                if (qrStatus) qrStatus.innerHTML = '<span>●</span><span>Scan with WhatsApp or click Connect</span>';
+            }
+        }
+    } catch (e) {
+        console.debug('Failed to fetch WhatsApp QR code:', e);
     }
 }
 
@@ -5945,6 +6001,38 @@ async function loadWhatsAppDashboard() {
                 }
             }
         }
+
+        // Update connection state tracking and toggle UI view
+        const isConnected = isConfigured && (activeProvider === 'green_api' || activeProvider === 'meta');
+        window._waIsConfigured = isConfigured;
+        window._waActiveProvider = activeProvider;
+        window._waIsConnected = isConnected;
+
+        const currentMode = window._waCurrentViewMode || 'web';
+        const sidebarStatus = document.getElementById('waSidebarStatus');
+        if (sidebarStatus) {
+            if (activeProvider === 'green_api') {
+                sidebarStatus.textContent = '● Green-API Online';
+                sidebarStatus.style.color = '#00a884';
+            } else if (activeProvider === 'meta') {
+                sidebarStatus.textContent = '● Meta Connected';
+                sidebarStatus.style.color = '#00a884';
+            } else if (window._waDemoMode) {
+                sidebarStatus.textContent = '🧪 Sandbox Demo';
+                sidebarStatus.style.color = '#00f0ff';
+            } else {
+                sidebarStatus.textContent = '● Disconnected';
+                sidebarStatus.style.color = '#8696a0';
+            }
+        }
+
+        const disconnectBtn = document.getElementById('waBtnDisconnect');
+        if (disconnectBtn) {
+            disconnectBtn.style.display = (isConnected || window._waDemoMode) ? 'inline-flex' : 'none';
+        }
+
+        // Apply clean view transition
+        setWhatsAppViewMode(currentMode);
 
         // 2. Load and render messages
         await loadWhatsAppMessagesOnly(isConfigured);
