@@ -1562,7 +1562,95 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
         self.assertIn("بہت شکریہ،", spoken)
 
 
+    def test_render_keep_alive_service_and_endpoints(self):
+        """Verifies Render anti-spindown keep-alive service detects environment, pings target, and exposes health endpoints."""
+        from keep_alive_service import KeepAliveService
+
+        # 1. Environment and URL resolution
+        with patch.dict(os.environ, {"RENDER_EXTERNAL_URL": "https://custom-app.onrender.com"}):
+            self.assertTrue(KeepAliveService.is_render_environment())
+            self.assertEqual(KeepAliveService.resolve_target_url(), "https://custom-app.onrender.com")
+            self.assertEqual(KeepAliveService.get_ping_url(), "https://custom-app.onrender.com/api/v1/ping")
+
+        # 2. Ping now with mocked HTTP request
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        with patch("requests.get", return_value=mock_resp):
+            res = KeepAliveService.ping_now(timeout=5.0)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["status_code"], 200)
+
+        # 3. HTTP endpoints
+        resp_root = self.client.get("/ping")
+        self.assertEqual(resp_root.status_code, 200)
+        self.assertEqual(resp_root.get_json()["status"], "ok")
+
+        resp_healthz = self.client.get("/healthz")
+        self.assertEqual(resp_healthz.status_code, 200)
+        self.assertEqual(resp_healthz.get_json()["status"], "ok")
+
+        resp_api = self.client.get("/api/v1/ping")
+        self.assertEqual(resp_api.status_code, 200)
+        self.assertEqual(resp_api.get_json()["status"], "ok")
+
+        # 4. Status endpoint
+        resp_status = self.client.get("/api/v1/keep-alive/status")
+        self.assertEqual(resp_status.status_code, 200)
+        data_status = resp_status.get_json()
+        self.assertIn("target_url", data_status)
+        self.assertIn("interval_seconds", data_status)
+
+    def test_inbound_webhook_responsiveness_and_production_async(self):
+        """Verifies inbound webhooks return HTTP 200 immediately and spawn background threads in production."""
+        import threading
+        sample_payload = {
+            "typeWebhook": "incomingMessageReceived",
+            "idMessage": "RESPONSIVENESS_MSG_001",
+            "timestamp": 1774000000,
+            "senderData": {
+                "chatId": "923331112233@c.us",
+                "chatName": "Responsive Customer",
+                "sender": "923331112233@c.us"
+            },
+            "messageData": {
+                "typeMessage": "textMessage",
+                "textMessageData": {
+                    "textMessage": "Hello OpsFlow, testing fast webhook responsiveness!"
+                }
+            }
+        }
+
+        # In testing mode: executes synchronously and persists to DB
+        resp = self.client.post("/api/v1/webhooks/whatsapp/green-api", json=sample_payload)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["processed"], 1)
+
+        # Verify DB record is persisted
+        rec = WhatsAppMessage.query.filter_by(whatsapp_message_id="RESPONSIVENESS_MSG_001").first()
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec.direction, "inbound")
+        self.assertIn("responsiveness", rec.body)
+
+        # In production mode (TESTING=False): verifies thread dispatch for instant responsiveness
+        with patch.dict(self.app.config, {"TESTING": False}):
+            sample_payload_2 = dict(sample_payload)
+            sample_payload_2["idMessage"] = "RESPONSIVENESS_MSG_002"
+
+            with patch("threading.Thread") as mock_thread_cls:
+                mock_t_instance = MagicMock()
+                mock_thread_cls.return_value = mock_t_instance
+                resp_prod = self.client.post("/api/v1/webhooks/whatsapp/green-api", json=sample_payload_2)
+                self.assertEqual(resp_prod.status_code, 200)
+                self.assertEqual(resp_prod.get_json()["status"], "ok")
+                # Confirms background thread was spawned to offload work
+                mock_thread_cls.assert_called()
+                mock_t_instance.start.assert_called()
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

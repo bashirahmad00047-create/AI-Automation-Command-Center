@@ -1007,6 +1007,24 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "code": "INTERNAL_SERVER_ERROR"
         }), 500
 
+    @application.route("/ping", methods=["GET"])
+    @application.route("/healthz", methods=["GET"])
+    def render_health_ping():
+        """Ultra-fast, zero-overhead health ping for Render keep-alive and cloud monitors."""
+        return jsonify({
+            "status": "ok",
+            "service": "OpsFlow Cloud",
+            "keep_alive": True,
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+        }), 200
+
+    # Start Render Free Tier anti-spindown keep-alive pinger daemon
+    try:
+        from keep_alive_service import KeepAliveService
+        KeepAliveService.start(application)
+    except Exception as _ka_err:
+        application.logger.warning(f"Could not start Keep-Alive service: {_ka_err}")
+
     return application
 
 
