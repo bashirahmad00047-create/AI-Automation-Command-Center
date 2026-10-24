@@ -2023,6 +2023,45 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
                 self.assertIn("[Outbound Live Audit] Green-API sendMessage payload", logs_str)
                 self.assertIn("[Outbound Live Audit] Green-API sendMessage response", logs_str)
 
+    def test_force_dispatch_logic_invokes_send_green_api_message_without_early_return(self):
+        """Verifies that inbound chat and transcribed voice notes explicitly invoke send_green_api_message without early return."""
+        WhatsAppService.clear_in_flight_phones()
+        WhatsAppService.clear_recent_replied_trigger_ids()
+
+        with patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake-key"), \
+             patch.object(WhatsAppService, "call_gemini_ai", return_value="Salam! Force dispatch response text."), \
+             patch.object(WhatsAppService, "send_green_api_message", return_value={"success": True, "whatsapp_message_id": "GREEN_FORCE_001"}) as mock_green_msg:
+
+            # 1. Inbound chat invokes send_green_api_message explicitly
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id="org-enterprise-default",
+                sender_phone="923001234567",
+                message_body="Force dispatch test chat",
+                message_id="MSG_FORCE_001"
+            )
+            self.assertIsNotNone(res)
+            mock_green_msg.assert_called_once()
+            self.assertEqual(mock_green_msg.call_args[1]["to_phone"], "923001234567")
+            self.assertEqual(mock_green_msg.call_args[1]["message_text"], "Salam! Force dispatch response text.")
+            self.assertEqual(mock_green_msg.call_args[1]["quoted_message_id"], "MSG_FORCE_001")
+
+            # 2. Inbound transcribed voice note invokes send_green_api_message explicitly
+            mock_green_msg.reset_mock()
+            with patch.object(WhatsAppService, "_download_media", return_value=b"audio"), \
+                 patch.object(WhatsAppService, "_transcribe_audio", return_value="Transcribed voice test"):
+
+                res_voice = WhatsAppService.handle_inbound_auto_response(
+                    organization_id="org-enterprise-default",
+                    sender_phone="923001234567",
+                    message_body="[Voice note]",
+                    message_id="MSG_FORCE_VOICE_002",
+                    is_voice=True
+                )
+                self.assertIsNotNone(res_voice)
+                mock_green_msg.assert_called_once()
+                self.assertEqual(mock_green_msg.call_args[1]["to_phone"], "923001234567")
+                self.assertEqual(mock_green_msg.call_args[1]["quoted_message_id"], "MSG_FORCE_VOICE_002")
+
 if __name__ == "__main__":
     unittest.main()
 
