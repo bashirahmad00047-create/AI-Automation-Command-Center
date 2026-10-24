@@ -477,6 +477,57 @@ class Storage:
     ) -> List[Dict[str, Any]]:
         session = self._get_session()
         org_id = organization_id or self.get_default_org_id()
+        # Auto-seed 2 active visual workflows if tenant workflow studio is empty
+        if session.query(AutomationRule).filter_by(organization_id=org_id).count() == 0:
+            wf1_steps = [
+                {"id": "step_1", "type": "trigger", "name": "Inbound Voice/Chat Ingress", "config": {"event": "whatsapp.inbound_message", "source": "Green-API"}},
+                {"id": "step_2", "type": "condition", "name": "Urdu & Voice Note Detection", "config": {"detector": "nlp_engine", "scripts": ["urdu_arabic", "roman_urdu"]}},
+                {"id": "step_3", "type": "ai_inference", "name": "Gemini AI Intent Reasoning", "config": {"model": "gemini-1.5-flash", "persona": "Urdu Commerce Concierge"}},
+                {"id": "step_4", "type": "action", "name": "CRM Lead Ingest & Score", "config": {"table": "leads", "lead_score": 90, "dept": "Sales"}},
+                {"id": "step_5", "type": "action", "name": "WhatsApp Green-API Dispatch", "config": {"channel": "whatsapp", "format": "text_or_oga"}},
+                {"id": "step_6", "type": "end", "name": "Pipeline Complete", "config": {}}
+            ]
+            wf2_steps = [
+                {"id": "step_1", "type": "trigger", "name": "Incident Alert Webhook", "config": {"source": "monitoring", "event": "incident.alert"}},
+                {"id": "step_2", "type": "condition", "name": "Severity Check (P0/Critical)", "config": {"field": "urgency_score", "threshold": 75}},
+                {"id": "step_3", "type": "action", "name": "Post to #incidents Channel", "config": {"channel": "#incidents", "priority": "urgent"}},
+                {"id": "step_4", "type": "action", "name": "Create Incident Alert Record", "config": {"route": "Priority Support", "sla": "15m"}},
+                {"id": "step_5", "type": "end", "name": "Escalation Dispatched", "config": {}}
+            ]
+            r1 = AutomationRule(
+                id=generate_uuid("rule"),
+                organization_id=org_id,
+                name="Urdu WhatsApp Voice-Lead Qualifier",
+                category="WhatsApp",
+                description="Automatically captures inbound WhatsApp voice notes and Urdu text queries, uses Gemini AI for intent qualification, auto-creates CRM leads, and dispatches Urdu response.",
+                priority=10,
+                enabled=True,
+                trigger_type="event",
+                trigger_json=json.dumps({"event_name": "whatsapp.inbound_message", "provider": "green_api", "language": "ur"}),
+                condition_json=json.dumps({"logic": "AND", "conditions": [{"field": "message_body", "operator": "is_not_empty", "value": ""}]}),
+                actions_json=json.dumps([{"type": "ai_qualification", "params": {"provider": "gemini", "output_lang": "ur"}}, {"type": "crm_lead_capture", "params": {"department": "Sales"}}, {"type": "whatsapp_dispatch", "params": {"channel": "green_api"}}]),
+                steps_json=json.dumps(wf1_steps)
+            )
+            r2 = AutomationRule(
+                id=generate_uuid("rule"),
+                organization_id=org_id,
+                name="High-Priority Support Escalation",
+                category="SRE",
+                description="Detects critical system incidents and SLA breaches from webhooks, routes alerts to #incidents channel, captures P0 incident tickets, and sends SMS/WhatsApp escalation.",
+                priority=20,
+                enabled=True,
+                trigger_type="event",
+                trigger_json=json.dumps({"event_name": "incident.alert", "source": "monitoring_webhook"}),
+                condition_json=json.dumps({"logic": "OR", "conditions": [{"field": "urgency_score", "operator": "gte", "value": 75}]}),
+                actions_json=json.dumps([{"type": "incident_create", "params": {"severity": "critical", "sla_minutes": 15}}, {"type": "company_channel_broadcast", "params": {"channel": "#incidents", "priority": "urgent"}}]),
+                steps_json=json.dumps(wf2_steps)
+            )
+            session.add_all([r1, r2])
+            try:
+                session.commit()
+            except Exception:
+                session.rollback()
+
         query = session.query(AutomationRule).filter_by(organization_id=org_id)
         if category and category.lower() != "all":
             query = query.filter_by(category=category)

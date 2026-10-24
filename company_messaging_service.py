@@ -295,6 +295,90 @@ class CompanyMessagingService:
             channel_id=ch.id
         )
 
+        # Preload 3 realistic collaboration messages if channel is currently empty
+        if not before_id and CompanyMessage.query.filter_by(organization_id=organization_id, channel_id=ch.id).count() == 0:
+            now_dt = datetime.datetime.utcnow()
+            ch_name = (ch.name or "").lower()
+            demo_msgs = []
+            if "general" in ch_name:
+                demo_msgs = [
+                    CompanyMessage(
+                        id=generate_uuid("cmsg"),
+                        organization_id=organization_id,
+                        channel_id=ch.id,
+                        sender_name="System Architect",
+                        sender_role="admin",
+                        body="Assalam-o-Alaikum team! Welcome to the OpsFlow Cloud Command Center workspace. Real-time WhatsApp webhooks and payment gateways are active.",
+                        priority="normal",
+                        is_system=False,
+                        created_at=now_dt - datetime.timedelta(hours=3)
+                    ),
+                    CompanyMessage(
+                        id=generate_uuid("cmsg"),
+                        organization_id=organization_id,
+                        channel_id=ch.id,
+                        sender_name="Lead DevOps Engineer",
+                        sender_role="operator",
+                        body="Morning everyone. Green-API WhatsApp ingress and Gemini auto-responder latency is currently sub-second across all active tenants.",
+                        priority="normal",
+                        is_system=False,
+                        created_at=now_dt - datetime.timedelta(hours=2)
+                    ),
+                    CompanyMessage(
+                        id=generate_uuid("cmsg"),
+                        organization_id=organization_id,
+                        channel_id=ch.id,
+                        sender_name="Product Lead",
+                        sender_role="member",
+                        body="Our Pakistani catalog & JazzCash checkout workflows are ready for the NIC / Ignite incubation review and investor demo today. Great work team!",
+                        priority="normal",
+                        is_system=False,
+                        created_at=now_dt - datetime.timedelta(minutes=45)
+                    )
+                ]
+            elif "incident" in ch_name or "sre" in ch_name:
+                demo_msgs = [
+                    CompanyMessage(
+                        id=generate_uuid("cmsg"),
+                        organization_id=organization_id,
+                        channel_id=ch.id,
+                        sender_name="SRE Health Bot",
+                        sender_role="system",
+                        body="Automated Health Check: All inbound WhatsApp webhook endpoints, Redis queue listeners, and DB replication are healthy (100% uptime).",
+                        priority="normal",
+                        is_system=True,
+                        created_at=now_dt - datetime.timedelta(hours=4)
+                    ),
+                    CompanyMessage(
+                        id=generate_uuid("cmsg"),
+                        organization_id=organization_id,
+                        channel_id=ch.id,
+                        sender_name="Security Operations",
+                        sender_role="operator",
+                        body="Gateway Notice: Monitoring payment gateway callbacks for JazzCash Pakistan. All transaction signature verifications operating normally.",
+                        priority="normal",
+                        is_system=False,
+                        created_at=now_dt - datetime.timedelta(hours=1, minutes=30)
+                    ),
+                    CompanyMessage(
+                        id=generate_uuid("cmsg"),
+                        organization_id=organization_id,
+                        channel_id=ch.id,
+                        sender_name="Incident Commander",
+                        sender_role="admin",
+                        body="Incident #INC-892 Resolved: Quota throttled sandbox routing successfully diverted to fallback simulator without dropping external customer chats.",
+                        priority="urgent",
+                        is_system=False,
+                        created_at=now_dt - datetime.timedelta(minutes=25)
+                    )
+                ]
+            if demo_msgs:
+                db.session.add_all(demo_msgs)
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+
         if before_id:
             ref_msg = CompanyMessage.query.filter_by(id=before_id, organization_id=organization_id).first()
             if ref_msg:

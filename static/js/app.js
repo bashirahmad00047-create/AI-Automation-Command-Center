@@ -3799,12 +3799,18 @@ function renderLeads(leads) {
 
         const previewMsg = escapeHtml((l.message || '').length > 60 ? (l.message || '').slice(0, 60) + '...' : l.message || 'No inquiry text');
 
+        const contactName = l.name && l.name !== 'N/A' && l.name !== 'Anonymous' ? l.name : (l.phone || 'Inbound Lead');
+        const phoneDisplay = l.phone && l.phone !== 'N/A' ? l.phone : '';
+        const emailDisplay = l.email && l.email !== 'N/A' && l.email !== 'No email' ? l.email : '';
+        const companyDisplay = l.company && l.company !== 'N/A' ? l.company : '';
+
         return `
             <tr>
                 <td>
-                    <div style="font-weight: 600; color: #fff;">${escapeHtml(l.name || 'Anonymous Lead')}</div>
-                    <div style="font-size: 0.8rem; color: #06b6d4; font-family: monospace;">${escapeHtml(l.email || 'No email')}</div>
-                    ${l.company ? `<div style="font-size: 0.75rem; color: #94a3b8;">🏢 ${escapeHtml(l.company)}</div>` : ''}
+                    <div style="font-weight: 600; color: #fff; font-size: 0.9rem;">${escapeHtml(contactName)}</div>
+                    ${phoneDisplay ? `<div style="font-size: 0.8rem; color: #10b981; font-family: monospace; font-weight: 600;">📱 ${escapeHtml(phoneDisplay)}</div>` : ''}
+                    ${emailDisplay ? `<div style="font-size: 0.75rem; color: #06b6d4; font-family: monospace;">✉️ ${escapeHtml(emailDisplay)}</div>` : ''}
+                    ${companyDisplay ? `<div style="font-size: 0.75rem; color: #94a3b8;">🏢 ${escapeHtml(companyDisplay)}</div>` : ''}
                 </td>
                 <td style="max-width: 250px; font-size: 0.85rem; color: #cbd5e1;" title="${escapeHtml(l.message || '')}">
                     "${previewMsg}"
@@ -3916,12 +3922,18 @@ function viewLeadDetail(leadId) {
     const lead = leadsCache.find(l => l.id === leadId);
     if (!lead) return;
 
+    const contactName = lead.name && lead.name !== 'N/A' && lead.name !== 'Anonymous' ? lead.name : (lead.phone || 'Inbound Customer');
+    const contactPhone = lead.phone && lead.phone !== 'N/A' ? lead.phone : 'Direct WhatsApp';
+    const contactEmail = lead.email && lead.email !== 'N/A' ? lead.email : 'WhatsApp Direct';
+    const contactCompany = lead.company && lead.company !== 'N/A' ? lead.company : 'Direct Client';
+
     alert(
         `LEAD DETAILS & AI ANALYSIS\n` +
         `-----------------------------------------\n` +
-        `Name: ${lead.name || 'N/A'}\n` +
-        `Email: ${lead.email || 'N/A'}\n` +
-        `Company: ${lead.company || 'N/A'}\n` +
+        `Contact Name: ${contactName}\n` +
+        `Phone Number: ${contactPhone}\n` +
+        `Email: ${contactEmail}\n` +
+        `Organization / Company: ${contactCompany}\n` +
         `Lead Score: ${lead.lead_score || 0} / 100\n` +
         `AI Intent: ${lead.intent || 'N/A'}\n` +
         `Urgency Score: ${lead.urgency_score || 0} / 100\n` +

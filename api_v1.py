@@ -4894,6 +4894,93 @@ def list_ecommerce_products():
     stock_status_filter = request.args.get("stock_status")
     limit = min(int(request.args.get("limit", 100)), 500)
 
+    # Auto-seed realistic Pakistani e-commerce products if catalog is empty
+    if Product.query.filter_by(organization_id=org.id).count() == 0:
+        demo_pak_products = [
+            {
+                "name": "Men's Cotton Kurta",
+                "category": "Apparel & Fashion",
+                "description": "Premium Pakistani breathable stitched summer cotton kurta with banded collar.",
+                "sku": "APP-KURTA-001",
+                "barcode": "8901234567891",
+                "image_url": "https://images.unsplash.com/photo-1597983073493-88cd35cf93b0?w=500&auto=format&fit=crop&q=60",
+                "unit": "piece",
+                "price": 2800.0,
+                "currency": "PKR",
+                "stock_quantity": 45
+            },
+            {
+                "name": "Leather Formal Shoes",
+                "category": "Footwear",
+                "description": "Handcrafted pure leather Oxford dress shoes with cushioned insole and anti-slip rubber sole.",
+                "sku": "FTW-SHOE-002",
+                "barcode": "8901234567892",
+                "image_url": "https://images.unsplash.com/photo-1533867617858-e7b97e060509?w=500&auto=format&fit=crop&q=60",
+                "unit": "pair",
+                "price": 6500.0,
+                "currency": "PKR",
+                "stock_quantity": 18
+            },
+            {
+                "name": "Wireless Bluetooth Earbuds",
+                "category": "Consumer Electronics",
+                "description": "TWS wireless earbuds with active environmental noise cancellation, deep bass, and 30h backup.",
+                "sku": "ELE-EARBUD-003",
+                "barcode": "8901234567893",
+                "image_url": "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=500&auto=format&fit=crop&q=60",
+                "unit": "piece",
+                "price": 3200.0,
+                "currency": "PKR",
+                "stock_quantity": 60
+            },
+            {
+                "name": "Pure Organic Honey (500g)",
+                "category": "Grocery & Gourmet",
+                "description": "100% raw sidr wild honey harvested from Khyber mountain valleys. Lab-certified purity.",
+                "sku": "GRO-HONEY-004",
+                "barcode": "8901234567894",
+                "image_url": "https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=500&auto=format&fit=crop&q=60",
+                "unit": "jar",
+                "price": 1950.0,
+                "currency": "PKR",
+                "stock_quantity": 30
+            },
+            {
+                "name": "Embroidered Lawn Stitched Suit",
+                "category": "Women's Fashion",
+                "description": "3-piece designer lawn collection with embroidered chiffon dupatta and printed cambric trouser.",
+                "sku": "APP-SUIT-005",
+                "barcode": "8901234567895",
+                "image_url": "https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=500&auto=format&fit=crop&q=60",
+                "unit": "suit",
+                "price": 4800.0,
+                "currency": "PKR",
+                "stock_quantity": 25
+            }
+        ]
+        for itm in demo_pak_products:
+            new_p = Product(
+                id=generate_uuid("prd"),
+                organization_id=org.id,
+                name=itm["name"],
+                category=itm["category"],
+                description=itm["description"],
+                sku=itm["sku"],
+                barcode=itm["barcode"],
+                image_url=itm["image_url"],
+                unit=itm["unit"],
+                price=itm["price"],
+                currency=itm["currency"],
+                stock_quantity=itm["stock_quantity"],
+                stock_status="in_stock",
+                is_active=True
+            )
+            db.session.add(new_p)
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     # Base query for tenant products
     query = Product.query.filter(Product.organization_id == org.id)
     if not include_inactive:

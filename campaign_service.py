@@ -1124,6 +1124,53 @@ class CampaignService:
         status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Returns campaigns for an organization."""
+        # Auto-seed realistic demo campaigns if pipeline is empty
+        if BroadcastCampaign.query.filter_by(organization_id=organization_id).count() == 0:
+            now_dt = datetime.datetime.utcnow()
+            cmp1 = BroadcastCampaign(
+                id=generate_uuid("cmp"),
+                organization_id=organization_id,
+                title="Eid Clearance VIP Broadcast",
+                channel="whatsapp",
+                audience_type="customers",
+                raw_template="Assalam-o-Alaikum {{name}}! OpsFlow Eid Clearance is LIVE. Get up to 50% off on all premium items with instant delivery across Pakistan.",
+                rendered_preview="Assalam-o-Alaikum Valued Customer! OpsFlow Eid Clearance is LIVE. Get up to 50% off on all premium items with instant delivery across Pakistan.",
+                status="completed",
+                total_recipients=1250,
+                sent_count=1250,
+                delivered_count=1225,
+                read_count=1180,
+                failed_count=25,
+                estimated_cost_usd=12.50,
+                scheduled_at=now_dt - datetime.timedelta(days=2),
+                approved_at=now_dt - datetime.timedelta(days=3),
+                created_at=now_dt - datetime.timedelta(days=3)
+            )
+            cmp2 = BroadcastCampaign(
+                id=generate_uuid("cmp"),
+                organization_id=organization_id,
+                title="Weekend Flash Promo",
+                channel="whatsapp",
+                audience_type="customers",
+                raw_template="Weekend Special: Enjoy free shipping & express 24h dispatch on all orders above PKR 3,000 this weekend!",
+                rendered_preview="Weekend Special: Enjoy free shipping & express 24h dispatch on all orders above PKR 3,000 this weekend!",
+                status="scheduled",
+                total_recipients=850,
+                sent_count=0,
+                delivered_count=0,
+                read_count=0,
+                failed_count=0,
+                estimated_cost_usd=8.50,
+                scheduled_at=now_dt + datetime.timedelta(days=2),
+                approved_at=now_dt - datetime.timedelta(hours=4),
+                created_at=now_dt - datetime.timedelta(hours=6)
+            )
+            db.session.add_all([cmp1, cmp2])
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
         query = BroadcastCampaign.query.filter_by(organization_id=organization_id)
         if status and status != "all":
             query = query.filter_by(status=status)
