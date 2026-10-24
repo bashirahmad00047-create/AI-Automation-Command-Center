@@ -142,6 +142,7 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
         fake_audio_bytes = b"\x00\x01\x02\x03\x04"
         with patch.object(WhatsAppService, "get_http_session") as mock_session_cls:
             mock_session = MagicMock()
+            mock_session.__enter__.return_value = mock_session
             mock_session_cls.return_value.__enter__.return_value = mock_session
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -163,6 +164,7 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
         with patch.object(WhatsAppService, "get_http_session") as mock_session_cls, \
              patch.object(WhatsAppService, "get_config", return_value={"green_api_id_instance": "7107", "green_api_token_instance": "tok"}):
             mock_session = MagicMock()
+            mock_session.__enter__.return_value = mock_session
             mock_session_cls.return_value.__enter__.return_value = mock_session
             post_resp = MagicMock()
             post_resp.status_code = 200
@@ -286,6 +288,7 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             "green_api_host": "https://7107.api.greenapi.com"
         }), patch.object(WhatsAppService, "get_http_session") as mock_session_cls:
             mock_session = MagicMock()
+            mock_session.__enter__.return_value = mock_session
             mock_session_cls.return_value.__enter__.return_value = mock_session
 
             # 1. uploadFile mock response
@@ -387,6 +390,7 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             "green_api_host": "https://7107.api.greenapi.com"
         }), patch.object(WhatsAppService, "get_http_session") as mock_session_cls:
             mock_session = MagicMock()
+            mock_session.__enter__.return_value = mock_session
             mock_session_cls.return_value.__enter__.return_value = mock_session
 
             # Simulate 500 error on uploadFile
@@ -679,6 +683,7 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             "green_api_host": "https://7107.api.greenapi.com"
         }), patch.object(WhatsAppService, "get_http_session") as mock_session_cls:
             mock_session = MagicMock()
+            mock_session.__enter__.return_value = mock_session
             mock_session_cls.return_value.__enter__.return_value = mock_session
 
             mock_up_resp = MagicMock()
@@ -714,6 +719,7 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             "green_api_host": "https://7107.api.greenapi.com"
         }), patch.object(WhatsAppService, "get_http_session") as mock_session_cls:
             mock_session = MagicMock()
+            mock_session.__enter__.return_value = mock_session
             mock_session_cls.return_value.__enter__.return_value = mock_session
 
             # 1. Test message dispatch
@@ -835,6 +841,7 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             "green_api_host": "https://7107.api.greenapi.com"
         }), patch.object(WhatsAppService, "get_http_session") as mock_session_cls:
             mock_session = MagicMock()
+            mock_session.__enter__.return_value = mock_session
             mock_session_cls.return_value.__enter__.return_value = mock_session
 
             mock_resp = MagicMock()
@@ -1713,6 +1720,118 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             # Confirms second message was processed without in_flight_debounce dropping
             self.assertEqual(resp2.get_json()["processed"], 1)
 
+
+    def test_outbound_auto_responder_dispatch_text_incoming(self):
+        """Verifies an inbound text message dispatches ONLY a text response with quoted_message_id."""
+        text_payload = {
+            "typeWebhook": "incomingMessageReceived",
+            "idMessage": "TEXT_DISPATCH_TEST_001",
+            "timestamp": int(time.time()),
+            "senderData": {
+                "chatId": "923001122334@c.us",
+                "chatName": "Zubair Text",
+                "sender": "923001122334@c.us",
+                "senderName": "Zubair"
+            },
+            "messageData": {
+                "typeMessage": "textMessage",
+                "textMessageData": {
+                    "textMessage": "Aap ka office timings kya hain?"
+                }
+            }
+        }
+        WhatsAppService.clear_in_flight_phones()
+
+        with patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake-gemini-key"), \
+             patch.object(WhatsAppService, "call_gemini_ai", return_value="Humara office subah 9 se shaam 6 tak khula hota hai.") as mock_ai, \
+             patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "OUT_TEXT_001"}) as mock_send_msg, \
+             patch.object(WhatsAppService, "send_green_api_file") as mock_send_file:
+
+            resp = self.client.post("/api/v1/webhooks/whatsapp/green-api", json=text_payload)
+            self.assertEqual(resp.status_code, 200)
+
+            # Assert ONLY text was dispatched, NO audio file was sent
+            mock_send_msg.assert_called_once()
+            self.assertEqual(mock_send_msg.call_args[1]["to_phone"], "923001122334")
+            self.assertIn("Humara office", mock_send_msg.call_args[1]["message_text"])
+            self.assertEqual(mock_send_msg.call_args[1]["quoted_message_id"], "TEXT_DISPATCH_TEST_001")
+            mock_send_file.assert_not_called()
+
+    def test_outbound_auto_responder_dispatch_voice_incoming(self):
+        """Verifies an inbound voice message dispatches ONLY a voice note response (.oga) without text."""
+        voice_payload = {
+            "typeWebhook": "incomingMessageReceived",
+            "idMessage": "VOICE_DISPATCH_TEST_001",
+            "timestamp": int(time.time()),
+            "senderData": {
+                "chatId": "923005544332@c.us",
+                "chatName": "Rashid Voice",
+                "sender": "923005544332@c.us",
+                "senderName": "Rashid"
+            },
+            "messageData": {
+                "typeMessage": "audioMessage",
+                "fileMessageData": {
+                    "downloadUrl": "https://media.opsflow.test/inbound_voice.oga",
+                    "caption": "",
+                    "fileName": "audio.oga",
+                    "mimeType": "audio/ogg; codecs=opus"
+                }
+            }
+        }
+        WhatsAppService.clear_in_flight_phones()
+
+        fake_reply_audio = b"OggS_FAKE_OPUS_AUDIO_STREAM_BYTES"
+        with patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake-gemini-key"), \
+             patch.object(WhatsAppService, "_download_media", return_value=b"OggS_DOWNLOADED_INBOUND"), \
+             patch.object(WhatsAppService, "_transcribe_audio", return_value="Delivery charges kya hain?"), \
+             patch.object(WhatsAppService, "call_gemini_ai", return_value="Delivery charges 200 rupay hain.") as mock_ai, \
+             patch.object(WhatsAppService, "generate_spoken_audio", return_value=(fake_reply_audio, "voice_reply.oga", "audio/ogg; codecs=opus")) as mock_tts, \
+             patch.object(WhatsAppService, "send_green_api_file", return_value={"success": True, "whatsapp_message_id": "OUT_VOICE_001"}) as mock_send_file, \
+             patch.object(WhatsAppService, "send_message") as mock_send_msg:
+
+            resp = self.client.post("/api/v1/webhooks/whatsapp/green-api", json=voice_payload)
+            self.assertEqual(resp.status_code, 200)
+
+            # Assert ONLY voice file was dispatched, NO text message was dispatched
+            mock_send_file.assert_called_once()
+            self.assertEqual(mock_send_file.call_args[1]["to_phone"], "923005544332")
+            self.assertEqual(mock_send_file.call_args[1]["file_bytes"], fake_reply_audio)
+            self.assertEqual(mock_send_file.call_args[1]["quoted_message_id"], "VOICE_DISPATCH_TEST_001")
+            mock_send_msg.assert_not_called()
+
+    def test_send_green_api_message_retry_unquoted_on_400(self):
+        """Verifies send_green_api_message automatically retries unquoted if quotedMessageId returns HTTP 400."""
+        from unittest.mock import MagicMock
+        with patch.object(WhatsAppService, "get_config", return_value={
+            "green_api_id_instance": "12345",
+            "green_api_token_instance": "tokenabc",
+            "green_api_host": "https://api.greenapi.com"
+        }):
+            mock_session = MagicMock()
+            mock_session.__enter__.return_value = mock_session
+            mock_resp_fail = MagicMock()
+            mock_resp_fail.status_code = 400
+            mock_resp_fail.text = '{"message": "quotedMessageId not found"}'
+
+            mock_resp_ok = MagicMock()
+            mock_resp_ok.status_code = 200
+            mock_resp_ok.text = '{"idMessage": "RETRY_SUCCESS_001"}'
+            mock_resp_ok.json.return_value = {"idMessage": "RETRY_SUCCESS_001"}
+
+            # First post returns 400, second post (unquoted) returns 200
+            mock_session.post.side_effect = [mock_resp_fail, mock_resp_ok]
+
+            with patch.object(WhatsAppService, "get_http_session", return_value=mock_session):
+                res = WhatsAppService.send_green_api_message(
+                    to_phone="923001234567",
+                    message_text="Salam, test retry unquoted",
+                    quoted_message_id="STALE_QUOTE_ID_999"
+                )
+                self.assertTrue(res["success"])
+                self.assertEqual(res["whatsapp_message_id"], "RETRY_SUCCESS_001")
+                # Confirms two attempts were made (quoted then unquoted)
+                self.assertEqual(mock_session.post.call_count, 2)
 
 if __name__ == "__main__":
     unittest.main()
