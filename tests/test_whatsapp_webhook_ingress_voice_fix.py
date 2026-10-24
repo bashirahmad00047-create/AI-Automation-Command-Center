@@ -543,11 +543,10 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             self.assertEqual(mock_tts.call_args[1]["language"], "ur")
             self.assertEqual(mock_tts.call_args[1]["output_format"], "oga")
 
-            # 4. Both Green-API audio (.oga) and text replies were dispatched
+            # 4. As per Dynamic Output Matching: Green-API audio (.oga) reply is dispatched, and NO text reply is sent
             mock_send_file.assert_called_once()
             self.assertEqual(mock_send_file.call_args[1]["filename"], "voice_reply.oga")
-            mock_send_text.assert_called_once()
-            self.assertIn("OpsFlow Cloud automation", mock_send_text.call_args[1]["message_text"])
+            mock_send_text.assert_not_called()
 
             # 5. Generic static acknowledgment was NOT sent
             self.assertNotIn("Aap ka voice message moosool ho gaya hai", res["reply_body"])
@@ -921,6 +920,174 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             # Verify list_models() is NOT called, ensuring fast sub-second execution
             self.assertFalse(mock_genai.list_models.called)
             mock_genai.GenerativeModel.assert_called_with("gemini-1.5-flash")
+
+    def test_dynamic_output_matching_text_only_and_voice_only(self):
+        """Verifies Dynamic Output Matching: Text message -> ONLY text reply; Voice note -> ONLY .oga audio reply."""
+        WhatsAppService.clear_recent_replied_trigger_ids()
+        fake_oga = b"OggS" + b"\x02" * 50
+
+        # Scenario 1: Inbound message is TEXT -> Replies with ONLY TEXT
+        with patch.dict(os.environ, {"AI_AUTO_REPLY_ENABLED": "true"}), \
+             patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake_key"), \
+             patch.object(WhatsAppService, "generate_ai_auto_response", return_value={
+                 "reply_body": "Hum logistics fleet tracking aur medical billing solutions faraham karte hain.",
+                 "intent": "service_inquiry",
+                 "lead_score": 70
+             }), \
+             patch.object(WhatsAppService, "generate_spoken_audio") as mock_tts, \
+             patch.object(WhatsAppService, "send_green_api_file") as mock_file, \
+             patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "TXT_MATCH_101"}) as mock_text:
+
+            res_text = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_body="Aap kaun si services provide kar rahe hain?",
+                message_id="TEXT_MSG_TRIGGER_101",
+                is_voice=False
+            )
+            self.assertIsNotNone(res_text)
+            self.assertTrue(res_text["success"])
+            mock_text.assert_called_once_with(
+                organization_id=self.org.id,
+                to_phone="923209350858",
+                message_text="Hum logistics fleet tracking aur medical billing solutions faraham karte hain."
+            )
+            mock_tts.assert_not_called()
+            mock_file.assert_not_called()
+
+        WhatsAppService.clear_recent_replied_trigger_ids()
+
+        # Scenario 2: Inbound message is VOICE -> Replies with ONLY VOICE NOTE (.oga) without text
+        with patch.dict(os.environ, {"AI_AUTO_REPLY_ENABLED": "true"}), \
+             patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake_key"), \
+             patch.object(WhatsAppService, "_download_media", return_value=b"audio_bytes"), \
+             patch.object(WhatsAppService, "_transcribe_audio", return_value="Billing rates kya hain?"), \
+             patch.object(WhatsAppService, "generate_ai_auto_response", return_value={
+                 "reply_body": "Medical billing rates claims volume par munhasir hain.",
+                 "intent": "pricing_inquiry",
+                 "lead_score": 80
+             }), \
+             patch.object(WhatsAppService, "generate_spoken_audio", return_value=(fake_oga, "voice_reply.oga", "audio/ogg; codecs=opus")) as mock_tts_voice, \
+             patch.object(WhatsAppService, "get_active_provider", return_value="green_api"), \
+             patch.object(WhatsAppService, "send_green_api_file", return_value={"success": True, "whatsapp_message_id": "AUDIO_MATCH_202"}) as mock_file_voice, \
+             patch.object(WhatsAppService, "send_message") as mock_text_voice:
+
+            res_voice = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_body="[Voice note]",
+                message_id="VOICE_MSG_TRIGGER_202",
+                is_voice=True,
+                download_url="https://do-media-7107.fra1.digitaloceanspaces.com/sample.oga"
+            )
+            self.assertIsNotNone(res_voice)
+            self.assertTrue(res_voice["success"])
+            mock_tts_voice.assert_called_once()
+            mock_file_voice.assert_called_once()
+            self.assertEqual(mock_file_voice.call_args[1]["filename"], "voice_reply.oga")
+            self.assertEqual(mock_file_voice.call_args[1]["caption"], "")
+            mock_text_voice.assert_not_called()
+
+    def test_real_world_time_synchronization_and_timezone(self):
+        """Verifies message timestamps and AI context use real-world Pakistan Time (PKT, UTC+5 / Asia/Karachi)."""
+        pkt_now = WhatsAppService.get_pakistan_time()
+        self.assertIsNotNone(pkt_now)
+
+        # Record a message in DB and assert created_at reflects Pakistan time
+        msg = WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender="923209350858",
+            recipient="system",
+            direction="inbound",
+            body="Logistics status check",
+            whatsapp_message_id="TIMEZONE_SYNC_MSG_001"
+        )
+        self.assertIsNotNone(msg.created_at)
+        as_dict = msg.to_dict()
+        self.assertEqual(as_dict["created_at"], msg.created_at.strftime("%Y-%m-%d %H:%M:%S"))
+
+    def test_conversation_history_last_3_to_5_turns_and_ui_display(self):
+        """Verifies get_conversation_history retains last 3-5 turns with Pakistan timestamps and voice indicators for OpsFlow Cloud UI."""
+        test_phone = "923119998877"
+
+        # Create 4 alternating turns in DB with sequential timestamps
+        import datetime
+        base_time = WhatsAppService.get_pakistan_time()
+        WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender=test_phone,
+            recipient="system",
+            direction="inbound",
+            body="Salam, logistics tracking chahiye.",
+            whatsapp_message_id="HIST_TURN_001",
+            created_at=base_time - datetime.timedelta(seconds=30)
+        )
+        WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender="system",
+            recipient=test_phone,
+            direction="outbound",
+            body="Walaikum Assalam! Aap ka tracking number share karein.",
+            whatsapp_message_id="HIST_TURN_002",
+            created_at=base_time - datetime.timedelta(seconds=20)
+        )
+        WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender=test_phone,
+            recipient="system",
+            direction="inbound",
+            body="TRK-982341",
+            message_type="audioMessage",
+            whatsapp_message_id="HIST_TURN_003",
+            created_at=base_time - datetime.timedelta(seconds=10)
+        )
+        voice_out = WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender="system",
+            recipient=test_phone,
+            direction="outbound",
+            body="Aap ka container Karachi port se rawana ho chuka hai.",
+            message_type="audioMessage",
+            raw_payload={"urlFile": "https://media.greenapi.com/voice.oga"},
+            whatsapp_message_id="HIST_TURN_004",
+            created_at=base_time
+        )
+
+        history = WhatsAppService.get_conversation_history(test_phone, organization_id=self.org.id, limit=5)
+        self.assertEqual(len(history), 4)
+        self.assertEqual(history[0]["role"], "Customer")
+        self.assertEqual(history[1]["role"], "Assistant")
+        self.assertTrue(history[2]["is_voice"])
+        self.assertIn("TRK-982341", history[2]["content"])
+
+        # Check OpsFlow Cloud UI serialization
+        out_dict = voice_out.to_dict()
+        self.assertTrue(out_dict["is_audio"])
+        self.assertEqual(out_dict["media_url"], "https://media.greenapi.com/voice.oga")
+        self.assertIn("Karachi port", out_dict["body"])
+
+    def test_persona_urdu_logistics_and_medical_billing_expert(self):
+        """Verifies AI system prompt enforces polite Urdu logistics & medical billing expert persona with clean text."""
+        mock_genai = MagicMock()
+        mock_model = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = "Aap ka claim insurance company ko submit ho chuka hai. 24 ghantay mein verification complete ho jayegi."
+        mock_model.generate_content.return_value = mock_resp
+        mock_genai.GenerativeModel.return_value = mock_model
+
+        with patch.object(WhatsAppService, "get_gemini_api_key", return_value="AIzaMockKey"), \
+             patch.object(WhatsAppService, "get_gemini_model_name", return_value="gemini-1.5-flash"), \
+             patch.dict("sys.modules", {"google.generativeai": mock_genai}):
+
+            reply = WhatsAppService.call_gemini_ai(
+                user_message="Mere medical claims ka status kya hai?",
+                organization_id=self.org.id
+            )
+            self.assertIsNotNone(reply)
+            called_prompt = mock_model.generate_content.call_args[0][0]
+            self.assertIn("Urdu logistics & medical billing expert", called_prompt)
+            self.assertIn("Pakistan Time", called_prompt)
+            self.assertIn("DO NOT use markdown symbols", called_prompt)
 
 if __name__ == "__main__":
     unittest.main()
