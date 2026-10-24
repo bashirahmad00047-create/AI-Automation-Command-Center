@@ -207,6 +207,10 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                             _prd_cols = {c["name"] for c in _insp.get_columns("products")}
                             if "image_url" not in _prd_cols:
                                 _c_conn.execute(_sa_text("ALTER TABLE products ADD COLUMN image_url VARCHAR(512);"))
+                        if "whatsapp_messages" in _insp.get_table_names():
+                            _wam_cols = {c["name"] for c in _insp.get_columns("whatsapp_messages")}
+                            if "parent_message_id" not in _wam_cols:
+                                _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN parent_message_id VARCHAR(128);"))
                         _c_conn.commit()
             except Exception as _col_err:
                 application.logger.warning(f"Runtime column sync notice: {_col_err}")

@@ -77,6 +77,275 @@ if os.path.exists("/etc/secrets") and os.path.isdir("/etc/secrets"):
 
 
 class WhatsAppService:
+    @classmethod
+    def preprocess_text_for_human_speech(cls, text: str, language: Optional[str] = None) -> str:
+        """Tunes and pre-processes text into ultra-expressive, natural human speech with pauses and conversational Urdu phrasing.
+        Eliminates robotic artifacts, rigid bullets, URLs, and introduces natural punctuation pauses.
+        """
+        if not text or not str(text).strip():
+            return ""
+
+        import re
+        t = str(text).strip()
+
+        # 1. Strip bracketed placeholders and system tokens
+        t = re.sub(r"\[.*?\]", "", t)
+        t = re.sub(r"[*_~`#>]", "", t)
+
+        # 2. Expand URLs and web links into natural speech phrasing
+        t = re.sub(r"https?://\S+", "ہماری ویب سائٹ", t)
+        t = re.sub(r"www\.\S+", "ہماری ویب سائٹ", t)
+
+        # 3. Clean rigid bullet structures (e.g., '1.', '2.', '-', '•') into fluid spoken phrasing
+        t = re.sub(r"^\s*[\d\.\-\*,\•]+\s*", "", t, flags=re.MULTILINE)
+        t = re.sub(r"\n+\s*[\d\.\-\*,\•]+\s*", "، ", t)
+        t = re.sub(r"\n+", "، ", t)
+
+        # 4. Spoken expansion of symbols and common terminology
+        t = re.sub(r"\b24/7\b", "چوبیس گھنٹے", t)
+        t = re.sub(r"\bPKR\b|\bRs\.?\b", "روپے", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bUSD\b|\$", "ڈالر ", t, flags=re.IGNORECASE)
+        t = re.sub(r"%", " فیصد ", t)
+
+        # 5. Natural pause tuning for greetings and Urdu conversational markers
+        greetings_map = [
+            (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|salam|slam)\b[,.]?", "السلام علیکم،"),
+            (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*)\b[,.]?", "وعلیکم السلام،"),
+            (r"(?i)\b(ji bilkul|ji haan)\b[,.]?", "جی بالکل،"),
+            (r"(?i)\b(shukriya|bohot shukriya|dera manana)\b[,.]?", "بہت شکریہ،"),
+            (r"(?i)\b(khush[\s\-]?[a-z]*)\b[,.]?", "خوش آمدید،")
+        ]
+        for pattern, replacement in greetings_map:
+            t = re.sub(pattern, replacement, t, count=1)
+
+        # 6. Smooth out redundant commas or spaces
+        t = re.sub(r"[,\،]{2,}", "،", t)
+        t = re.sub(r"\s+([,\،\.\!\؟])", r"\1", t)
+        t = re.sub(r"\s+", " ", t).strip()
+
+        # 7. Ensure clean sentence termination
+        if t and t[-1] not in (".", "!", "؟", "،"):
+            t += "."
+
+        return t
+
+    @classmethod
+    def call_gemini_vision(
+        cls,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg",
+        prompt: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        customer_name: Optional[str] = None
+    ) -> Optional[str]:
+        """Analyzes an incoming image using Gemini Vision API with multimodal perception."""
+        api_key = cls.get_gemini_api_key(organization_id=organization_id)
+        if not api_key or not image_bytes:
+            return None
+
+        import base64
+        import requests
+        b_name = cls.get_tenant_business_name(organization_id=organization_id)
+        cust_label = f"Customer '{customer_name.strip()}'" if customer_name and customer_name.strip() else "The customer"
+        user_prompt = prompt.strip() if prompt and len(prompt.strip()) > 3 else "Please examine this image carefully. Provide a polite, helpful analysis addressing any logistics documents, medical invoices, prescriptions, parcels, or receipts visible in the image."
+
+        full_prompt = (
+            f"You are a polite Urdu logistics and medical billing expert for {b_name}.\n"
+            f"{cust_label} has shared an image with the inquiry: '{user_prompt}'.\n"
+            "Analyze the contents of this image accurately and respond politely in 2-3 concise sentences in the customer's language (Urdu/Roman Urdu or English). Do NOT use markdown symbols (*, #)."
+        )
+
+        # 1. Try google.generativeai SDK
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = model.generate_content([
+                full_prompt,
+                {"mime_type": mime_type or "image/jpeg", "data": image_bytes}
+            ])
+            if response and hasattr(response, "text") and response.text:
+                return response.text.strip()
+        except Exception as e:
+            logger.debug(f"Gemini SDK Vision analysis notice: {e}")
+
+        # 2. Try direct HTTP REST API with base64 inline_data
+        try:
+            b64_data = base64.b64encode(image_bytes).decode("utf-8")
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": full_prompt},
+                        {"inline_data": {"mime_type": mime_type or "image/jpeg", "data": b64_data}}
+                    ]
+                }]
+            }
+            resp = requests.post(url, params={"key": api_key}, json=payload, headers={"Content-Type": "application/json"}, timeout=8.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts and "text" in parts[0]:
+                        return parts[0]["text"].strip()
+        except Exception as e:
+            logger.debug(f"Fast REST Gemini Vision notice: {e}")
+
+        return None
+
+    @classmethod
+    def generate_image(
+        cls,
+        prompt: str,
+        organization_id: Optional[str] = None
+    ) -> Optional[Tuple[bytes, str, str]]:
+        """Generates an image from a natural language prompt using OpenAI DALL-E or Pollinations AI.
+        Returns (image_bytes, filename, mime_type).
+        """
+        clean_p = str(prompt or "").strip()
+        if not clean_p:
+            clean_p = "Modern medical billing and logistics fleet command center"
+
+        # 1. Try OpenAI DALL-E API
+        openai_key = cls.get_openai_api_key(organization_id=organization_id)
+        if openai_key and str(openai_key).strip():
+            try:
+                import requests
+                import base64
+                dalle_payload = {
+                    "model": "dall-e-3",
+                    "prompt": clean_p[:1000],
+                    "n": 1,
+                    "size": "1024x1024",
+                    "response_format": "b64_json"
+                }
+                resp = requests.post(
+                    "https://api.openai.com/v1/images/generations",
+                    headers={
+                        "Authorization": f"Bearer {str(openai_key).strip()}",
+                        "Content-Type": "application/json"
+                    },
+                    json=dalle_payload,
+                    timeout=15.0
+                )
+                if resp.status_code == 200:
+                    data = resp.json().get("data", [])
+                    if data and "b64_json" in data[0]:
+                        raw_bytes = base64.b64decode(data[0]["b64_json"])
+                        return (raw_bytes, "generated_image.png", "image/png")
+            except Exception as e:
+                logger.debug(f"OpenAI DALL-E generation failed: {e}")
+
+        # 2. Fast direct image generation fallback (Pollinations AI)
+        try:
+            import requests
+            import urllib.parse
+            encoded_p = urllib.parse.quote(clean_p)
+            url = f"https://image.pollinations.ai/prompt/{encoded_p}?width=1024&height=1024&nologo=true"
+            resp = requests.get(url, timeout=12.0)
+            if resp.status_code == 200 and resp.content and len(resp.content) > 1000:
+                return (resp.content, "generated_image.jpg", "image/jpeg")
+        except Exception as poll_err:
+            logger.debug(f"Pollinations AI image generation notice: {poll_err}")
+
+        return None
+
+    @classmethod
+    def handle_incoming_voice_call(
+        cls,
+        call_data: Dict[str, Any],
+        organization_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Handles incoming WhatsApp voice calls and establishes direct audio streaming listener session."""
+        if not call_data or not isinstance(call_data, dict):
+            return {"success": False, "status": "invalid_payload"}
+
+        org_id = organization_id or "org-enterprise-default"
+        chat_id = (
+            call_data.get("chatId")
+            or call_data.get("from")
+            or call_data.get("caller")
+            or call_data.get("senderData", {}).get("chatId", "")
+        )
+        caller_phone = cls.format_phone_number(chat_id.replace("@c.us", "").replace("@g.us", ""))
+        call_id = call_data.get("idCall") or call_data.get("callId") or call_data.get("id") or f"call_{uuid.uuid4().hex[:12]}"
+        status = call_data.get("status") or "ringing"
+        ts = call_data.get("timestamp")
+
+        # Live audio stream connection endpoint for direct two-way audio streaming
+        stream_url = f"https://opsflow-cloud.onrender.com/api/v1/voice/stream/{call_id}"
+
+        # Record incoming call in WhatsAppMessage DB with Pakistan Time
+        if has_app_context():
+            try:
+                call_rec = cls.record_message(
+                    organization_id=org_id,
+                    sender=caller_phone or "Caller",
+                    recipient="Voice Call Gateway",
+                    direction="inbound",
+                    body=f"[Incoming Voice Call: Audio streaming session active (Call ID: {call_id})]",
+                    message_type="voiceCall",
+                    status="streaming",
+                    whatsapp_message_id=call_id,
+                    raw_payload={
+                        **call_data,
+                        "call_id": call_id,
+                        "stream_url": stream_url,
+                        "audio_streaming": True
+                    }
+                )
+                logger.info(f"[Live Call Handling] Incoming WhatsApp Voice Call from {caller_phone} (Call ID: {call_id}) connected to audio stream: {stream_url}")
+            except Exception as call_err:
+                logger.warning(f"Failed to record incoming voice call: {call_err}")
+
+        return {
+            "success": True,
+            "status": "streaming",
+            "action": "streamAudio",
+            "call_id": call_id,
+            "caller": caller_phone,
+            "stream_url": stream_url,
+            "audio_streaming": True,
+            "message": "Live WhatsApp Voice Call connected to audio streaming session."
+        }
+
+    @classmethod
+    def handle_incoming_message_deletion(
+        cls,
+        message_id: str,
+        organization_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Deletes matching WhatsApp message DB records when a message deletion/revocation webhook is received."""
+        if not message_id or not has_app_context():
+            return {"success": False, "deleted": 0}
+
+        clean_id = str(message_id).strip()
+        try:
+            query = WhatsAppMessage.query.filter(
+                (WhatsAppMessage.whatsapp_message_id == clean_id) | (WhatsAppMessage.id == clean_id)
+            )
+            if organization_id:
+                query = query.filter(WhatsAppMessage.organization_id == organization_id)
+
+            matches = query.all()
+            if not matches:
+                return {"success": True, "deleted": 0, "message_id": clean_id}
+
+            deleted_count = len(matches)
+            for m in matches:
+                db.session.delete(m)
+            db.session.commit()
+            logger.info(f"[WhatsApp Webhook] Deleted {deleted_count} DB record(s) matching deleted WhatsApp message ID '{clean_id}'.")
+            return {"success": True, "deleted": deleted_count, "message_id": clean_id}
+        except Exception as e:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Failed to delete WhatsApp message record for '{clean_id}': {e}")
+            return {"success": False, "error": str(e), "message_id": clean_id}
+
     PKT_TZ = datetime.timezone(datetime.timedelta(hours=5))
 
     @classmethod
@@ -725,12 +994,7 @@ class WhatsAppService:
         if not text or not str(text).strip():
             return None
 
-        clean_text = str(text).strip()
-        import re
-        clean_text = re.sub(r"\[.*?\]", "", clean_text).strip()
-        # Clean markdown formatting so TTS engine does not awkwardly verbalize symbols
-        clean_text = re.sub(r"[*_~`#]", "", clean_text)
-        clean_text = re.sub(r"\s+", " ", clean_text).strip()
+        clean_text = cls.preprocess_text_for_human_speech(text, language=language)
         if not clean_text:
             clean_text = str(text).strip()
 
@@ -2841,7 +3105,8 @@ class WhatsAppService:
         message_timestamp: Optional[Any] = None,
         is_voice: bool = False,
         download_url: Optional[str] = None,
-        sync_transcribe: bool = False
+        sync_transcribe: bool = False,
+        parent_msg_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Handles automated AI response to an inbound message if enabled and not debounced."""
         if not sender_phone:
@@ -2953,6 +3218,88 @@ class WhatsAppService:
             logger.info("Direct Groq AI auto-responder enabled for inbound WhatsApp message.")
         elif has_openai:
             logger.info("Direct OpenAI auto-responder enabled for inbound WhatsApp message.")
+
+        # 0. Check if user asks to generate / create an image
+        lower_msg = str(message_body or "").strip().lower()
+        img_gen_triggers = (
+            "generate image", "create image", "image generate", "tasweer banao",
+            "picture generate", "photo banao", "image banao", "draw an image",
+            "generate an image", "create a picture", "make an image", "picture banao"
+        )
+        if any(trig in lower_msg for trig in img_gen_triggers):
+            try:
+                img_prompt = lower_msg
+                for trig in img_gen_triggers:
+                    img_prompt = img_prompt.replace(trig, "")
+                img_prompt = re.sub(r"^(of|for|ki|ka|ke|please|barah-e-karam)\s+", "", img_prompt.strip(), flags=re.IGNORECASE)
+                if not img_prompt:
+                    img_prompt = "A high-tech Pakistani logistics fleet and modern medical facility"
+
+                logger.info(f"Generating requested image for {clean_phone}: '{img_prompt}'...")
+                gen_img_res = cls.generate_image(img_prompt, organization_id=org_id)
+                if gen_img_res:
+                    img_bytes, img_fn, img_mt = gen_img_res
+                    caption_txt = f"Aap ki requested image: {img_prompt.capitalize()}"
+                    dispatch_file_res = cls.send_green_api_file(
+                        organization_id=org_id,
+                        to_phone=clean_phone,
+                        file_bytes=img_bytes,
+                        filename=img_fn,
+                        mime_type=img_mt,
+                        caption=caption_txt,
+                        quoted_message_id=message_id
+                    )
+                    return {
+                        "success": True,
+                        "action": "image_generated",
+                        "prompt": img_prompt,
+                        "reply_body": caption_txt,
+                        "dispatch": dispatch_file_res
+                    }
+            except Exception as gen_err:
+                logger.warning(f"Image generation error: {gen_err}")
+
+        # 0b. Check if incoming message is an image/photo for Gemini Vision analysis
+        is_image_inbound = bool(
+            body_clean_str in ("[image]", "[image message]", "[photo]", "[picture]")
+            or (download_url and any(download_url.lower().split("?")[0].endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp")))
+            or (isinstance(engine_res, dict) and engine_res.get("message_type") in ("imageMessage", "image"))
+        )
+        if is_image_inbound and (download_url or message_id):
+            try:
+                logger.info(f"Downloading incoming image for Gemini Vision analysis for {clean_phone} (message_id={message_id})...")
+                img_bytes = cls._download_media(
+                    chat_id=sender_phone,
+                    message_id=message_id,
+                    download_url=download_url,
+                    organization_id=org_id
+                )
+                if img_bytes:
+                    vision_analysis = cls.call_gemini_vision(
+                        image_bytes=img_bytes,
+                        mime_type="image/jpeg",
+                        prompt=clean_body if clean_body not in ("[image]", "[image message]", "[photo]") else None,
+                        organization_id=org_id,
+                        customer_name=sender_name
+                    )
+                    if vision_analysis and vision_analysis.strip():
+                        logger.info(f"Gemini Vision successfully analyzed image for {clean_phone}: '{vision_analysis[:80]}...'")
+                        vision_reply_text = re.sub(r"[*_~`#>]", "", vision_analysis).strip()
+                        send_res = cls.send_message(
+                            organization_id=org_id,
+                            to_phone=clean_phone,
+                            message_text=vision_reply_text,
+                            quoted_message_id=message_id
+                        )
+                        return {
+                            "success": True,
+                            "action": "image_analyzed",
+                            "reply_body": vision_reply_text,
+                            "mode": "gemini_vision",
+                            "dispatch": send_res
+                        }
+            except Exception as img_err:
+                logger.warning(f"Image ingress vision analysis notice: {img_err}")
 
         # Check if incoming message is an audio / voice note message (.oga, audioMessage, etc.)
         if is_voice_inbound and (not clean_body or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]")):
@@ -3108,10 +3455,32 @@ class WhatsAppService:
                 "trigger_type": payment_action.get("trigger_type")
             }
 
+        # Extract quoted parent message context if available
+        if not parent_msg_id and has_app_context() and message_id:
+            try:
+                cur_in_rec = WhatsAppMessage.query.filter_by(whatsapp_message_id=message_id).first()
+                if cur_in_rec and cur_in_rec.parent_message_id:
+                    parent_msg_id = cur_in_rec.parent_message_id
+            except Exception:
+                pass
+        if not parent_msg_id and isinstance(engine_res, dict):
+            parent_msg_id = engine_res.get("parent_msg_id") or engine_res.get("parent_message_id")
+
+        quoted_context_directive = ""
+        if parent_msg_id and has_app_context():
+            try:
+                parent_rec = WhatsAppMessage.query.filter(
+                    (WhatsAppMessage.whatsapp_message_id == str(parent_msg_id).strip()) | (WhatsAppMessage.id == str(parent_msg_id).strip())
+                ).first()
+                if parent_rec and parent_rec.body:
+                    quoted_context_directive = f"Quoted Context: The customer is directly replying to this specific previous message: '{parent_rec.body.strip()}'. Address their reply specifically in relation to it."
+            except Exception:
+                pass
+
         # Generate response
         generated = cls.generate_ai_auto_response(
             organization_id=org_id,
-            message_body=message_body,
+            message_body=f"{message_body}\n\n{quoted_context_directive}".strip() if quoted_context_directive else message_body,
             sender_name=sender_name,
             sender_phone=clean_phone
         )
@@ -3163,7 +3532,6 @@ class WhatsAppService:
             audio_dispatch_res = None
 
             # Clean reply text: ensure clean without markdown symbols (*, #, _, ~) for voice/chat
-            import re
             clean_reply_text = re.sub(r"[*_~`#>]", "", reply_body).strip()
             if not clean_reply_text:
                 clean_reply_text = reply_body.strip()
@@ -3216,7 +3584,8 @@ class WhatsAppService:
                 text_dispatch_res = cls.send_message(
                     organization_id=org_id,
                     to_phone=clean_phone,
-                    message_text=clean_reply_text
+                    message_text=clean_reply_text,
+                    quoted_message_id=message_id
                 )
                 dispatch_res = text_dispatch_res
                 logger.info(f"AI text response dispatched to {clean_phone} (Dynamic Output Matching: TEXT -> ONLY TEXT): '{clean_reply_text[:60]}...'")
@@ -3657,6 +4026,9 @@ class WhatsAppService:
                 for st in raw_statuses:
                     st_id = st.get("id")
                     st_status = st.get("status")
+                    if st_status in ("deleted", "revoked") and st_id:
+                        cls.handle_incoming_message_deletion(st_id)
+                        continue
                     err_detail = None
                     errors = st.get("errors", [])
                     if errors and isinstance(errors, list):
@@ -3667,9 +4039,13 @@ class WhatsAppService:
                 raw_msgs = value.get("messages", [])
                 for msg in raw_msgs:
                     msg_id = msg.get("id")
+                    msg_type = msg.get("type", "text")
+                    if msg_type in ("revoked", "deleted") and msg_id:
+                        cls.handle_incoming_message_deletion(msg_id)
+                        continue
                     from_phone = msg.get("from")
                     timestamp = msg.get("timestamp")
-                    msg_type = msg.get("type", "text")
+                    parent_msg_id = msg.get("context", {}).get("id") if isinstance(msg.get("context"), dict) else None
 
                     body = ""
                     if msg_type == "text":
@@ -3712,6 +4088,7 @@ class WhatsAppService:
                         "timestamp": timestamp,
                         "message_type": msg_type,
                         "body": body,
+                        "parent_msg_id": parent_msg_id,
                         "location": loc_meta,
                         "raw": msg
                     })
@@ -3942,6 +4319,24 @@ class WhatsAppService:
 
         type_webhook = data.get("typeWebhook")
 
+        # Handle incoming voice call webhooks for direct audio streaming
+        if type_webhook in ("incomingCall", "callReceived", "incomingVoiceCall"):
+            cls.handle_incoming_voice_call(data)
+            return messages
+
+        # Handle message deletion / revocation webhooks
+        if type_webhook in ("deletedMessageReceived", "messageDeleted", "incomingMessageDeleted"):
+            deleted_id = data.get("idMessage") or data.get("deletedMessageId") or data.get("stanzaId")
+            if deleted_id:
+                cls.handle_incoming_message_deletion(deleted_id)
+            return messages
+
+        if type_webhook == "outgoingMessageStatus" and (data.get("status") in ("deleted", "revoked", "deletedMessage")):
+            deleted_id = data.get("idMessage")
+            if deleted_id:
+                cls.handle_incoming_message_deletion(deleted_id)
+            return messages
+
         # Handle message delivery status updates
         if type_webhook in ("outgoingMessageStatus", "statusInstanceChanged"):
             msg_id = data.get("idMessage")
@@ -3972,7 +4367,37 @@ class WhatsAppService:
 
         message_data = data.get("messageData", {})
         type_message = message_data.get("typeMessage", "textMessage")
+        if type_message in ("deletedMessage", "revokedMessage", "messageRevoked", "deleted"):
+            del_data = message_data.get("deletedMessageData", {}) if isinstance(message_data, dict) else {}
+            deleted_id = (
+                del_data.get("stanzaId")
+                or del_data.get("idMessage")
+                or message_data.get("stanzaId")
+                or message_data.get("idMessage")
+                or msg_id
+            )
+            if deleted_id:
+                cls.handle_incoming_message_deletion(deleted_id)
+            return messages
+
         body = cls.extract_message_body_and_quote(message_data, type_message)
+
+        # Extract quoted/parent message context (parent_msg_id)
+        parent_msg_id = None
+        ext_data = message_data.get("extendedTextMessageData", {}) if isinstance(message_data, dict) else {}
+        quoted_obj = (
+            (message_data.get("quotedMessage") if isinstance(message_data, dict) else None)
+            or (ext_data.get("quotedMessage") if isinstance(ext_data, dict) else None)
+            or (message_data.get("quotedMessageData") if isinstance(message_data, dict) else None)
+        )
+        if isinstance(quoted_obj, dict):
+            parent_msg_id = quoted_obj.get("stanzaId") or quoted_obj.get("idMessage")
+        if not parent_msg_id and isinstance(ext_data, dict):
+            parent_msg_id = ext_data.get("stanzaId")
+        if not parent_msg_id and isinstance(message_data, dict):
+            parent_msg_id = message_data.get("stanzaId") or message_data.get("quotedMessageId")
+        if not parent_msg_id and isinstance(data, dict):
+            parent_msg_id = data.get("parent_msg_id") or data.get("parent_message_id")
 
         # Extract direct download URL if present (avoids extra /downloadFile/ API calls)
         file_data = message_data.get("fileMessageData", {}) if isinstance(message_data, dict) else {}
@@ -4014,6 +4439,7 @@ class WhatsAppService:
             "timestamp": timestamp,
             "message_type": type_message,
             "body": body,
+            "parent_msg_id": parent_msg_id,
             "download_url": download_url,
             "location": location_info,
             "provider": "green_api",
@@ -5047,17 +5473,27 @@ class WhatsAppService:
         execution_id: Optional[int] = None,
         error_message: Optional[str] = None,
         raw_payload: Optional[Dict[str, Any]] = None,
-        created_at: Optional[datetime.datetime] = None
+        created_at: Optional[datetime.datetime] = None,
+        parent_message_id: Optional[str] = None
     ) -> WhatsAppMessage:
         """Persists a WhatsApp message record in the tenant workspace with real-world Pakistan local time."""
         if not created_at:
             ts = raw_payload.get("timestamp") if isinstance(raw_payload, dict) else None
             created_at = cls.get_pakistan_time(ts)
 
+        if not parent_message_id and isinstance(raw_payload, dict):
+            parent_message_id = (
+                raw_payload.get("parent_msg_id")
+                or raw_payload.get("parent_message_id")
+                or raw_payload.get("stanzaId")
+                or raw_payload.get("quoted_message_id")
+            )
+
         msg = WhatsAppMessage(
             id=generate_uuid("wam"),
             organization_id=organization_id or "org-enterprise-default",
             whatsapp_message_id=whatsapp_message_id or f"wamid.{uuid.uuid4().hex[:16]}",
+            parent_message_id=parent_message_id,
             direction=direction,
             sender=sender,
             recipient=recipient,
@@ -5184,7 +5620,8 @@ class WhatsAppService:
         to_phone: Optional[str] = None,
         message_text: Optional[str] = None,
         execution_id: Optional[int] = None,
-        allow_fallback: bool = True
+        allow_fallback: bool = True,
+        quoted_message_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Dispatches an outbound WhatsApp text message via Green-API with timeout & simulator fallback.
 
@@ -5252,6 +5689,8 @@ class WhatsAppService:
             "chatId": chat_id,
             "message": message_text or ""
         }
+        if quoted_message_id:
+            payload["quotedMessageId"] = quoted_message_id
 
         timeouts = cls.get_timeout_tuple()
 
@@ -5600,7 +6039,8 @@ class WhatsAppService:
         preview_url: bool = False,
         execution_id: Optional[int] = None,
         template_name: Optional[str] = None,
-        template_language: str = "en_US"
+        template_language: str = "en_US",
+        quoted_message_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Dispatches an outbound WhatsApp text or template message via the active provider (Green-API or Meta Cloud API).
 
@@ -5629,7 +6069,8 @@ class WhatsAppService:
                 to_phone=to_phone,
                 message_text=message_text,
                 execution_id=execution_id,
-                allow_fallback=True
+                allow_fallback=True,
+                quoted_message_id=quoted_message_id
             )
 
         # If Meta Cloud API is the active configured provider

@@ -950,7 +950,8 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             mock_text.assert_called_once_with(
                 organization_id=self.org.id,
                 to_phone="923209350858",
-                message_text="Hum logistics fleet tracking aur medical billing solutions faraham karte hain."
+                message_text="Hum logistics fleet tracking aur medical billing solutions faraham karte hain.",
+                quoted_message_id="TEXT_MSG_TRIGGER_101"
             )
             mock_tts.assert_not_called()
             mock_file.assert_not_called()
@@ -1088,6 +1089,256 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
             self.assertIn("Urdu logistics & medical billing expert", called_prompt)
             self.assertIn("Pakistan Time", called_prompt)
             self.assertIn("DO NOT use markdown symbols", called_prompt)
+
+    def test_voice_quality_upgrade_preprocess_text_for_human_speech(self):
+        """Verifies preprocess_text_for_human_speech tunes text for expressive human-like Urdu voice with natural pauses."""
+        raw_text = """**Salam!** OpsFlow Cloud 24/7 logistics & medical billing services are ready.
+        1. Fleet tracking
+        2. Claims review for PKR 50000.
+        Details at https://opsflow.cloud!"""
+
+        spoken = WhatsAppService.preprocess_text_for_human_speech(raw_text, language="ur")
+        self.assertIsNotNone(spoken)
+        # Strips markdown asterisks
+        self.assertNotIn("**", spoken)
+        # Converts URLs
+        self.assertNotIn("https://", spoken)
+        self.assertIn("ہماری ویب سائٹ", spoken)
+        # Expands 24/7 to natural Urdu speech
+        self.assertIn("چوبیس گھنٹے", spoken)
+        # Expands currency
+        self.assertIn("روپے", spoken)
+        # Replaces rigid bullet numbers with fluid phrasing
+        self.assertNotIn("1.", spoken)
+        self.assertNotIn("2.", spoken)
+        # Natural pause punctuation at greeting
+        self.assertIn("السلام علیکم،", spoken)
+
+    def test_quoted_message_reply_context_parent_msg_id(self):
+        """Verifies inbound messages quoting previous messages capture parent_msg_id and ground AI generation in context."""
+        WhatsAppService.clear_recent_replied_trigger_ids()
+
+        # 1. First record an original message in the DB
+        orig_msg = WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender="system",
+            recipient="923209350858",
+            direction="outbound",
+            body="Aap ka invoice #INV-402 generate ho chuka hai.",
+            whatsapp_message_id="WAMID_ORIGINAL_INV_402"
+        )
+        self.assertIsNotNone(orig_msg)
+
+        # 2. Simulate incoming Green-API webhook quoting the original message
+        quote_webhook_payload = {
+            "typeWebhook": "incomingMessageReceived",
+            "instanceData": {
+                "idInstance": 710722761603,
+                "wid": "923471000668@c.us"
+            },
+            "idMessage": "MSG_REPLY_QUOTE_909",
+            "senderData": {
+                "chatId": "923209350858@c.us",
+                "sender": "923209350858@c.us"
+            },
+            "messageData": {
+                "typeMessage": "extendedTextMessage",
+                "extendedTextMessageData": {
+                    "text": "Mujhe is invoice mein discount chahiye.",
+                    "stanzaId": "WAMID_ORIGINAL_INV_402",
+                    "quotedMessage": {
+                        "textMessage": "Aap ka invoice #INV-402 generate ho chuka hai.",
+                        "stanzaId": "WAMID_ORIGINAL_INV_402"
+                    }
+                }
+            }
+        }
+
+        parsed = WhatsAppService.parse_green_api_payload(quote_webhook_payload)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["parent_msg_id"], "WAMID_ORIGINAL_INV_402")
+
+        # 3. Record message and assert parent_message_id persistence
+        reply_rec = WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender="923209350858",
+            recipient="system",
+            direction="inbound",
+            body=parsed[0]["body"],
+            whatsapp_message_id="MSG_REPLY_QUOTE_909",
+            parent_message_id=parsed[0]["parent_msg_id"],
+            raw_payload=parsed[0]
+        )
+        self.assertEqual(reply_rec.parent_message_id, "WAMID_ORIGINAL_INV_402")
+        as_dict = reply_rec.to_dict()
+        self.assertEqual(as_dict["parent_msg_id"], "WAMID_ORIGINAL_INV_402")
+
+        # 4. Assert handle_inbound_auto_response passes quoted context to AI generator and quotes message on send
+        with patch.dict(os.environ, {"AI_AUTO_REPLY_ENABLED": "true"}), \
+             patch.object(WhatsAppService, "get_gemini_api_key", return_value="fake_key"), \
+             patch.object(WhatsAppService, "generate_ai_auto_response") as mock_gen, \
+             patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "TXT_OUT_QUOTE"}) as mock_send:
+
+            mock_gen.return_value = {
+                "reply_body": "Ji bilkul, hum invoice #INV-402 par special discount offer kar sakte hain.",
+                "intent": "discount_inquiry",
+                "lead_score": 80
+            }
+
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_body="Mujhe is invoice mein discount chahiye.",
+                message_id="MSG_REPLY_QUOTE_909",
+                parent_msg_id="WAMID_ORIGINAL_INV_402"
+            )
+
+            self.assertIsNotNone(res)
+            mock_gen.assert_called_once()
+            call_body = mock_gen.call_args[1]["message_body"]
+            self.assertIn("Quoted Context", call_body)
+            self.assertIn("INV-402", call_body)
+
+            # Assert reply dispatched quotes the incoming message ID
+            mock_send.assert_called_once()
+            self.assertEqual(mock_send.call_args[1]["quoted_message_id"], "MSG_REPLY_QUOTE_909")
+
+    def test_handle_incoming_message_deletion_webhook(self):
+        """Verifies WhatsApp message deletion webhook removes matching records from the database."""
+        target_wamid = "WAMID_TO_BE_DELETED_101"
+        rec = WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender="923209350858",
+            recipient="system",
+            direction="inbound",
+            body="Please delete this accidental message.",
+            whatsapp_message_id=target_wamid
+        )
+        self.assertIsNotNone(rec)
+        found = WhatsAppMessage.query.filter_by(whatsapp_message_id=target_wamid).first()
+        self.assertIsNotNone(found)
+
+        # 1. Test direct handle_incoming_message_deletion method
+        res_del = WhatsAppService.handle_incoming_message_deletion(target_wamid, organization_id=self.org.id)
+        self.assertTrue(res_del["success"])
+        self.assertEqual(res_del["deleted"], 1)
+
+        after_del = WhatsAppMessage.query.filter_by(whatsapp_message_id=target_wamid).first()
+        self.assertIsNone(after_del)
+
+        # 2. Test Green-API deletedMessage webhook ingestion
+        wamid2 = "WAMID_GREEN_DELETED_202"
+        WhatsAppService.record_message(
+            organization_id=self.org.id,
+            sender="923209350858",
+            recipient="system",
+            direction="inbound",
+            body="Another message to delete via webhook.",
+            whatsapp_message_id=wamid2
+        )
+        self.assertIsNotNone(WhatsAppMessage.query.filter_by(whatsapp_message_id=wamid2).first())
+
+        green_del_payload = {
+            "typeWebhook": "incomingMessageReceived",
+            "idMessage": "MSG_DELETE_EVENT_999",
+            "messageData": {
+                "typeMessage": "deletedMessage",
+                "deletedMessageData": {
+                    "stanzaId": wamid2,
+                    "idMessage": wamid2
+                }
+            }
+        }
+        res_parse = WhatsAppService.parse_green_api_payload(green_del_payload)
+        self.assertEqual(res_parse, [])  # Handled and filtered out
+
+        after_webhook = WhatsAppMessage.query.filter_by(whatsapp_message_id=wamid2).first()
+        self.assertIsNone(after_webhook)
+
+    def test_live_whatsapp_voice_call_direct_audio_streaming(self):
+        """Verifies incoming WhatsApp voice call webhook initiates live audio streaming session and records DB event."""
+        call_payload = {
+            "typeWebhook": "incomingCall",
+            "chatId": "923209350858@c.us",
+            "idCall": "CALL_STREAM_LIVE_001",
+            "status": "ringing",
+            "timestamp": 1729760123
+        }
+
+        # 1. Test direct handler
+        res = WhatsAppService.handle_incoming_voice_call(call_payload, organization_id=self.org.id)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["status"], "streaming")
+        self.assertEqual(res["call_id"], "CALL_STREAM_LIVE_001")
+        self.assertTrue(res["audio_streaming"])
+        self.assertIn("CALL_STREAM_LIVE_001", res["stream_url"])
+
+        # Check DB record
+        call_msg = WhatsAppMessage.query.filter_by(whatsapp_message_id="CALL_STREAM_LIVE_001").first()
+        self.assertIsNotNone(call_msg)
+        self.assertEqual(call_msg.message_type, "voiceCall")
+        self.assertEqual(call_msg.status, "streaming")
+
+        # 2. Test HTTP endpoint /api/v1/webhooks/whatsapp/calls
+        resp = self.client.post("/api/v1/webhooks/whatsapp/calls", json={
+            "typeWebhook": "incomingCall",
+            "chatId": "923209350858@c.us",
+            "idCall": "CALL_HTTP_ROUTE_002",
+            "status": "ringing"
+        })
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["call_id"], "CALL_HTTP_ROUTE_002")
+        self.assertEqual(data["status"], "streaming")
+
+    def test_gemini_vision_image_ingress_analysis(self):
+        """Verifies incoming image media is analyzed via Gemini Vision and replied with visual analysis."""
+        WhatsAppService.clear_recent_replied_trigger_ids()
+        fake_img_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+
+        with patch.dict(os.environ, {"AI_AUTO_REPLY_ENABLED": "true"}), \
+             patch.object(WhatsAppService, "_download_media", return_value=fake_img_bytes), \
+             patch.object(WhatsAppService, "call_gemini_vision", return_value="Tasweer mein logistics shipping container aur medical supplies invoice wazeh hai.") as mock_vis, \
+             patch.object(WhatsAppService, "send_message", return_value={"success": True, "whatsapp_message_id": "TXT_VIS_001"}) as mock_send:
+
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_body="[Image]",
+                message_id="MSG_IMAGE_VISION_001",
+                download_url="https://media.greenapi.com/waybill.jpg"
+            )
+
+            self.assertIsNotNone(res)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["action"], "image_analyzed")
+            mock_vis.assert_called_once()
+            mock_send.assert_called_once()
+            self.assertIn("logistics shipping container", mock_send.call_args[1]["message_text"])
+
+    def test_image_generation_intent_and_file_dispatch(self):
+        """Verifies customer request to generate an image calls generation service and dispatches generated image file."""
+        WhatsAppService.clear_recent_replied_trigger_ids()
+        fake_gen_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+
+        with patch.dict(os.environ, {"AI_AUTO_REPLY_ENABLED": "true"}), \
+             patch.object(WhatsAppService, "generate_image", return_value=(fake_gen_png, "generated_image.png", "image/png")) as mock_gen_img, \
+             patch.object(WhatsAppService, "send_green_api_file", return_value={"success": True, "whatsapp_message_id": "FILE_IMG_001"}) as mock_send_file:
+
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_body="Please generate an image of a modern logistics warehouse in Karachi",
+                message_id="IMG_GEN_REQUEST_001"
+            )
+
+            self.assertIsNotNone(res)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["action"], "image_generated")
+            mock_gen_img.assert_called_once()
+            mock_send_file.assert_called_once()
+            self.assertEqual(mock_send_file.call_args[1]["filename"], "generated_image.png")
+            self.assertEqual(mock_send_file.call_args[1]["mime_type"], "image/png")
 
 if __name__ == "__main__":
     unittest.main()

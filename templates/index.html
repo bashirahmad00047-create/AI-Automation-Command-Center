@@ -921,9 +921,23 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                                 <span>AI Auto-Responder</span>
                                 <span id="waHeaderAiStatusText" style="font-weight: 700; font-size: 10px;">OFF</span>
                             </div>
-                            <button type="button" class="wa-icon-btn" title="Simulate Inbound Voice Note" onclick="simulateInboundVoiceNote()">🎙️ Voice Demo</button>
-                            <button type="button" class="wa-icon-btn" id="waBtnMarkUnread" title="Mark Conversation as Unread" onclick="markCurrentConversationUnread()">📫 Mark Unread</button>
-                            <button type="button" class="wa-icon-btn" title="Clear Conversation" onclick="clearCurrentConversation()">🗑️ Clear</button>
+                            <button type="button" class="wa-icon-btn" title="Simulate Inbound Voice Note" onclick="simulateInboundVoiceNote()" aria-label="Simulate Inbound Voice Note">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                                </svg>
+                            </button>
+                            <button type="button" class="wa-icon-btn" id="waBtnMarkUnread" title="Mark Conversation as Unread" onclick="markCurrentConversationUnread()" aria-label="Mark Conversation as Unread">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                    <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+                                    <circle cx="19" cy="5" r="3" fill="#00a884"/>
+                                </svg>
+                            </button>
+                            <button type="button" class="wa-icon-btn" title="Clear Conversation" onclick="clearCurrentConversation()" aria-label="Clear Conversation">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                                </svg>
+                            </button>
                         </div>
                     </div>
 

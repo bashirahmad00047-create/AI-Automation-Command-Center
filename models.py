@@ -810,6 +810,7 @@ class WhatsAppMessage(db.Model):
     id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("wam"))
     organization_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     whatsapp_message_id = db.Column(db.String(128), nullable=True, index=True)  # Meta wamid...
+    parent_message_id = db.Column(db.String(128), nullable=True, index=True)  # Quoted / parent message ID
     direction = db.Column(db.String(16), nullable=False, default="inbound")  # inbound, outbound
     sender = db.Column(db.String(64), nullable=False)  # Phone number or System
     recipient = db.Column(db.String(64), nullable=False)  # Phone number or System
@@ -829,6 +830,7 @@ class WhatsAppMessage(db.Model):
         is_ai_generated = False
         ai_intent = None
         response_source = None
+        parent_id = getattr(self, "parent_message_id", None)
         if self.raw_payload_json:
             try:
                 raw = json.loads(self.raw_payload_json)
@@ -865,6 +867,8 @@ class WhatsAppMessage(db.Model):
             "id": self.id,
             "organization_id": self.organization_id,
             "whatsapp_message_id": self.whatsapp_message_id,
+            "parent_message_id": parent_id,
+            "parent_msg_id": parent_id,
             "direction": self.direction,
             "sender": self.sender,
             "recipient": self.recipient,
