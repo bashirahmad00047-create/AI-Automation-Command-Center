@@ -2857,6 +2857,14 @@ def whatsapp_webhook_ingress():
     return jsonify({"status": "ok", "provider": provider_name, "processed": processed_count}), 200
 
 
+@api_v1.route("/webhooks/whatsapp/calls", methods=["GET", "POST"])
+def whatsapp_voice_call_ingress():
+    """Incoming WhatsApp Voice Call Webhook Listener for direct audio streaming."""
+    payload = request.get_json(silent=True) or request.form.to_dict() or {}
+    res = WhatsAppService.handle_incoming_voice_call(payload, organization_id=request.args.get("org_id"))
+    return jsonify(res), 200
+
+
 @api_v1.route("/webhooks/whatsapp/green-api", methods=["GET", "POST"])
 @rate_limit(limit=120, window=60, message="Too many Green-API webhook requests.")
 def green_api_webhook_ingress():
@@ -2870,6 +2878,12 @@ def green_api_webhook_ingress():
         }), 200
 
     payload = request.get_json(silent=True) or request.form.to_dict() or {}
+
+    # Handle incoming WhatsApp Voice Call webhook to direct audio streaming
+    if payload.get("typeWebhook") in ("incomingCall", "callReceived", "incomingVoiceCall") or payload.get("callData"):
+        call_res = WhatsAppService.handle_incoming_voice_call(payload, organization_id=request.args.get("org_id"))
+        return jsonify(call_res), 200
+
     messages = WhatsAppService.parse_green_api_payload(payload)
 
     if not messages:
