@@ -77,6 +77,21 @@ if os.path.exists("/etc/secrets") and os.path.isdir("/etc/secrets"):
 
 
 class WhatsAppService:
+    PKT_TZ = datetime.timezone(datetime.timedelta(hours=5))
+
+    @classmethod
+    def get_pakistan_time(cls, timestamp: Optional[Any] = None) -> datetime.datetime:
+        """Returns real-world local time in Pakistan Standard Time (PKT, UTC+5 / Asia/Karachi)."""
+        if timestamp:
+            try:
+                ts = float(timestamp)
+                if ts > 1e11:
+                    ts = ts / 1000.0
+                return datetime.datetime.fromtimestamp(ts, tz=cls.PKT_TZ).replace(tzinfo=None)
+            except Exception:
+                pass
+        return datetime.datetime.now(cls.PKT_TZ).replace(tzinfo=None)
+
     """Manages WhatsApp Business Cloud API & Green-API interactions and message tracking."""
 
     GRAPH_API_VERSION = "v19.0"
@@ -1572,9 +1587,9 @@ class WhatsAppService:
         cls,
         sender_phone: str,
         organization_id: Optional[str] = None,
-        limit: int = 6
-    ) -> List[Dict[str, str]]:
-        """Retrieves recent conversation turns for this customer to enable multi-turn contextual AI responses."""
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Retrieves recent 3-5 conversation turns for this customer to enable multi-turn contextual AI responses with Pakistan timestamps."""
         if not sender_phone or not has_app_context():
             return []
 
@@ -1595,14 +1610,26 @@ class WhatsAppService:
                 )
             ).order_by(WhatsAppMessage.created_at.desc(), WhatsAppMessage.id.desc()).limit(limit).all()
 
-            history: List[Dict[str, str]] = []
+            history: List[Dict[str, Any]] = []
             for m in reversed(msgs):
                 if not m.body or not m.body.strip():
                     continue
                 role = "Customer" if m.direction == "inbound" else "Assistant"
+                is_voice = (
+                    m.message_type in ("audioMessage", "voiceMessage", "audio", "voice", "ptt")
+                    or "[voice" in (m.body or "").lower()
+                )
+                time_str = m.created_at.strftime("%I:%M %p") if m.created_at else ""
+                content_body = m.body.strip()
+                if is_voice and not content_body.lower().startswith("[voice"):
+                    content_body = f"[Voice Note: {content_body}]"
+                time_prefix = f"[{time_str} PKT] " if time_str else ""
                 history.append({
                     "role": role,
-                    "content": m.body.strip()
+                    "content": f"{time_prefix}{content_body}",
+                    "is_voice": is_voice,
+                    "time": time_str,
+                    "created_at": m.created_at.strftime("%Y-%m-%d %H:%M:%S") if m.created_at else None
                 })
             return history
         except Exception as e:
@@ -2131,24 +2158,29 @@ class WhatsAppService:
         history_section = ""
         if conversation_history:
             history_lines = []
-            for item in conversation_history[-6:]:
+            for item in conversation_history[-5:]:
                 r = item.get("role", "Customer")
                 c = item.get("content", "").strip()
                 if c:
                     history_lines.append(f"{r}: {c}")
             if history_lines:
-                history_section = "\n\nRecent Conversation History:\n" + "\n".join(history_lines)
+                history_section = "\n\nRecent Conversation History (Past 3-5 Turns in Pakistan Time):\n" + "\n".join(history_lines)
 
         b_name = cls.get_tenant_business_name(organization_id=organization_id)
         cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
         lang_info = cls.detect_language(clean_text, conversation_history=conversation_history)
         lang_directive = cls.get_language_prompt_directive(lang_info, clean_text)
+        pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
         prompt = (
-            f"You are an intelligent, polite, and direct AI assistant for {b_name}.{sys_instruct}{history_section}\n\n"
+            f"You are a polite, knowledgeable, and highly professional Urdu logistics & medical billing expert assisting customers of {b_name}.\n"
+            f"Current Real-World Time: {pkt_time_str}.\n"
+            f"{sys_instruct}{history_section}\n\n"
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"Please provide a direct, helpful, and natural response specifically addressing their inquiry in light of any conversation context above. "
-            f"Ensure your reply strictly adheres to the language requirement above and is formatted concisely for mobile WhatsApp reading without robotic boilerplate."
+            f"STRICT RESPONSE RULES:\n"
+            f"1. Persona & Tone: Polite, courteous Urdu logistics & medical billing expert (نرم گفتار، بااخلاق اور پیشہ ورانہ انداز).\n"
+            f"2. Length: Strictly keep the response short (exactly 2 to 3 sentences maximum).\n"
+            f"3. Pure Clean Text: DO NOT use markdown symbols (no asterisks '*', hashtags '#', underscores '_', backticks). Provide pure, clean conversational text ready for voice reading and WhatsApp display."
         )
 
         configured_model = cls.get_gemini_model_name(organization_id=organization_id)
@@ -2338,11 +2370,14 @@ class WhatsAppService:
         cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
         lang_info = cls.detect_language(clean_text, conversation_history=conversation_history)
         lang_directive = cls.get_language_prompt_directive(lang_info, clean_text)
+        b_name = cls.get_tenant_business_name(organization_id=organization_id)
+        pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
         user_prompt = (
+            f"You are a polite, knowledgeable, and highly professional Urdu logistics & medical billing expert assisting customers of {b_name}.\n"
+            f"Current Real-World Time: {pkt_time_str}.\n\n"
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"Please provide a direct, helpful, and natural response specifically addressing their inquiry in light of any previous conversation. "
-            f"Ensure your reply strictly adheres to the language requirement above and is formatted concisely for mobile WhatsApp reading without robotic boilerplate."
+            f"STRICT RULES: Respond as a polite Urdu logistics and medical billing expert in strictly 2 to 3 sentences. DO NOT use markdown symbols (*, #, _, ~). Keep text 100% clean and conversational."
         )
 
         configured_groq_model = (
@@ -3119,35 +3154,32 @@ class WhatsAppService:
             with cls._processed_ids_lock:
                 cls._recent_replied_trigger_ids[message_id] = time.time()
 
-        # Dispatch outbound message: Gemini/Groq AI text response immediately sent, with strict error-handled TTS voice audio
+        # Dispatch outbound message: Dynamic Output Matching:
+        # - Incoming TEXT -> Reply with ONLY TEXT.
+        # - Incoming VOICE -> Reply with ONLY VOICE NOTE (.oga). DO NOT send text message along with audio.
         try:
-            # 1. Guarantee immediate dispatch of AI text response back to customer via Green-API send_message()
+            dispatch_res = None
             text_dispatch_res = None
-            try:
-                text_dispatch_res = cls.send_message(
-                    organization_id=org_id,
-                    to_phone=clean_phone,
-                    message_text=reply_body
-                )
-                logger.info(f"AI text response immediately dispatched to {clean_phone}: '{reply_body[:60]}...'")
-            except Exception as txt_err:
-                logger.error(f"Failed to dispatch text reply to {clean_phone}: {txt_err}")
-                text_dispatch_res = None
-
-            # 2. If inbound was a voice note, synthesize Urdu .oga audio and dispatch via send_green_api_file()
-            # Strict error handling and fallback ensures any TTS failure NEVER impacts or silences the text response
             audio_dispatch_res = None
+
+            # Clean reply text: ensure clean without markdown symbols (*, #, _, ~) for voice/chat
+            import re
+            clean_reply_text = re.sub(r"[*_~`#>]", "", reply_body).strip()
+            if not clean_reply_text:
+                clean_reply_text = reply_body.strip()
+
             if is_voice or is_voice_inbound:
+                # 1. Incoming is VOICE: Generate Urdu .oga spoken audio and reply with ONLY VOICE NOTE
                 try:
                     audio_res = cls.generate_spoken_audio(
-                        text=reply_body,
+                        text=clean_reply_text,
                         language="ur",
                         organization_id=org_id,
                         output_format="oga"
                     )
                     if audio_res:
                         audio_b, audio_fn, audio_mt = audio_res
-                        logger.info(f"Synthesized {len(audio_b)} bytes of Urdu .oga audio for voice note reply to {clean_phone}.")
+                        logger.info(f"Synthesized {len(audio_b)} bytes of Urdu .oga audio for voice note reply to {clean_phone} (Dynamic Output Matching: VOICE -> ONLY VOICE).")
                         active_prov = cls.get_active_provider(organization_id=org_id)
                         if active_prov == "green_api" or cls.is_green_api_configured(organization_id=org_id):
                             audio_dispatch_res = cls.send_green_api_file(
@@ -3156,16 +3188,41 @@ class WhatsAppService:
                                 file_bytes=audio_b,
                                 filename=audio_fn,
                                 mime_type=audio_mt,
-                                caption=reply_body,
-                                quoted_message_id=message_id
+                                caption="",  # Pure audio note, NO text message sent along with audio
+                                quoted_message_id=message_id,
+                                transcript=clean_reply_text
                             )
                     else:
-                        logger.info(f"TTS audio synthesis unavailable for voice note reply to {clean_phone}; text response is already safely delivered.")
+                        logger.warning(f"TTS audio synthesis unavailable for voice note reply to {clean_phone}; falling back to text.")
                 except Exception as tts_err:
-                    logger.warning(f"TTS voice synthesis/dispatch notice for {clean_phone}: {tts_err}. Text reply safely delivered.")
+                    logger.warning(f"TTS voice synthesis failed for {clean_phone}: {tts_err}. Falling back to text.")
                     audio_dispatch_res = None
 
-            dispatch_res = audio_dispatch_res if (audio_dispatch_res and audio_dispatch_res.get("success")) else (text_dispatch_res or {})
+                # If audio dispatch succeeded, we DO NOT send text (Dynamic Output Matching)
+                if audio_dispatch_res and audio_dispatch_res.get("success"):
+                    dispatch_res = audio_dispatch_res
+                    logger.info(f"Voice note (.oga) reply successfully dispatched to {clean_phone}. No text sent as per Dynamic Output Matching.")
+                else:
+                    # Fallback to text only if audio synthesis or dispatch failed
+                    logger.info(f"Audio dispatch failed or unavailable, falling back to text reply for {clean_phone}.")
+                    text_dispatch_res = cls.send_message(
+                        organization_id=org_id,
+                        to_phone=clean_phone,
+                        message_text=clean_reply_text
+                    )
+                    dispatch_res = text_dispatch_res
+            else:
+                # 2. Incoming is TEXT: Reply with ONLY TEXT
+                text_dispatch_res = cls.send_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    message_text=clean_reply_text
+                )
+                dispatch_res = text_dispatch_res
+                logger.info(f"AI text response dispatched to {clean_phone} (Dynamic Output Matching: TEXT -> ONLY TEXT): '{clean_reply_text[:60]}...'")
+
+            if not dispatch_res:
+                dispatch_res = text_dispatch_res or audio_dispatch_res or {}
             # Tag the newly recorded outbound message with AI metadata
             outbound_record_id = (dispatch_res.get("record_id") or dispatch_res.get("message_record_id")) if isinstance(dispatch_res, dict) else None
             msg_rec = None
@@ -4989,9 +5046,14 @@ class WhatsAppService:
         message_type: str = "text",
         execution_id: Optional[int] = None,
         error_message: Optional[str] = None,
-        raw_payload: Optional[Dict[str, Any]] = None
+        raw_payload: Optional[Dict[str, Any]] = None,
+        created_at: Optional[datetime.datetime] = None
     ) -> WhatsAppMessage:
-        """Persists a WhatsApp message record in the tenant workspace."""
+        """Persists a WhatsApp message record in the tenant workspace with real-world Pakistan local time."""
+        if not created_at:
+            ts = raw_payload.get("timestamp") if isinstance(raw_payload, dict) else None
+            created_at = cls.get_pakistan_time(ts)
+
         msg = WhatsAppMessage(
             id=generate_uuid("wam"),
             organization_id=organization_id or "org-enterprise-default",
@@ -5005,7 +5067,7 @@ class WhatsAppService:
             execution_id=execution_id,
             error_message=error_message,
             raw_payload_json=json.dumps(raw_payload) if raw_payload else None,
-            created_at=datetime.datetime.utcnow()
+            created_at=created_at
         )
         if has_app_context():
             try:
@@ -5418,7 +5480,8 @@ class WhatsAppService:
         caption: Optional[str] = None,
         quoted_message_id: Optional[str] = None,
         execution_id: Optional[int] = None,
-        allow_fallback: bool = True
+        allow_fallback: bool = True,
+        transcript: Optional[str] = None
     ) -> Dict[str, Any]:
         """Dispatches an outbound WhatsApp file/audio message via Green-API (uploadFile + sendFileByUrl)."""
         if isinstance(to_phone, (bytes, bytearray)) and file_bytes is None:
@@ -5496,12 +5559,18 @@ class WhatsAppService:
                         sender=f"GreenAPI Instance {id_inst}",
                         recipient=clean_to,
                         direction="outbound",
-                        body=caption or f"[Voice Note: {fn}]",
+                        body=transcript or caption or f"[Voice Note: {fn}]",
                         message_type="audioMessage",
                         status="sent",
                         whatsapp_message_id=msg_id,
                         execution_id=execution_id,
-                        raw_payload={**send_data, "urlFile": url_file, "downloadUrl": url_file, "fileName": fn}
+                        raw_payload={
+                            **send_data,
+                            "urlFile": url_file,
+                            "downloadUrl": url_file,
+                            "fileName": fn,
+                            "transcript": transcript or caption or ""
+                        }
                     )
                     return {
                         "success": True,

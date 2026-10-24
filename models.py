@@ -26,6 +26,22 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from database import db
 
 
+PKT_TZ = datetime.timezone(datetime.timedelta(hours=5))
+
+
+def get_pakistan_time(timestamp: Optional[Any] = None) -> datetime.datetime:
+    """Returns real-world local time in Pakistan Standard Time (PKT, UTC+5 / Asia/Karachi)."""
+    if timestamp:
+        try:
+            ts = float(timestamp)
+            if ts > 1e11:
+                ts = ts / 1000.0
+            return datetime.datetime.fromtimestamp(ts, tz=PKT_TZ).replace(tzinfo=None)
+        except Exception:
+            pass
+    return datetime.datetime.now(PKT_TZ).replace(tzinfo=None)
+
+
 def generate_uuid(prefix: str = "") -> str:
     """Generate a readable prefixed UUID."""
     val = uuid.uuid4().hex
@@ -493,7 +509,7 @@ class Lead(db.Model):
     draft_response = db.Column(db.Text, nullable=True)
     execution_id = db.Column(db.Integer, db.ForeignKey("workflow_executions.id", ondelete="SET NULL"), nullable=True)
     is_sample = db.Column(db.Boolean, nullable=False, default=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=get_pakistan_time, index=True)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     def to_dict(self) -> Dict[str, Any]:
