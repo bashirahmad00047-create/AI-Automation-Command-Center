@@ -1116,7 +1116,8 @@ class WhatsAppService:
         model_id: Optional[str] = None
     ) -> Optional[bytes]:
         """Synthesizes text into ultra-natural human speech using ElevenLabs Multilingual Neural TTS engine.
-        Defaults to voice_id='pNInz6obpgDQGcFmaJgB' and model_id='eleven_multilingual_v2' for conversational Urdu/Roman Urdu.
+        Defaults to deep natural male voice_id='JBFqnCBsd6RMkjVDRZzb' (George) and model_id='eleven_multilingual_v2'
+        with stability=0.35, similarity_boost=0.85, style=0.45 for casual conversational Pakistani Urdu/Roman Urdu.
         """
         eleven_key = (
             cls._get_tenant_or_global_setting("ELEVENLABS_API_KEY", organization_id=organization_id)
@@ -1129,7 +1130,7 @@ class WhatsAppService:
             voice_id
             or cls._get_tenant_or_global_setting("ELEVENLABS_VOICE_ID", organization_id=organization_id)
             or os.environ.get("ELEVENLABS_VOICE_ID")
-            or "pNInz6obpgDQGcFmaJgB"
+            or "JBFqnCBsd6RMkjVDRZzb"
         )
         active_model = (
             model_id
@@ -1150,8 +1151,10 @@ class WhatsAppService:
                 "text": text[:1000],
                 "model_id": active_model,
                 "voice_settings": {
-                    "stability": 0.5,
-                    "similarity_boost": 0.8
+                    "stability": 0.35,
+                    "similarity_boost": 0.85,
+                    "style": 0.45,
+                    "use_speaker_boost": True
                 }
             }
             resp = requests.post(url, headers=headers, json=payload, timeout=8.0)
@@ -1176,9 +1179,9 @@ class WhatsAppService:
         """Synthesizes text into ultra-realistic HD human spoken audio bytes.
 
         Supported providers in order of precedence:
-        1. OpenAI Audio Speech API (tts-1-hd) if OPENAI_API_KEY is configured (native Opus & MP3)
-        2. ElevenLabs Text-to-Speech API if ELEVENLABS_API_KEY is configured
-        3. Microsoft Edge Neural HD Voice (ur-PK-UzmaNeural / en-US-JennyNeural) for crystal-clear natural human speech
+        1. ElevenLabs Multilingual Neural TTS (voice_id='JBFqnCBsd6RMkjVDRZzb', model_id='eleven_multilingual_v2') - ALWAYS primary for all voice notes (Urdu, Roman Urdu, English)
+        2. Microsoft Edge Neural HD Voice (hi-IN-MadhurNeural / ur-PK-UzmaNeural / en-US-JennyNeural) fallback ONLY if ElevenLabs fails completely
+        3. OpenAI Audio Speech API (tts-1-hd) fallback
         4. Local gTTS (Google Text-to-Speech) fallback
 
         Returns (audio_bytes, filename, mime_type) or None if no TTS capability is available.
@@ -1197,7 +1200,8 @@ class WhatsAppService:
         audio_fn = "voice_reply.oga" if is_oga else "voice_reply.mp3"
         audio_mt = "audio/ogg; codecs=opus" if is_oga else "audio/mpeg"
 
-        # 1. Primary: ElevenLabs Multilingual Neural TTS (voice_id='pNInz6obpgDQGcFmaJgB', model_id='eleven_multilingual_v2')
+        # 1. Primary: ElevenLabs Multilingual Neural TTS (voice_id='JBFqnCBsd6RMkjVDRZzb', model_id='eleven_multilingual_v2')
+        # ALWAYS attempted first for every voice note, including Urdu / Roman Urdu / English text responses.
         eleven_bytes = cls._synthesize_elevenlabs_tts(clean_text[:1000], organization_id=organization_id)
         if eleven_bytes and len(eleven_bytes) > 100:
             return (eleven_bytes, audio_fn, audio_mt)
@@ -3918,8 +3922,8 @@ class WhatsAppService:
             logger.info(f"[Force Dispatch] send_green_api_message execution result for {clean_phone}: {green_dispatch_res}")
 
             # 2. VOICE SYNTHESIS & DISPATCH GUARANTEE WITH FALLBACK PROTECTION
-            # Uses edge-tts engine (hi-IN-MadhurNeural rate=-5% pitch=+2Hz / ur-PK-UzmaNeural)
-            # Synthesizes every generated Pakistani Urdu text response into .oga voice note and dispatches via send_green_api_file
+            # Uses ElevenLabs multilingual v2 (voice_id='JBFqnCBsd6RMkjVDRZzb', stability=0.35, similarity_boost=0.85, style=0.45)
+            # Synthesizes every generated Pakistani Urdu text response into .oga voice note and dispatches via send_green_api_file (falling back to edge-tts/OpenAI if ElevenLabs fails)
             audio_dispatch_res = None
             try:
                 audio_res = cls.generate_spoken_audio(
