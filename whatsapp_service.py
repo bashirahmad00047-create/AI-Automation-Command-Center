@@ -254,9 +254,9 @@ class WhatsAppService:
             t = re.sub(r'(\d+)\s*%', lambda m: cls.number_to_roman_urdu(int(m.group(1))) + " feesad", t)
             t = re.sub(r'%', ' feesad ', t)
 
-            # Slash / -> ya
-            t = re.sub(r'(\w+)\s*/\s*(\w+)', r'\1 ya \2', t)
-            t = re.sub(r'/', ' ya ', t)
+            # Slash / and Ampersand & -> ya
+            t = re.sub(r'(\w+)\s*[/&]\s*(\w+)', r'\1 ya \2', t)
+            t = re.sub(r'[/&]', ' ya ', t)
 
             # Currency words without numbers
             t = re.sub(r'\bPKR\b|\bRs\.?\b', "rupay", t, flags=re.IGNORECASE)

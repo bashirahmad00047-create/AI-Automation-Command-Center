@@ -337,12 +337,13 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
         res_fee = WhatsAppService.preprocess_text_for_human_speech(sample_fee, language="roman_urdu")
         self.assertIn("Aap ki fee, pachees hazar rupay hai", res_fee)
 
-        # 3. Currency symbols and percentage conversion
-        sample_symbols = "Total fee 500 Rs aur discount 10% cash/online hai."
+        # 3. Currency symbols, percentage, and & / conversion
+        sample_symbols = "Total fee 500 Rs aur discount 10% cash & online / bank transfer hai."
         res_symbols = WhatsAppService.preprocess_text_for_human_speech(sample_symbols, language="roman_urdu")
         self.assertIn("paanch sau rupay", res_symbols)
         self.assertIn("das feesad", res_symbols)
         self.assertIn("cash ya online", res_symbols)
+        self.assertIn("ya bank transfer", res_symbols)
 
         # 4. Natural breathing pauses with ellipses (...) and commas
         sample_greetings = "Assalam-o-Alaikum. Aap ka order ready hai."
