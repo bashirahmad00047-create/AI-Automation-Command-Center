@@ -296,7 +296,7 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
             self.assertIn("OpsFlow support team active hai", mock_msg.call_args[1]["message_text"])
 
     def test_elevenlabs_multilingual_voice_synthesis(self):
-        """Verifies ElevenLabs Multilingual Neural TTS synthesizes natural audio with voice_id pNInz6obpgDQGcFmaJgB and model_id eleven_multilingual_v2."""
+        """Verifies ElevenLabs Multilingual Neural TTS synthesizes natural audio with voice_id JBFqnCBsd6RMkjVDRZzb and model_id eleven_multilingual_v2."""
         from unittest.mock import patch, MagicMock
 
         fake_audio = b"\xff\xfb\x90\x44" + b"\x00" * 350
@@ -316,10 +316,13 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
 
             mock_post.assert_called_once()
             called_url = mock_post.call_args[0][0]
-            self.assertIn("pNInz6obpgDQGcFmaJgB", called_url)
+            self.assertIn("JBFqnCBsd6RMkjVDRZzb", called_url)
             called_payload = mock_post.call_args[1]["json"]
             self.assertEqual(called_payload["model_id"], "eleven_multilingual_v2")
             self.assertIn("Assalam-o-Alaikum", called_payload["text"])
+            self.assertEqual(called_payload["voice_settings"]["stability"], 0.35)
+            self.assertEqual(called_payload["voice_settings"]["similarity_boost"], 0.85)
+            self.assertEqual(called_payload["voice_settings"]["style"], 0.45)
 
 
 if __name__ == "__main__":
