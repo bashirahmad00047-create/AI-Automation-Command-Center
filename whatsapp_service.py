@@ -1108,6 +1108,64 @@ class WhatsAppService:
             return None
 
     @classmethod
+    def _synthesize_elevenlabs_tts(
+        cls,
+        text: str,
+        organization_id: Optional[str] = None,
+        voice_id: Optional[str] = None,
+        model_id: Optional[str] = None
+    ) -> Optional[bytes]:
+        """Synthesizes text into ultra-natural human speech using ElevenLabs Multilingual Neural TTS engine.
+        Defaults to voice_id='pNInz6obpgDQGcFmaJgB' and model_id='eleven_multilingual_v2' for conversational Urdu/Roman Urdu.
+        """
+        eleven_key = (
+            cls._get_tenant_or_global_setting("ELEVENLABS_API_KEY", organization_id=organization_id)
+            or os.environ.get("ELEVENLABS_API_KEY")
+        )
+        if not eleven_key:
+            return None
+
+        active_voice = (
+            voice_id
+            or cls._get_tenant_or_global_setting("ELEVENLABS_VOICE_ID", organization_id=organization_id)
+            or os.environ.get("ELEVENLABS_VOICE_ID")
+            or "pNInz6obpgDQGcFmaJgB"
+        )
+        active_model = (
+            model_id
+            or cls._get_tenant_or_global_setting("ELEVENLABS_MODEL_ID", organization_id=organization_id)
+            or os.environ.get("ELEVENLABS_MODEL_ID")
+            or "eleven_multilingual_v2"
+        )
+
+        try:
+            import requests
+            url = f"https://api.elevenlabs.io/v1/text-to-speech/{active_voice}"
+            headers = {
+                "xi-api-key": str(eleven_key).strip(),
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg"
+            }
+            payload = {
+                "text": text[:1000],
+                "model_id": active_model,
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.8
+                }
+            }
+            resp = requests.post(url, headers=headers, json=payload, timeout=8.0)
+            if resp.status_code == 200 and resp.content and len(resp.content) > 100:
+                logger.info(f"ElevenLabs TTS voice '{active_voice}' ({active_model}) synthesized {len(resp.content)} bytes of audio.")
+                return resp.content
+            else:
+                logger.warning(f"ElevenLabs TTS returned HTTP {resp.status_code}: {resp.text[:200]}")
+                return None
+        except Exception as e:
+            logger.warning(f"ElevenLabs TTS synthesis error: {e}")
+            return None
+
+    @classmethod
     def generate_spoken_audio(
         cls,
         text: str,
@@ -1139,7 +1197,12 @@ class WhatsAppService:
         audio_fn = "voice_reply.oga" if is_oga else "voice_reply.mp3"
         audio_mt = "audio/ogg; codecs=opus" if is_oga else "audio/mpeg"
 
-        # 1. OpenAI HD Audio Speech API (model 'tts-1-hd', voice 'onyx' preset) with optimized streaming bytes
+        # 1. Primary: ElevenLabs Multilingual Neural TTS (voice_id='pNInz6obpgDQGcFmaJgB', model_id='eleven_multilingual_v2')
+        eleven_bytes = cls._synthesize_elevenlabs_tts(clean_text[:1000], organization_id=organization_id)
+        if eleven_bytes and len(eleven_bytes) > 100:
+            return (eleven_bytes, audio_fn, audio_mt)
+
+        # 2. Secondary fallback: OpenAI HD Audio Speech API (model 'tts-1-hd')
         openai_key = cls.get_openai_api_key(organization_id=organization_id)
         if openai_key and str(openai_key).strip():
             try:
@@ -1152,7 +1215,6 @@ class WhatsAppService:
                 if voice_choice not in ("onyx", "nova", "alloy", "echo", "fable", "shimmer"):
                     voice_choice = "onyx"
 
-                # Realistic Male Natural Voice Engine: 1.0x speed with natural conversational pacing
                 speed_val = 1.0
                 speed_str = (
                     cls._get_tenant_or_global_setting("OPENAI_TTS_SPEED", organization_id=organization_id)
@@ -1197,36 +1259,6 @@ class WhatsAppService:
                         return (audio_bytes, audio_fn, audio_mt)
             except Exception as e:
                 logger.debug(f"OpenAI TTS-1-HD synthesis failed: {e}")
-
-        # 2. ElevenLabs Text-to-Speech API (if ELEVENLABS_API_KEY configured)
-        eleven_key = (
-            cls._get_tenant_or_global_setting("ELEVENLABS_API_KEY", organization_id=organization_id)
-            or os.environ.get("ELEVENLABS_API_KEY")
-        )
-        if eleven_key:
-            try:
-                import requests
-                voice_id = (
-                    cls._get_tenant_or_global_setting("ELEVENLABS_VOICE_ID", organization_id=organization_id)
-                    or os.environ.get("ELEVENLABS_VOICE_ID")
-                    or "21m00Tcm4TlvDq8ikWAM"
-                )
-                resp = requests.post(
-                    f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-                    headers={
-                        "xi-api-key": eleven_key.strip(),
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "text": clean_text[:1000],
-                        "model_id": "eleven_multilingual_v2"
-                    },
-                    timeout=4.0
-                )
-                if resp.status_code == 200 and resp.content:
-                    return (resp.content, audio_fn, audio_mt)
-            except Exception as e:
-                logger.debug(f"ElevenLabs TTS synthesis failed: {e}")
 
         # 3. Microsoft Edge Neural HD Voice (ur-PK-UzmaNeural / en-US-JennyNeural)
         # Enabled in production or when explicitly enabled in tests
