@@ -1080,8 +1080,8 @@ class WhatsAppService:
             else:
                 active_voice = "en-US-JennyNeural"
 
-            active_rate = configured_rate or ("-5%" if active_voice == "hi-IN-MadhurNeural" else "+0%")
-            active_pitch = configured_pitch or ("+2Hz" if active_voice == "hi-IN-MadhurNeural" else "+0Hz")
+            active_rate = configured_rate or ("-10%" if active_voice == "hi-IN-MadhurNeural" else "+0%")
+            active_pitch = configured_pitch or ("-2Hz" if active_voice == "hi-IN-MadhurNeural" else "+0Hz")
 
             async def _run():
                 comm = edge_tts.Communicate(text, active_voice, rate=active_rate, pitch=active_pitch)
