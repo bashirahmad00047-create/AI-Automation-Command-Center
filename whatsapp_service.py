@@ -78,10 +78,67 @@ if os.path.exists("/etc/secrets") and os.path.isdir("/etc/secrets"):
 
 class WhatsAppService:
     @classmethod
+    def number_to_roman_urdu(cls, n: int) -> str:
+        """Converts an integer into natural conversational Roman Urdu words.
+        Examples: 25000 -> 'pachees hazar', 500 -> 'paanch sau', 1000 -> 'ek hazar'.
+        Prevents ElevenLabs from reading raw digits or saying 'sifar sifar'.
+        """
+        if n < 0:
+            return "manfi " + cls.number_to_roman_urdu(-n)
+        if n == 0:
+            return "sifar"
+
+        parts = []
+        crores, n = divmod(n, 10000000)
+        if crores > 0:
+            parts.append(cls.number_to_roman_urdu(crores) + " crore")
+
+        lakhs, n = divmod(n, 100000)
+        if lakhs > 0:
+            parts.append(cls.number_to_roman_urdu(lakhs) + " lakh")
+
+        thousands, n = divmod(n, 1000)
+        if thousands > 0:
+            parts.append(cls.number_to_roman_urdu(thousands) + " hazar")
+
+        hundreds, n = divmod(n, 100)
+        if hundreds > 0:
+            parts.append("ek sau" if hundreds == 1 else (cls.number_to_roman_urdu(hundreds) + " sau"))
+
+        if n > 0:
+            ones_tens = {
+                1: "ek", 2: "do", 3: "teen", 4: "chaar", 5: "paanch",
+                6: "chhe", 7: "saat", 8: "aath", 9: "nau", 10: "das",
+                11: "gyarah", 12: "barah", 13: "terah", 14: "chaudah", 15: "pandrah",
+                16: "solah", 17: "satrah", 18: "atharah", 19: "unnees", 20: "bees",
+                21: "ikkees", 22: "baees", 23: "teees", 24: "chaubees", 25: "pachees",
+                26: "chhabees", 27: "sattaees", 28: "atthaees", 29: "untees", 30: "tees",
+                31: "ikattees", 32: "battees", 33: "taintees", 34: "chauntees", 35: "paintees",
+                36: "chhattees", 37: "saintees", 38: "athtees", 39: "untaalees", 40: "chaalees",
+                41: "iktaalees", 42: "bayaalees", 43: "taintaalees", 44: "chawwaalees", 45: "paintaalees",
+                46: "chhiyaalees", 47: "saintaalees", 48: "adhtaalees", 49: "unchaas", 50: "pachaas",
+                51: "ikyaawan", 52: "baawan", 53: "tirpan", 54: "chawwan", 55: "pachpan",
+                56: "chhappan", 57: "sattawan", 58: "atthawan", 59: "unsath", 60: "saath",
+                61: "iksath", 62: "baasath", 63: "tirsath", 64: "chaunsath", 65: "painsath",
+                66: "chhiyaasath", 67: "sadsath", 68: "adhsath", 69: "unhattar", 70: "sattar",
+                71: "ikhattar", 72: "bahattar", 73: "tihattar", 74: "chauhattar", 75: "pachhattar",
+                76: "chhihattar", 77: "sathattar", 78: "athhattar", 79: "unasi", 80: "assi",
+                81: "ikyasi", 82: "bayasi", 83: "tirasi", 84: "chaurasi", 85: "pachasi",
+                86: "chhiyasi", 87: "satasi", 88: "athasi", 89: "nawasi", 90: "nabbey",
+                91: "ikyanway", 92: "baanway", 93: "tiranway", 94: "chauranway", 95: "pachanway",
+                96: "chhiyanway", 97: "sattanway", 98: "atthanway", 99: "ninyanway"
+            }
+            parts.append(ones_tens.get(n, str(n)))
+
+        return " ".join(parts)
+
+    @classmethod
     def preprocess_text_for_human_speech(cls, text: str, language: Optional[str] = None) -> str:
         """Tunes and pre-processes text into colloquial, warm, informal local Pakistani voice note cadence with natural breathing pauses.
         Distinguishes between Urdu script and Roman Urdu to eliminate script-switching glitches in ElevenLabs.
-        Eliminates robotic artifacts, rigid bullets, URLs, and softens formal corporate jargon into casual friendly spoken phrasing.
+        Converts all numbers and prices into spoken Urdu words (e.g. 25000 -> 'pachees hazar', 500 -> 'paanch sau').
+        Expands symbols like %, /, Rs, PKR into words ('feesad', 'rupay', 'ya').
+        Inserts natural pauses with commas and ellipses (...) for relaxed, human-like voice delivery.
         """
         if not text or not str(text).strip():
             return ""
@@ -165,32 +222,65 @@ class WhatsAppService:
             t = re.sub(r"\n+", ", ", t)
             t = re.sub(r"\s*[:;]\s*", ", ", t)
 
-            # Conversational expansions
+            # 1. Spoken expansions of logistics and corporate jargon
             t = re.sub(r"\b24/7\b", "chobees ghante", t)
-            t = re.sub(r"\bPKR\b|\bRs\.?\b", "rupay", t, flags=re.IGNORECASE)
-            t = re.sub(r"\bUSD\b|\$", "dollar ", t, flags=re.IGNORECASE)
-            t = re.sub(r"%", " percent ", t)
             t = re.sub(r"\bCOD\b", "cash on delivery", t, flags=re.IGNORECASE)
             t = re.sub(r"\bM&P\b", "M and P", t, flags=re.IGNORECASE)
             t = re.sub(r"(?i)\b(tracking[\s\-]?(id|number|no)?)\b[:\s]*", "tracking number, ", t)
-
-            # Soften formal robot phrases into informal WhatsApp voice note tone
             t = re.sub(r"(?i)\b(moaziz\s*(sarif|customer)|dear customer)\b", "yar", t)
             t = re.sub(r"(?i)\b(baraye meherbani|barah-e-karam)\b", "zara", t)
 
-            # Conversational Roman Urdu natural pauses
+            # 2. Grammar & pricing adjustments (e.g. "Aap ka fee 25000 hai" -> "Aap ki fee, pachees hazar rupay hai")
+            t = re.sub(
+                r'(?i)\b(aap|ap)\s+(?:ka|ki)\s+fee\s*,?\s*(\d+)(?:\s*rupay|\s*rs\.?|\s*pkr)?\s*(hai)?\b',
+                lambda m: f"Aap ki fee, {cls.number_to_roman_urdu(int(m.group(2)))} rupay" + (" hai" if m.group(3) else ""),
+                t
+            )
+            t = re.sub(r'(?i)\b(aap|ap)\s+ka\s+fee\b', 'Aap ki fee,', t)
+            t = re.sub(r'(?i)\b(aap|ap)\s+ki\s+fee\b', 'Aap ki fee,', t)
+
+            # General fee/charges pattern: fee 25000 -> fee, pachees hazar rupay
+            t = re.sub(
+                r'(?i)\b(fee|charges|fees)\s*,?\s*(\d+)(?:\s*rupay|\s*rs\.?|\s*pkr)?\b',
+                lambda m: f"{m.group(1)}, {cls.number_to_roman_urdu(int(m.group(2)))} rupay",
+                t
+            )
+
+            # Currency symbols Rs / PKR with digits -> words
+            t = re.sub(r'(?i)(?:rs\.?|pkr)\s*(\d+)', lambda m: cls.number_to_roman_urdu(int(m.group(1))) + " rupay", t)
+            t = re.sub(r'(?i)(\d+)\s*(?:rs\.?|pkr|rupees|rupay)', lambda m: cls.number_to_roman_urdu(int(m.group(1))) + " rupay", t)
+
+            # Percent % -> feesad
+            t = re.sub(r'(\d+)\s*%', lambda m: cls.number_to_roman_urdu(int(m.group(1))) + " feesad", t)
+            t = re.sub(r'%', ' feesad ', t)
+
+            # Slash / -> ya
+            t = re.sub(r'(\w+)\s*/\s*(\w+)', r'\1 ya \2', t)
+            t = re.sub(r'/', ' ya ', t)
+
+            # Currency words without numbers
+            t = re.sub(r'\bPKR\b|\bRs\.?\b', "rupay", t, flags=re.IGNORECASE)
+            t = re.sub(r'\bUSD\b|\$', "dollar ", t, flags=re.IGNORECASE)
+
+            # 3. Convert all remaining numbers and prices into Urdu words (no raw digits to prevent 'sifar sifar')
+            t = re.sub(r'\b\d+\b', lambda m: cls.number_to_roman_urdu(int(m.group(0))), t)
+
+            # 4. Conversational Roman Urdu natural pauses with ellipses and commas
             roman_greetings = [
-                (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|salam|slam)\b[,.]?", "Assalam-o-Alaikum, "),
-                (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*)\b[,.]?", "Walaikum Assalam, "),
-                (r"(?i)\b(ji bilkul|ji haan|ji han)\b[,.]?", "Ji bilkul, "),
-                (r"(?i)\b(fikr na karein|pareshan na hon|koi masla nahi|tension na lein|tension na lo)\b[,.]?", "Tension na lein, aap befikr rahein, "),
-                (r"(?i)\b(shukriya|bohot shukriya|thank you|thanks)\b[,.]?", "Bohat shukriya yar, "),
-                (r"(?i)\b(theek hai|okay|ok)\b[,.]?", "Theek hai, ")
+                (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|salam|slam)\b[,.]?", "Assalam-o-Alaikum, ... "),
+                (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*)\b[,.]?", "Walaikum Assalam, ... "),
+                (r"(?i)\b(ji bilkul|ji haan|ji han)\b[,.]?", "Ji bilkul, ... "),
+                (r"(?i)\b(theek hai|okay|ok)\b[,.]?", "Theek hai, ... "),
+                (r"(?i)\b(fikr na karein|pareshan na hon|koi masla nahi|tension na lein|tension na lo)\b[,.]?", "Tension na lein, aap befikr rahein... "),
+                (r"(?i)\b(shukriya|bohot shukriya|thank you|thanks)\b[,.]?", "Bohat shukriya yar... ")
             ]
             for pattern, replacement in roman_greetings:
                 t = re.sub(pattern, replacement, t, count=1)
 
-            # Smooth out commas and spaces
+            # 5. Natural sentence pauses using ellipses (...) for relaxed delivery
+            t = re.sub(r'\.\s+', '... ', t)
+            t = re.sub(r'\s*([\.]{2,})\s*', '... ', t)
+            t = re.sub(r'\s*,\s*\.\.\.\s*', ', ... ', t)
             t = re.sub(r"[,]{2,}", ",", t)
             t = re.sub(r"\s+([,\.\!\?])", r"\1", t)
             t = re.sub(r"([,])\s*", r"\1 ", t)
@@ -1169,7 +1259,7 @@ class WhatsAppService:
     ) -> Optional[bytes]:
         """Synthesizes text into ultra-natural human speech using ElevenLabs Multilingual Neural TTS engine.
         Defaults to natural voice_id='QwMurwQUOf6t7fnABXar' and model_id='eleven_multilingual_v2'
-        with stability=0.35, similarity_boost=0.85, style=0.45 for casual conversational Pakistani Urdu/Roman Urdu.
+        with stability=0.35, similarity_boost=0.75, style=0.40, use_speaker_boost=True for natural Pakistani human touch.
         """
         eleven_key = (
             cls._get_tenant_or_global_setting("ELEVENLABS_API_KEY", organization_id=organization_id)
@@ -1204,8 +1294,8 @@ class WhatsAppService:
                 "model_id": active_model,
                 "voice_settings": {
                     "stability": 0.35,
-                    "similarity_boost": 0.85,
-                    "style": 0.45,
+                    "similarity_boost": 0.75,
+                    "style": 0.40,
                     "use_speaker_boost": True
                 }
             }
