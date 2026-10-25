@@ -1259,7 +1259,7 @@ class WhatsAppService:
     ) -> Optional[bytes]:
         """Synthesizes text into ultra-natural human speech using ElevenLabs Multilingual Neural TTS engine.
         Defaults to natural voice_id='QwMurwQUOf6t7fnABXar' and model_id='eleven_multilingual_v2'
-        with stability=0.35, similarity_boost=0.75, style=0.40, use_speaker_boost=True for natural Pakistani human touch.
+        with stability=0.50, similarity_boost=0.75, style=0.40, use_speaker_boost=True for natural Pakistani human touch.
         """
         eleven_key = (
             cls._get_tenant_or_global_setting("ELEVENLABS_API_KEY", organization_id=organization_id)
@@ -1293,7 +1293,7 @@ class WhatsAppService:
                 "text": text[:1000],
                 "model_id": active_model,
                 "voice_settings": {
-                    "stability": 0.35,
+                    "stability": 0.50,
                     "similarity_boost": 0.75,
                     "style": 0.40,
                     "use_speaker_boost": True
@@ -4066,7 +4066,7 @@ class WhatsAppService:
             logger.info(f"[Force Dispatch] send_green_api_message execution result for {clean_phone}: {green_dispatch_res}")
 
             # 2. VOICE SYNTHESIS & DISPATCH GUARANTEE WITH FALLBACK PROTECTION
-            # Uses ElevenLabs multilingual v2 (voice_id='QwMurwQUOf6t7fnABXar', stability=0.35, similarity_boost=0.85, style=0.45)
+            # Uses ElevenLabs multilingual v2 (voice_id='QwMurwQUOf6t7fnABXar', stability=0.50, similarity_boost=0.75, style=0.40, use_speaker_boost=True)
             # Synthesizes every generated Pakistani Urdu text response into .oga voice note and dispatches via send_green_api_file (falling back to edge-tts/OpenAI if ElevenLabs fails)
             audio_dispatch_res = None
             try:
