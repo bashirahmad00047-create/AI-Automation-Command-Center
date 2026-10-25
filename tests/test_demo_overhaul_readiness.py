@@ -243,6 +243,58 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
         self.assertIsNotNone(audio_bytes)
         self.assertGreater(len(audio_bytes), 500)
 
+    def test_dispatch_guarantee_text_and_voice_oga(self):
+        """Requirement 1 & 2: Tests text dispatch via send_green_api_message AND .oga voice note via send_green_api_file."""
+        from unittest.mock import patch, MagicMock
+
+        fake_oga = b"OggS\x00\x02\x00\x00" + b"\x00" * 300
+
+        with patch.object(WhatsAppService, "send_green_api_message", return_value={"success": True, "idMessage": "msg-123"}) as mock_msg, \
+             patch.object(WhatsAppService, "generate_spoken_audio", return_value=(fake_oga, "voice_reply.oga", "audio/ogg; codecs=opus")) as mock_voice, \
+             patch.object(WhatsAppService, "send_green_api_file", return_value={"success": True, "idMessage": "file-456"}) as mock_file, \
+             patch.object(WhatsAppService, "generate_ai_auto_response", return_value={"reply_body": "Aap ka shukriya, order process ho raha hai.", "intent": "order_intent", "lead_score": 85}):
+
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_body="Can you please confirm my order delivery?",
+                sender_name="Mubi",
+                message_id="wamid.test.dispatch.001"
+            )
+
+            self.assertIsNotNone(res)
+            self.assertTrue(res["success"])
+            mock_msg.assert_called_once()
+            self.assertIn("order process ho raha hai", mock_msg.call_args[1]["message_text"])
+
+            mock_voice.assert_called_once()
+            self.assertEqual(mock_voice.call_args[1]["output_format"], "oga")
+
+            mock_file.assert_called_once()
+            self.assertEqual(mock_file.call_args[1]["file_bytes"], fake_oga)
+            self.assertEqual(mock_file.call_args[1]["filename"], "voice_reply.oga")
+
+    def test_voice_synthesis_fallback_protection(self):
+        """Requirement 3: Fallback Protection: if voice synthesis fails, text reply STILL goes through without skipping."""
+        from unittest.mock import patch
+
+        with patch.object(WhatsAppService, "send_green_api_message", return_value={"success": True, "idMessage": "msg-789"}) as mock_msg, \
+             patch.object(WhatsAppService, "generate_spoken_audio", side_effect=RuntimeError("TTS engine network timeout")), \
+             patch.object(WhatsAppService, "generate_ai_auto_response", return_value={"reply_body": "OpsFlow support team active hai.", "intent": "support_request", "lead_score": 60}):
+
+            res = WhatsAppService.handle_inbound_auto_response(
+                organization_id=self.org.id,
+                sender_phone="923209350858",
+                message_body="Support ticket test",
+                sender_name="B",
+                message_id="wamid.test.fallback.002"
+            )
+
+            self.assertIsNotNone(res)
+            self.assertTrue(res["success"])
+            mock_msg.assert_called_once()
+            self.assertIn("OpsFlow support team active hai", mock_msg.call_args[1]["message_text"])
+
 
 if __name__ == "__main__":
     unittest.main()
