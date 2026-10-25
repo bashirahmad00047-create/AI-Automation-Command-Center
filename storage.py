@@ -1070,6 +1070,16 @@ class Storage:
         session = self._get_session()
         org_id = organization_id or self.get_default_org_id()
         try:
+            real_ip = ip_address
+            if not real_ip:
+                try:
+                    from flask import request, has_request_context
+                    if has_request_context() and request:
+                        real_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.headers.get("X-Real-IP") or request.remote_addr
+                except Exception:
+                    pass
+            real_ip = real_ip or "127.0.0.1"
+
             log = AuditLog(
                 organization_id=org_id,
                 user_id=user_id,
@@ -1078,7 +1088,7 @@ class Storage:
                 resource_type=resource_type,
                 resource_id=resource_id,
                 details_json=json.dumps(details or {}),
-                ip_address=ip_address or "127.0.0.1",
+                ip_address=real_ip,
                 created_at=datetime.datetime.utcnow()
             )
             session.add(log)

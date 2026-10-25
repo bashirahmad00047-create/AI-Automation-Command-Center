@@ -769,7 +769,7 @@
                     <div style="margin-top: 24px;">
                         <h4 style="color: var(--text-primary); margin-bottom: 8px;">Quick Ingest Example (cURL)</h4>
                         <div class="curl-snippet" id="webhookCurlSnippet">
-curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_stream" \
+curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhooks/incoming/wh_live_prod_alert_stream" \
   -H "Content-Type: application/json" \
   -d '{"event": "system.metrics", "cpu_percent": 94.5, "host": "prod-k8s-01"}'
                         </div>
@@ -1737,11 +1737,11 @@ curl -X POST "http://localhost:5000/api/v1/webhooks/incoming/wh_live_prod_alert_
                         Manage team members, roles, permissions, invitations, and workspace security policies.
                     </p>
                 </div>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <div style="font-size: 13px; color: var(--text-dim); background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); padding: 6px 14px; border-radius: 6px;">
-                        Seats: <strong id="teamSeatCount" style="color: var(--cyan-glow);">-</strong> / <span id="teamSeatLimit">-</span>
+                <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap; flex-shrink: 0;">
+                    <div class="team-seat-badge" style="font-size: 13px; color: var(--text-dim); background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-color); padding: 8px 16px; border-radius: 6px; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;">
+                        <span>Seats:</span> <strong id="teamSeatCount" style="color: var(--cyan-glow);">-</strong> / <span id="teamSeatLimit">-</span>
                     </div>
-                    <button class="hud-btn primary" onclick="openAddMemberModal()" style="font-weight: 600; display: inline-flex; align-items: center; gap: 6px;">
+                    <button class="hud-btn primary" onclick="openAddMemberModal()" style="font-weight: 600; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; padding: 8px 18px; flex-shrink: 0;">
                         <span style="font-size: 1.1rem; line-height: 1;">+</span> Add Team Member
                     </button>
                 </div>

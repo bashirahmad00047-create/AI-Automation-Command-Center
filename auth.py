@@ -230,6 +230,21 @@ def sanitize_sensitive_data(data: Any) -> Any:
     return data
 
 
+def get_client_ip() -> str:
+    """Extracts the true client IP from reverse proxy headers (X-Forwarded-For, X-Real-IP) or remote socket."""
+    if not request:
+        return "127.0.0.1"
+    x_forwarded = request.headers.get("X-Forwarded-For")
+    if x_forwarded:
+        client_ip = x_forwarded.split(",")[0].strip()
+        if client_ip:
+            return client_ip
+    x_real_ip = request.headers.get("X-Real-IP")
+    if x_real_ip and x_real_ip.strip():
+        return x_real_ip.strip()
+    return request.remote_addr or "127.0.0.1"
+
+
 def log_audit_event(
     action: str,
     resource_type: str,
@@ -238,7 +253,7 @@ def log_audit_event(
     org_id: Optional[str] = None,
     user_id: Optional[str] = None
 ) -> None:
-    """Persists an administrative audit event for compliance and security forensics."""
+    """Persists an administrative audit event for compliance and security forensics with real client IP."""
     try:
         if not org_id and hasattr(g, "current_org") and g.current_org:
             org_id = g.current_org.id
@@ -259,7 +274,7 @@ def log_audit_event(
             resource_type=resource_type,
             resource_id=resource_id,
             details_json=json.dumps(clean_details),
-            ip_address=request.remote_addr if request else "127.0.0.1"
+            ip_address=get_client_ip()
         )
         db.session.add(audit)
         db.session.commit()
