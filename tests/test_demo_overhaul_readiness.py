@@ -234,6 +234,15 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
         self.assertIsNotNone(audit)
         self.assertEqual(audit.ip_address, "182.180.74.192")
 
+    def test_edge_tts_neural_voice_synthesis(self):
+        """Verifies Microsoft Edge Neural TTS synthesizes realistic Pakistani Urdu voice audio."""
+        audio_bytes = WhatsAppService._synthesize_edge_tts(
+            "Assalam-o-Alaikum, aap ka order confirm ho chuka hai.",
+            language="roman_urdu"
+        )
+        self.assertIsNotNone(audio_bytes)
+        self.assertGreater(len(audio_bytes), 500)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1028,31 +1028,63 @@ class WhatsAppService:
     _force_test_edge_tts: bool = False
 
     @classmethod
-    def _synthesize_edge_tts(cls, text: str, language: Optional[str] = None) -> Optional[bytes]:
+    def _synthesize_edge_tts(
+        cls,
+        text: str,
+        language: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        voice: Optional[str] = None,
+        rate: Optional[str] = None,
+        pitch: Optional[str] = None
+    ) -> Optional[bytes]:
         """Synthesizes text into ultra-realistic HD neural human speech using Microsoft Edge Neural TTS.
-        Supports natural Pakistani Urdu (ur-PK-UzmaNeural, ur-PK-AsadNeural), English, Arabic, and regional languages.
+        Supports natural Pakistani Urdu (ur-PK-UzmaNeural, ur-PK-AsadNeural, hi-IN-MadhurNeural), English, Arabic, and regional languages.
         """
         try:
             import edge_tts
             import asyncio
             lang_str = str(language or "").lower()
-            if "urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str:
-                voice = "ur-PK-AsadNeural"  # Realistic Male Natural Voice
+
+            is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in (text or ""))
+
+            configured_voice = (
+                voice
+                or cls._get_tenant_or_global_setting("EDGE_TTS_VOICE", organization_id=organization_id)
+                or os.environ.get("EDGE_TTS_VOICE")
+            )
+            configured_rate = (
+                rate
+                or cls._get_tenant_or_global_setting("EDGE_TTS_RATE", organization_id=organization_id)
+                or os.environ.get("EDGE_TTS_RATE")
+            )
+            configured_pitch = (
+                pitch
+                or cls._get_tenant_or_global_setting("EDGE_TTS_PITCH", organization_id=organization_id)
+                or os.environ.get("EDGE_TTS_PITCH")
+            )
+
+            if configured_voice:
+                active_voice = configured_voice.strip()
+            elif "urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str:
+                active_voice = "ur-PK-UzmaNeural" if is_arabic_script else "hi-IN-MadhurNeural"
             elif "pashto" in lang_str or lang_str == "ps":
-                voice = "ps-AF-LatifaNeural"
+                active_voice = "ps-AF-LatifaNeural"
             elif "arabic" in lang_str or lang_str == "ar":
-                voice = "ar-SA-ZariyahNeural"
+                active_voice = "ar-SA-ZariyahNeural"
             elif "hindi" in lang_str or lang_str == "hi":
-                voice = "hi-IN-SwaraNeural"
+                active_voice = "hi-IN-MadhurNeural"
             elif "spanish" in lang_str or lang_str == "es":
-                voice = "es-ES-ElviraNeural"
+                active_voice = "es-ES-ElviraNeural"
             elif "french" in lang_str or lang_str == "fr":
-                voice = "fr-FR-DeniseNeural"
+                active_voice = "fr-FR-DeniseNeural"
             else:
-                voice = "en-US-JennyNeural"
+                active_voice = "en-US-JennyNeural"
+
+            active_rate = configured_rate or ("-5%" if active_voice == "hi-IN-MadhurNeural" else "+0%")
+            active_pitch = configured_pitch or ("+2Hz" if active_voice == "hi-IN-MadhurNeural" else "+0Hz")
 
             async def _run():
-                comm = edge_tts.Communicate(text, voice, rate="+0%")
+                comm = edge_tts.Communicate(text, active_voice, rate=active_rate, pitch=active_pitch)
                 chunks = []
                 async for chunk in comm.stream():
                     if chunk.get("type") == "audio":
@@ -1064,7 +1096,7 @@ class WhatsAppService:
                 if loop.is_running():
                     import concurrent.futures
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                        return pool.submit(asyncio.run, _run()).result(timeout=6.0)
+                        return pool.submit(asyncio.run, _run()).result(timeout=8.0)
                 else:
                     return loop.run_until_complete(_run())
             except RuntimeError:
@@ -1200,7 +1232,7 @@ class WhatsAppService:
         # Enabled in production or when explicitly enabled in tests
         is_testing = has_app_context() and current_app.config.get("TESTING")
         if not is_testing or getattr(cls, "_force_test_edge_tts", False):
-            edge_bytes = cls._synthesize_edge_tts(clean_text[:1000], language=language)
+            edge_bytes = cls._synthesize_edge_tts(clean_text[:1000], language=language, organization_id=organization_id)
             if edge_bytes and len(edge_bytes) > 100:
                 return (edge_bytes, audio_fn, audio_mt)
 
