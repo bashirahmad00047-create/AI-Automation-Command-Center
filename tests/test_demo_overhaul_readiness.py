@@ -320,7 +320,7 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
             called_payload = mock_post.call_args[1]["json"]
             self.assertEqual(called_payload["model_id"], "eleven_multilingual_v2")
             self.assertIn("Assalam-o-Alaikum", called_payload["text"])
-            self.assertEqual(called_payload["voice_settings"]["stability"], 0.35)
+            self.assertEqual(called_payload["voice_settings"]["stability"], 0.50)
             self.assertEqual(called_payload["voice_settings"]["similarity_boost"], 0.75)
             self.assertEqual(called_payload["voice_settings"]["style"], 0.40)
             self.assertTrue(called_payload["voice_settings"]["use_speaker_boost"])
