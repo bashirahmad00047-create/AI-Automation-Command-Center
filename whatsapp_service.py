@@ -5843,29 +5843,49 @@ class WhatsAppService:
         if not contact_name or contact_name.lower() in ("whatsapp contact", "unknown", "website visitor", "anonymous", "none", "n/a"):
             contact_name = disp_phone or clean_phone
 
-        # Dynamic Intent Classification
-        inferred_intent = "lead_inquiry"
+        # Granular Dynamic Intent Classification & Scoring
+        clean_lower = final_message.lower()
+        
+        is_greeting = any(w in clean_lower for w in ("salam", "assalam", "hello", "hi", "hey", "aoa", "kese", "kaise", "morning", "evening", "adaab"))
+        has_pricing = any(w in clean_lower for w in ("pricing", "price", "rate", "cost", "qimat", "narkh", "package", "packages", "quote", "discount", "offer", "budget", "قیمت", "ریٹ", "خرچہ", "پیکج", "کتنا", "کتنے"))
+        has_order = any(w in clean_lower for w in ("order", "buy", "purchase", "item", "cart", "kharidna", "خریدنا", "chahiye", "چاہیئے", "delivery", "suit", "shoes", "kurta", "earbuds", "honey"))
+        has_support = any(w in clean_lower for w in ("help", "issue", "problem", "bug", "broken", "error", "fail", "reset", "madad", "masla", "kharab", "شکایت", "مسئلہ", "مدد", "support", "complaint"))
+        has_payment = any(w in clean_lower for w in ("jazzcash", "easypaisa", "payment", "bank", "transfer", "pay", "paise", "receipt", "paid", "transaction", "slip"))
+
         if maps_url:
             inferred_intent = "location_shared"
-        elif any(w in final_message.lower() for w in ("jazzcash", "easypaisa", "payment", "bank", "transfer", "pay", "paise")):
-            inferred_intent = "payment_or_deal_closure"
-        elif any(w in final_message.lower() for w in ("order", "buy", "purchase", "kharidna", "خریدنا")):
-            inferred_intent = "order_intent"
-        elif any(w in final_message.lower() for w in ("item", "delivery", "chahiye", "قیمت", "rate", "cost", "price")):
-            inferred_intent = "lead_inquiry"
-        elif any(w in final_message.lower() for w in ("help", "issue", "problem", "madad", "masla", "kharab", "شکایت", "مسئله")):
-            inferred_intent = "support_request"
+        elif has_payment:
+            inferred_intent = "PAYMENT_CONFIRMATION"
+        elif has_order:
+            inferred_intent = "PRODUCT_ORDER"
+        elif has_support:
+            inferred_intent = "TECH_SUPPORT"
+        elif has_pricing:
+            inferred_intent = "SERVICE_PRICING_QUERY"
+        elif is_greeting:
+            inferred_intent = "CASUAL_GREETING"
+        else:
+            inferred_intent = "SERVICE_PRICING_QUERY"
 
-        calculated_score = 60
-        if inferred_intent == "payment_or_deal_closure":
-            calculated_score = 90
-        elif inferred_intent == "order_intent":
-            calculated_score = 85
+        # Dynamic Lead Score calculation based on sentiment and buying intent:
+        # direct quote/service inquiries: 75-90
+        # casual greetings: 30-45
+        pos_words = ("great", "good", "excellent", "shukriya", "jazakallah", "love", "thanks", "perfect", "zabar10", "zabardast", "bht acha", "mashallah")
+        is_positive = any(pw in clean_lower for pw in pos_words)
+
+        if inferred_intent == "CASUAL_GREETING":
+            calculated_score = 42 if is_positive else 35
+        elif inferred_intent == "TECH_SUPPORT":
+            calculated_score = 48
+        elif inferred_intent == "SERVICE_PRICING_QUERY":
+            calculated_score = 88 if is_positive or any(w in clean_lower for w in ("enterprise", "wholesale", "custom", "quote", "immediately", "urgent")) else 80
+        elif inferred_intent == "PRODUCT_ORDER":
+            calculated_score = 90 if is_positive or any(w in clean_lower for w in ("size", "color", "pieces", "urgent", "confirm")) else 85
+        elif inferred_intent == "PAYMENT_CONFIRMATION":
+            calculated_score = 92
         elif inferred_intent == "location_shared":
             calculated_score = 80
-        elif inferred_intent == "lead_inquiry":
-            calculated_score = 75
-        elif inferred_intent == "support_request":
+        else:
             calculated_score = 65
 
         lead_record = Lead(
@@ -5877,10 +5897,10 @@ class WhatsAppService:
             company="WhatsApp Direct",
             message=final_message,
             intent=inferred_intent,
-            sentiment="neutral",
-            urgency_score=35 if maps_url else 25,
+            sentiment="positive" if is_positive else "neutral",
+            urgency_score=35 if maps_url else (50 if any(w in clean_lower for w in ("urgent", "immediately", "asap")) else 25),
             lead_score=calculated_score,
-            route_department="Support" if inferred_intent == "support_request" else "Sales",
+            route_department="Support" if inferred_intent == "TECH_SUPPORT" else "Sales",
             status="new"
         )
 

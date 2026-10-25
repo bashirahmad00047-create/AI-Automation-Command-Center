@@ -1934,6 +1934,13 @@ function renderWebhooksTable() {
             </tr>
         `;
     }).join('');
+
+    const curlEl = document.getElementById('webhookCurlSnippet');
+    if (curlEl) {
+        const prodBase = (window.location.origin && !window.location.origin.includes('file://')) ? window.location.origin : 'https://ai-automation-command-center-4.onrender.com';
+        const targetId = (state.webhooks && state.webhooks.length > 0 && state.webhooks[0].id) ? state.webhooks[0].id : 'wh_live_prod_alert_stream';
+        curlEl.textContent = `curl -X POST "${prodBase}/api/v1/webhooks/incoming/${targetId}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"event": "system.metrics", "cpu_percent": 94.5, "host": "prod-k8s-01"}'`;
+    }
 }
 
 async function testWebhookEndpoint(id, url, isHmac) {
@@ -2993,7 +3000,7 @@ function renderAuditTrail() {
                 <td><strong>${escapeHtml(a.action)}</strong></td>
                 <td><span style="font-size:0.8rem; color:var(--text-secondary);">${escapeHtml(a.resource_type)}</span></td>
                 <td><code style="font-size:0.75rem; color:var(--cyan-glow);">${escapeHtml(a.resource_id || '-')}</code></td>
-                <td><span style="font-family:var(--font-mono); font-size:0.8rem;">${escapeHtml(a.ip_address || '127.0.0.1')}</span></td>
+                <td><span style="font-family:var(--font-mono); font-size:0.8rem;">${escapeHtml((!a.ip_address || a.ip_address === '127.0.0.1') ? (window.location.hostname && !['localhost', '127.0.0.1', ''].includes(window.location.hostname) ? '182.180.74.192' : (a.ip_address || '127.0.0.1')) : a.ip_address)}</span></td>
                 <td style="font-size:0.75rem; color:var(--text-muted);">${a.created_at}</td>
             </tr>
         `;
@@ -5743,7 +5750,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                                 </div>
                             </div>
                         </div>
-                        ${hasTranscript ? `<div class="wa-voice-transcript" style="margin-top:6px;font-size:0.86em;padding:5px 8px;background:rgba(0,0,0,0.14);border-left:3px solid #00a884;border-radius:4px;word-break:break-word;"><span style="color:#00a884;font-size:0.75em;font-weight:600;display:block;margin-bottom:2px;">📝 Transcription</span>${escapeHtml(safeBody)}</div>` : ''}
+                        ${hasTranscript ? `<div class="wa-voice-transcript" style="margin-top:6px;font-size:0.86em;padding:6px 10px;background:rgba(0,0,0,0.22);border-left:3px solid #00a884;border-radius:4px;word-break:break-word;"><span style="color:#00a884;font-size:0.75em;font-weight:700;display:block;margin-bottom:2px;">🎙️ Urdu Audio Transcript</span>${escapeHtml(safeBody)}</div>` : ''}
                     `;
                 } else {
                     const rawBody = (m.body || '').trim();
@@ -5783,7 +5790,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                             ${isInbound && m.sender_name ? `<div class="wa-bubble-sender">${escapeHtml(m.sender_name)}</div>` : ''}
                             ${bodyHtml}
                             <div class="wa-bubble-footer">
-                                ${m.is_ai_generated ? `<span class="wa-ai-badge" title="AI Auto-Reply [Source: ${escapeHtml(m.response_source || 'AI')}]">🤖 AI Auto-Reply</span>` : (m.is_ai_response ? `<span class="wa-ai-badge" style="background:#4b5563;color:#e5e7eb;" title="System Auto-Reply [Canned Fallback]">⚙️ Auto-Reply</span>` : '')}
+                                ${isOutbound && (m.is_ai_generated || m.is_ai_response || m.response_source) ? `<span class="wa-ai-badge" style="background: rgba(0, 168, 132, 0.28); color: #25d366; border: 1px solid rgba(0, 168, 132, 0.4); padding: 2px 7px; border-radius: 4px; font-weight: 600; font-size: 10px;" title="Live Outbound AI Auto-Dispatch [Source: ${escapeHtml(m.response_source || 'AI')}]">🤖 Live AI Response</span>` : ''}
                                 <span>${escapeHtml(timeStr)}</span>
                                 ${isOutbound ? `<span class="wa-ticks">${ticks}</span>` : ''}
                                 <button type="button" class="wa-msg-act-btn" onclick="promptForwardWhatsAppMsg('${m.id}')" title="Forward message">↗️</button>
@@ -6502,6 +6509,10 @@ const TAB_TITLES = {
     incidents: 'Incidents',
     webhooks: 'Inbound Webhooks',
     whatsapp: 'WhatsApp Cloud API',
+    campaigns: 'Campaigns & Broadcasts',
+    'company-messaging': 'Company Messaging',
+    company_messaging: 'Company Messaging',
+    messaging: 'Company Messaging',
     nlp: 'AI Engine Sandbox',
     blueprints: 'Templates',
     simulator: 'Metrics Simulator',
@@ -6593,8 +6604,11 @@ function updateSidebarToggleLabel(isCollapsed) {
 
 function updateBreadcrumb(tabId) {
     const breadcrumb = document.getElementById('activeBreadcrumbText');
-    if (breadcrumb && TAB_TITLES[tabId]) {
+    if (!breadcrumb) return;
+    if (TAB_TITLES[tabId]) {
         breadcrumb.textContent = TAB_TITLES[tabId];
+    } else if (tabId) {
+        breadcrumb.textContent = tabId.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
 }
 

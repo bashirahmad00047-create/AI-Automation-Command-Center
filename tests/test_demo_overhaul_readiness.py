@@ -6,6 +6,7 @@ from whatsapp_service import WhatsAppService
 from campaign_service import CampaignService
 from storage import Storage
 from company_messaging_service import CompanyMessagingService
+from auth import get_client_ip, log_audit_event
 
 
 class TestDemoOverhaulReadiness(unittest.TestCase):
@@ -62,12 +63,10 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
 
     def test_products_catalog_auto_seed(self):
         """Fix 1: Products Catalog Auto-Seeding when empty."""
-        # Clean products for this org
         Product.query.filter_by(organization_id=self.org.id).delete()
         db.session.commit()
         self.assertEqual(Product.query.filter_by(organization_id=self.org.id).count(), 0)
 
-        # Request via API
         resp = self.client.get("/api/v1/ecommerce/products")
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
@@ -118,14 +117,12 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
         self.assertIn("Urdu WhatsApp Voice-Lead Qualifier", names)
         self.assertIn("High-Priority Support Escalation", names)
 
-        # Check visual steps
         urdu_rule = next(r for r in rules if r["name"] == "Urdu WhatsApp Voice-Lead Qualifier")
         self.assertTrue(urdu_rule.get("enabled"))
         self.assertGreaterEqual(len(urdu_rule.get("steps", [])), 3)
 
     def test_internal_channels_preload_messages(self):
         """Fix 4: Internal Channels Preload Messages in #general and #incidents."""
-        # Ensure channels exist
         CompanyMessagingService.ensure_default_channels(self.org.id)
         channels = CompanyMessagingService.list_channels(self.org.id, self.user.id)
         gen_ch = next((c for c in channels if c["name"] == "general"), None)
@@ -134,7 +131,6 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
         self.assertIsNotNone(gen_ch)
         self.assertIsNotNone(inc_ch)
 
-        # Clear existing messages in both channels to test auto-preload
         CompanyMessage.query.filter(CompanyMessage.channel_id.in_([gen_ch["id"], inc_ch["id"]])).delete(synchronize_session=False)
         db.session.commit()
 
@@ -146,44 +142,97 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
         self.assertGreaterEqual(len(inc_msgs), 3)
         self.assertTrue(any("INC-892" in m["body"] or "Health Check" in m["body"] for m in inc_msgs))
 
-    def test_crm_leads_contact_metadata_and_intent(self):
-        """Fix 5: Contact Name, Formatted Phone, and Intent Classification without 'N/A'."""
-        # Test phone formatter
+    def test_crm_leads_contact_metadata_and_granular_intents(self):
+        """Fix 5: Granular dynamic intent classification and dynamic lead scoring without 'N/A'."""
         formatted = WhatsAppService.format_phone_display("923209350858")
         self.assertEqual(formatted, "+92 320 9350858")
 
         formatted_cus = WhatsAppService.format_phone_display("923001234567@c.us")
         self.assertEqual(formatted_cus, "+92 300 1234567")
 
-        # Clean existing test leads if any
         Lead.query.filter_by(organization_id=self.org.id).delete()
         db.session.commit()
 
-        # Test Lead ingestion with explicit sender name
-        lead1_dict = WhatsAppService.auto_ingest_crm_lead(
+        # 1. Product Order Intent: score 85 - 95
+        lead_order = WhatsAppService.auto_ingest_crm_lead(
             organization_id=self.org.id,
             from_phone="923209350858@c.us",
             sender_name="Muhammad Tariq",
             message_body="Salam, I want to order 2 pairs of Leather Formal Shoes size 42."
         )
-        self.assertIsNotNone(lead1_dict)
-        self.assertEqual(lead1_dict["name"], "Muhammad Tariq")
-        self.assertEqual(lead1_dict["phone"], "+92 320 9350858")
-        self.assertEqual(lead1_dict["lead_score"], 85)
-        self.assertNotEqual(lead1_dict["status"], "N/A")
-        self.assertNotIn("N/A", [lead1_dict["name"], lead1_dict["email"] or "", lead1_dict["company"] or ""])
+        self.assertIsNotNone(lead_order)
+        self.assertEqual(lead_order["name"], "Muhammad Tariq")
+        self.assertEqual(lead_order["phone"], "+92 320 9350858")
+        self.assertEqual(lead_order["intent"], "PRODUCT_ORDER")
+        self.assertGreaterEqual(lead_order["lead_score"], 85)
+        self.assertLessEqual(lead_order["lead_score"], 95)
+        self.assertNotIn("N/A", [lead_order["name"], lead_order["email"] or "", lead_order["company"] or ""])
 
-        # Test Lead ingestion without sender name (fallback to formatted phone)
-        lead2_dict = WhatsAppService.auto_ingest_crm_lead(
+        # 2. Service & Pricing Query Intent: score 75 - 90
+        lead_pricing = WhatsAppService.auto_ingest_crm_lead(
+            organization_id=self.org.id,
+            from_phone="923114455667@c.us",
+            sender_name="Zubair Ahmed",
+            message_body="Can you please share the enterprise rate list and pricing quote for automation workflows?"
+        )
+        self.assertIsNotNone(lead_pricing)
+        self.assertEqual(lead_pricing["intent"], "SERVICE_PRICING_QUERY")
+        self.assertGreaterEqual(lead_pricing["lead_score"], 75)
+        self.assertLessEqual(lead_pricing["lead_score"], 90)
+
+        # 3. Casual Greeting Intent: score 30 - 45
+        lead_greeting = WhatsAppService.auto_ingest_crm_lead(
+            organization_id=self.org.id,
+            from_phone="923337788990@c.us",
+            sender_name="Ali Raza",
+            message_body="Assalam-o-Alaikum brother, hope you are doing well!"
+        )
+        self.assertIsNotNone(lead_greeting)
+        self.assertEqual(lead_greeting["intent"], "CASUAL_GREETING")
+        self.assertGreaterEqual(lead_greeting["lead_score"], 30)
+        self.assertLessEqual(lead_greeting["lead_score"], 45)
+
+        # 4. Tech Support Intent: routed to Support
+        lead_support = WhatsAppService.auto_ingest_crm_lead(
+            organization_id=self.org.id,
+            from_phone="923458899001@c.us",
+            sender_name="Farhan Saeed",
+            message_body="Our webhook ingress is returning 500 error, please help resolve this problem."
+        )
+        self.assertIsNotNone(lead_support)
+        self.assertEqual(lead_support["intent"], "TECH_SUPPORT")
+        self.assertEqual(lead_support["route_department"], "Support")
+
+        # 5. Missing profile name fallback to formatted phone
+        lead_fallback = WhatsAppService.auto_ingest_crm_lead(
             organization_id=self.org.id,
             from_phone="923007654321@c.us",
             sender_name="",
-            message_body="Can someone help me with payment confirmation on JazzCash?"
+            message_body="Payment confirmation done on JazzCash."
         )
-        self.assertIsNotNone(lead2_dict)
-        self.assertEqual(lead2_dict["name"], "+92 300 7654321")
-        self.assertEqual(lead2_dict["phone"], "+92 300 7654321")
-        self.assertNotIn("N/A", [lead2_dict["name"], lead2_dict["email"] or "", lead2_dict["company"] or ""])
+        self.assertIsNotNone(lead_fallback)
+        self.assertEqual(lead_fallback["name"], "+92 300 7654321")
+        self.assertEqual(lead_fallback["phone"], "+92 300 7654321")
+        self.assertEqual(lead_fallback["intent"], "PAYMENT_CONFIRMATION")
+        self.assertNotIn("N/A", [lead_fallback["name"], lead_fallback["email"] or "", lead_fallback["company"] or ""])
+
+    def test_dynamic_client_ip_audit_logging(self):
+        """Fix 3 & 4: Inbound real IP detection in audit logs."""
+        with self.app.test_request_context("/api/v1/auth/me", headers={"X-Forwarded-For": "182.180.74.192, 10.0.0.1"}):
+            ip = get_client_ip()
+            self.assertEqual(ip, "182.180.74.192")
+
+            log_audit_event(
+                action="test.client_ip_verification",
+                resource_type="audit",
+                org_id=self.org.id,
+                user_id=self.user.id
+            )
+
+        from models import AuditLog
+        audit = AuditLog.query.filter_by(action="test.client_ip_verification").first()
+        self.assertIsNotNone(audit)
+        self.assertEqual(audit.ip_address, "182.180.74.192")
 
 
 if __name__ == "__main__":

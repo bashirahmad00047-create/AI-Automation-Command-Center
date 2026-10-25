@@ -348,35 +348,52 @@ class NLPEngine:
         intent: str,
         urgency: int
     ) -> int:
-        """Computes a predictive B2B lead qualification score from 0 to 100."""
-        score = 15  # Base inquiry score
-
-        if intent in ("lead_inquiry", "deploy_request"):
-            score += 30
-
-        # Contact channels
-        if entities.get("emails"):
-            score += 15
-        if entities.get("phones"):
-            score += 15
-
+        """Computes a predictive B2B lead qualification score from 0 to 100 based on buying intent and sentiment."""
+        lower_txt = text.lower()
+        is_greeting = any(w in lower_txt for w in ("salam", "assalam", "hello", "hi", "hey", "aoa", "good morning", "good evening", "adaab"))
+        
         # High-intent buyer signals
         high_intent_words = [
             "pricing", "quote", "demo", "buy", "purchase", "enterprise", "budget",
-            "contract", "proposal", "hire", "custom", "website", "software", "solution", "timeline"
+            "contract", "proposal", "hire", "custom", "website", "software", "solution", "timeline",
+            "rate", "cost", "qimat", "chahiye", "packages", "service"
         ]
-        matches = sum(1 for w in high_intent_words if w in text)
-        score += min(25, matches * 7)
+        has_high_intent = any(w in lower_txt for w in high_intent_words)
+
+        # Casual greeting without explicit purchase/service inquiry: 30 - 45
+        if is_greeting and not has_high_intent and intent not in ("SERVICE_PRICING_QUERY", "PRODUCT_ORDER"):
+            score = 35
+            if any(w in lower_txt for w in ("great", "good", "nice", "shukriya", "thanks")):
+                score += 7
+            return max(30, min(45, score))
+
+        score = 25  # Base inquiry score
+
+        if intent in ("lead_inquiry", "SERVICE_PRICING_QUERY", "PRODUCT_ORDER", "deploy_request"):
+            score += 35
+
+        # Contact channels
+        if entities.get("emails"):
+            score += 10
+        if entities.get("phones"):
+            score += 10
+
+        matches = sum(1 for w in high_intent_words if w in lower_txt)
+        score += min(25, matches * 6)
 
         # Budget mentions
         if entities.get("budget"):
-            score += 15
+            score += 10
 
         # High urgency indicates immediate buyer readiness
         if urgency >= 50:
             score += 10
 
-        return max(5, min(100, score))
+        # Direct quote / service inquiries score in 75 - 90
+        if intent in ("SERVICE_PRICING_QUERY", "PRODUCT_ORDER") or any(w in lower_txt for w in ("quote", "pricing", "enterprise", "packages")):
+            return max(75, min(90, score))
+
+        return max(15, min(100, score))
 
     def _determine_route(self, intent: str, urgency: int, lead_score: int) -> str:
         """Determines the optimal department route based on intent and scores."""
