@@ -79,8 +79,9 @@ if os.path.exists("/etc/secrets") and os.path.isdir("/etc/secrets"):
 class WhatsAppService:
     @classmethod
     def preprocess_text_for_human_speech(cls, text: str, language: Optional[str] = None) -> str:
-        """Tunes and pre-processes text into colloquial, warm, soft-spoken local Pakistani Urdu with short natural pauses.
-        Eliminates robotic artifacts, rigid bullets, URLs, and introduces natural punctuation pauses.
+        """Tunes and pre-processes text into colloquial, warm, informal local Pakistani voice note cadence with natural breathing pauses.
+        Distinguishes between Urdu script and Roman Urdu to eliminate script-switching glitches in ElevenLabs.
+        Eliminates robotic artifacts, rigid bullets, URLs, and softens formal corporate jargon into casual friendly spoken phrasing.
         """
         if not text or not str(text).strip():
             return ""
@@ -88,65 +89,116 @@ class WhatsAppService:
         import re
         t = str(text).strip()
 
-        # 1. Strip bracketed placeholders and system tokens
+        # 1. Strip bracketed placeholders and markdown symbols
         t = re.sub(r"\[.*?\]", "", t)
         t = re.sub(r"[*_~`#>]", "", t)
 
-        # 2. Expand URLs and web links into natural speech phrasing
-        t = re.sub(r"https?://\S+", "ہماری ویب سائٹ", t)
-        t = re.sub(r"www\.\S+", "ہماری ویب سائٹ", t)
+        # Detect script
+        is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in (t or ""))
+        lang_str = str(language or "").lower()
+        use_urdu_script = is_arabic_script or lang_str in ("ur", "urdu")
 
-        # 3. Clean rigid bullet structures and colons into fluid spoken phrasing with pauses
-        t = re.sub(r"^\s*[\d\.\-\*,\•]+\s*", "", t, flags=re.MULTILINE)
-        t = re.sub(r"\n+\s*[\d\.\-\*,\•]+\s*", "، ", t)
-        t = re.sub(r"\n+", "، ", t)
-        t = re.sub(r"\s*[:;]\s*", "، ", t)
+        if use_urdu_script:
+            # Urdu Script Flow (or tests explicitly requesting language='ur')
+            t = re.sub(r"https?://\S+", "ہماری ویب سائٹ", t)
+            t = re.sub(r"www\.\S+", "ہماری ویب سائٹ", t)
 
-        # 4. Spoken expansion of symbols, payment terms, and common terminology
-        t = re.sub(r"\b24/7\b", "چوبیس گھنٹے", t)
-        t = re.sub(r"\bPKR\b|\bRs\.?\b", "روپے", t, flags=re.IGNORECASE)
-        t = re.sub(r"\bUSD\b|\$", "ڈالر ", t, flags=re.IGNORECASE)
-        t = re.sub(r"%", " فیصد ", t)
-        t = re.sub(r"\bCOD\b", "کیش آن ڈیلیوری", t, flags=re.IGNORECASE)
-        t = re.sub(r"\bJazzCash\b", "جاز کیش", t, flags=re.IGNORECASE)
-        t = re.sub(r"\bEasyPaisa\b", "ایزی پیسہ", t, flags=re.IGNORECASE)
+            # Clean rigid bullet structures and colons into fluid spoken phrasing with pauses
+            t = re.sub(r"^\s*[\d\.\-\*,\•]+\s*", "", t, flags=re.MULTILINE)
+            t = re.sub(r"\n+\s*[\d\.\-\*,\•]+\s*", "، ", t)
+            t = re.sub(r"\n+", "، ", t)
+            t = re.sub(r"\s*[:;]\s*", "، ", t)
 
-        # 5. Natural pause tuning for greetings and Urdu conversational markers
-        greetings_map = [
-            (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|salam|slam)\b[,.]?", "السلام علیکم،"),
-            (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*)\b[,.]?", "وعلیکم السلام،"),
-            (r"(?i)\b(ji bilkul|ji haan|ji han)\b[,.]?", "جی بالکل،"),
-            (r"(?i)\b(shukriya|bohot shukriya|dera manana|thank you|thanks)\b[,.]?", "بہت شکریہ،"),
-            (r"(?i)\b(khush[\s\-]?[a-z]*|welcome|you'?re welcome)\b[,.]?", "خوش آمدید،"),
-            (r"(?i)\b(inshallah|in sha allah)\b[,.]?", "انشاءاللہ،"),
-            (r"(?i)\b(fikr na karein|pareshan na hon|koi masla nahi)\b[,.]?", "آپ بے فکر رہیں،"),
-            (r"(?i)\b(theek hai|okay|ok)\b[,.]?", "جی ٹھیک ہے،"),
-            (r"(?i)\b(barah[\s\-]?e[\s\-]?karam|please)\b[,.]?", "مہربانی فرما کر،"),
-            (r"(?i)\b(jazakallah|jazak allah)\b[,.]?", "جزاک اللہ،"),
-            (r"(?i)\b(alhamdulillah|al-hamdu lillah)\b[,.]?", "الحمدللہ،"),
-            (r"(?i)\b(subhanallah)\b[,.]?", "سبحان اللہ،"),
-            (r"(?i)\b(yaqeenan|bilkul zaroor)\b[,.]?", "یقیناً،"),
-            (r"(?i)\b(ji zaroor|zaroor)\b[,.]?", "جی ضرور،"),
-            (r"(?i)\b(apki rehnumai|aapki rehnumai)\b[,.]?", "آپ کی مکمل رہنمائی،")
-        ]
-        for pattern, replacement in greetings_map:
-            t = re.sub(pattern, replacement, t, count=1)
+            # Spoken expansion of symbols, payment terms, and common terminology
+            t = re.sub(r"\b24/7\b", "چوبیس گھنٹے", t)
+            t = re.sub(r"\bPKR\b|\bRs\.?\b", "روپے", t, flags=re.IGNORECASE)
+            t = re.sub(r"\bUSD\b|\$", "ڈالر ", t, flags=re.IGNORECASE)
+            t = re.sub(r"%", " فیصد ", t)
+            t = re.sub(r"\bCOD\b", "کیش آن ڈیلیوری", t, flags=re.IGNORECASE)
+            t = re.sub(r"\bJazzCash\b", "جاز کیش", t, flags=re.IGNORECASE)
+            t = re.sub(r"\bEasyPaisa\b", "ایزی پیسہ", t, flags=re.IGNORECASE)
 
-        # Spoken expansion of logistics & medical terminology for fluid Pakistani Urdu cadence
-        t = re.sub(r"(?i)\b(tracking[\s\-]?(id|number|no)?|consignment[\s\-]?(id|number|no)?)\b[:\s]*", "ٹریکنگ نمبر، ", t)
-        t = re.sub(r"(?i)\b(invoice[\s\-]?(id|number|no)?)\b[:\s]*", "انوائس نمبر، ", t)
-        t = re.sub(r"(?i)\bTCS\b", "ٹی سی ایس", t)
-        t = re.sub(r"(?i)\bM&P\b", "ایم اینڈ پی", t)
-        t = re.sub(r"(?i)\bLeopards\b", "لیپرڈز", t)
+            # Soften formal customer service jargon into informal Pakistani WhatsApp tone
+            t = re.sub(r"معزز\s*(صارف|کسٹمر)", "بھائی", t)
 
-        # 6. Smooth out redundant commas or spaces
-        t = re.sub(r"[,\،]{2,}", "،", t)
-        t = re.sub(r"\s+([,\،\.\!\؟])", r"\1", t)
-        t = re.sub(r"([,\،])\s*", r"\1 ", t)
+            # Natural pause tuning for greetings and Urdu conversational markers
+            greetings_map = [
+                (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|salam|slam)\b[,.]?", "السلام علیکم،"),
+                (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*)\b[,.]?", "وعلیکم السلام،"),
+                (r"(?i)\b(ji bilkul|ji haan|ji han)\b[,.]?", "جی بالکل،"),
+                (r"(?i)\b(shukriya|bohot shukriya|dera manana|thank you|thanks)\b[,.]?", "بہت شکریہ،"),
+                (r"(?i)\b(khush[\s\-]?[a-z]*|welcome|you'?re welcome)\b[,.]?", "خوش آمدید،"),
+                (r"(?i)\b(inshallah|in sha allah)\b[,.]?", "انشاءاللہ،"),
+                (r"(?i)\b(fikr na karein|pareshan na hon|koi masla nahi|tension na lo)\b[,.]?", "آپ بے فکر رہیں،"),
+                (r"(?i)\b(theek hai|okay|ok)\b[,.]?", "جی ٹھیک ہے،"),
+                (r"(?i)\b(barah[\s\-]?e[\s\-]?karam|please)\b[,.]?", "مہربانی فرما کر،"),
+                (r"(?i)\b(jazakallah|jazak allah)\b[,.]?", "جزاک اللہ،"),
+                (r"(?i)\b(alhamdulillah|al-hamdu lillah)\b[,.]?", "الحمدللہ،"),
+                (r"(?i)\b(subhanallah)\b[,.]?", "سبحان اللہ،"),
+                (r"(?i)\b(yaqeenan|bilkul zaroor)\b[,.]?", "یقیناً،"),
+                (r"(?i)\b(ji zaroor|zaroor)\b[,.]?", "جی ضرور،"),
+                (r"(?i)\b(apki rehnumai|aapki rehnumai)\b[,.]?", "آپ کی مکمل رہنمائی،")
+            ]
+            for pattern, replacement in greetings_map:
+                t = re.sub(pattern, replacement, t, count=1)
+
+            # Spoken expansion of logistics & medical terminology for fluid Pakistani Urdu cadence
+            t = re.sub(r"(?i)\b(tracking[\s\-]?(id|number|no)?|consignment[\s\-]?(id|number|no)?)\b[:\s]*", "ٹریکنگ نمبر، ", t)
+            t = re.sub(r"(?i)\b(invoice[\s\-]?(id|number|no)?)\b[:\s]*", "انوائس نمبر، ", t)
+            t = re.sub(r"(?i)\bTCS\b", "ٹی سی ایس", t)
+            t = re.sub(r"(?i)\bM&P\b", "ایم اینڈ پی", t)
+            t = re.sub(r"(?i)\bLeopards\b", "لیپرڈز", t)
+
+            # Smooth out redundant commas or spaces
+            t = re.sub(r"[,\،]{2,}", "،", t)
+            t = re.sub(r"\s+([,\،\.\!\؟])", r"\1", t)
+            t = re.sub(r"([,\،])\s*", r"\1 ", t)
+        else:
+            # Roman Urdu / Spoken Pakistani English Flow
+            # Maintains pure Latin script so ElevenLabs Multilingual V2 does not glitch on script switching
+            t = re.sub(r"https?://\S+", "hamari website", t)
+            t = re.sub(r"www\.\S+", "hamari website", t)
+
+            # Clean rigid bullet structures into fluid spoken pauses
+            t = re.sub(r"^\s*[\d\.\-\*,\•]+\s*", "", t, flags=re.MULTILINE)
+            t = re.sub(r"\n+\s*[\d\.\-\*,\•]+\s*", ", ", t)
+            t = re.sub(r"\n+", ", ", t)
+            t = re.sub(r"\s*[:;]\s*", ", ", t)
+
+            # Conversational expansions
+            t = re.sub(r"\b24/7\b", "chobees ghante", t)
+            t = re.sub(r"\bPKR\b|\bRs\.?\b", "rupay", t, flags=re.IGNORECASE)
+            t = re.sub(r"\bUSD\b|\$", "dollar ", t, flags=re.IGNORECASE)
+            t = re.sub(r"%", " percent ", t)
+            t = re.sub(r"\bCOD\b", "cash on delivery", t, flags=re.IGNORECASE)
+            t = re.sub(r"\bM&P\b", "M and P", t, flags=re.IGNORECASE)
+            t = re.sub(r"(?i)\b(tracking[\s\-]?(id|number|no)?)\b[:\s]*", "tracking number, ", t)
+
+            # Soften formal robot phrases into informal WhatsApp voice note tone
+            t = re.sub(r"(?i)\b(moaziz\s*(sarif|customer)|dear customer)\b", "yar", t)
+            t = re.sub(r"(?i)\b(baraye meherbani|barah-e-karam)\b", "zara", t)
+
+            # Conversational Roman Urdu natural pauses
+            roman_greetings = [
+                (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|salam|slam)\b[,.]?", "Assalam-o-Alaikum, "),
+                (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*)\b[,.]?", "Walaikum Assalam, "),
+                (r"(?i)\b(ji bilkul|ji haan|ji han)\b[,.]?", "Ji bilkul, "),
+                (r"(?i)\b(fikr na karein|pareshan na hon|koi masla nahi|tension na lein|tension na lo)\b[,.]?", "Tension na lein, aap befikr rahein, "),
+                (r"(?i)\b(shukriya|bohot shukriya|thank you|thanks)\b[,.]?", "Bohat shukriya yar, "),
+                (r"(?i)\b(theek hai|okay|ok)\b[,.]?", "Theek hai, ")
+            ]
+            for pattern, replacement in roman_greetings:
+                t = re.sub(pattern, replacement, t, count=1)
+
+            # Smooth out commas and spaces
+            t = re.sub(r"[,]{2,}", ",", t)
+            t = re.sub(r"\s+([,\.\!\?])", r"\1", t)
+            t = re.sub(r"([,])\s*", r"\1 ", t)
+
         t = re.sub(r"\s+", " ", t).strip()
 
-        # 7. Ensure clean sentence termination
-        if t and t[-1] not in (".", "!", "؟", "،"):
+        # Ensure clean sentence termination
+        if t and t[-1] not in (".", "!", "؟", "،", "?"):
             t += "."
 
         return t
@@ -2668,20 +2720,22 @@ class WhatsAppService:
             )
         elif fmt == "urdu_arabic":
             return (
-                "LANGUAGE REQUIREMENT (CRITICAL - STRICT URDU ARABIC/NASTALIQ SCRIPT):\n"
+                "LANGUAGE REQUIREMENT (CRITICAL - NATURAL SPOKEN URDU SCRIPT):\n"
                 f"- The customer messaged in Urdu using Urdu/Arabic script: '{clean_text}'.\n"
-                "- You MUST formulate your entire reply in natural, polite Urdu using Urdu script (اردو زبان).\n"
+                "- Formulate your entire reply in natural, warm, conversational Urdu using Urdu script (اردو زبان) like an informal, friendly WhatsApp voice note.\n"
                 "- Do NOT answer in English or Roman Urdu.\n"
-                "- Use respectful Urdu phrasing (e.g., السلام علیکم! OpsFlow Cloud میں خوش آمدید، ہم آپ کی کیا مدد کر سکتے ہیں؟).\n"
+                "- Use warm spoken phrasing (e.g., السلام علیکم بھائی! آپ بالکل بے فکر رہیں، میں ابھی دیکھ کر بتاتا ہوں).\n"
+                "- Avoid robotic corporate phrases.\n"
                 "- Preserve proprietary brand names such as 'OpsFlow Cloud' as-is."
             )
         elif fmt == "roman_urdu":
             return (
-                "LANGUAGE REQUIREMENT (CRITICAL - STRICT ROMAN URDU):\n"
+                "LANGUAGE REQUIREMENT (CRITICAL - INFORMAL CASUAL ROMAN URDU):\n"
                 f"- The customer messaged in Roman Urdu (Latin alphabet): '{clean_text}'.\n"
-                "- You MUST formulate your entire reply in natural, polite Roman Urdu (conversational Latin script Urdu).\n"
+                "- Formulate your entire reply in natural, colloquial spoken Roman Urdu (Latin script Urdu) sounding 100% like a real Pakistani human sending an informal WhatsApp voice note.\n"
                 "- Do NOT answer in English or Arabic script.\n"
-                "- Use natural Roman Urdu phrasing (e.g., 'Salam! OpsFlow Cloud mein khush-amdeed, main aapki kya madad kar sakta hoon?').\n"
+                "- Use natural, friendly spoken phrasing (e.g., 'Assalam-o-Alaikum bhai! OpsFlow ke hawale se bilkul tension na lo, main abhi dekh kar guide karta hoon').\n"
+                "- Avoid robotic call center clichés or formal announcements.\n"
                 "- Preserve proprietary brand names such as 'OpsFlow Cloud' as-is."
             )
         elif fmt == "english":
@@ -2751,7 +2805,7 @@ class WhatsAppService:
             f"DEEP CONTEXTUAL REASONING & ACCURACY PROTOCOL (لازمی ہدایات):\n"
             f"1. Deep Reasoning & Intent Comprehension (گہری فہم و ادراک): Thoroughly analyze every inquiry point, implied concern, invoice/order query, or logistical request in context. Use the recent conversation history to provide coherent, contextual responses.\n"
             f"2. Point-by-Point Accurate Resolution (تمام سوالات کا جامع و درست جواب): If the customer asks multiple questions (e.g., shipping charges, delivery time, billing breakdown, or payment methods), answer every single inquiry point accurately based on verified knowledge. Do not skip any detail.\n"
-            f"3. Natural Pakistani Urdu Cadence & Warmth (پرتپاک، شائستہ اور فطری پاکستانی لہجہ): Speak in a warm, polite, reassuring colloquial Pakistani Urdu tone (شائستہ، ہمدردانہ اور باوقار انداز). Avoid stiff literal translations, rigid news-anchor cadence, or robotic corporate disclaimers.\n"
+            f"3. 100% Real Informal Pakistani Voice Note Feel (فطری اور غیر رسمی صوتی انداز): Your reply is directly synthesized into an authentic WhatsApp voice note. Speak 100% like a real, helpful Pakistani human sending a friendly informal voice note on WhatsApp (جیسے کوئی دوست یا مخلص ساتھی واٹس ایپ پر بے تکلف بول کر وائس نوٹ بھیجتا ہے). Use genuine conversational markers ('Assalam-o-Alaikum yar / bhai', 'Acha suno', 'Ji bilkul tension na lo', 'Main abhi dekh kar batata hoon'). Strictly avoid robotic customer support boilerplate (never say 'معزز صارف', 'ہماری خدمات', 'آپ کی کیا رہنمائی کر سکتے ہیں').\n"
             f"4. Concise Human Pacing: Deliver your answer in 2 to 4 smooth, well-crafted conversational sentences covering all points thoroughly.\n"
             f"5. Pure Spoken Clean Text: DO NOT use markdown symbols (no asterisks '*', hashtags '#', underscores '_', backticks, bullet symbols). Provide pure, clean conversational text ready for natural human speech synthesis and WhatsApp messaging."
         )
@@ -3926,9 +3980,11 @@ class WhatsAppService:
             # Synthesizes every generated Pakistani Urdu text response into .oga voice note and dispatches via send_green_api_file (falling back to edge-tts/OpenAI if ElevenLabs fails)
             audio_dispatch_res = None
             try:
+                reply_is_arabic = any('\u0600' <= ch <= '\u06FF' for ch in (clean_reply_text or ""))
+                synth_lang = "ur" if reply_is_arabic else "roman_urdu"
                 audio_res = cls.generate_spoken_audio(
                     text=clean_reply_text,
-                    language="urdu",
+                    language=synth_lang,
                     organization_id=org_id,
                     output_format="oga"
                 )
