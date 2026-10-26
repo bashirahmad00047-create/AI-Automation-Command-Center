@@ -341,3 +341,23 @@ class TestWhatsAppLanguageMatchedReplies(unittest.TestCase):
             )
             self.assertEqual(res_rp["language_format"], "roman_pashto")
             self.assertIn("manana", res_rp["reply_body"].lower())
+
+    def test_greeting_direct_natural_response(self):
+        """Verifies greetings such as 'Assalamualaikum, apkeseho' directly receive natural language-matched replies without unsolicited branding."""
+        with patch.object(WhatsAppService, "call_gemini_ai", return_value=None):
+            with patch.object(WhatsAppService, "call_groq_ai", return_value=None):
+                res = WhatsAppService.generate_ai_auto_response(
+                    organization_id=self.org.id,
+                    message_body="Assalamualaikum, apkeseho"
+                )
+                self.assertEqual(res["language_format"], "roman_urdu")
+                self.assertEqual(res["reply_body"], "Wa alaikum assalam! Main theek hoon, shukriya. Aap kaise hain?")
+                self.assertNotIn("OpsFlow", res["reply_body"])
+
+                res_urdu = WhatsAppService.generate_ai_auto_response(
+                    organization_id=self.org.id,
+                    message_body="السلام علیکم، آپ کیسے ہیں"
+                )
+                self.assertEqual(res_urdu["language_format"], "urdu_arabic")
+                self.assertEqual(res_urdu["reply_body"], "وعلیکم السلام! میں ٹھیک ہوں، شکریہ۔ آپ کیسے ہیں؟")
+                self.assertNotIn("OpsFlow", res_urdu["reply_body"])

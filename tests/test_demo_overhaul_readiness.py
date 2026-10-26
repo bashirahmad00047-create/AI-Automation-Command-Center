@@ -322,22 +322,35 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
             self.assertIn("Assalam-o-Alaikum", called_payload["text"])
             self.assertEqual(called_payload["voice_settings"]["stability"], 0.50)
             self.assertEqual(called_payload["voice_settings"]["similarity_boost"], 0.75)
-            self.assertEqual(called_payload["voice_settings"]["style"], 0.40)
+            self.assertEqual(called_payload["voice_settings"]["style"], 0.25)
             self.assertTrue(called_payload["voice_settings"]["use_speaker_boost"])
 
     def test_spoken_roman_urdu_number_and_symbol_preprocessing(self):
         """Verifies numbers and prices convert into natural Roman Urdu words with relaxed pauses and symbols expanded."""
         # 1. Direct number-to-words helper verification
-        self.assertEqual(WhatsAppService.number_to_roman_urdu(25000), "pachees hazar")
+        self.assertEqual(WhatsAppService.number_to_roman_urdu(25000), "pachees hazaar")
         self.assertEqual(WhatsAppService.number_to_roman_urdu(500), "paanch sau")
-        self.assertEqual(WhatsAppService.number_to_roman_urdu(1000), "ek hazar")
+        self.assertEqual(WhatsAppService.number_to_roman_urdu(1000), "ek hazaar")
 
-        # 2. Phrasing conversion: 'Aap ka fee 25000 hai' -> 'Aap ki fee, pachees hazar rupay hai'
+        # 2. Comma-separated number: '25,000 rupay' -> 'pachees hazaar rupay'
+        res_comma = WhatsAppService.preprocess_text_for_human_speech("25,000 rupay", language="roman_urdu")
+        self.assertEqual(res_comma, "pachees hazaar rupay.")
+
+        # 3. Magnitude & currency normalization without duplicates: '25 thousand', '25 hazar', '25k hazar'
+        self.assertEqual(WhatsAppService.preprocess_text_for_human_speech("25 thousand", language="roman_urdu"), "pachees hazaar.")
+        self.assertEqual(WhatsAppService.preprocess_text_for_human_speech("25 hazar", language="roman_urdu"), "pachees hazaar.")
+        self.assertEqual(WhatsAppService.preprocess_text_for_human_speech("25k hazar", language="roman_urdu"), "pachees hazaar.")
+
+        # 4. Phrasing conversion: 'Aap ka fee 25000 hai' -> 'Aap ki fee, pachees hazaar rupay hai'
         sample_fee = "Aap ka fee 25000 hai"
         res_fee = WhatsAppService.preprocess_text_for_human_speech(sample_fee, language="roman_urdu")
-        self.assertIn("Aap ki fee, pachees hazar rupay hai", res_fee)
+        self.assertIn("Aap ki fee, pachees hazaar rupay hai", res_fee)
 
-        # 3. Currency symbols, percentage, and & / conversion
+        # 5. Preserving leading valid amounts (no unsafe deletion)
+        res_lead = WhatsAppService.preprocess_text_for_human_speech("25000 fees hai", language="roman_urdu")
+        self.assertIn("pachees hazaar fees hai", res_lead)
+
+        # 6. Currency symbols, percentage, and & / conversion
         sample_symbols = "Total fee 500 Rs aur discount 10% cash & online / bank transfer hai."
         res_symbols = WhatsAppService.preprocess_text_for_human_speech(sample_symbols, language="roman_urdu")
         self.assertIn("paanch sau rupay", res_symbols)
@@ -345,11 +358,15 @@ class TestDemoOverhaulReadiness(unittest.TestCase):
         self.assertIn("cash ya online", res_symbols)
         self.assertIn("ya bank transfer", res_symbols)
 
-        # 4. Natural breathing pauses with ellipses (...) and commas
-        sample_greetings = "Assalam-o-Alaikum. Aap ka order ready hai."
-        res_greet = WhatsAppService.preprocess_text_for_human_speech(sample_greetings, language="roman_urdu")
-        self.assertIn("Assalam-o-Alaikum, ...", res_greet)
-        self.assertIn("...", res_greet)
+        # 7. Brand pronunciation normalization: OpsFlow -> Opsflow for speech synthesis
+        res_brand = WhatsAppService.preprocess_text_for_human_speech("OpsFlow Cloud platform", language="roman_urdu")
+        self.assertIn("Opsflow Cloud platform", res_brand)
+
+        # 8. Natural sentence punctuation preserved (periods NOT turned into ellipses)
+        sample_sentence = "Assalam-o-Alaikum. Aap ka order ready hai. Hum jald rabta karenge."
+        res_sent = WhatsAppService.preprocess_text_for_human_speech(sample_sentence, language="roman_urdu")
+        self.assertIn("Assalam-o-Alaikum, ...", res_sent)
+        self.assertIn("Aap ka order ready hai. Hum jald rabta karenge.", res_sent)
 
 
 if __name__ == "__main__":
