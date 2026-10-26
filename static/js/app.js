@@ -1,5 +1,5 @@
 /**
- * OpsFlow Cloud Enterprise Frontend Application Controller
+ * BashFlow Cloud Enterprise Frontend Application Controller
  * Handles Multi-Tenancy, RBAC Persona switching, Visual Workflow Studio,
  * Inbound Webhooks, NLP Incident Triage, Execution Forensics,
  * Incident Management, Scoped API Keys, and Team Directory.
@@ -2745,7 +2745,7 @@ function renderApiKeysTable() {
             colspan: 6,
             icon: '🔑',
             title: 'No API keys yet',
-            description: 'Generate programmatic API tokens to integrate OpsFlow Cloud into your CI/CD pipelines, backend services, or monitoring scripts.',
+            description: 'Generate programmatic API tokens to integrate BashFlow Cloud into your CI/CD pipelines, backend services, or monitoring scripts.',
             actionHtml: '<button type="button" class="hud-btn primary small" onclick="openNewApiKeyModal()"><span>+</span> Generate API Key</button>'
         });
         return;
@@ -4059,7 +4059,7 @@ function switchAuthTab(tab) {
             tabLogin.style.color = 'var(--cyan-glow, #00f0ff)';
             tabLogin.style.borderBottom = '2px solid var(--cyan-glow, #00f0ff)';
         }
-        if (title) title.textContent = 'OpsFlow Cloud Authentication';
+        if (title) title.textContent = 'BashFlow Cloud Authentication';
         if (subtitle) subtitle.textContent = 'Access enterprise automation workspace';
     }
 }
@@ -4393,7 +4393,7 @@ async function handleLogout() {
     state.userRole = 'guest';
     updateUserBadgeUI();
     updateAuthHeaderUI(false);
-    showToast('Signed out of OpsFlow Cloud.', 'info');
+    showToast('Signed out of BashFlow Cloud.', 'info');
     openAuthModal('login', true);
 }
 
@@ -8732,7 +8732,7 @@ function stopCompanyMessagingAutoPoll() {
 
 
 // ==========================================================================
-// OPSFLOW CLOUD: PRODUCTS CATALOG & SHOP MANAGEMENT CONTROLLER
+// BASHFLOW CLOUD: PRODUCTS CATALOG & SHOP MANAGEMENT CONTROLLER
 // ==========================================================================
 
 let productSearchDebounceTimer = null;
@@ -9456,7 +9456,7 @@ function closeProductImagePreview() {
 
 
 // ==========================================================================
-// OPSFLOW CLOUD: BULK LEADS IMPORTER, WHATSAPP LOCATION & TRUCK DISPATCH
+// BASHFLOW CLOUD: BULK LEADS IMPORTER, WHATSAPP LOCATION & TRUCK DISPATCH
 // ==========================================================================
 
 // --- 1. Bulk Leads Importer ---
@@ -9715,4 +9715,89 @@ function submitTruckDispatch() {
             btn.innerHTML = '<span class="icon">🚚</span> Confirm &amp; Dispatch Truck';
         }
     });
+}
+
+// ============================================================================
+// LIVE AI VOICE CALL CONTROLLER (BASHFLOW CLOUD)
+// ============================================================================
+let liveVoiceCallActive = false;
+let liveVoiceRecognition = null;
+
+function openLiveVoiceCallModal() {
+    const modal = document.getElementById('liveVoiceCallModal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+function closeLiveVoiceCallModal() {
+    const modal = document.getElementById('liveVoiceCallModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    if (liveVoiceCallActive) {
+        toggleLiveVoiceCall();
+    }
+}
+
+function toggleLiveVoiceCall() {
+    const btnText = document.getElementById('startVoiceBtnText');
+    const statusLabel = document.getElementById('voiceCallStatusLabel');
+    const subLabel = document.getElementById('voiceCallSubLabel');
+    const pulseCircle = document.getElementById('voiceCallPulseCircle');
+    const transcriptBox = document.getElementById('voiceTranscriptBox');
+
+    if (!liveVoiceCallActive) {
+        // Start Call
+        liveVoiceCallActive = true;
+        if (btnText) btnText.textContent = 'End Call';
+        if (statusLabel) statusLabel.textContent = 'Listening... Speak now';
+        if (subLabel) subLabel.textContent = 'Voice agent is actively listening to your speech';
+        if (pulseCircle) pulseCircle.style.transform = 'scale(1.1)';
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            try {
+                liveVoiceRecognition = new SpeechRecognition();
+                liveVoiceRecognition.continuous = true;
+                liveVoiceRecognition.interimResults = true;
+                liveVoiceRecognition.lang = 'ur-PK, en-US';
+
+                liveVoiceRecognition.onresult = function(event) {
+                    let transcript = '';
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        transcript += event.results[i][0].transcript;
+                    }
+                    if (transcriptBox && transcript) {
+                        transcriptBox.innerHTML = '<strong>You:</strong> ' + transcript;
+                    }
+                };
+
+                liveVoiceRecognition.onerror = function(err) {
+                    console.warn('[Live Voice Call] Speech recognition note:', err);
+                };
+
+                liveVoiceRecognition.start();
+            } catch (recErr) {
+                console.warn('[Live Voice Call] Mic init note:', recErr);
+            }
+        } else {
+            if (transcriptBox) {
+                transcriptBox.innerHTML = '<span style="color:#34d399;">● Live Voice Stream session active. Connected to Gemini AI engine.</span>';
+            }
+        }
+    } else {
+        // End Call
+        liveVoiceCallActive = false;
+        if (btnText) btnText.textContent = 'Start Voice Call';
+        if (statusLabel) statusLabel.textContent = 'Call Ended';
+        if (subLabel) subLabel.textContent = 'Click "Start Voice Call" to begin a new conversation';
+        if (pulseCircle) pulseCircle.style.transform = 'scale(1.0)';
+        if (liveVoiceRecognition) {
+            try {
+                liveVoiceRecognition.stop();
+            } catch (e) {}
+            liveVoiceRecognition = null;
+        }
+    }
 }

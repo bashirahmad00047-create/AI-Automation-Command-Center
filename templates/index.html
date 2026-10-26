@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpsFlow Cloud - Enterprise Intelligent Automation</title>
+    <title>BashFlow Cloud - Enterprise Intelligent Automation</title>
     <link rel="stylesheet" href="/static/css/style.css?v=2.8.5">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,7 +21,7 @@
                 <span class="brand-symbol">⚡</span>
             </div>
             <div class="brand-meta">
-                <div class="brand-title text-gray-900 dark:text-white">OPSFLOW CLOUD</div>
+                <div class="brand-title text-gray-900 dark:text-white">BASHFLOW CLOUD</div>
                 <span class="brand-badge-cloud">AI AUTOMATION COMMAND CENTER</span>
             </div>
 
@@ -189,7 +189,7 @@
                     <span>☰</span>
                 </button>
                 <div class="topbar-brand-area">
-                    <span class="topbar-brand-title">OpsFlow Cloud</span>
+                    <span class="topbar-brand-title">BashFlow Cloud</span>
                     <span class="topbar-brand-divider">/</span>
                     <span class="breadcrumb-current" id="activeBreadcrumbText">Executive Overview</span>
                 </div>
@@ -310,6 +310,30 @@
 
         <!-- TAB 1: EXECUTIVE OVERVIEW -->
         <section id="tab-dashboard" class="tab-panel active">
+            <!-- Dashboard Live AI Voice Call Banner -->
+            <div class="hud-panel live-voice-hero-banner bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-gray-900 dark:text-white" style="margin-bottom: 20px; padding: 14px 20px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(59, 130, 246, 0.04) 100%); border-left: 5px solid #10b981;">
+                <div style="display: flex; align-items: center; gap: 14px;">
+                    <div style="width: 42px; height: 42px; border-radius: 50%; background: #10b981; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #fff; box-shadow: 0 0 14px rgba(16, 185, 129, 0.45);">
+                        🎙️
+                    </div>
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <h3 style="margin: 0; font-size: 15px; font-weight: 700;">Live AI Voice Call</h3>
+                            <span class="status-badge active" style="font-size: 10px; padding: 2px 8px; background: #10b981; color: white;">ACTIVE AGENT</span>
+                            <span style="font-size: 11px; color: #10b981; font-weight: 600;">● Gemini Multilingual &amp; Pakistani Urdu Voice</span>
+                        </div>
+                        <p style="margin: 3px 0 0 0; font-size: 12px; color: var(--text-secondary);">
+                            Speak directly with our automated AI assistant or initiate real-time outbound customer voice calls.
+                        </p>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button type="button" class="hud-btn primary" id="liveAiVoiceCallBtn" onclick="openLiveVoiceCallModal()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700; font-size: 13px; padding: 9px 20px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.35); border: none; cursor: pointer; color: #ffffff;">
+                        <span style="font-size: 16px;">📞</span>
+                        <span>Live AI Voice Call</span>
+                    </button>
+                </div>
+            </div>
             <!-- Primary Executive KPI Cards -->
             <div class="metrics-grid">
                 <div class="metric-card emerald bg-white dark:bg-slate-900 text-gray-900 dark:text-white border border-slate-200 dark:border-slate-800">
@@ -1205,7 +1229,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                         </div>
                         <div class="form-group" id="waMessageBodyGroup" style="margin-bottom: 14px;">
                             <label style="font-size: 12px; margin-bottom: 4px; display: block;">Message Body *</label>
-                            <textarea id="waMessageBody" class="hud-textarea" rows="4" placeholder="Hello from OpsFlow Cloud automation engine! Your incident #104 has been triaged."></textarea>
+                            <textarea id="waMessageBody" class="hud-textarea" rows="4" placeholder="Hello from BashFlow Cloud automation engine! Your incident #104 has been triaged."></textarea>
                         </div>
                         <button type="submit" class="hud-btn primary" id="waSendBtn" style="width: 100%;">Send WhatsApp Message</button>
                     </form>
@@ -2510,7 +2534,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                         <h2 style="margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em;">PRODUCTS CATALOG &amp; ONLINE SHOP</h2>
                     </div>
                     <p style="color: var(--text-secondary); margin-top: 6px; font-size: 0.92rem; max-width: 780px;">
-                        Manage shop inventory, live pricing, product images, and live WhatsApp sales auto-grounding directly from OpsFlow Cloud.
+                        Manage shop inventory, live pricing, product images, and live WhatsApp sales auto-grounding directly from BashFlow Cloud.
                     </p>
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
@@ -2672,7 +2696,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
         <section id="tab-apidocs" class="tab-panel">
             <div class="blueprints-intro" style="margin-bottom: 24px;">
                 <h2>REST API Reference &amp; Developer Hub</h2>
-                <p>Integrate OpsFlow Cloud directly into your external microservices, webhooks, or third-party CRM platforms. All requests support Bearer API Key authentication or Session cookies.</p>
+                <p>Integrate BashFlow Cloud directly into your external microservices, webhooks, or third-party CRM platforms. All requests support Bearer API Key authentication or Session cookies.</p>
                 <div style="margin-top: 10px; display: flex; gap: 15px; align-items: center;">
                     <span class="role-badge admin">Base URL: <code style="color:#00ffff;">/api/v1</code></span>
                     <span class="role-badge operator">Auth Header: <code style="color:#10b981;">X-API-Key: sk_live_...</code></span>
@@ -2765,7 +2789,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
     <!-- Global Application Footer -->
     <footer class="app-global-footer bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 text-gray-600 dark:text-slate-400" id="appGlobalFooter">
         <div class="footer-inner">
-            <span class="creator-mark text-gray-600 dark:text-slate-400">2026 OpsFlow Cloud &bull; Built by Bashir Khanii</span>
+            <span class="creator-mark text-gray-600 dark:text-slate-400">2026 BashFlow Cloud &bull; Built by Bashir Khanii</span>
         </div>
     </footer>
     </div><!-- end .enterprise-app-main -->
@@ -3457,7 +3481,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <div style="width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(59, 130, 246, 0.2)); border: 1px solid rgba(0, 240, 255, 0.4); display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 0 12px rgba(0, 240, 255, 0.25);">⚡</div>
                     <div>
-                        <h3 id="authModalTitle" style="margin: 0; font-size: 17px; font-weight: 700; color: #f8fafc; letter-spacing: -0.01em;">OpsFlow Cloud Authentication</h3>
+                        <h3 id="authModalTitle" style="margin: 0; font-size: 17px; font-weight: 700; color: #f8fafc; letter-spacing: -0.01em;">BashFlow Cloud Authentication</h3>
                         <p id="authModalSubtitle" style="margin: 2px 0 0 0; font-size: 12px; color: var(--text-dim, #94a3b8);">Access enterprise automation workspace</p>
                     </div>
                 </div>
@@ -3661,7 +3685,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 <div class="hud-flex-row hud-gap-md">
                     <span style="font-size: 24px;">🚀</span>
                     <div>
-                        <h3 id="onboardingWizardTitle" style="color: #10b981; margin: 0;">Welcome to OpsFlow Cloud!</h3>
+                        <h3 id="onboardingWizardTitle" style="color: #10b981; margin: 0;">Welcome to BashFlow Cloud!</h3>
                         <p style="font-size: 12px; color: var(--text-dim, #888); margin: 2px 0 0 0;">Your turnkey intelligent automation command center is live</p>
                     </div>
                 </div>
@@ -3741,7 +3765,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                             <input type="text" id="wizApiKeyInput" readonly class="hud-input" style="font-family: var(--font-mono); font-size: 13px; color: #00f0ff; width: 100%;" value="sk_live_...">
                             <button type="button" class="hud-btn primary" onclick="copyOnboardingApiKey()" id="wizCopyKeyBtn">📋 Copy</button>
                         </div>
-                        <p style="font-size: 11px; color: #f59e0b; margin: 10px 0 0 0;">⚠️ Please store this key securely. OpsFlow Cloud stores SHA-256 hashes and will not display this secret token again!</p>
+                        <p style="font-size: 11px; color: #f59e0b; margin: 10px 0 0 0;">⚠️ Please store this key securely. BashFlow Cloud stores SHA-256 hashes and will not display this secret token again!</p>
                     </div>
                 </div>
 
@@ -4622,5 +4646,44 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
     <div id="toastContainer" class="toast-container"></div>
 
     <script src="/static/js/app.js?v=2.8.4"></script>
+    <!-- LIVE AI VOICE CALL MODAL -->
+    <div class="hud-modal-backdrop" id="liveVoiceCallModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(8px); z-index: 10050; align-items: center; justify-content: center;">
+        <div class="hud-modal-content" style="background: #0f172a; border: 1px solid #334155; border-radius: 16px; width: 92%; max-width: 520px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6); color: #f8fafc;">
+            <div style="padding: 18px 24px; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; background: #1e293b;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 32px; height: 32px; border-radius: 50%; background: #10b981; display: flex; align-items: center; justify-content: center; font-size: 16px;">
+                        🎙️
+                    </div>
+                    <div>
+                        <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff;">Live AI Voice Call</h3>
+                        <span style="font-size: 11px; color: #34d399;">● Gemini &amp; ElevenLabs Voice Agent</span>
+                    </div>
+                </div>
+                <button type="button" onclick="closeLiveVoiceCallModal()" style="background: none; border: none; font-size: 20px; color: #94a3b8; cursor: pointer;">✕</button>
+            </div>
+            
+            <div style="padding: 24px; text-align: center;">
+                <div id="voiceCallPulseCircle" style="width: 90px; height: 90px; border-radius: 50%; background: radial-gradient(circle, rgba(16, 185, 129, 0.25) 0%, rgba(16, 185, 129, 0.05) 70%); border: 2px solid #10b981; margin: 0 auto 16px auto; display: flex; align-items: center; justify-content: center; font-size: 38px; box-shadow: 0 0 25px rgba(16, 185, 129, 0.4);">
+                    🎙️
+                </div>
+                
+                <h4 id="voiceCallStatusLabel" style="margin: 0 0 6px 0; font-size: 17px; font-weight: 600; color: #f8fafc;">Voice Agent Ready</h4>
+                <p id="voiceCallSubLabel" style="margin: 0 0 16px 0; font-size: 13px; color: #94a3b8;">Speak in Pakistani Urdu or English for real-time conversation.</p>
+                
+                <div id="voiceTranscriptBox" style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px 16px; min-height: 80px; max-height: 140px; overflow-y: auto; text-align: left; font-size: 13px; color: #cbd5e1; margin-bottom: 20px;">
+                    <em style="color: #64748b;">Transcript will appear here in real-time...</em>
+                </div>
+
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button type="button" id="startVoiceCallBtn" onclick="toggleLiveVoiceCall()" style="background: #10b981; color: #fff; font-weight: 700; font-size: 14px; padding: 10px 24px; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
+                        <span>📞</span> <span id="startVoiceBtnText">Start Voice Call</span>
+                    </button>
+                    <button type="button" onclick="closeLiveVoiceCallModal()" style="background: #334155; color: #cbd5e1; font-weight: 600; font-size: 14px; padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer;">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

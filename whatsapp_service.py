@@ -6707,160 +6707,93 @@ class WhatsAppService:
             else:
                 raise ValueError(f"Invalid recipient phone number: '{to_phone or chat_id}'. Must include country code and digits.")
 
-        conf = cls.get_config(organization_id=organization_id)
-        id_inst = conf.get("green_api_id_instance") or os.environ.get("GREEN_API_ID_INSTANCE") or SystemSetting.get_val("GREEN_API_ID_INSTANCE") or os.environ.get("ID_INSTANCE")
-        tok_inst = conf.get("green_api_token_instance") or os.environ.get("GREEN_API_TOKEN_INSTANCE") or SystemSetting.get_val("GREEN_API_TOKEN_INSTANCE") or os.environ.get("API_TOKEN_INSTANCE")
-        host_val = conf.get("green_api_host") or os.environ.get("GREEN_API_HOST") or SystemSetting.get_val("GREEN_API_HOST")
-        host = cls.normalize_green_api_host(host_val, id_inst)
-
-        if not id_inst or not tok_inst:
-            err_msg = "Green-API credentials not configured (GREEN_API_ID_INSTANCE and GREEN_API_TOKEN_INSTANCE required)."
-            if allow_fallback and cls.is_simulator_fallback_enabled():
-                return cls.dispatch_simulator_message(
-                    organization_id=organization_id,
-                    to_phone=clean_to,
-                    message_text=message_text,
-                    execution_id=execution_id,
-                    fallback_reason=err_msg
+        # Exclusively dispatch via local Baileys bridge (never calls Green API)
+        bridge_chat_id = chat_id or real_chat_id
+        bridge_message = message_text or ""
+        bridge_url = os.environ.get("BAILEYS_BRIDGE_URL", "http://localhost:3001/send-message")
+        bridge_timeout = float(os.environ.get("BAILEYS_BRIDGE_TIMEOUT", "5.0"))
+        try:
+            with cls.get_http_session(retries=1) as session:
+                bridge_resp = session.post(
+                    bridge_url,
+                    json={"chatId": bridge_chat_id, "message": bridge_message},
+                    headers={"Content-Type": "application/json"},
+                    timeout=bridge_timeout
                 )
-            cls.record_message(
+            if bridge_resp.status_code == 200:
+                bridge_data = bridge_resp.json() if bridge_resp.text and bridge_resp.text.strip() else {}
+                msg_id = bridge_data.get("messageId") or bridge_data.get("idMessage") or f"baileys_{int(time.time() * 1000)}"
+                logger.info(f"[Baileys Bridge Success] Free WhatsApp message dispatched via Baileys bridge: ID={msg_id}")
+                cls.record_outbound_sent_id(msg_id)
+                if message_text:
+                    cls.record_bot_reply_body(message_text)
+                record = cls.record_message(
+                    organization_id=organization_id,
+                    sender="Baileys WhatsApp Bridge",
+                    recipient=real_chat_id,
+                    direction="outbound",
+                    body=message_text,
+                    message_type="text",
+                    status="sent",
+                    whatsapp_message_id=msg_id,
+                    execution_id=execution_id,
+                    raw_payload={**bridge_data, "chat_id": real_chat_id, "chatId": bridge_chat_id, "provider": "baileys_bridge"}
+                )
+                return {
+                    "success": True,
+                    "status": "sent",
+                    "provider": "baileys_bridge",
+                    "whatsapp_message_id": msg_id,
+                    "message_record_id": record.id if record else None,
+                    "recipient": clean_to,
+                    "chat_id": real_chat_id,
+                    "message_type": "text"
+                }
+            else:
+                err_text = bridge_resp.text[:200]
+                logger.error(f"[Baileys Bridge Failed] HTTP {bridge_resp.status_code}: {err_text}")
+                record = cls.record_message(
+                    organization_id=organization_id,
+                    sender="Baileys WhatsApp Bridge",
+                    recipient=real_chat_id,
+                    direction="outbound",
+                    body=message_text,
+                    message_type="text",
+                    status="failed",
+                    execution_id=execution_id,
+                    error_message=f"Baileys Bridge HTTP {bridge_resp.status_code}: {err_text}"
+                )
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "provider": "baileys_bridge",
+                    "error": f"Baileys Bridge HTTP {bridge_resp.status_code}: {err_text}",
+                    "recipient": clean_to,
+                    "chat_id": real_chat_id,
+                    "message_record_id": record.id if record else None
+                }
+        except Exception as bridge_err:
+            err_msg = f"Baileys Bridge error ({bridge_err})"
+            logger.error(f"[Baileys Bridge Error] {err_msg}")
+            record = cls.record_message(
                 organization_id=organization_id,
-                sender="GreenAPI",
+                sender="Baileys WhatsApp Bridge",
                 recipient=real_chat_id,
                 direction="outbound",
-                body=message_text or "",
+                body=message_text,
+                message_type="text",
                 status="failed",
                 execution_id=execution_id,
                 error_message=err_msg
             )
             return {
                 "success": False,
-                "status": "not_configured",
-                "provider": "green_api",
+                "status": "failed",
+                "provider": "baileys_bridge",
                 "error": err_msg,
                 "recipient": clean_to,
-                "chat_id": real_chat_id
-            }
-
-        url = f"{host}/waInstance{id_inst}/sendMessage/{tok_inst}"
-        payload = {
-            "chatId": real_chat_id,
-            "message": message_text or ""
-        }
-        if quoted_message_id:
-            payload["quotedMessageId"] = quoted_message_id
-
-        timeouts = cls.get_timeout_tuple()
-        logger.info(f"[Outbound Live Audit] Green-API sendMessage payload: chatId={chat_id}, quotedMessageId={quoted_message_id}, text='{(message_text or '')[:100]}'")
-
-        try:
-            with cls.get_http_session(retries=2) as session:
-                resp = session.post(url, json=payload, timeout=timeouts)
-                if resp.status_code == 400 and quoted_message_id:
-                    logger.warning(f"Green-API sendMessage failed with quotedMessageId (HTTP 400), retrying unquoted for {clean_to}...")
-                    payload_unquoted = dict(payload)
-                    payload_unquoted.pop("quotedMessageId", None)
-                    resp = session.post(url, json=payload_unquoted, timeout=timeouts)
-                try:
-                    resp_json = resp.json() if resp.text and resp.text.strip() else {}
-                except Exception:
-                    resp_json = {}
-                logger.info(f"[Outbound Live Audit] Green-API sendMessage response: status={resp.status_code}, data={resp_json}")
-                if resp.status_code == 200 and resp_json.get("idMessage"):
-                    msg_id = resp_json.get("idMessage")
-                    cls.record_outbound_sent_id(msg_id)
-                    if message_text:
-                        cls.record_bot_reply_body(message_text)
-                    record = cls.record_message(
-                        organization_id=organization_id,
-                        sender=f"GreenAPI Instance {id_inst}",
-                        recipient=real_chat_id,
-                        direction="outbound",
-                        body=message_text,
-                        message_type="text",
-                        status="sent",
-                        whatsapp_message_id=msg_id,
-                        execution_id=execution_id,
-                        raw_payload={**resp_json, "chat_id": real_chat_id, "chatId": real_chat_id}
-                    )
-                    return {
-                        "success": True,
-                        "status": "sent",
-                        "provider": "green_api",
-                        "whatsapp_message_id": msg_id,
-                        "message_record_id": record.id if record else None,
-                        "recipient": clean_to,
-                        "chat_id": real_chat_id,
-                        "message_type": "text"
-                    }
-                else:
-                    err = resp_json.get("message") or resp.text[:200] or (
-                        f"Green-API authentication failed (HTTP {resp.status_code} Unauthorized). Verify Instance ID and API Token Instance in Green-API console."
-                        if resp.status_code == 401 else f"HTTP {resp.status_code}"
-                    )
-                    is_quota_or_rate = (
-                        "quota" in err.lower()
-                        or "quote_allowed" in err.lower()
-                        or "exceeded" in err.lower()
-                        or resp.status_code == 429
-                    )
-                    if (resp.status_code >= 500 or resp.status_code == 401 or is_quota_or_rate) and allow_fallback and cls.is_simulator_fallback_enabled():
-                        logger.warning(f"Green-API returned HTTP {resp.status_code} ({err}). Falling back to simulator.")
-                        return cls.dispatch_simulator_message(
-                            organization_id=organization_id,
-                            to_phone=clean_to,
-                            message_text=message_text,
-                            execution_id=execution_id,
-                            fallback_reason=f"Green-API HTTP {resp.status_code}: {err}"
-                        )
-                    record = cls.record_message(
-                        organization_id=organization_id,
-                        sender=f"GreenAPI Instance {id_inst}",
-                        recipient=clean_to,
-                        direction="outbound",
-                        body=message_text,
-                        message_type="text",
-                        status="failed",
-                        execution_id=execution_id,
-                        error_message=err,
-                        raw_payload=resp_json
-                    )
-                    return {
-                        "success": False,
-                        "status": "failed",
-                        "provider": "green_api",
-                        "error": err,
-                        "recipient": clean_to,
-                        "message_record_id": record.id if record else None
-                    }
-        except requests.exceptions.ConnectTimeout:
-            err_msg = f"Connection timeout: Failed to connect to Green-API within {timeouts[0]}s."
-            logger.warning(f"Green-API send connect timeout: {err_msg}")
-            if allow_fallback and cls.is_simulator_fallback_enabled():
-                logger.info(f"Triggering WhatsApp simulator fallback for {clean_to} due to connection timeout.")
-                return cls.dispatch_simulator_message(
-                    organization_id=organization_id,
-                    to_phone=clean_to,
-                    message_text=message_text,
-                    execution_id=execution_id,
-                    fallback_reason=err_msg
-                )
-            cls.record_message(
-                organization_id=organization_id,
-                sender=f"GreenAPI Instance {id_inst}",
-                recipient=clean_to,
-                direction="outbound",
-                body=message_text,
-                status="timeout",
-                execution_id=execution_id,
-                error_message=err_msg
-            )
-            return {
-                "success": False,
-                "status": "timeout",
-                "provider": "green_api",
-                "error": err_msg,
-                "recipient": clean_to
+                "chat_id": real_chat_id,
+                "message_record_id": record.id if record else None
             }
         except requests.exceptions.ReadTimeout:
             err_msg = f"Read timeout: Green-API server did not respond within {timeouts[1]}s."

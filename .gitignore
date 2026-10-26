@@ -65,3 +65,8 @@ backup_*.py
 targeted_cleanup_backup.json
 
 fix_*.py
+
+# Node.js dependencies & Baileys session storage
+node_modules/
+baileys_auth/
+
