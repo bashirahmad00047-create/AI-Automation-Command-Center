@@ -706,6 +706,35 @@ class WhatsAppService:
         return False
 
     @classmethod
+    def _is_european_gibberish(cls, text: Optional[str]) -> bool:
+        """Detects if transcription output is European language gibberish (Welsh, German, Polish, etc.)
+        hallucinated by Whisper when processing low-resource audio or background noise.
+        """
+        if not text or not isinstance(text, str):
+            return False
+        clean = text.strip()
+        if not clean:
+            return False
+
+        # 1. Accented European characters never used in Urdu, Roman Urdu, or English
+        euro_accents = re.compile(r"[éèêëàâäöüßñçłżśćńęąčšžýťďőűøåæÉÈÊËÀÂÄÖÜÑÇŁŻŚĆŃĘĄČŠŽÝ]")
+        if euro_accents.search(clean):
+            return True
+
+        # 2. Distinctive Welsh, German, Polish, Hungarian, Dutch, Scandinavian stopwords
+        euro_stopwords = {
+            "yn", "nid", "bod", "mae", "ond", "hefyd", "dros", "sydd", "mewn", "gyda", "chwi", "wedi", "fy", "ein", "eich",
+            "und", "der", "die", "das", "nicht", "eine", "ist", "für", "sie", "wie", "aber", "auch", "van", "een", "het",
+            "och", "det", "som", "för", "ikke", "jest", "nie", "się", "jak", "oraz", "hogy", "nem", "egy"
+        }
+        words = [w.lower().strip(".,!?:;\"'()[]") for w in clean.split()]
+        if len(words) >= 2:
+            euro_count = sum(1 for w in words if w in euro_stopwords)
+            if euro_count >= 2 or (euro_count >= 1 and len(words) <= 3):
+                return True
+        return False
+
+    @classmethod
     def _download_media(
         cls,
         chat_id: Optional[str] = None,
@@ -827,13 +856,13 @@ class WhatsAppService:
                     return cached[1]
 
         transcription_prompt = (
-            "Provide an accurate, verbatim transcription of this WhatsApp voice message. "
-            "If spoken in Pashto, transcribe accurately in Urdu (or Pashto as spoken). "
-            "If in Urdu, transcribe accurately in Urdu (Arabic script or Roman Urdu as spoken). "
-            "If in English, transcribe in English. "
-            "Output ONLY the transcribed speech text without introductory or explanatory text."
+            "Provide an accurate transcription of this WhatsApp voice message. "
+            "STRICT LANGUAGE REQUIREMENT: Output MUST be strictly in Urdu (Arabic script or Roman Urdu) or English. "
+            "If spoken in Pashto, Punjabi, or another regional dialect, transcribe or translate it accurately into clear Urdu. "
+            "STRICTLY FORBIDDEN: Do NOT output Welsh, German, Polish, or any European language gibberish. "
+            "Output ONLY the transcribed speech text without introductory or explanatory text. If audio is silent or unintelligible, output nothing."
         )
-        whisper_context_prompt = "WhatsApp voice note in Urdu, Pashto, Roman Urdu, or English. Conversational customer speech."
+        whisper_context_prompt = "اردو یا انگلش وائس میسج۔ WhatsApp voice message in Urdu or English speech."
 
         # Detect audio container format
         if audio_bytes.startswith(b"ID3") or audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
@@ -880,7 +909,35 @@ class WhatsAppService:
                         if resp.status_code == 200:
                             whisper_res = resp.json()
                             whisper_text = (whisper_res.get("text") or "").strip()
-                            if whisper_text and not cls._is_prompt_echo_or_refusal(whisper_text):
+                            # If Whisper misdetected language and produced European gibberish, force language='ur' and retry
+                            if whisper_text and cls._is_european_gibberish(whisper_text):
+                                logger.warning(f"Groq {g_model} returned European gibberish ('{whisper_text[:50]}...'), retrying with forced language='ur'...")
+                                try:
+                                    files_retry = {"file": (audio_fn, audio_bytes, audio_mt)}
+                                    data_retry = {
+                                        "model": g_model,
+                                        "response_format": "json",
+                                        "language": "ur",
+                                        "prompt": "اردو وائس میسج"
+                                    }
+                                    resp_retry = requests.post(
+                                        "https://api.groq.com/openai/v1/audio/transcriptions",
+                                        headers=headers,
+                                        files=files_retry,
+                                        data=data_retry,
+                                        timeout=call_timeout
+                                    )
+                                    if resp_retry.status_code == 200:
+                                        retry_text = (resp_retry.json().get("text") or "").strip()
+                                        if retry_text and not cls._is_prompt_echo_or_refusal(retry_text) and not cls._is_european_gibberish(retry_text):
+                                            whisper_text = retry_text
+                                        else:
+                                            whisper_text = ""
+                                except Exception as retry_err:
+                                    logger.debug(f"Groq language='ur' retry notice: {retry_err}")
+                                    whisper_text = ""
+
+                            if whisper_text and not cls._is_prompt_echo_or_refusal(whisper_text) and not cls._is_european_gibberish(whisper_text):
                                 logger.info(f"Groq {g_model} transcription successful: {whisper_text[:60]}...")
                                 if message_id:
                                     with cls._media_cache_lock:
@@ -888,6 +945,8 @@ class WhatsAppService:
                                 return whisper_text
                             elif cls._is_prompt_echo_or_refusal(whisper_text):
                                 logger.debug(f"Groq {g_model} returned prompt echo / refusal, trying next model fallback...")
+                            elif cls._is_european_gibberish(whisper_text):
+                                logger.debug(f"Groq {g_model} returned European gibberish, trying next model fallback...")
                             else:
                                 logger.debug(f"Groq {g_model} returned empty transcript (HTTP 200), trying next model fallback...")
                         else:
@@ -923,7 +982,34 @@ class WhatsAppService:
                 if resp.status_code == 200:
                     openai_res = resp.json()
                     openai_text = (openai_res.get("text") or "").strip()
-                    if openai_text and not cls._is_prompt_echo_or_refusal(openai_text):
+                    if openai_text and cls._is_european_gibberish(openai_text):
+                        logger.warning(f"OpenAI Whisper returned European gibberish ('{openai_text[:50]}...'), retrying with forced language='ur'...")
+                        try:
+                            files_retry = {"file": (audio_fn, audio_bytes, audio_mt)}
+                            data_retry = {
+                                "model": "whisper-1",
+                                "response_format": "json",
+                                "language": "ur",
+                                "prompt": "اردو وائس میسج"
+                            }
+                            resp_retry = requests.post(
+                                "https://api.openai.com/v1/audio/transcriptions",
+                                headers=headers,
+                                files=files_retry,
+                                data=data_retry,
+                                timeout=call_timeout
+                            )
+                            if resp_retry.status_code == 200:
+                                retry_text = (resp_retry.json().get("text") or "").strip()
+                                if retry_text and not cls._is_prompt_echo_or_refusal(retry_text) and not cls._is_european_gibberish(retry_text):
+                                    openai_text = retry_text
+                                else:
+                                    openai_text = ""
+                        except Exception as retry_err:
+                            logger.debug(f"OpenAI language='ur' retry notice: {retry_err}")
+                            openai_text = ""
+
+                    if openai_text and not cls._is_prompt_echo_or_refusal(openai_text) and not cls._is_european_gibberish(openai_text):
                         logger.info(f"OpenAI Whisper transcription successful: {openai_text[:60]}...")
                         if message_id:
                             with cls._media_cache_lock:
@@ -931,6 +1017,8 @@ class WhatsAppService:
                         return openai_text
                     elif cls._is_prompt_echo_or_refusal(openai_text):
                         logger.debug("OpenAI Whisper returned prompt echo / refusal, falling back...")
+                    elif cls._is_european_gibberish(openai_text):
+                        logger.debug("OpenAI Whisper returned European gibberish, falling back...")
             except Exception as openai_err:
                 logger.debug(f"OpenAI Whisper transcription notice: {openai_err}")
 
@@ -954,7 +1042,7 @@ class WhatsAppService:
                     response = model.generate_content([uploaded, transcription_prompt])
                     if hasattr(response, "text") and response.text:
                         res_txt = response.text.strip()
-                        if res_txt and not cls._is_prompt_echo_or_refusal(res_txt):
+                        if res_txt and not cls._is_prompt_echo_or_refusal(res_txt) and not cls._is_european_gibberish(res_txt):
                             logger.info(f"Gemini transcription successful: {res_txt[:60]}...")
                             if message_id:
                                 with cls._media_cache_lock:
@@ -962,6 +1050,8 @@ class WhatsAppService:
                             return res_txt
                         elif cls._is_prompt_echo_or_refusal(res_txt):
                             logger.debug("Gemini transcription returned prompt echo / refusal notice.")
+                        elif cls._is_european_gibberish(res_txt):
+                            logger.debug("Gemini transcription returned European gibberish notice.")
                 finally:
                     try:
                         os.remove(tmp_path)
@@ -1034,7 +1124,7 @@ class WhatsAppService:
             lower_cleaned = cleaned.lower()
             if lower_cleaned in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]"):
                 return ""
-            if cls._is_prompt_echo_or_refusal(cleaned):
+            if cls._is_prompt_echo_or_refusal(cleaned) or cls._is_european_gibberish(cleaned):
                 return ""
             return cleaned
         return ""
@@ -2851,11 +2941,12 @@ class WhatsAppService:
         roman_urdu_words = {
             "kya", "kia", "aap", "ap", "tum", "mujhe", "mujy", "humein", "humain",
             "hai", "hain", "hoon", "hun", "chahiye", "chahye", "chahia", "kaise",
-            "kese", "kaisa", "kaisi", "shukriya", "shukria", "batao", "batayein",
+            "kese", "kesy", "kaisa", "kaisi", "shukriya", "shukria", "batao", "batayein",
             "bataen", "bataiye", "kitna", "kitne", "kitni", "theek", "thik", "acha",
             "achha", "sahi", "karein", "karna", "karo", "karta", "karti", "mera",
             "meri", "mere", "apka", "aapka", "apki", "aapki", "kahan", "kyun", "kyon",
-            "kab", "kaun", "kon", "kis", "zaroor", "bilkul", "wali", "waise"
+            "kab", "kaun", "kon", "kis", "zaroor", "bilkul", "wali", "waise",
+            "assalam", "assalamualaikum", "salam", "walaikum", "apkeseho", "kaiseho", "keseho", "apkesyho"
         }
 
         # English vocabulary
@@ -2919,40 +3010,38 @@ class WhatsAppService:
 
         if fmt == "pashto_arabic":
             return (
-                "LANGUAGE REQUIREMENT (CRITICAL - STRICT PASHTO ARABIC SCRIPT):\n"
-                f"- The customer messaged in Pashto using Pashto/Arabic script: '{clean_text}'.\n"
-                "- You MUST formulate your entire reply in natural, polite, and fluent Pashto using Pashto/Arabic script (پښتو ژبه).\n"
-                "- Do NOT answer in English, Urdu, or Roman script.\n"
-                "- Use authentic Pashto phrases (e.g., سلام، مننه، مهرباني، ستاسو د مرستې لپاره چمتو یو).\n"
+                "LANGUAGE REQUIREMENT (CRITICAL - STRICT PASHTO ARABIC SCRIPT & NATURAL SPOKEN ROMAN URDU/URDU):\n"
+                f"- The customer messaged in Pashto using Pashto/Arabic script (پښتو): '{clean_text}'.\n"
+                "- VOICE NOTE NATURAL PRONUNCIATION PROTOCOL: Your reply will be directly synthesized into a voice note using ElevenLabs / Edge-TTS. Because voice synthesis engines cannot pronounce Pashto naturally and sound robotic, you MUST formulate your voice note reply in simple, warm, conversational Roman Urdu or simple conversational Urdu so ElevenLabs and Edge-TTS pronounce it 100% naturally and fluently.\n"
+                "- Speak like a friendly, helpful Pakistani human on WhatsApp (e.g., 'Assalam-o-Alaikum bhai! OpsFlow Cloud ke bare mein bilkul tension na lein, main aapko batata hoon...').\n"
+                "- Keep sentences simple, smooth, and conversational for authentic human voice delivery.\n"
                 "- Preserve proprietary brand names such as 'OpsFlow Cloud' as-is."
             )
         elif fmt == "roman_pashto":
             return (
-                "LANGUAGE REQUIREMENT (CRITICAL - STRICT ROMAN PASHTO):\n"
-                f"- The customer messaged in Roman Pashto (Latin alphabet): '{clean_text}'.\n"
-                "- You MUST formulate your entire reply in natural, conversational Roman Pashto (Latin script Pashto).\n"
-                "- Do NOT answer in English, Urdu script, or Arabic script.\n"
-                "- Use natural Roman Pashto conversational phrasing (e.g., 'Salam! Dera manana, sanga ye? Pa kher raghle, zamaung team staso maraste ta tayar de').\n"
+                "LANGUAGE REQUIREMENT (CRITICAL - STRICT ROMAN PASHTO & NATURAL SPOKEN ROMAN URDU):\n"
+                f"- The customer messaged in Roman Pashto (Latin script Pashto): '{clean_text}'.\n"
+                "- VOICE NOTE NATURAL PRONUNCIATION PROTOCOL: Your reply is directly synthesized into a WhatsApp voice note. Formulate your reply in simple, warm, conversational Roman Urdu (or natural Urdu) so ElevenLabs and Edge-TTS pronounce every single word with 100% natural, smooth Pakistani human inflection.\n"
+                "- Speak like a friendly, helpful Pakistani human on WhatsApp (e.g., 'Assalam-o-Alaikum bhai! Main aapki madad ke liye hazir hoon, main aapko guide karta hoon...').\n"
+                "- Avoid complex foreign vocabulary or tongue-twister phrases so speech synthesis is effortless.\n"
                 "- Preserve proprietary brand names such as 'OpsFlow Cloud' as-is."
             )
         elif fmt == "urdu_arabic":
             return (
-                "LANGUAGE REQUIREMENT (CRITICAL - NATURAL SPOKEN URDU SCRIPT):\n"
-                f"- The customer messaged in Urdu using Urdu/Arabic script: '{clean_text}'.\n"
-                "- Formulate your entire reply in natural, warm, conversational Urdu using Urdu script (اردو زبان) like an informal, friendly WhatsApp voice note.\n"
-                "- Do NOT answer in English or Roman Urdu.\n"
-                "- Use warm spoken phrasing (e.g., السلام علیکم بھائی! آپ بالکل بے فکر رہیں، میں ابھی دیکھ کر بتاتا ہوں).\n"
-                "- Avoid robotic corporate phrases.\n"
+                "LANGUAGE REQUIREMENT (CRITICAL - STRICT URDU ARABIC/NASTALIQ SCRIPT):\n"
+                f"- The customer messaged in Urdu using Urdu/Arabic script (اردو): '{clean_text}'.\n"
+                "- Formulate your entire reply in natural, warm, conversational Urdu or clear Roman Urdu so ElevenLabs and Edge-TTS pronounce it naturally without robotic glitches.\n"
+                "- Use warm spoken phrasing (e.g., السلام علیکم بھائی! آپ بالکل بے فکر رہیں، میں ابھی آپ کو رہنمائی فراہم کرتا ہوں).\n"
+                "- Avoid robotic corporate phrases or complex literature words so speech synthesis sounds natural.\n"
                 "- Preserve proprietary brand names such as 'OpsFlow Cloud' as-is."
             )
         elif fmt == "roman_urdu":
             return (
-                "LANGUAGE REQUIREMENT (CRITICAL - INFORMAL CASUAL ROMAN URDU):\n"
+                "LANGUAGE REQUIREMENT (CRITICAL - STRICT ROMAN URDU):\n"
                 f"- The customer messaged in Roman Urdu (Latin alphabet): '{clean_text}'.\n"
-                "- Formulate your entire reply in natural, colloquial spoken Roman Urdu (Latin script Urdu) sounding 100% like a real Pakistani human sending an informal WhatsApp voice note.\n"
-                "- Do NOT answer in English or Arabic script.\n"
-                "- Use natural, friendly spoken phrasing (e.g., 'Assalam-o-Alaikum bhai! OpsFlow ke hawale se bilkul tension na lo, main abhi dekh kar guide karta hoon').\n"
-                "- Avoid robotic call center clichés or formal announcements.\n"
+                "- Formulate your entire reply in natural, colloquial spoken Roman Urdu sounding 100% like a real Pakistani human sending an informal WhatsApp voice note.\n"
+                "- Use simple conversational words that ElevenLabs / Edge-TTS pronounces effortlessly (e.g., 'Assalam-o-Alaikum bhai! OpsFlow ke hawale se bilkul tension na lo, main abhi dekh kar guide karta hoon').\n"
+                "- Avoid robotic call center clichés, difficult vocabulary, or convoluted sentences so the voice note sounds completely natural.\n"
                 "- Preserve proprietary brand names such as 'OpsFlow Cloud' as-is."
             )
         elif fmt == "english":
@@ -3023,7 +3112,7 @@ class WhatsAppService:
             f"0. Direct Inquiry Resolution (براہ راست جواب): Always reply directly, helpfully, and conversationally to the customer's transcribed voice message or inquiry. Even if spoken in Pashto, address their substantive questions directly regarding OpsFlow pricing, packages, automations, orders, or support. NEVER refuse service or state that you cannot provide Pashto-to-Urdu transcription service.\n" 
             f"1. Deep Reasoning & Intent Comprehension (گہری فہم و ادراک): Thoroughly analyze every inquiry point, implied concern, invoice/order query, or logistical request in context. Use the recent conversation history to provide coherent, contextual responses.\n"
             f"2. Point-by-Point Accurate Resolution (تمام سوالات کا جامع و درست جواب): If the customer asks multiple questions (e.g., shipping charges, delivery time, billing breakdown, or payment methods), answer every single inquiry point accurately based on verified knowledge. Do not skip any detail.\n"
-            f"3. 100% Real Informal Pakistani Voice Note Feel (فطری اور غیر رسمی صوتی انداز): Your reply is directly synthesized into an authentic WhatsApp voice note. Speak 100% like a real, helpful Pakistani human sending a friendly informal voice note on WhatsApp (جیسے کوئی دوست یا مخلص ساتھی واٹس ایپ پر بے تکلف بول کر وائس نوٹ بھیجتا ہے). Use genuine conversational markers ('Assalam-o-Alaikum yar / bhai', 'Acha suno', 'Ji bilkul tension na lo', 'Main abhi dekh kar batata hoon'). Strictly avoid robotic customer support boilerplate (never say 'معزز صارف', 'ہماری خدمات', 'آپ کی کیا رہنمائی کر سکتے ہیں').\n"
+            f"3. Natural Conversational Voice Note Cadence (ElevenLabs / Edge-TTS Optimization): Your reply is directly synthesized into an authentic WhatsApp voice note. Always formulate your response in simple, warm, conversational Roman Urdu or Urdu (e.g., 'Assalam-o-Alaikum! Ji bilkul...', 'Aap tension na lein, main batata hoon...'). Avoid complex English jargon, tongue-twister phrasing, or awkward vocabulary so ElevenLabs (QwMurwQUOf6t7fnABXar) and Edge-TTS (hi-IN-MadhurNeural / ur-PK-UzmaNeural) pronounce every single word with 100% smooth, natural Pakistani human inflection.\n"
             f"4. Concise Human Pacing: Deliver your answer in 2 to 4 smooth, well-crafted conversational sentences covering all points thoroughly.\n"
             f"5. Pure Spoken Clean Text: DO NOT use markdown symbols (no asterisks '*', hashtags '#', underscores '_', backticks, bullet symbols). Provide pure, clean conversational text ready for natural human speech synthesis and WhatsApp messaging."
         )
@@ -3241,7 +3330,7 @@ class WhatsAppService:
             f"0. Direct Inquiry Resolution: Always reply directly, helpfully, and conversationally to the customer's transcribed voice message or inquiry. Even if spoken in Pashto, address their substantive questions directly regarding OpsFlow pricing, packages, automations, orders, or support. NEVER refuse service or state that you cannot provide Pashto-to-Urdu transcription service.\n" 
             f"1. Deep Intent Comprehension: Reason through customer needs, context, and conversation history.\n"
             f"2. Point-by-Point Accuracy: Accurately resolve every specific inquiry point (rates, tracking, billing).\n"
-            f"3. Persona & Warmth: Polite, courteous, soft-spoken Pakistani Urdu cadence (شائستہ، بااخلاق اور ہمدردانہ انداز).\n"
+            f"3. Natural Conversational Voice Note Cadence (ElevenLabs / Edge-TTS Optimization): Your reply is directly synthesized into an authentic WhatsApp voice note. Formulate your response in simple, warm, conversational Roman Urdu or Urdu so ElevenLabs (QwMurwQUOf6t7fnABXar) and Edge-TTS (hi-IN-MadhurNeural / ur-PK-UzmaNeural) pronounce it with 100% smooth, natural Pakistani human inflection.\n"
             f"4. Length & Pacing: 2 to 4 smooth sentences with natural conversational flow.\n"
             f"5. Pure Clean Text: DO NOT use markdown symbols (*, #, _, `, bullets). Keep text 100% clean for voice reading."
         )
