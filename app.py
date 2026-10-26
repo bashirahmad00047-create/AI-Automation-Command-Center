@@ -15,8 +15,13 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import shutil
+import socket
+import subprocess
 import sys
+import threading
 from typing import Any, Dict, Optional
+import requests
 from flask import Flask, Response, g, jsonify, render_template, request, send_from_directory, session, url_for
 
 from api_v1 import api_v1
@@ -32,6 +37,70 @@ from storage import Storage
 
 # Official Master Demo & Admin Account Configuration
 MASTER_ADMIN_EMAIL = os.environ.get("MASTER_ADMIN_EMAIL", "bashirahmad00047@gmail.com")
+
+# Background WhatsApp Baileys Bridge Subprocess Manager
+_wa_bridge_proc = None
+_wa_bridge_proc_lock = threading.Lock()
+
+
+def start_wa_bridge_subprocess(app_ref=None):
+    """Spawns `node wa_bridge.js` on port 3001 as a persistent background subprocess when the server starts."""
+    global _wa_bridge_proc
+    with _wa_bridge_proc_lock:
+        if _wa_bridge_proc is not None and _wa_bridge_proc.poll() is None:
+            return  # Subprocess already active
+
+        # Check if already running on port 3001
+        try:
+            s_test = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s_test.settimeout(0.4)
+            result = s_test.connect_ex(("127.0.0.1", 3001))
+            s_test.close()
+            if result == 0:
+                if app_ref:
+                    app_ref.logger.info("[WhatsApp Bridge] Port 3001 already active. Reusing existing bridge.")
+                return
+        except Exception:
+            pass
+
+        root_dir = os.path.dirname(os.path.abspath(__file__))
+        bridge_script = os.path.join(root_dir, "wa_bridge.js")
+        if not os.path.exists(bridge_script):
+            return
+
+        # Ensure npm packages exist
+        node_modules = os.path.join(root_dir, "node_modules")
+        package_json = os.path.join(root_dir, "package.json")
+        if os.path.exists(package_json) and not os.path.exists(node_modules):
+            npm_bin = shutil.which("npm") or "npm"
+            try:
+                if app_ref:
+                    app_ref.logger.info(f"[WhatsApp Bridge] Installing npm dependencies using {npm_bin}...")
+                subprocess.run([npm_bin, "install"], cwd=root_dir, check=True, timeout=120)
+            except Exception as e:
+                if app_ref:
+                    app_ref.logger.warning(f"[WhatsApp Bridge] npm install notice: {e}")
+
+        node_bin = shutil.which("node") or "node"
+        env = os.environ.copy()
+        env["PORT"] = "3001"
+        env["PYTHON_WEBHOOK_URL"] = env.get(
+            "PYTHON_WEBHOOK_URL",
+            f"http://localhost:{os.environ.get('PORT', '5000')}/api/v1/webhooks/whatsapp"
+        )
+        try:
+            _wa_bridge_proc = subprocess.Popen(
+                [node_bin, bridge_script],
+                cwd=root_dir,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            if app_ref:
+                app_ref.logger.info(f"[WhatsApp Bridge] Subprocess spawned successfully (PID: {_wa_bridge_proc.pid}) on port 3001")
+        except Exception as e:
+            if app_ref:
+                app_ref.logger.error(f"[WhatsApp Bridge] Failed to spawn wa_bridge.js: {e}")
 
 
 # Auto-seed sample audit logs on startup if empty
@@ -456,6 +525,38 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     def legacy_whatsapp_send():
         from api_v1 import whatsapp_send_message
         return whatsapp_send_message()
+
+    @application.route("/api/whatsapp/bridge-qr", methods=["GET"])
+    @application.route("/api/v1/whatsapp/bridge-qr", methods=["GET"])
+    def route_whatsapp_bridge_qr():
+        """Returns the Baileys bridge QR code and pairing status for web dashboard scanning."""
+        bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://localhost:3001/qr")
+        try:
+            resp = requests.get(bridge_url, timeout=3.0)
+            data = resp.json() if resp.text else {}
+            return jsonify(data), resp.status_code
+        except Exception as e:
+            return jsonify({
+                "status": "offline",
+                "connected": False,
+                "message": f"WhatsApp Baileys bridge starting up or offline on port 3001 ({str(e)})"
+            }), 503
+
+    @application.route("/api/whatsapp/bridge-status", methods=["GET"])
+    @application.route("/api/v1/whatsapp/bridge-status", methods=["GET"])
+    def route_whatsapp_bridge_status():
+        """Returns the Baileys bridge live connection status."""
+        bridge_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://localhost:3001/status")
+        try:
+            resp = requests.get(bridge_url, timeout=3.0)
+            data = resp.json() if resp.text else {}
+            return jsonify(data), resp.status_code
+        except Exception as e:
+            return jsonify({
+                "status": "offline",
+                "connected": False,
+                "message": f"Bridge starting up ({str(e)})"
+            }), 503
 
     @application.route("/api/whatsapp/ai-health", methods=["GET"])
     @application.route("/api/v1/whatsapp/ai-health", methods=["GET"])
@@ -1015,7 +1116,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         """Ultra-fast, zero-overhead health ping for Render keep-alive and cloud monitors."""
         return jsonify({
             "status": "ok",
-            "service": "OpsFlow Cloud",
+            "service": "BashFlow Cloud",
             "keep_alive": True,
             "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
         }), 200
@@ -1026,6 +1127,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         KeepAliveService.start(application)
     except Exception as _ka_err:
         application.logger.warning(f"Could not start Keep-Alive service: {_ka_err}")
+
+    # Start WhatsApp Baileys Bridge background subprocess on port 3001
+    if not application.config.get("TESTING"):
+        try:
+            start_wa_bridge_subprocess(application)
+        except Exception as _bridge_err:
+            application.logger.warning(f"Could not initialize WhatsApp bridge subprocess: {_bridge_err}")
 
     return application
 

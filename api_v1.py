@@ -2624,6 +2624,38 @@ def stripe_webhook():
 # WhatsApp Business / Meta Cloud API Gateway
 # ==========================================
 
+@api_v1.route("/whatsapp/bridge-qr", methods=["GET"])
+def api_whatsapp_bridge_qr():
+    """Returns the Baileys bridge QR code and pairing status for web dashboard scanning."""
+    bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://localhost:3001/qr")
+    try:
+        resp = requests.get(bridge_url, timeout=3.0)
+        data = resp.json() if resp.text else {}
+        return jsonify(data), resp.status_code
+    except Exception as e:
+        return jsonify({
+            "status": "offline",
+            "connected": False,
+            "message": f"WhatsApp Baileys bridge starting up or offline on port 3001 ({str(e)})"
+        }), 503
+
+
+@api_v1.route("/whatsapp/bridge-status", methods=["GET"])
+def api_whatsapp_bridge_status():
+    """Returns the Baileys bridge live connection status."""
+    bridge_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://localhost:3001/status")
+    try:
+        resp = requests.get(bridge_url, timeout=3.0)
+        data = resp.json() if resp.text else {}
+        return jsonify(data), resp.status_code
+    except Exception as e:
+        return jsonify({
+            "status": "offline",
+            "connected": False,
+            "message": f"Bridge starting up ({str(e)})"
+        }), 503
+
+
 @api_v1.route("/webhooks/whatsapp", methods=["GET"])
 def whatsapp_webhook_verification():
     """Meta Cloud API Webhook Subscription Verification (hub.mode, hub.verify_token, hub.challenge)."""
