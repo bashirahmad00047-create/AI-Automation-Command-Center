@@ -1,0 +1,32 @@
+{
+  "name": "ai-automation-command-center",
+  "version": "1.0.0",
+  "description": "> **Commercial-Grade B2B Workflow Orchestration & Intelligent Automation Platform**   > *Python Flask • SQLAlchemy 2.0 ORM • SQLite WAL (Local) / PostgreSQL Ready • Multi-Tenant RBAC • Offline Heuristic NLP Core • Inbound Webhook Gateway*",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "start": "node wa_bridge.js",
+    "bridge": "node wa_bridge.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bashirahmad00047-create/AI-Automation-Command-Center.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/bashirahmad00047-create/AI-Automation-Command-Center/issues"
+  },
+  "homepage": "https://github.com/bashirahmad00047-create/AI-Automation-Command-Center#readme",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "express": "^5.3.0",
+    "pino": "^10.4.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
