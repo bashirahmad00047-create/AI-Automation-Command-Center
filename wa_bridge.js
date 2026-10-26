@@ -273,12 +273,26 @@ app.get(['/', '/status'], (req, res) => {
  */
 app.get('/qr', (req, res) => {
   if (isConnected) {
-    return res.json({ status: 'connected', message: 'WhatsApp is already linked and connected.' });
+    return res.json({
+      status: 'connected',
+      connected: true,
+      message: 'WhatsApp is already linked and connected.',
+      user: sock?.user || null
+    });
   }
   if (!currentQr) {
-    return res.json({ status: 'waiting', message: 'QR code not generated yet or renewing.' });
+    return res.json({
+      status: 'waiting',
+      connected: false,
+      message: 'QR code not generated yet or renewing.'
+    });
   }
-  res.json({ status: 'qr_ready', qr: currentQr });
+  res.json({
+    status: 'qr_ready',
+    connected: false,
+    qr: currentQr,
+    qrImageUrl: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(currentQr)}`
+  });
 });
 
 /**

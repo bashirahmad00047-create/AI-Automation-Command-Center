@@ -9801,3 +9801,86 @@ function toggleLiveVoiceCall() {
         }
     }
 }
+
+// ============================================================================
+// WHATSAPP LINK QR MODAL CONTROLLER (BAILEYS BRIDGE)
+// ============================================================================
+let bridgeQrPollInterval = null;
+
+function openLinkWhatsAppQrModal() {
+    const modal = document.getElementById('linkWhatsAppQrModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        fetchBridgeQrCode(true);
+        if (bridgeQrPollInterval) clearInterval(bridgeQrPollInterval);
+        bridgeQrPollInterval = setInterval(() => fetchBridgeQrCode(false), 3000);
+    }
+}
+
+function closeLinkWhatsAppQrModal() {
+    const modal = document.getElementById('linkWhatsAppQrModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    if (bridgeQrPollInterval) {
+        clearInterval(bridgeQrPollInterval);
+        bridgeQrPollInterval = null;
+    }
+}
+
+async function fetchBridgeQrCode(force) {
+    const spinner = document.getElementById('qrLoadingSpinner');
+    const imageWrapper = document.getElementById('qrImageWrapper');
+    const connectedState = document.getElementById('qrConnectedState');
+    const qrImg = document.getElementById('bridgeQrImage');
+    const statusText = document.getElementById('qrStatusText');
+    const connectedNumber = document.getElementById('qrConnectedNumber');
+
+    try {
+        let res = null;
+        try {
+            res = await fetch('/api/v1/whatsapp/bridge-qr');
+            if (!res.ok && res.status !== 503) throw new Error('Proxy status ' + res.status);
+        } catch (e) {
+            try {
+                res = await fetch('/api/whatsapp/bridge-qr');
+            } catch (e2) {
+                res = await fetch('http://localhost:3001/qr');
+            }
+        }
+
+        if (!res) throw new Error('Bridge unreachable');
+        const data = await res.json();
+
+        if (data.status === 'connected' || data.connected) {
+            if (spinner) spinner.style.display = 'none';
+            if (imageWrapper) imageWrapper.style.display = 'none';
+            if (connectedState) connectedState.style.display = 'block';
+            if (connectedNumber && data.user) {
+                const phone = data.user.id ? data.user.id.split(':')[0] : 'Linked';
+                connectedNumber.textContent = `Connected as +${phone} (Unlimited Free Messaging Ready).`;
+            }
+            return;
+        }
+
+        if (data.status === 'qr_ready' && (data.qrImageUrl || data.qr)) {
+            const qrSrc = data.qrImageUrl || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(data.qr)}`;
+            if (qrImg) {
+                qrImg.src = qrSrc;
+            }
+            if (spinner) spinner.style.display = 'none';
+            if (connectedState) connectedState.style.display = 'none';
+            if (imageWrapper) imageWrapper.style.display = 'block';
+            return;
+        }
+
+        // Waiting or initializing
+        if (imageWrapper) imageWrapper.style.display = 'none';
+        if (connectedState) connectedState.style.display = 'none';
+        if (spinner) spinner.style.display = 'flex';
+        if (statusText) statusText.textContent = data.message || 'WhatsApp Baileys bridge is initializing pairing session...';
+    } catch (err) {
+        console.warn('[Bridge QR Fetch Error]', err);
+        if (statusText) statusText.textContent = 'WhatsApp bridge starting up on port 3001... Please wait 5s.';
+    }
+}

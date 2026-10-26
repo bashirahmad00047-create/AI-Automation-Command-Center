@@ -3,8 +3,8 @@ services:
     name: ai-automation-command-center
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt && python init_db.py
-    startCommand: gunicorn app:app
+    buildCommand: npm install && pip install -r requirements.txt && python init_db.py
+    startCommand: gunicorn --config gunicorn_config.py app:app
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
