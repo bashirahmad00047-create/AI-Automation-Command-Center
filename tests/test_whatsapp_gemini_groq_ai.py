@@ -651,6 +651,55 @@ class TestWhatsAppGeminiGroqAI(unittest.TestCase):
                 mock_gemini.assert_not_called()
                 mock_groq.assert_not_called()
 
+    def test_transcribed_voice_note_routes_to_ai_responder_instead_of_canned_fallback(self):
+        """Verifies that a successfully transcribed voice note reaches the AI responder as the customer message,
+        answering what was said, while untranscribed voice notes retain the generic media_handler fallback."""
+        with patch.object(WhatsAppService, "call_gemini_ai", return_value="وعلیکم السلام! میں بالکل ٹھیک ہوں۔") as mock_gemini:
+            # 1. Transcribed voice note in Urdu script with Voice Note wrapper
+            res_urdu = WhatsAppService.generate_ai_auto_response(
+                organization_id=self.org.id,
+                message_body="[Voice Note: آپ کیسے ہیں]",
+                sender_name="Ali",
+                sender_phone="923001234567"
+            )
+            self.assertIsNotNone(res_urdu)
+            self.assertNotEqual(res_urdu.get("mode"), "media_handler")
+            self.assertEqual(res_urdu.get("mode"), "gemini_ai")
+            self.assertEqual(res_urdu["reply_body"], "وعلیکم السلام! میں بالکل ٹھیک ہوں۔")
+            # Verify the actual customer speech without the prefix reached the AI responder
+            mock_gemini.assert_called_once()
+            called_msg = mock_gemini.call_args[0][0]
+            self.assertEqual(called_msg, "آپ کیسے ہیں")
+
+        # 2. Transcribed voice note with bracket prefix format [Voice note] text
+        with patch.object(WhatsAppService, "call_gemini_ai", return_value="Hum automated customer support services faraham karte hain.") as mock_gemini:
+            res_roman = WhatsAppService.generate_ai_auto_response(
+                organization_id=self.org.id,
+                message_body="[Voice note] Aap ki service packages kya hain?",
+                sender_name="Ahmed",
+                sender_phone="923001234567"
+            )
+            self.assertIsNotNone(res_roman)
+            self.assertNotEqual(res_roman.get("mode"), "media_handler")
+            self.assertEqual(res_roman.get("mode"), "gemini_ai")
+            called_msg = mock_gemini.call_args[0][0]
+            self.assertEqual(called_msg, "Aap ki service packages kya hain?")
+
+        # 3. Untranscribed voice note: generic canned acknowledgement is retained
+        with patch.object(WhatsAppService, "call_gemini_ai") as mock_gemini, \
+             patch.object(WhatsAppService, "call_groq_ai") as mock_groq:
+            res_untranscribed = WhatsAppService.generate_ai_auto_response(
+                organization_id=self.org.id,
+                message_body="[Voice note]",
+                sender_name="Zubair",
+                sender_phone="923001234567"
+            )
+            self.assertIsNotNone(res_untranscribed)
+            self.assertEqual(res_untranscribed.get("mode"), "media_handler")
+            self.assertIn("voice note", res_untranscribed["reply_body"].lower())
+            mock_gemini.assert_not_called()
+            mock_groq.assert_not_called()
+
     def test_multilingual_roman_urdu_fallback(self):
         """Verifies Roman Urdu fallback matching when both LLMs are offline."""
         with patch.object(WhatsAppService, "call_gemini_ai", return_value=None):
