@@ -13,7 +13,8 @@ const {
   default: makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
-  fetchLatestBaileysVersion
+  fetchLatestBaileysVersion,
+  downloadMediaMessage
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const qrcodeTerminal = require('qrcode-terminal');
@@ -64,10 +65,25 @@ function destroyOldSocket() {
 }
 
 /**
+ * Cleans phone numbers / JIDs by stripping @lid, @s.whatsapp.net, @c.us,
+ * and device indices like :0 or :1 to return clean numbers.
+ */
+function cleanPhoneNumber(jid) {
+  if (!jid) return '';
+  let str = String(jid).trim();
+  if (str.endsWith('@g.us')) return str;
+  str = str.replace(/@lid|@s\.whatsapp\.net|@c\.us/gi, '');
+  str = str.split(':')[0];
+  const digits = str.replace(/[^0-9]/g, '');
+  return digits || str;
+}
+
+/**
  * Normalizes phone numbers / chat IDs to Baileys JID format.
  * - Handles group chats: 12345-67890@g.us
  * - Handles legacy/Green-API chats: 923001234567@c.us -> 923001234567@s.whatsapp.net
  * - Handles plain numbers / international format: +92 300 1234567 -> 923001234567@s.whatsapp.net
+ * - Handles LID JIDs: 12345@lid -> 12345@s.whatsapp.net
  */
 function normalizeJid(chatId) {
   if (!chatId) return '';
@@ -76,12 +92,13 @@ function normalizeJid(chatId) {
   if (jid.endsWith('@g.us')) {
     return jid;
   }
-  if (jid.endsWith('@c.us')) {
-    return jid.replace('@c.us', '@s.whatsapp.net');
-  }
   if (jid.endsWith('@s.whatsapp.net')) {
     return jid;
   }
+  if (jid.endsWith('@c.us') || jid.endsWith('@lid')) {
+    jid = jid.replace(/@c\.us|@lid/gi, '');
+  }
+  jid = jid.split(':')[0];
 
   // Strip all non-digit characters
   const cleanDigits = jid.replace(/[^0-9]/g, '');
@@ -296,8 +313,8 @@ async function startWhatsAppBridge() {
           if (msg.key?.remoteJid === 'status@broadcast') continue;
 
           const remoteJid = msg.key?.remoteJid || '';
-          const senderPhone = remoteJid.replace(/@.*$/, '');
-          const pushName = msg.pushName || senderPhone || 'WhatsApp User';
+          const cleanSenderPhone = cleanPhoneNumber(msg.key?.participant || remoteJid);
+          const pushName = msg.pushName || cleanSenderPhone || 'WhatsApp User';
           const messageId = msg.key?.id || `msg_${Date.now()}`;
           const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
           
@@ -306,12 +323,31 @@ async function startWhatsAppBridge() {
           let isAudio = false;
           let isImage = false;
           let typeMessage = 'textMessage';
+          let audioBase64 = null;
 
           if (msg.message?.audioMessage) {
             isAudio = true;
             isVoice = Boolean(msg.message.audioMessage.ptt);
             typeMessage = isVoice ? 'voiceMessage' : 'audioMessage';
             if (!text) text = isVoice ? '[Voice note]' : '[Audio message]';
+
+            try {
+              const buffer = await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+                {
+                  logger: pino({ level: 'silent' }),
+                  reuploadRequest: sock?.updateMediaMessage
+                }
+              );
+              if (buffer && buffer.length > 0) {
+                audioBase64 = buffer.toString('base64');
+                console.log(`[Media Download] Downloaded voice note (${buffer.length} bytes) for +${cleanSenderPhone}`);
+              }
+            } catch (dlErr) {
+              console.warn('[Media Download Error] Could not download voice buffer:', dlErr.message);
+            }
           } else if (msg.message?.imageMessage) {
             isImage = true;
             typeMessage = 'imageMessage';
@@ -321,19 +357,19 @@ async function startWhatsAppBridge() {
             if (!text) text = msg.message.documentMessage.fileName || '[Document]';
           }
 
-          console.log(`[Incoming Message] From: +${senderPhone} (${pushName}) | ID: ${messageId} | Type: ${typeMessage} | Text: "${text}"`);
+          console.log(`[Incoming Message] From: +${cleanSenderPhone} (${pushName}) | ID: ${messageId} | Type: ${typeMessage} | Audio: ${Boolean(audioBase64)} | Text: "${text}"`);
 
           const payload = {
             typeWebhook: 'incomingMessageReceived',
             instanceData: {
               idInstance: 'baileys_bridge',
-              wid: `${sock?.user?.id?.split(':')[0] || 'bridge'}@c.us`
+              wid: `${cleanPhoneNumber(sock?.user?.id || 'bridge')}@c.us`
             },
             timestamp,
             idMessage: messageId,
             senderData: {
               chatId: remoteJid,
-              sender: remoteJid,
+              sender: cleanSenderPhone,
               chatName: pushName,
               senderName: pushName
             },
@@ -344,17 +380,19 @@ async function startWhatsAppBridge() {
               },
               fileMessageData: (isAudio || isVoice || isImage) ? {
                 caption: text,
-                mimeType: msg.message?.audioMessage?.mimetype || msg.message?.imageMessage?.mimetype || 'audio/ogg'
+                mimeType: msg.message?.audioMessage?.mimetype || msg.message?.imageMessage?.mimetype || 'audio/ogg',
+                audioBase64: audioBase64
               } : undefined
             },
             chatId: remoteJid,
-            from: senderPhone,
-            from_phone: senderPhone,
+            from: cleanSenderPhone,
+            from_phone: cleanSenderPhone,
             senderName: pushName,
             message: text,
             body: text,
             is_voice: isVoice,
             is_audio: isAudio,
+            audio_base64: audioBase64,
             message_type: typeMessage,
             rawMessage: msg
           };

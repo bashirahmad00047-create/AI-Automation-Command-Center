@@ -885,6 +885,22 @@ class WhatsAppMessage(db.Model):
             bool(media_url and any(str(media_url).lower().split("?")[0].endswith(ext) for ext in (".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aac", ".opus")))
         )
 
+        def _clean_phone(v: str) -> str:
+            if not v:
+                return ""
+            s = str(v).strip()
+            if s.endswith("@g.us"):
+                return s
+            for suf in ("@lid", "@s.whatsapp.net", "@c.us"):
+                if s.lower().endswith(suf):
+                    s = s[:-len(suf)]
+            s = s.split(":")[0]
+            digits = "".join(filter(str.isdigit, s))
+            return digits if len(digits) >= 7 else s
+
+        clean_sender = _clean_phone(self.sender)
+        clean_recipient = _clean_phone(self.recipient)
+
         return {
             "id": self.id,
             "organization_id": self.organization_id,
@@ -892,8 +908,10 @@ class WhatsAppMessage(db.Model):
             "parent_message_id": parent_id,
             "parent_msg_id": parent_id,
             "direction": self.direction,
-            "sender": self.sender,
-            "recipient": self.recipient,
+            "sender": clean_sender,
+            "recipient": clean_recipient,
+            "raw_sender": self.sender,
+            "raw_recipient": self.recipient,
             "sender_name": sender_name,
             "message_type": self.message_type,
             "body": self.body,
