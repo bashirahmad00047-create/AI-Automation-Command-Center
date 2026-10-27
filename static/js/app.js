@@ -5162,13 +5162,46 @@ function normalizeWaPhone(phone) {
 
 function formatWaDisplayPhone(phone) {
     if (!phone) return '';
+    // Strip JID suffixes before formatting
     const norm = normalizeWaPhone(phone);
     if (!norm) return '';
     if (norm.endsWith('@g.us')) return 'WhatsApp Group';
     if (norm.endsWith('@broadcast')) return 'Status Broadcast';
+
+    // Pakistani number: 923XXXXXXXXX (12 digits starting with 92)
     if (norm.startsWith('92') && norm.length === 12) {
         return `+92 ${norm.slice(2, 5)} ${norm.slice(5)}`;
     }
+
+    // Known international formats — add spacing after country code
+    if (norm.length >= 10) {
+        // Belgium +32 (2-digit cc, remaining ~9 digits)
+        if (norm.startsWith('32') && norm.length >= 11) {
+            return `+32 ${norm.slice(2, 5)} ${norm.slice(5, 8)} ${norm.slice(8)}`;
+        }
+        // UK +44 (2-digit cc)
+        if (norm.startsWith('44') && norm.length >= 12) {
+            return `+44 ${norm.slice(2, 6)} ${norm.slice(6)}`;
+        }
+        // USA/Canada +1 (1-digit cc)
+        if (norm.startsWith('1') && norm.length === 11) {
+            return `+1 (${norm.slice(1, 4)}) ${norm.slice(4, 7)}-${norm.slice(7)}`;
+        }
+        // UAE +971 (3-digit cc)
+        if (norm.startsWith('971') && norm.length >= 12) {
+            return `+971 ${norm.slice(3, 5)} ${norm.slice(5)}`;
+        }
+        // India +91 (2-digit cc)
+        if (norm.startsWith('91') && norm.length === 12) {
+            return `+91 ${norm.slice(2, 7)} ${norm.slice(7)}`;
+        }
+        // Generic: insert space after guessed country code (2 digits) and every 3 digits after
+        const cc = norm.slice(0, 2);
+        const rest = norm.slice(2);
+        const grouped = rest.replace(/(\d{3})(?=\d)/g, '$1 ').trim();
+        return `+${cc} ${grouped}`;
+    }
+
     if (norm.length >= 8) {
         return `+${norm}`;
     }
@@ -5190,6 +5223,8 @@ function groupWhatsAppConversations(messages) {
     const map = {};
     (messages || []).forEach(m => {
         const isInbound = m.direction === 'inbound';
+        // Strip JID suffixes from partner before normalizing so that
+        // "32844168577254@s.whatsapp.net" and "32844168577254" map to the same key
         const rawPartner = isInbound ? m.sender : m.recipient;
         const normKey = normalizeWaPhone(rawPartner) || 'Unknown';
         const displayPhone = formatWaDisplayPhone(rawPartner) || normKey;
@@ -5202,6 +5237,7 @@ function groupWhatsAppConversations(messages) {
             map[normKey] = {
                 phone: displayPhone,
                 normalizedPhone: normKey,
+                // Prefer contact name from inbound sender_name; fallback to display number
                 name: (isInbound ? m.sender_name : '') || displayPhone,
                 lastMessage: initialMsg,
                 timestamp: m.created_at || '',
@@ -5210,15 +5246,26 @@ function groupWhatsAppConversations(messages) {
             };
         }
         map[normKey].messages.push(m);
-        if (m.sender_name && (!map[normKey].name || map[normKey].name === displayPhone || map[normKey].name === normKey)) {
+        // Update last message preview to the most recent message (last in array)
+        const latestMsg = map[normKey].messages[map[normKey].messages.length - 1];
+        let latestText = (latestMsg.body && latestMsg.body !== '(no text)') ? latestMsg.body : (latestMsg.is_audio ? '🎙️ Voice note' : '(no text)');
+        if (latestText.includes('[quotedMessage]')) {
+            latestText = latestText.replace(/\[quotedMessage\]/gi, 'Quoted message');
+        }
+        map[normKey].lastMessage = latestText;
+        map[normKey].timestamp = latestMsg.created_at || map[normKey].timestamp;
+        map[normKey].is_audio = Boolean(latestMsg.is_audio);
+        // Prefer contact name from any inbound sender_name
+        if (m.sender_name && m.direction === 'inbound' && (!map[normKey].name || map[normKey].name === displayPhone || map[normKey].name === normKey)) {
             map[normKey].name = m.sender_name;
         }
     });
 
     const list = Object.values(map);
+    // Sort by latest message timestamp descending (most recent first)
     list.sort((a, b) => {
-        const timeA = a.messages[0]?.created_at || '';
-        const timeB = b.messages[0]?.created_at || '';
+        const timeA = a.timestamp || '';
+        const timeB = b.timestamp || '';
         return timeB.localeCompare(timeA);
     });
     return list;

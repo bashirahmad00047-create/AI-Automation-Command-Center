@@ -413,7 +413,20 @@ async function startWhatsAppBridge() {
           if (msg.key?.remoteJid === 'status@broadcast') continue;
 
           const remoteJid = msg.key?.remoteJid || '';
-          const cleanSenderPhone = cleanPhoneNumber(msg.key?.participant || remoteJid);
+          const isGroupChat = remoteJid.endsWith('@g.us') || remoteJid.endsWith('@broadcast');
+          // For group chats, always use msg.key.participant (the actual sender's JID).
+          // If participant is empty for a group message, skip it (we can't determine the sender).
+          const participantJid = msg.key?.participant || '';
+          let cleanSenderPhone;
+          if (isGroupChat) {
+            if (!participantJid) {
+              console.warn(`[Group Message] Skipping group message with no participant JID: ${remoteJid}`);
+              continue;
+            }
+            cleanSenderPhone = cleanPhoneNumber(participantJid);
+          } else {
+            cleanSenderPhone = cleanPhoneNumber(remoteJid);
+          }
           const pushName = msg.pushName || cleanSenderPhone || 'WhatsApp User';
           const messageId = msg.key?.id || `msg_${Date.now()}`;
           const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
