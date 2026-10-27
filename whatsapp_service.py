@@ -4427,7 +4427,7 @@ class WhatsAppService:
                     audio_b, audio_fn, audio_mt = audio_res
                     logger.info(f"[Voice Pipeline] Synthesized {len(audio_b)} bytes of Urdu .oga audio companion for {real_chat_id}.")
                     active_prov = cls.get_active_provider(organization_id=org_id)
-                    if active_prov == "green_api" or cls.is_green_api_configured(organization_id=org_id):
+                    if active_prov in ("baileys_bridge", "green_api") or cls.is_configured(organization_id=org_id):
                         audio_dispatch_res = cls.send_green_api_file(
                             organization_id=org_id,
                             to_phone=clean_phone,
@@ -6666,6 +6666,15 @@ class WhatsAppService:
         """Dispatches an outbound WhatsApp voice/file message via Baileys bridge (http://127.0.0.1:3001/send-message)."""
         fn = filename or (os.path.basename(file_path) if file_path else 'audio.oga')
         body = transcript or caption or f"[Voice Note: {fn}]"
+
+        f_bytes = file_bytes
+        if not f_bytes and file_path and os.path.exists(file_path):
+            try:
+                with open(file_path, "rb") as f:
+                    f_bytes = f.read()
+            except Exception:
+                pass
+
         return cls.send_message(
             organization_id=organization_id,
             to_phone=to_phone,
@@ -6673,6 +6682,11 @@ class WhatsAppService:
             execution_id=execution_id,
             quoted_message_id=quoted_message_id,
             chat_id=chat_id,
+            file_bytes=f_bytes,
+            filename=fn,
+            mime_type=mime_type or "audio/ogg; codecs=opus",
+            is_voice=True,
+            ptt=kwargs.get("ptt", True),
             **kwargs
         )
 
@@ -6691,7 +6705,7 @@ class WhatsAppService:
         chat_id: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """Dispatches an outbound WhatsApp text message directly to http://127.0.0.1:3001/send-message.
+        """Dispatches an outbound WhatsApp text or voice message directly to http://127.0.0.1:3001/send-message.
         Completely bypasses Green API and Meta Cloud API quotas.
         """
         if to_phone is not None and message_text is None:
@@ -6735,6 +6749,34 @@ class WhatsAppService:
         bridge_url = os.environ.get("BAILEYS_BRIDGE_URL", "http://127.0.0.1:3001/send-message")
         bridge_timeout = float(os.environ.get("BAILEYS_BRIDGE_TIMEOUT", "6.0"))
 
+        # Resolve audio / voice / media bytes
+        f_bytes = kwargs.get("file_bytes") or kwargs.get("audio_bytes")
+        f_path = kwargs.get("file_path")
+        if not f_bytes and f_path and os.path.exists(f_path):
+            try:
+                with open(f_path, "rb") as f:
+                    f_bytes = f.read()
+            except Exception:
+                pass
+
+        out_msg_type = "text"
+        bridge_payload = {"chatId": bridge_chat_id, "message": bridge_message}
+
+        if f_bytes:
+            import base64
+            bridge_payload["audioBase64"] = base64.b64encode(f_bytes).decode("ascii")
+            bridge_payload["ptt"] = bool(kwargs.get("ptt", True) or kwargs.get("is_voice", False))
+            bridge_payload["mimetype"] = kwargs.get("mime_type") or kwargs.get("mimetype") or "audio/ogg; codecs=opus"
+            out_msg_type = "voiceMessage" if bridge_payload["ptt"] else "audioMessage"
+        elif kwargs.get("image_bytes") or kwargs.get("imageBase64"):
+            import base64
+            img_b = kwargs.get("image_bytes")
+            if img_b:
+                bridge_payload["imageBase64"] = base64.b64encode(img_b).decode("ascii")
+            else:
+                bridge_payload["imageBase64"] = kwargs.get("imageBase64")
+            out_msg_type = "imageMessage"
+
         try:
             from wa_bridge_manager import ensure_wa_bridge_running
             ensure_wa_bridge_running(timeout_seconds=5.0)
@@ -6745,14 +6787,14 @@ class WhatsAppService:
             with cls.get_http_session(retries=1) as session:
                 bridge_resp = session.post(
                     bridge_url,
-                    json={"chatId": bridge_chat_id, "message": bridge_message},
+                    json=bridge_payload,
                     headers={"Content-Type": "application/json"},
                     timeout=bridge_timeout
                 )
             if bridge_resp.status_code == 200:
                 bridge_data = bridge_resp.json() if bridge_resp.text and bridge_resp.text.strip() else {}
                 msg_id = bridge_data.get("messageId") or bridge_data.get("idMessage") or f"baileys_{int(time.time() * 1000)}"
-                logger.info(f"[Baileys Bridge Success] Free WhatsApp message dispatched: ID={msg_id}")
+                logger.info(f"[Baileys Bridge Success] Free WhatsApp message dispatched: ID={msg_id} (type={out_msg_type})")
                 cls.record_outbound_sent_id(msg_id)
                 if message_text:
                     cls.record_bot_reply_body(message_text)
@@ -6762,11 +6804,11 @@ class WhatsAppService:
                     recipient=real_chat_id,
                     direction="outbound",
                     body=message_text,
-                    message_type="text",
+                    message_type=out_msg_type,
                     status="sent",
                     whatsapp_message_id=msg_id,
                     execution_id=execution_id,
-                    raw_payload={**bridge_data, "chat_id": real_chat_id, "chatId": bridge_chat_id, "provider": "baileys_bridge"}
+                    raw_payload={**bridge_data, "chat_id": real_chat_id, "chatId": bridge_chat_id, "provider": "baileys_bridge", "message_type": out_msg_type}
                 )
                 return {
                     "success": True,
@@ -6776,7 +6818,7 @@ class WhatsAppService:
                     "message_record_id": record.id if record else None,
                     "recipient": clean_to,
                     "chat_id": real_chat_id,
-                    "message_type": "text"
+                    "message_type": out_msg_type
                 }
             else:
                 err_text = bridge_resp.text[:200]

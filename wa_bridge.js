@@ -300,9 +300,28 @@ async function startWhatsAppBridge() {
           const pushName = msg.pushName || senderPhone || 'WhatsApp User';
           const messageId = msg.key?.id || `msg_${Date.now()}`;
           const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
-          const text = extractMessageText(msg.message);
+          
+          let text = extractMessageText(msg.message);
+          let isVoice = false;
+          let isAudio = false;
+          let isImage = false;
+          let typeMessage = 'textMessage';
 
-          console.log(`[Incoming Message] From: +${senderPhone} (${pushName}) | ID: ${messageId} | Text: "${text}"`);
+          if (msg.message?.audioMessage) {
+            isAudio = true;
+            isVoice = Boolean(msg.message.audioMessage.ptt);
+            typeMessage = isVoice ? 'voiceMessage' : 'audioMessage';
+            if (!text) text = isVoice ? '[Voice note]' : '[Audio message]';
+          } else if (msg.message?.imageMessage) {
+            isImage = true;
+            typeMessage = 'imageMessage';
+            if (!text) text = msg.message.imageMessage.caption || '[Photo]';
+          } else if (msg.message?.documentMessage) {
+            typeMessage = 'documentMessage';
+            if (!text) text = msg.message.documentMessage.fileName || '[Document]';
+          }
+
+          console.log(`[Incoming Message] From: +${senderPhone} (${pushName}) | ID: ${messageId} | Type: ${typeMessage} | Text: "${text}"`);
 
           const payload = {
             typeWebhook: 'incomingMessageReceived',
@@ -319,10 +338,14 @@ async function startWhatsAppBridge() {
               senderName: pushName
             },
             messageData: {
-              typeMessage: 'textMessage',
+              typeMessage: typeMessage,
               textMessageData: {
                 textMessage: text
-              }
+              },
+              fileMessageData: (isAudio || isVoice || isImage) ? {
+                caption: text,
+                mimeType: msg.message?.audioMessage?.mimetype || msg.message?.imageMessage?.mimetype || 'audio/ogg'
+              } : undefined
             },
             chatId: remoteJid,
             from: senderPhone,
@@ -330,6 +353,9 @@ async function startWhatsAppBridge() {
             senderName: pushName,
             message: text,
             body: text,
+            is_voice: isVoice,
+            is_audio: isAudio,
+            message_type: typeMessage,
             rawMessage: msg
           };
 
@@ -532,7 +558,7 @@ app.post('/send-message', async (req, res, next) => {
     let message = null;
 
     try {
-      chatId = req.body?.chatId || req.body?.to || req.body?.phone;
+      chatId = req.body?.chatId || req.body?.to || req.body?.phone || req.body?.recipient;
       message = req.body?.message !== undefined ? req.body.message : (req.body?.text !== undefined ? req.body.text : req.body?.body);
     } catch (parseErr) {
       return res.status(400).json({
@@ -541,10 +567,14 @@ app.post('/send-message', async (req, res, next) => {
       });
     }
 
-    if (!chatId || message === undefined || message === null) {
+    const hasAudio = Boolean(req.body?.audioBase64 || req.body?.audio || req.body?.fileBase64 || req.body?.audioUrl || req.body?.urlFile);
+    const hasImage = Boolean(req.body?.imageBase64 || req.body?.image || req.body?.imageUrl);
+    const hasText = message !== undefined && message !== null && String(message).trim().length > 0;
+
+    if (!chatId || (!hasAudio && !hasImage && !hasText)) {
       return res.status(400).json({
         success: false,
-        error: "Missing required fields. Please provide { chatId, message } in JSON body."
+        error: "Missing required fields. Please provide chatId and either message text or audioBase64/imageBase64."
       });
     }
 
@@ -573,10 +603,51 @@ app.post('/send-message', async (req, res, next) => {
       });
     }
 
-    const textToSend = String(message);
     let sent = null;
     try {
-      sent = await sock.sendMessage(jid, { text: textToSend });
+      if (hasAudio) {
+        const audioRaw = req.body?.audioBase64 || req.body?.audio || req.body?.fileBase64;
+        const audioUrl = req.body?.audioUrl || req.body?.urlFile;
+        const ptt = req.body?.ptt !== false;
+        const mimetype = req.body?.mimetype || req.body?.mime_type || 'audio/ogg; codecs=opus';
+
+        if (audioRaw) {
+          const cleanBase64 = String(audioRaw).replace(/^data:audio\/\w+;base64,/, '').replace(/^data:application\/\w+;base64,/, '');
+          const audioBuffer = Buffer.from(cleanBase64, 'base64');
+          sent = await sock.sendMessage(jid, {
+            audio: audioBuffer,
+            mimetype,
+            ptt
+          });
+        } else if (audioUrl) {
+          sent = await sock.sendMessage(jid, {
+            audio: { url: audioUrl },
+            mimetype,
+            ptt
+          });
+        }
+      } else if (hasImage) {
+        const imageRaw = req.body?.imageBase64 || req.body?.image;
+        const imageUrl = req.body?.imageUrl;
+        const caption = message ? String(message) : '';
+
+        if (imageRaw) {
+          const cleanBase64 = String(imageRaw).replace(/^data:image\/\w+;base64,/, '');
+          const imageBuffer = Buffer.from(cleanBase64, 'base64');
+          sent = await sock.sendMessage(jid, {
+            image: imageBuffer,
+            caption
+          });
+        } else if (imageUrl) {
+          sent = await sock.sendMessage(jid, {
+            image: { url: imageUrl },
+            caption
+          });
+        }
+      } else {
+        const textToSend = String(message || '');
+        sent = await sock.sendMessage(jid, { text: textToSend });
+      }
     } catch (sendErr) {
       console.error(`[Outbound Message Send Error to ${jid}]:`, sendErr);
       return res.status(500).json({

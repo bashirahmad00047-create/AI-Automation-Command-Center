@@ -563,6 +563,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 "message": f"Bridge starting up ({str(e)})"
             }), 503
 
+    @application.route("/api/voice/chat", methods=["POST"])
+    @application.route("/api/v1/voice/chat", methods=["POST"])
+    def route_ai_voice_chat():
+        """Endpoint proxy for real-time AI Voice Chat with natural speech synthesis."""
+        from api_v1 import ai_voice_chat
+        return ai_voice_chat()
+
     @application.route("/api/whatsapp/ai-health", methods=["GET"])
     @application.route("/api/v1/whatsapp/ai-health", methods=["GET"])
     @rate_limit(limit=30, window=60)
