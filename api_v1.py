@@ -2716,6 +2716,65 @@ def api_whatsapp_bridge_status():
         }), 503
 
 
+@api_v1.route("/voice/chat", methods=["POST"])
+@rate_limit(limit=60, window=60, message="Too many voice chat requests.")
+def ai_voice_chat():
+    """Real-time AI Voice Chat endpoint.
+    Accepts speech transcript / text message, generates intelligent AI response,
+    and synthesizes human speech audio (ElevenLabs / Edge-TTS) returned as base64 Data URI.
+    """
+    data = request.get_json(silent=True) or {}
+    user_msg = str(data.get("message") or data.get("text") or "").strip()
+    if not user_msg:
+        return jsonify({"success": False, "error": "Message text is required"}), 400
+
+    org_id = request.args.get("org_id") or "org-enterprise-default"
+    lang = data.get("language") or "roman_urdu"
+    if any("\u0600" <= ch <= "\u06FF" for ch in user_msg):
+        lang = "ur"
+
+    # Generate conversational AI response
+    try:
+        ai_res = WhatsAppService.generate_ai_auto_response(
+            organization_id=org_id,
+            message_body=user_msg,
+            sender_name="Voice User",
+            sender_phone="voice_session"
+        )
+        reply_text = ai_res.get("reply_body") or "Salam! Aap ki baat samajh aa gayi hai, batayein main aap ki kya mazeed madad kar sakta hoon?"
+    except Exception as ai_err:
+        logger.warning(f"[Voice Chat] AI response generation note: {ai_err}")
+        reply_text = "Salam! Main aap ki awaz sun raha hoon. Aap ka sawal sun lia hai."
+
+    clean_reply = re.sub(r"[*_~`#>]", "", reply_text).strip()
+
+    # Synthesize natural human speech
+    audio_data_uri = None
+    audio_base64 = None
+    try:
+        synth_res = WhatsAppService.generate_spoken_audio(
+            text=clean_reply,
+            language=lang,
+            organization_id=org_id,
+            output_format="mp3"
+        )
+        if synth_res:
+            audio_bytes, _, mime_type = synth_res
+            import base64
+            audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
+            audio_data_uri = f"data:{mime_type};base64,{audio_base64}"
+    except Exception as synth_err:
+        logger.warning(f"[Voice Chat] Speech synthesis note: {synth_err}")
+
+    return jsonify({
+        "success": True,
+        "user_message": user_msg,
+        "reply_text": clean_reply,
+        "audio_data_uri": audio_data_uri,
+        "audio_base64": audio_base64
+    }), 200
+
+
 @api_v1.route("/webhooks/whatsapp", methods=["GET"])
 def whatsapp_webhook_verification():
     """Meta Cloud API Webhook Subscription Verification (hub.mode, hub.verify_token, hub.challenge)."""
@@ -3291,6 +3350,22 @@ def whatsapp_send_message():
     if not message and not template_name:
         return jsonify({"error": "Either 'message' body or 'template_name' is required.", "code": "VALIDATION_ERROR"}), 400
 
+    is_voice = bool(data.get("is_voice") or (message and str(message).startswith(("[voiceMessage]", "[Voice note]", "[voice]"))))
+    audio_bytes = None
+    if data.get("audio_base64") or data.get("audioBase64"):
+        import base64
+        raw_b64 = str(data.get("audio_base64") or data.get("audioBase64")).split(",")[-1]
+        try:
+            audio_bytes = base64.b64decode(raw_b64)
+            is_voice = True
+        except Exception:
+            pass
+    elif is_voice:
+        clean_text = str(message).replace("[voiceMessage]", "").replace("[Voice note]", "").replace("[voice]", "").strip()
+        synth = WhatsAppService.generate_spoken_audio(text=clean_text or "Voice note", language="roman_urdu", organization_id=org.id, output_format="oga")
+        if synth:
+            audio_bytes, _, _ = synth
+
     try:
         result = WhatsAppService.send_message(
             organization_id=org.id,
@@ -3298,7 +3373,10 @@ def whatsapp_send_message():
             message_text=message or "",
             preview_url=preview_url,
             template_name=template_name,
-            template_language=template_language
+            template_language=template_language,
+            file_bytes=audio_bytes,
+            is_voice=is_voice,
+            ptt=is_voice
         )
         log_audit_event("whatsapp.message_sent", "whatsapp", result.get("whatsapp_message_id"), {
             "recipient": to_phone,

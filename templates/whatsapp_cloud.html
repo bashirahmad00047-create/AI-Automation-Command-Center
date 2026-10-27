@@ -442,6 +442,46 @@
     </main>
     <script src="/static/js/app.js"></script>
 
+    <!-- LIVE AI VOICE CALL MODAL -->
+    <div class="hud-modal-backdrop" id="liveVoiceCallModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(8px); z-index: 10050; align-items: center; justify-content: center;">
+        <div class="hud-modal-content" style="background: #0f172a; border: 1px solid #334155; border-radius: 16px; width: 92%; max-width: 520px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6); color: #f8fafc;">
+            <div style="padding: 18px 24px; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; background: #1e293b;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 32px; height: 32px; border-radius: 50%; background: #10b981; display: flex; align-items: center; justify-content: center; font-size: 16px;">
+                        🎙️
+                    </div>
+                    <div>
+                        <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff;">Live AI Voice Call</h3>
+                        <span style="font-size: 11px; color: #34d399;">● Gemini &amp; ElevenLabs Voice Agent</span>
+                    </div>
+                </div>
+                <button type="button" onclick="closeLiveVoiceCallModal()" style="background: none; border: none; font-size: 20px; color: #94a3b8; cursor: pointer;">✕</button>
+            </div>
+            
+            <div style="padding: 24px; text-align: center;">
+                <div id="voiceCallPulseCircle" style="width: 90px; height: 90px; border-radius: 50%; background: radial-gradient(circle, rgba(16, 185, 129, 0.25) 0%, rgba(16, 185, 129, 0.05) 70%); border: 2px solid #10b981; margin: 0 auto 16px auto; display: flex; align-items: center; justify-content: center; font-size: 38px; box-shadow: 0 0 25px rgba(16, 185, 129, 0.4); transition: transform 0.3s ease;">
+                    🎙️
+                </div>
+                
+                <h4 id="voiceCallStatusLabel" style="margin: 0 0 6px 0; font-size: 17px; font-weight: 600; color: #f8fafc;">Voice Agent Ready</h4>
+                <p id="voiceCallSubLabel" style="margin: 0 0 16px 0; font-size: 13px; color: #94a3b8;">Speak in Pakistani Urdu or English for real-time conversation.</p>
+                
+                <div id="voiceTranscriptBox" style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px 16px; min-height: 80px; max-height: 140px; overflow-y: auto; text-align: left; font-size: 13px; color: #cbd5e1; margin-bottom: 20px;">
+                    <em style="color: #64748b;">Transcript will appear here in real-time...</em>
+                </div>
+
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button type="button" id="startVoiceCallBtn" onclick="toggleLiveVoiceCall()" style="background: #10b981; color: #fff; font-weight: 700; font-size: 14px; padding: 10px 24px; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
+                        <span>📞</span> <span id="startVoiceBtnText">Start Voice Call</span>
+                    </button>
+                    <button type="button" onclick="closeLiveVoiceCallModal()" style="background: #334155; color: #cbd5e1; font-weight: 600; font-size: 14px; padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer;">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- LINK WHATSAPP QR MODAL (BAILEYS BRIDGE) -->
     <div class="hud-modal-backdrop" id="linkWhatsAppQrModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); z-index: 10060; align-items: center; justify-content: center;">
         <div class="hud-modal-content" style="background: #0f172a; border: 1px solid #334155; border-radius: 16px; width: 92%; max-width: 480px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6); color: #f8fafc;">

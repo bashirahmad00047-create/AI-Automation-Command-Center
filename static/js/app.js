@@ -5499,7 +5499,8 @@ async function sendWhatsAppReply() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 to: recipient,
-                message: message
+                message: message,
+                is_voice: isVoice
             })
         });
         const data = await res.json();
@@ -9638,6 +9639,68 @@ function submitTruckDispatch() {
 let liveVoiceCallActive = false;
 let liveVoiceRecognition = null;
 
+let voiceSpeechDebounceTimer = null;
+let currentVoiceAudioPlayer = null;
+
+async function sendVoiceChatQuery(spokenText) {
+    if (!spokenText || !spokenText.trim()) return;
+    const transcriptBox = document.getElementById('voiceTranscriptBox');
+    const statusLabel = document.getElementById('voiceCallStatusLabel');
+    const pulseCircle = document.getElementById('voiceCallPulseCircle');
+
+    if (statusLabel) statusLabel.textContent = 'Thinking... (AI generating response)';
+    if (pulseCircle) pulseCircle.style.borderColor = '#38bdf8';
+
+    try {
+        const res = await fetch('/api/v1/voice/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: spokenText.trim() })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            if (transcriptBox) {
+                transcriptBox.innerHTML = `
+                    <div style="margin-bottom: 8px;"><strong>You:</strong> ${escapeHtml(spokenText)}</div>
+                    <div style="color: #34d399;"><strong>AI Voice Agent:</strong> ${escapeHtml(data.reply_text)}</div>
+                `;
+                transcriptBox.scrollTop = transcriptBox.scrollHeight;
+            }
+
+            if (data.audio_data_uri) {
+                if (statusLabel) statusLabel.textContent = 'Speaking... (AI audio response)';
+                if (pulseCircle) {
+                    pulseCircle.style.borderColor = '#10b981';
+                    pulseCircle.style.transform = 'scale(1.2)';
+                }
+                if (currentVoiceAudioPlayer) {
+                    try { currentVoiceAudioPlayer.pause(); } catch (_) {}
+                }
+                currentVoiceAudioPlayer = new Audio(data.audio_data_uri);
+                currentVoiceAudioPlayer.onended = function() {
+                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak now';
+                    if (pulseCircle) {
+                        pulseCircle.style.transform = 'scale(1.05)';
+                        pulseCircle.style.borderColor = '#10b981';
+                    }
+                };
+                currentVoiceAudioPlayer.play().catch(e => {
+                    console.warn('[Live Voice Audio Play Notice]', e);
+                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak now';
+                });
+            } else {
+                if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak now';
+                if (pulseCircle) pulseCircle.style.transform = 'scale(1.05)';
+            }
+        } else {
+            if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak now';
+        }
+    } catch (err) {
+        console.warn('[Voice Chat Query Error]', err);
+        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak now';
+    }
+}
+
 function openLiveVoiceCallModal() {
     const modal = document.getElementById('liveVoiceCallModal');
     if (modal) {
@@ -9653,6 +9716,10 @@ function closeLiveVoiceCallModal() {
     if (liveVoiceCallActive) {
         toggleLiveVoiceCall();
     }
+    if (currentVoiceAudioPlayer) {
+        try { currentVoiceAudioPlayer.pause(); } catch (_) {}
+        currentVoiceAudioPlayer = null;
+    }
 }
 
 function toggleLiveVoiceCall() {
@@ -9667,8 +9734,11 @@ function toggleLiveVoiceCall() {
         liveVoiceCallActive = true;
         if (btnText) btnText.textContent = 'End Call';
         if (statusLabel) statusLabel.textContent = 'Listening... Speak now';
-        if (subLabel) subLabel.textContent = 'Voice agent is actively listening to your speech';
-        if (pulseCircle) pulseCircle.style.transform = 'scale(1.1)';
+        if (subLabel) subLabel.textContent = 'Voice agent is actively listening in real-time';
+        if (pulseCircle) {
+            pulseCircle.style.transform = 'scale(1.1)';
+            pulseCircle.style.borderColor = '#10b981';
+        }
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (SpeechRecognition) {
@@ -9679,17 +9749,37 @@ function toggleLiveVoiceCall() {
                 liveVoiceRecognition.lang = 'ur-PK, en-US';
 
                 liveVoiceRecognition.onresult = function(event) {
-                    let transcript = '';
+                    let interimTranscript = '';
+                    let finalTranscript = '';
                     for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        transcript += event.results[i][0].transcript;
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                        }
                     }
-                    if (transcriptBox && transcript) {
-                        transcriptBox.innerHTML = '<strong>You:</strong> ' + transcript;
+                    const textToDisplay = finalTranscript || interimTranscript;
+                    if (transcriptBox && textToDisplay) {
+                        transcriptBox.innerHTML = '<strong>You:</strong> ' + escapeHtml(textToDisplay);
+                    }
+                    clearTimeout(voiceSpeechDebounceTimer);
+                    const textToSend = (finalTranscript || interimTranscript).trim();
+                    if (textToSend.length > 2) {
+                        voiceSpeechDebounceTimer = setTimeout(() => {
+                            sendVoiceChatQuery(textToSend);
+                        }, 1300);
                     }
                 };
 
                 liveVoiceRecognition.onerror = function(err) {
                     console.warn('[Live Voice Call] Speech recognition note:', err);
+                };
+
+                liveVoiceRecognition.onend = function() {
+                    // Auto-restart if call is still active
+                    if (liveVoiceCallActive && liveVoiceRecognition) {
+                        try { liveVoiceRecognition.start(); } catch (_) {}
+                    }
                 };
 
                 liveVoiceRecognition.start();
@@ -9698,18 +9788,27 @@ function toggleLiveVoiceCall() {
             }
         } else {
             if (transcriptBox) {
-                transcriptBox.innerHTML = '<span style="color:#34d399;">● Live Voice Stream session active. Connected to Gemini AI engine.</span>';
+                transcriptBox.innerHTML = '<span style="color:#34d399;">● Live Voice Stream active. Speech recognition not natively supported in this browser.</span>';
             }
         }
     } else {
         // End Call
         liveVoiceCallActive = false;
+        clearTimeout(voiceSpeechDebounceTimer);
         if (btnText) btnText.textContent = 'Start Voice Call';
         if (statusLabel) statusLabel.textContent = 'Call Ended';
         if (subLabel) subLabel.textContent = 'Click "Start Voice Call" to begin a new conversation';
-        if (pulseCircle) pulseCircle.style.transform = 'scale(1.0)';
+        if (pulseCircle) {
+            pulseCircle.style.transform = 'scale(1.0)';
+            pulseCircle.style.borderColor = '#10b981';
+        }
+        if (currentVoiceAudioPlayer) {
+            try { currentVoiceAudioPlayer.pause(); } catch (_) {}
+            currentVoiceAudioPlayer = null;
+        }
         if (liveVoiceRecognition) {
             try {
+                liveVoiceRecognition.onend = null;
                 liveVoiceRecognition.stop();
             } catch (e) {}
             liveVoiceRecognition = null;
