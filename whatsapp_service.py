@@ -536,12 +536,14 @@ class WhatsAppService:
         if formatted_contact:
             candidates.add(formatted_contact)
             candidates.add(f"+{formatted_contact}")
+            candidates.add(f"{formatted_contact}@s.whatsapp.net")
             candidates.add(f"{formatted_contact}@c.us")
             candidates.add(f"+{formatted_contact}@c.us")
         if clean_contact:
             clean_bare = clean_contact.lstrip("+")
             candidates.add(clean_bare)
             candidates.add(f"+{clean_bare}")
+            candidates.add(f"{clean_bare}@s.whatsapp.net")
             candidates.add(f"{clean_bare}@c.us")
             candidates.add(f"+{clean_bare}@c.us")
 
@@ -552,8 +554,10 @@ class WhatsAppService:
         if last_digits:
             filter_conditions.extend([
                 WhatsAppMessage.sender.like(f"%{last_digits}"),
+                WhatsAppMessage.sender.like(f"%{last_digits}@s.whatsapp.net"),
                 WhatsAppMessage.sender.like(f"%{last_digits}@c.us"),
                 WhatsAppMessage.recipient.like(f"%{last_digits}"),
+                WhatsAppMessage.recipient.like(f"%{last_digits}@s.whatsapp.net"),
                 WhatsAppMessage.recipient.like(f"%{last_digits}@c.us")
             ])
 
@@ -3904,14 +3908,15 @@ class WhatsAppService:
         )
         clean_phone = cls.format_phone_number(sender_phone)
         if raw_chat:
-            if raw_chat.endswith("@s.whatsapp.net"):
-                real_chat_id = f"{cls.format_phone_number(raw_chat.replace('@s.whatsapp.net', ''))}@c.us"
-            elif "@" in raw_chat:
+            if raw_chat.endswith("@g.us"):
                 real_chat_id = raw_chat
+            elif "@" in raw_chat:
+                clean_target = cls.format_phone_number(raw_chat.split("@")[0].split(":")[0])
+                real_chat_id = f"{clean_target}@s.whatsapp.net"
             else:
-                real_chat_id = f"{cls.format_phone_number(raw_chat)}@c.us"
+                real_chat_id = f"{cls.format_phone_number(raw_chat)}@s.whatsapp.net"
         else:
-            real_chat_id = f"{clean_phone}@c.us" if clean_phone else str(sender_phone)
+            real_chat_id = f"{clean_phone}@s.whatsapp.net" if clean_phone else str(sender_phone)
         org_id = organization_id or "org-enterprise-default"
 
         # Stale timestamp guard
@@ -6703,10 +6708,10 @@ class WhatsAppService:
             else:
                 raise ValueError(f"Invalid recipient phone number: '{to_phone or chat_id}'. Must include country code and digits.")
 
-        bridge_chat_id = chat_id or real_chat_id
+        bridge_chat_id = real_chat_id
         bridge_message = message_text or ""
         bridge_url = os.environ.get("BAILEYS_BRIDGE_URL", "http://127.0.0.1:3001/send-message")
-        bridge_timeout = float(os.environ.get("BAILEYS_BRIDGE_TIMEOUT", "6.0"))
+        bridge_timeout = float(os.environ.get("BAILEYS_BRIDGE_TIMEOUT", "8.0"))
 
         # Resolve audio / voice / media bytes
         f_bytes = kwargs.get("file_bytes") or kwargs.get("audio_bytes")
@@ -6719,7 +6724,15 @@ class WhatsAppService:
                 pass
 
         out_msg_type = "text"
-        bridge_payload = {"chatId": bridge_chat_id, "message": bridge_message}
+        bridge_payload = {
+            "chatId": real_chat_id,
+            "to": clean_to,
+            "recipient": real_chat_id,
+            "message": bridge_message
+        }
+        if quoted_message_id:
+            bridge_payload["quotedMessageId"] = str(quoted_message_id).strip()
+            bridge_payload["quoted_message_id"] = str(quoted_message_id).strip()
 
         if f_bytes:
             import base64
@@ -6736,163 +6749,118 @@ class WhatsAppService:
                 bridge_payload["imageBase64"] = kwargs.get("imageBase64")
             out_msg_type = "imageMessage"
 
-        try:
-            from wa_bridge_manager import ensure_wa_bridge_running
-            ensure_wa_bridge_running(timeout_seconds=5.0)
-        except Exception as _bridge_mgr_err:
-            logger.warning(f"[Baileys Bridge] Bridge manager note: {_bridge_mgr_err}")
+        is_testing = False
+        if has_app_context():
+            from flask import current_app
+            is_testing = bool(current_app.config.get("TESTING"))
 
-        try:
-            with cls.get_http_session(retries=1) as session:
-                bridge_resp = session.post(
-                    bridge_url,
-                    json=bridge_payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=bridge_timeout
-                )
-            if bridge_resp.status_code == 200:
-                bridge_data = bridge_resp.json() if bridge_resp.text and bridge_resp.text.strip() else {}
-                msg_id = bridge_data.get("messageId") or bridge_data.get("idMessage") or f"baileys_{int(time.time() * 1000)}"
-                logger.info(f"[Baileys Bridge Success] Free WhatsApp message dispatched: ID={msg_id} (type={out_msg_type})")
-                cls.record_outbound_sent_id(msg_id)
-                if message_text:
-                    cls.record_bot_reply_body(message_text)
-                record = cls.record_message(
-                    organization_id=organization_id,
-                    sender="Baileys WhatsApp Bridge",
-                    recipient=real_chat_id,
-                    direction="outbound",
-                    body=message_text,
-                    message_type=out_msg_type,
-                    status="sent",
-                    whatsapp_message_id=msg_id,
-                    execution_id=execution_id,
-                    raw_payload={
-                        **bridge_data,
-                        "chat_id": real_chat_id,
-                        "chatId": bridge_chat_id,
-                        "provider": "baileys_bridge",
-                        "message_type": out_msg_type,
-                        "audio_base64": bridge_payload.get("audioBase64"),
-                        "is_voice": bool(bridge_payload.get("ptt"))
-                    }
-                )
-                return {
-                    "success": True,
-                    "status": "sent",
-                    "provider": "baileys_bridge",
-                    "whatsapp_message_id": msg_id,
-                    "message_record_id": record.id if record else None,
-                    "recipient": clean_to,
-                    "chat_id": real_chat_id,
-                    "message_type": out_msg_type,
-                    "media_url": f"data:{bridge_payload.get('mimetype', 'audio/ogg')};base64,{bridge_payload.get('audioBase64')}" if bridge_payload.get("audioBase64") else None
-                }
-            else:
-                err_text = bridge_resp.text[:200]
-                logger.error(f"[Baileys Bridge Failed] HTTP {bridge_resp.status_code}: {err_text}")
-                is_testing = False
-                if has_app_context():
-                    from flask import current_app
-                    is_testing = bool(current_app.config.get("TESTING"))
-                if is_testing or cls.is_simulator_fallback_enabled():
-                    msg_id = f"wamid.mock_{int(time.time() * 1000)}"
-                    is_ai = bool(kwargs.get("is_ai_response") or kwargs.get("is_ai"))
+        if not is_testing:
+            try:
+                from wa_bridge_manager import ensure_wa_bridge_running
+                ensure_wa_bridge_running(timeout_seconds=5.0)
+            except Exception as _bridge_mgr_err:
+                logger.warning(f"[Baileys Bridge] Bridge manager note: {_bridge_mgr_err}")
+
+            try:
+                with cls.get_http_session(retries=1) as session:
+                    bridge_resp = session.post(
+                        bridge_url,
+                        json=bridge_payload,
+                        headers={"Content-Type": "application/json"},
+                        timeout=bridge_timeout
+                    )
+                if bridge_resp.status_code == 200:
+                    bridge_data = bridge_resp.json() if bridge_resp.text and bridge_resp.text.strip() else {}
+                    msg_id = bridge_data.get("messageId") or bridge_data.get("idMessage") or f"baileys_{int(time.time() * 1000)}"
+                    logger.info(f"[Baileys Bridge Success] Free WhatsApp message dispatched: ID={msg_id} (type={out_msg_type})")
+                    cls.record_outbound_sent_id(msg_id)
+                    if message_text:
+                        cls.record_bot_reply_body(message_text)
                     record = cls.record_message(
                         organization_id=organization_id,
-                        sender="WhatsApp Simulator",
+                        sender="Baileys WhatsApp Bridge",
                         recipient=real_chat_id,
                         direction="outbound",
                         body=message_text,
                         message_type=out_msg_type,
-                        status="mock_sent",
+                        status="sent",
                         whatsapp_message_id=msg_id,
                         execution_id=execution_id,
-                        raw_payload={"mock": True, "chat_id": real_chat_id, "audio_base64": bridge_payload.get("audioBase64"), "is_ai_response": is_ai}
+                        raw_payload={
+                            **bridge_data,
+                            "chat_id": real_chat_id,
+                            "chatId": bridge_chat_id,
+                            "provider": "baileys_bridge",
+                            "message_type": out_msg_type,
+                            "audio_base64": bridge_payload.get("audioBase64"),
+                            "is_voice": bool(bridge_payload.get("ptt"))
+                        }
                     )
                     return {
                         "success": True,
-                        "status": "mock_sent",
-                        "provider": "simulator",
-                        "mode": "simulator",
+                        "status": "sent",
+                        "provider": "baileys_bridge",
                         "whatsapp_message_id": msg_id,
                         "message_record_id": record.id if record else None,
                         "recipient": clean_to,
                         "chat_id": real_chat_id,
-                        "message_type": out_msg_type
+                        "message_type": out_msg_type,
+                        "media_url": f"data:{bridge_payload.get('mimetype', 'audio/ogg')};base64,{bridge_payload.get('audioBase64')}" if bridge_payload.get("audioBase64") else None
                     }
-                record = cls.record_message(
-                    organization_id=organization_id,
-                    sender="Baileys WhatsApp Bridge",
-                    recipient=real_chat_id,
-                    direction="outbound",
-                    body=message_text,
-                    message_type="text",
-                    status="failed",
-                    execution_id=execution_id,
-                    error_message=f"Baileys Bridge HTTP {bridge_resp.status_code}: {err_text}"
-                )
-                return {
-                    "success": False,
-                    "status": "failed",
-                    "provider": "baileys_bridge",
-                    "error": f"Baileys Bridge HTTP {bridge_resp.status_code}: {err_text}",
-                    "recipient": clean_to,
-                    "chat_id": real_chat_id,
-                    "message_record_id": record.id if record else None
-                }
-        except Exception as bridge_err:
-            logger.error(f"[Baileys Bridge Error]: {bridge_err}")
-            is_testing = False
-            if has_app_context():
-                from flask import current_app
-                is_testing = bool(current_app.config.get("TESTING"))
-            if is_testing or cls.is_simulator_fallback_enabled():
-                msg_id = f"wamid.mock_{int(time.time() * 1000)}"
-                is_ai = bool(kwargs.get("is_ai_response") or kwargs.get("is_ai"))
-                record = cls.record_message(
-                    organization_id=organization_id,
-                    sender="WhatsApp Simulator",
-                    recipient=real_chat_id,
-                    direction="outbound",
-                    body=message_text,
-                    message_type=out_msg_type,
-                    status="mock_sent",
-                    whatsapp_message_id=msg_id,
-                    execution_id=execution_id,
-                    raw_payload={"mock": True, "chat_id": real_chat_id, "audio_base64": bridge_payload.get("audioBase64"), "is_ai_response": is_ai}
-                )
-                return {
-                    "success": True,
-                    "status": "mock_sent",
-                    "provider": "simulator",
-                    "mode": "simulator",
-                    "whatsapp_message_id": msg_id,
-                    "message_record_id": record.id if record else None,
-                    "recipient": clean_to,
-                    "chat_id": real_chat_id,
-                    "message_type": out_msg_type
-                }
+                else:
+                    err_text = bridge_resp.text[:200]
+                    logger.error(f"[Baileys Bridge Failed] HTTP {bridge_resp.status_code}: {err_text}")
+            except Exception as bridge_err:
+                logger.error(f"[Baileys Bridge Exception] Failed to contact bridge at {bridge_url}: {bridge_err}")
+
+        if is_testing or cls.is_simulator_fallback_enabled():
+            msg_id = f"wamid.mock_{int(time.time() * 1000)}"
+            is_ai = bool(kwargs.get("is_ai_response") or kwargs.get("is_ai"))
             record = cls.record_message(
                 organization_id=organization_id,
-                sender="Baileys WhatsApp Bridge",
+                sender="WhatsApp Simulator",
                 recipient=real_chat_id,
                 direction="outbound",
                 body=message_text,
-                message_type="text",
-                status="failed",
+                message_type=out_msg_type,
+                status="mock_sent",
+                whatsapp_message_id=msg_id,
                 execution_id=execution_id,
-                error_message=str(bridge_err)
+                raw_payload={"mock": True, "chat_id": real_chat_id, "audio_base64": bridge_payload.get("audioBase64"), "is_ai_response": is_ai}
             )
             return {
-                "success": False,
-                "status": "failed",
-                "provider": "baileys_bridge",
-                "error": str(bridge_err),
+                "success": True,
+                "status": "mock_sent",
+                "provider": "simulator",
+                "mode": "simulator",
+                "whatsapp_message_id": msg_id,
+                "message_record_id": record.id if record else None,
                 "recipient": clean_to,
                 "chat_id": real_chat_id,
-                "message_record_id": record.id if record else None
+                "message_type": out_msg_type,
+                "media_url": f"data:{bridge_payload.get('mimetype', 'audio/ogg')};base64,{bridge_payload.get('audioBase64')}" if bridge_payload.get("audioBase64") else None
             }
+
+        record = cls.record_message(
+            organization_id=organization_id,
+            sender="Baileys WhatsApp Bridge",
+            recipient=real_chat_id,
+            direction="outbound",
+            body=message_text,
+            message_type="text",
+            status="failed",
+            execution_id=execution_id,
+            error_message="Baileys Bridge offline or failed to dispatch"
+        )
+        return {
+            "success": False,
+            "status": "failed",
+            "provider": "baileys_bridge",
+            "error": "Baileys Bridge offline or failed to dispatch",
+            "recipient": clean_to,
+            "chat_id": real_chat_id,
+            "message_record_id": record.id if record else None
+        }
 
 
     # =========================================================================

@@ -476,7 +476,29 @@ async function startWhatsAppBridge() {
             audioMimeType = 'audio/ogg; codecs=opus';
           }
 
-          console.log(`[Incoming Message] From: +${cleanSenderPhone} (${pushName}) | ID: ${messageId} | Type: ${typeMessage} | Audio: ${Boolean(audioBase64)} | Text: "${text}"`);
+          // Extract quoted parent message context if present
+          const contextInfo = unwrappedMsg?.extendedTextMessage?.contextInfo ||
+                              unwrappedMsg?.imageMessage?.contextInfo ||
+                              unwrappedMsg?.videoMessage?.contextInfo ||
+                              unwrappedMsg?.audioMessage?.contextInfo ||
+                              unwrappedMsg?.documentMessage?.contextInfo;
+          const quotedMessage = contextInfo?.quotedMessage || null;
+          const quotedStanzaId = contextInfo?.stanzaId || null;
+          const quotedParticipant = cleanPhoneNumber(contextInfo?.participant || '');
+
+          let extendedData = undefined;
+          if (contextInfo || quotedStanzaId || quotedMessage) {
+            extendedData = {
+              text: text,
+              stanzaId: quotedStanzaId,
+              participant: quotedParticipant,
+              quotedMessage: quotedMessage
+            };
+          }
+
+          const normalizedChatId = remoteJid.endsWith('@g.us') ? remoteJid : normalizeJid(cleanSenderPhone || remoteJid);
+
+          console.log(`[Incoming Message] From: +${cleanSenderPhone} (${pushName}) | ID: ${messageId} | Chat: ${normalizedChatId} | Type: ${typeMessage} | Audio: ${Boolean(audioBase64)} | Text: "${text}"`);
 
           const payload = {
             typeWebhook: 'incomingMessageReceived',
@@ -487,7 +509,7 @@ async function startWhatsAppBridge() {
             timestamp,
             idMessage: messageId,
             senderData: {
-              chatId: remoteJid,
+              chatId: normalizedChatId,
               sender: cleanSenderPhone,
               chatName: pushName,
               senderName: pushName
@@ -497,18 +519,25 @@ async function startWhatsAppBridge() {
               textMessageData: {
                 textMessage: text
               },
+              extendedTextMessageData: extendedData,
+              quotedMessage: quotedMessage,
+              stanzaId: quotedStanzaId,
               fileMessageData: (isAudio || isVoice || isImage) ? {
                 caption: text,
                 mimeType: isAudio ? audioMimeType : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg'),
                 audioBase64: audioBase64
               } : undefined
             },
-            chatId: remoteJid,
+            chatId: normalizedChatId,
+            remoteJid: remoteJid,
             from: cleanSenderPhone,
             from_phone: cleanSenderPhone,
             senderName: pushName,
+            chatName: pushName,
             message: text,
             body: text,
+            parent_msg_id: quotedStanzaId,
+            parent_message_id: quotedStanzaId,
             is_voice: isVoice,
             is_audio: isAudio,
             audio_base64: audioBase64,
@@ -520,14 +549,18 @@ async function startWhatsAppBridge() {
           };
 
           try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
             const response = await fetch(PYTHON_WEBHOOK_URL, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
                 'User-Agent': 'WhatsApp-Baileys-Bridge/1.0'
               },
-              body: JSON.stringify(payload)
+              body: JSON.stringify(payload),
+              signal: controller.signal
             });
+            clearTimeout(timeoutId);
 
             console.log(`[Webhook Forward] Dispatched to ${PYTHON_WEBHOOK_URL} -> HTTP ${response.status}`);
           } catch (err) {
