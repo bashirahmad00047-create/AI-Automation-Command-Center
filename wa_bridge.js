@@ -56,12 +56,37 @@ function destroyOldSocket() {
       if (sock.ev && typeof sock.ev.removeAllListeners === 'function') {
         sock.ev.removeAllListeners();
       }
+      if (sock.ws && typeof sock.ws.close === 'function') {
+        sock.ws.close();
+      }
       if (typeof sock.end === 'function') {
         sock.end(undefined);
       }
     } catch (_) {}
     sock = null;
   }
+}
+
+/**
+ * Unwraps nested message structures (ephemeral, view-once, documentWithCaption, etc.)
+ * to extract the raw underlying payload and media elements.
+ */
+function unwrapMessage(msgContent) {
+  if (!msgContent) return null;
+  let unwrapped = msgContent;
+  while (
+    unwrapped?.ephemeralMessage?.message ||
+    unwrapped?.viewOnceMessage?.message ||
+    unwrapped?.viewOnceMessageV2?.message ||
+    unwrapped?.documentWithCaptionMessage?.message
+  ) {
+    unwrapped =
+      unwrapped.ephemeralMessage?.message ||
+      unwrapped.viewOnceMessage?.message ||
+      unwrapped.viewOnceMessageV2?.message ||
+      unwrapped.documentWithCaptionMessage?.message;
+  }
+  return unwrapped;
 }
 
 /**
@@ -122,21 +147,22 @@ function normalizeJid(chatId) {
 }
 
 /**
- * Extracts plain text from various Baileys message types.
+ * Extracts plain text from various Baileys message types, unwrapping nested structures.
  */
 function extractMessageText(message) {
-  if (!message) return '';
+  const unwrapped = unwrapMessage(message) || message;
+  if (!unwrapped) return '';
 
   return (
-    message.conversation ||
-    message.extendedTextMessage?.text ||
-    message.imageMessage?.caption ||
-    message.videoMessage?.caption ||
-    message.documentMessage?.caption ||
-    message.buttonsResponseMessage?.selectedButtonId ||
-    message.templateButtonReplyMessage?.selectedId ||
-    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+    unwrapped.conversation ||
+    unwrapped.extendedTextMessage?.text ||
+    unwrapped.imageMessage?.caption ||
+    unwrapped.videoMessage?.caption ||
+    unwrapped.documentMessage?.caption ||
+    unwrapped.buttonsResponseMessage?.selectedButtonId ||
+    unwrapped.templateButtonReplyMessage?.selectedId ||
+    unwrapped.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    unwrapped.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
     ''
   );
 }
@@ -205,7 +231,8 @@ async function startWhatsAppBridge() {
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
-      browser: ['BashFlow Cloud', 'Chrome', '1.0.0']
+      browser: ['BashFlow Cloud', 'Chrome', '1.0.0'],
+      getMessage: async (key) => undefined
     });
 
     // Safely persist session credentials
@@ -271,10 +298,12 @@ async function startWhatsAppBridge() {
             ? lastDisconnect.error.output?.statusCode
             : lastDisconnect?.error?.output?.statusCode;
 
-        const isLoggedOut = (statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 403);
+        // Only consider true logouts (e.g. user linked device removed) or 401 as logged out.
+        // Do NOT wipe auth directory on transient 403s or network dropouts!
+        const isLoggedOut = (statusCode === DisconnectReason.loggedOut || statusCode === 401);
         console.warn(`[WhatsApp Bridge] Connection closed (code: ${statusCode}, isLoggedOut: ${isLoggedOut}).`);
 
-        // If session was logged out or credentials became invalid, wipe auth directory
+        // If session was explicitly logged out, wipe auth directory
         // so a fresh QR code is immediately generated on restart
         if (isLoggedOut) {
           console.warn('[WhatsApp Bridge] Session logged out or invalidated. Clearing auth folder to refresh QR...');
@@ -334,22 +363,27 @@ async function startWhatsAppBridge() {
           const messageId = msg.key?.id || `msg_${Date.now()}`;
           const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
           
-          let text = extractMessageText(msg.message);
+          const unwrappedMsg = unwrapMessage(msg.message) || msg.message;
+          let text = extractMessageText(unwrappedMsg);
           let isVoice = false;
           let isAudio = false;
           let isImage = false;
           let typeMessage = 'textMessage';
           let audioBase64 = null;
 
-          if (msg.message?.audioMessage) {
+          if (unwrappedMsg?.audioMessage) {
             isAudio = true;
-            isVoice = Boolean(msg.message.audioMessage.ptt);
+            isVoice = Boolean(unwrappedMsg.audioMessage.ptt);
             typeMessage = isVoice ? 'voiceMessage' : 'audioMessage';
             if (!text) text = isVoice ? '[Voice note]' : '[Audio message]';
 
             try {
+              const msgToDownload = {
+                key: msg.key,
+                message: unwrappedMsg
+              };
               const buffer = await downloadMediaMessage(
-                msg,
+                msgToDownload,
                 'buffer',
                 {},
                 {
@@ -364,13 +398,13 @@ async function startWhatsAppBridge() {
             } catch (dlErr) {
               console.warn('[Media Download Error] Could not download voice buffer:', dlErr.message);
             }
-          } else if (msg.message?.imageMessage) {
+          } else if (unwrappedMsg?.imageMessage) {
             isImage = true;
             typeMessage = 'imageMessage';
-            if (!text) text = msg.message.imageMessage.caption || '[Photo]';
-          } else if (msg.message?.documentMessage) {
+            if (!text) text = unwrappedMsg.imageMessage.caption || '[Photo]';
+          } else if (unwrappedMsg?.documentMessage) {
             typeMessage = 'documentMessage';
-            if (!text) text = msg.message.documentMessage.fileName || '[Document]';
+            if (!text) text = unwrappedMsg.documentMessage.fileName || '[Document]';
           }
 
           console.log(`[Incoming Message] From: +${cleanSenderPhone} (${pushName}) | ID: ${messageId} | Type: ${typeMessage} | Audio: ${Boolean(audioBase64)} | Text: "${text}"`);
@@ -396,7 +430,7 @@ async function startWhatsAppBridge() {
               },
               fileMessageData: (isAudio || isVoice || isImage) ? {
                 caption: text,
-                mimeType: msg.message?.audioMessage?.mimetype || msg.message?.imageMessage?.mimetype || 'audio/ogg',
+                mimeType: unwrappedMsg?.audioMessage?.mimetype || unwrappedMsg?.imageMessage?.mimetype || 'audio/ogg',
                 audioBase64: audioBase64
               } : undefined
             },
@@ -662,6 +696,21 @@ app.post('/send-message', async (req, res, next) => {
     }
 
     let sent = null;
+    const quotedMessageId = req.body?.quotedMessageId || req.body?.quoted_message_id || req.body?.quotedId || req.body?.replyTo || req.body?.reply_to;
+    const sendOptions = {};
+    if (quotedMessageId) {
+      sendOptions.quoted = {
+        key: {
+          remoteJid: jid,
+          id: String(quotedMessageId),
+          fromMe: false
+        },
+        message: {
+          conversation: ''
+        }
+      };
+    }
+
     try {
       if (hasAudio) {
         const ptt = req.body?.ptt !== false && req.body?.is_voice !== false;
@@ -674,13 +723,13 @@ app.post('/send-message', async (req, res, next) => {
             audio: audioBuffer,
             mimetype,
             ptt
-          });
+          }, sendOptions);
         } else if (audioUrl) {
           sent = await sock.sendMessage(jid, {
             audio: { url: audioUrl },
             mimetype,
             ptt
-          });
+          }, sendOptions);
         }
       } else if (hasImage) {
         const imageRaw = req.body?.imageBase64 || req.body?.image;
@@ -693,16 +742,16 @@ app.post('/send-message', async (req, res, next) => {
           sent = await sock.sendMessage(jid, {
             image: imageBuffer,
             caption
-          });
+          }, sendOptions);
         } else if (imageUrl) {
           sent = await sock.sendMessage(jid, {
             image: { url: imageUrl },
             caption
-          });
+          }, sendOptions);
         }
       } else {
         const textToSend = String(message || '');
-        sent = await sock.sendMessage(jid, { text: textToSend });
+        sent = await sock.sendMessage(jid, { text: textToSend }, sendOptions);
       }
     } catch (sendErr) {
       console.error(`[Outbound Message Send Error to ${jid}]:`, sendErr);
