@@ -2626,10 +2626,20 @@ def stripe_webhook():
 
 @api_v1.route("/whatsapp/bridge-qr", methods=["GET"])
 def api_whatsapp_bridge_qr():
-    """Returns the Baileys bridge QR code and pairing status for web dashboard scanning."""
-    bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://localhost:3001/qr")
+    """Returns the Baileys bridge QR code and pairing status for web dashboard scanning.
+    Checks if port 3001 is reachable; if not, automatically runs npm install (if node_modules is missing)
+    and spawns `node wa_bridge.js` using subprocess.Popen, waiting up to 5 seconds for port 3001 to come online.
+    """
+    import requests
     try:
-        resp = requests.get(bridge_url, timeout=3.0)
+        from wa_bridge_manager import ensure_wa_bridge_running
+        ensure_wa_bridge_running(timeout_seconds=5.0)
+    except Exception as _mgr_err:
+        logger.warning(f"[WA Bridge] Manager error: {_mgr_err}")
+
+    bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://127.0.0.1:3001/qr")
+    try:
+        resp = requests.get(bridge_url, timeout=3.5)
         data = resp.json() if resp.text else {}
         return jsonify(data), resp.status_code
     except Exception as e:
@@ -2643,7 +2653,14 @@ def api_whatsapp_bridge_qr():
 @api_v1.route("/whatsapp/bridge-status", methods=["GET"])
 def api_whatsapp_bridge_status():
     """Returns the Baileys bridge live connection status."""
-    bridge_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://localhost:3001/status")
+    import requests
+    try:
+        from wa_bridge_manager import ensure_wa_bridge_running
+        ensure_wa_bridge_running(timeout_seconds=2.0)
+    except Exception:
+        pass
+
+    bridge_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://127.0.0.1:3001/status")
     try:
         resp = requests.get(bridge_url, timeout=3.0)
         data = resp.json() if resp.text else {}

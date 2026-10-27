@@ -6712,6 +6712,13 @@ class WhatsAppService:
         bridge_message = message_text or ""
         bridge_url = os.environ.get("BAILEYS_BRIDGE_URL", "http://127.0.0.1:3001/send-message")
         bridge_timeout = float(os.environ.get("BAILEYS_BRIDGE_TIMEOUT", "5.0"))
+
+        # Check if port 3001 is reachable; if not, auto-install missing npm packages and spawn wa_bridge.js, waiting up to 5s
+        try:
+            from wa_bridge_manager import ensure_wa_bridge_running
+            ensure_wa_bridge_running(timeout_seconds=5.0)
+        except Exception as _bridge_mgr_err:
+            logger.warning(f"[Baileys Bridge] Bridge manager auto-start note: {_bridge_mgr_err}")
         try:
             with cls.get_http_session(retries=1) as session:
                 bridge_resp = session.post(

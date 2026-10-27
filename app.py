@@ -45,61 +45,12 @@ _wa_bridge_proc_lock = threading.Lock()
 
 def start_wa_bridge_subprocess(app_ref=None):
     """Spawns `node wa_bridge.js` on port 3001 as a persistent background subprocess when the server starts."""
-    global _wa_bridge_proc
-    with _wa_bridge_proc_lock:
-        if _wa_bridge_proc is not None and _wa_bridge_proc.poll() is None:
-            return  # Subprocess already active
-
-        # Check if already running on port 3001
-        try:
-            s_test = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s_test.settimeout(0.4)
-            result = s_test.connect_ex(("127.0.0.1", 3001))
-            s_test.close()
-            if result == 0:
-                if app_ref:
-                    app_ref.logger.info("[WhatsApp Bridge] Port 3001 already active. Reusing existing bridge.")
-                return
-        except Exception:
-            pass
-
-        root_dir = os.path.dirname(os.path.abspath(__file__))
-        bridge_script = os.path.join(root_dir, "wa_bridge.js")
-        if not os.path.exists(bridge_script):
-            return
-
-        # Ensure node and npm exist in environment
-        try:
-            from install_node import ensure_node_installed, install_npm_packages
-            ensure_node_installed()
-            install_npm_packages()
-        except Exception as _node_setup_err:
-            if app_ref:
-                app_ref.logger.warning(f"[WhatsApp Bridge] Node provisioner note: {_node_setup_err}")
-
-        node_bin = shutil.which("node") or os.path.join(os.path.dirname(sys.executable), "node") or "node"
-        env = os.environ.copy()
-        env["PORT"] = "3001"
-        env["WA_BRIDGE_PORT"] = "3001"
-        env["PYTHON_WEBHOOK_URL"] = env.get(
-            "PYTHON_WEBHOOK_URL",
-            f"http://127.0.0.1:{os.environ.get('PORT', '5000')}/api/v1/webhooks/whatsapp"
-        )
-        try:
-            log_path = os.path.join(root_dir, "wa_bridge.log")
-            log_out = open(log_path, "a", encoding="utf-8")
-            _wa_bridge_proc = subprocess.Popen(
-                [node_bin, bridge_script],
-                cwd=root_dir,
-                env=env,
-                stdout=log_out,
-                stderr=log_out
-            )
-            if app_ref:
-                app_ref.logger.info(f"[WhatsApp Bridge] Subprocess spawned successfully (PID: {_wa_bridge_proc.pid}) on port 3001")
-        except Exception as e:
-            if app_ref:
-                app_ref.logger.error(f"[WhatsApp Bridge] Failed to spawn wa_bridge.js: {e}")
+    try:
+        from wa_bridge_manager import ensure_wa_bridge_running
+        ensure_wa_bridge_running(timeout_seconds=5.0)
+    except Exception as e:
+        if app_ref:
+            app_ref.logger.warning(f"[WhatsApp Bridge] Failed to start bridge subprocess: {e}")
 
 
 # Auto-seed sample audit logs on startup if empty
@@ -528,30 +479,38 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/api/whatsapp/bridge-qr", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-qr", methods=["GET"])
     def route_whatsapp_bridge_qr():
-        """Returns the Baileys bridge QR code and pairing status for web dashboard scanning."""
+        """Returns the Baileys bridge QR code and pairing status for web dashboard scanning.
+        Checks if port 3001 is reachable; if not, automatically runs npm install (if node_modules is missing)
+        and spawns `node wa_bridge.js` using subprocess.Popen, waiting up to 5 seconds for port 3001 to come online.
+        """
+        try:
+            from wa_bridge_manager import ensure_wa_bridge_running
+            ensure_wa_bridge_running(timeout_seconds=5.0)
+        except Exception as _bridge_err:
+            application.logger.warning(f"[WhatsApp Bridge] ensure_wa_bridge_running notice: {_bridge_err}")
+
         bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://127.0.0.1:3001/qr")
-        for attempt in range(2):
-            try:
-                resp = requests.get(bridge_url, timeout=2.5)
-                data = resp.json() if resp.text else {}
-                return jsonify(data), resp.status_code
-            except Exception as e:
-                if attempt == 0:
-                    start_wa_bridge_subprocess(application)
-                    import time
-                    time.sleep(1.2)
-                    continue
-                return jsonify({
-                    "status": "offline",
-                    "connected": False,
-                    "message": f"WhatsApp Baileys bridge starting up on port 3001 ({str(e)})... Please wait a moment."
-                }), 503
+        try:
+            resp = requests.get(bridge_url, timeout=3.5)
+            data = resp.json() if resp.text else {}
+            return jsonify(data), resp.status_code
+        except Exception as e:
+            return jsonify({
+                "status": "offline",
+                "connected": False,
+                "message": f"WhatsApp Baileys bridge starting up on port 3001 ({str(e)})... Please wait a moment."
+            }), 503
 
     @application.route("/api/whatsapp/bridge-status", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-status", methods=["GET"])
     def route_whatsapp_bridge_status():
         """Returns the Baileys bridge live connection status."""
-        bridge_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://localhost:3001/status")
+        try:
+            from wa_bridge_manager import ensure_wa_bridge_running
+            ensure_wa_bridge_running(timeout_seconds=2.0)
+        except Exception:
+            pass
+        bridge_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://127.0.0.1:3001/status")
         try:
             resp = requests.get(bridge_url, timeout=3.0)
             data = resp.json() if resp.text else {}
