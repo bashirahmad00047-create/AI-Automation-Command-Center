@@ -68,33 +68,32 @@ def start_wa_bridge_subprocess(app_ref=None):
         if not os.path.exists(bridge_script):
             return
 
-        # Ensure npm packages exist
-        node_modules = os.path.join(root_dir, "node_modules")
-        package_json = os.path.join(root_dir, "package.json")
-        if os.path.exists(package_json) and not os.path.exists(node_modules):
-            npm_bin = shutil.which("npm") or "npm"
-            try:
-                if app_ref:
-                    app_ref.logger.info(f"[WhatsApp Bridge] Installing npm dependencies using {npm_bin}...")
-                subprocess.run([npm_bin, "install"], cwd=root_dir, check=True, timeout=120)
-            except Exception as e:
-                if app_ref:
-                    app_ref.logger.warning(f"[WhatsApp Bridge] npm install notice: {e}")
+        # Ensure node and npm exist in environment
+        try:
+            from install_node import ensure_node_installed, install_npm_packages
+            ensure_node_installed()
+            install_npm_packages()
+        except Exception as _node_setup_err:
+            if app_ref:
+                app_ref.logger.warning(f"[WhatsApp Bridge] Node provisioner note: {_node_setup_err}")
 
-        node_bin = shutil.which("node") or "node"
+        node_bin = shutil.which("node") or os.path.join(os.path.dirname(sys.executable), "node") or "node"
         env = os.environ.copy()
         env["PORT"] = "3001"
+        env["WA_BRIDGE_PORT"] = "3001"
         env["PYTHON_WEBHOOK_URL"] = env.get(
             "PYTHON_WEBHOOK_URL",
-            f"http://localhost:{os.environ.get('PORT', '5000')}/api/v1/webhooks/whatsapp"
+            f"http://127.0.0.1:{os.environ.get('PORT', '5000')}/api/v1/webhooks/whatsapp"
         )
         try:
+            log_path = os.path.join(root_dir, "wa_bridge.log")
+            log_out = open(log_path, "a", encoding="utf-8")
             _wa_bridge_proc = subprocess.Popen(
                 [node_bin, bridge_script],
                 cwd=root_dir,
                 env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stdout=log_out,
+                stderr=log_out
             )
             if app_ref:
                 app_ref.logger.info(f"[WhatsApp Bridge] Subprocess spawned successfully (PID: {_wa_bridge_proc.pid}) on port 3001")
@@ -530,17 +529,23 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/api/v1/whatsapp/bridge-qr", methods=["GET"])
     def route_whatsapp_bridge_qr():
         """Returns the Baileys bridge QR code and pairing status for web dashboard scanning."""
-        bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://localhost:3001/qr")
-        try:
-            resp = requests.get(bridge_url, timeout=3.0)
-            data = resp.json() if resp.text else {}
-            return jsonify(data), resp.status_code
-        except Exception as e:
-            return jsonify({
-                "status": "offline",
-                "connected": False,
-                "message": f"WhatsApp Baileys bridge starting up or offline on port 3001 ({str(e)})"
-            }), 503
+        bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://127.0.0.1:3001/qr")
+        for attempt in range(2):
+            try:
+                resp = requests.get(bridge_url, timeout=2.5)
+                data = resp.json() if resp.text else {}
+                return jsonify(data), resp.status_code
+            except Exception as e:
+                if attempt == 0:
+                    start_wa_bridge_subprocess(application)
+                    import time
+                    time.sleep(1.2)
+                    continue
+                return jsonify({
+                    "status": "offline",
+                    "connected": False,
+                    "message": f"WhatsApp Baileys bridge starting up on port 3001 ({str(e)})... Please wait a moment."
+                }), 503
 
     @application.route("/api/whatsapp/bridge-status", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-status", methods=["GET"])

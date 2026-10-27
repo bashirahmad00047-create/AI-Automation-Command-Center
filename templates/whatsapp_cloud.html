@@ -17,6 +17,9 @@
                     </p>
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <button type="button" class="hud-btn primary small" id="btnLinkWhatsAppQr" onclick="openLinkWhatsAppQrModal()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 10px rgba(16, 185, 129, 0.35); cursor: pointer;">
+                        <span>📱</span> Link WhatsApp QR
+                    </button>
                     <div class="hud-btn-group" style="display: inline-flex; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; background: rgba(0,0,0,0.25);">
                         <button type="button" class="hud-btn small active" id="btnViewWaWeb" onclick="setWhatsAppViewMode('web')" style="border: none; border-radius: 0; padding: 5px 12px; font-size: 11px;">💬 WhatsApp Web</button>
                         <button type="button" class="hud-btn small" id="btnViewWaClassic" onclick="setWhatsAppViewMode('classic')" style="border: none; border-radius: 0; padding: 5px 12px; font-size: 11px;">⚙️ Gateway &amp; Audit</button>
@@ -37,8 +40,11 @@
                         </div>
                     </div>
                 </div>
-                <div id="whatsappBannerAction">
-                    <button type="button" class="hud-btn primary small" onclick="openWhatsAppConnectGuide()">Connect WhatsApp</button>
+                <div id="whatsappBannerAction" style="display: flex; gap: 8px;">
+                    <button type="button" class="hud-btn primary small" onclick="openLinkWhatsAppQrModal()" style="background: #10b981; font-weight: 700; color: #fff;">
+                        <span>📱</span> Link WhatsApp QR
+                    </button>
+                    <button type="button" class="hud-btn outline small" onclick="openWhatsAppConnectGuide()">Connect Guide</button>
                 </div>
             </div>
 

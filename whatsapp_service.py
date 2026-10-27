@@ -6710,7 +6710,7 @@ class WhatsAppService:
         # Exclusively dispatch via local Baileys bridge (never calls Green API)
         bridge_chat_id = chat_id or real_chat_id
         bridge_message = message_text or ""
-        bridge_url = os.environ.get("BAILEYS_BRIDGE_URL", "http://localhost:3001/send-message")
+        bridge_url = os.environ.get("BAILEYS_BRIDGE_URL", "http://127.0.0.1:3001/send-message")
         bridge_timeout = float(os.environ.get("BAILEYS_BRIDGE_TIMEOUT", "5.0"))
         try:
             with cls.get_http_session(retries=1) as session:
@@ -6794,120 +6794,6 @@ class WhatsAppService:
                 "recipient": clean_to,
                 "chat_id": real_chat_id,
                 "message_record_id": record.id if record else None
-            }
-        except requests.exceptions.ReadTimeout:
-            err_msg = f"Read timeout: Green-API server did not respond within {timeouts[1]}s."
-            logger.warning(f"Green-API send read timeout: {err_msg}")
-            if allow_fallback and cls.is_simulator_fallback_enabled():
-                logger.info(f"Triggering WhatsApp simulator fallback for {clean_to} due to read timeout.")
-                return cls.dispatch_simulator_message(
-                    organization_id=organization_id,
-                    to_phone=clean_to,
-                    message_text=message_text,
-                    execution_id=execution_id,
-                    fallback_reason=err_msg
-                )
-            cls.record_message(
-                organization_id=organization_id,
-                sender=f"GreenAPI Instance {id_inst}",
-                recipient=clean_to,
-                direction="outbound",
-                body=message_text,
-                status="timeout",
-                execution_id=execution_id,
-                error_message=err_msg
-            )
-            return {
-                "success": False,
-                "status": "timeout",
-                "provider": "green_api",
-                "error": err_msg,
-                "recipient": clean_to
-            }
-        except requests.exceptions.ConnectionError as ce:
-            err_msg = f"Network connection error: Unable to reach Green-API host ({str(ce)})."
-            logger.warning(f"Green-API send connection error: {err_msg}")
-            if allow_fallback and cls.is_simulator_fallback_enabled():
-                logger.info(f"Triggering WhatsApp simulator fallback for {clean_to} due to network connection error.")
-                return cls.dispatch_simulator_message(
-                    organization_id=organization_id,
-                    to_phone=clean_to,
-                    message_text=message_text,
-                    execution_id=execution_id,
-                    fallback_reason=err_msg
-                )
-            cls.record_message(
-                organization_id=organization_id,
-                sender=f"GreenAPI Instance {id_inst}",
-                recipient=clean_to,
-                direction="outbound",
-                body=message_text,
-                status="connection_error",
-                execution_id=execution_id,
-                error_message=err_msg
-            )
-            return {
-                "success": False,
-                "status": "connection_error",
-                "provider": "green_api",
-                "error": err_msg,
-                "recipient": clean_to
-            }
-        except requests.exceptions.RequestException as re:
-            err_msg = f"HTTP request error: {str(re)}"
-            logger.error(f"Green-API send request error: {err_msg}")
-            if allow_fallback and cls.is_simulator_fallback_enabled():
-                return cls.dispatch_simulator_message(
-                    organization_id=organization_id,
-                    to_phone=clean_to,
-                    message_text=message_text,
-                    execution_id=execution_id,
-                    fallback_reason=err_msg
-                )
-            cls.record_message(
-                organization_id=organization_id,
-                sender=f"GreenAPI Instance {id_inst}",
-                recipient=clean_to,
-                direction="outbound",
-                body=message_text,
-                status="failed",
-                execution_id=execution_id,
-                error_message=err_msg
-            )
-            return {
-                "success": False,
-                "status": "failed",
-                "provider": "green_api",
-                "error": err_msg,
-                "recipient": clean_to
-            }
-        except Exception as e:
-            err_msg = str(e)
-            logger.error(f"Unexpected error in Green-API send: {err_msg}")
-            if allow_fallback and cls.is_simulator_fallback_enabled():
-                return cls.dispatch_simulator_message(
-                    organization_id=organization_id,
-                    to_phone=clean_to,
-                    message_text=message_text,
-                    execution_id=execution_id,
-                    fallback_reason=err_msg
-                )
-            cls.record_message(
-                organization_id=organization_id,
-                sender=f"GreenAPI Instance {id_inst}",
-                recipient=clean_to,
-                direction="outbound",
-                body=message_text,
-                status="failed",
-                execution_id=execution_id,
-                error_message=err_msg
-            )
-            return {
-                "success": False,
-                "status": "failed",
-                "provider": "green_api",
-                "error": err_msg,
-                "recipient": clean_to
             }
 
     @classmethod
