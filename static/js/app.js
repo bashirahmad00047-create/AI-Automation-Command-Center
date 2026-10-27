@@ -6030,8 +6030,13 @@ async function loadWhatsAppDashboard() {
         const currentMode = window._waCurrentViewMode || 'web';
         const sidebarStatus = document.getElementById('waSidebarStatus');
         if (sidebarStatus) {
-            if (activeProvider === 'green_api') {
-                sidebarStatus.textContent = '● Green-API Online';
+            sidebarStatus.style.cursor = 'pointer';
+            sidebarStatus.title = 'Click to Link WhatsApp QR / View Status';
+            sidebarStatus.onclick = function() {
+                if (window.openLinkWhatsAppQrModal) window.openLinkWhatsAppQrModal();
+            };
+            if (activeProvider === 'green_api' || activeProvider === 'baileys_bridge') {
+                sidebarStatus.textContent = '● Live Sync Active';
                 sidebarStatus.style.color = '#00a884';
             } else if (activeProvider === 'meta') {
                 sidebarStatus.textContent = '● Meta Connected';
@@ -6041,13 +6046,20 @@ async function loadWhatsAppDashboard() {
                 sidebarStatus.style.color = '#00f0ff';
             } else {
                 sidebarStatus.textContent = '● Disconnected';
-                sidebarStatus.style.color = '#8696a0';
+                sidebarStatus.style.color = '#ef4444';
             }
         }
 
         const disconnectBtn = document.getElementById('waBtnDisconnect');
         if (disconnectBtn) {
-            disconnectBtn.style.display = (isConnected || window._waDemoMode) ? 'inline-flex' : 'none';
+            disconnectBtn.style.display = 'inline-flex';
+            disconnectBtn.style.cursor = 'pointer';
+            disconnectBtn.title = 'Link WhatsApp QR / Gateway Status';
+            disconnectBtn.onclick = function() {
+                if (window.openLinkWhatsAppQrModal) {
+                    window.openLinkWhatsAppQrModal();
+                }
+            };
         }
 
         // Apply clean view transition
