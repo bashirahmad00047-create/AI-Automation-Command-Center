@@ -906,21 +906,27 @@ class WhatsAppMessage(db.Model):
             if not v:
                 return ""
             s = str(v).strip()
+            # Preserve group JIDs intact — they are valid identifiers for group conversations
             if s.endswith("@g.us"):
                 return s
+            # Strip all known JID suffixes and device index ports
             for suf in ("@lid", "@s.whatsapp.net", "@c.us"):
                 if s.lower().endswith(suf):
                     s = s[:-len(suf)]
             s = s.split(":")[0]
             digits = "".join(filter(str.isdigit, s))
+            # Pakistani local number normalisation
             if digits.startswith("03") and len(digits) == 11:
                 digits = "92" + digits[1:]
             elif digits.startswith("3") and len(digits) == 10:
                 digits = "92" + digits
             elif digits.startswith("913") and len(digits) == 12:
+                # Strip erroneous +91 prefix from Pakistani 3xx mobile numbers
                 digits = "923" + digits[3:]
             elif digits.startswith("00"):
                 digits = digits[2:]
+            # Return clean digits if they look like a real phone number (>=7 digits);
+            # otherwise fall back to the raw stripped string so we don't lose data
             return digits if len(digits) >= 7 else s
 
         clean_sender = _clean_phone(self.sender)

@@ -1,3 +1,13 @@
+﻿
+function cleanPakistaniNumber(jid) {
+    if (!jid) return "";
+    let digits = jid.replace(/\D/g, "");
+    if (digits.startsWith("92") && digits.length === 12) {
+        return "0" + digits.slice(2);
+    }
+    return jid;
+}
+
 /**
  * WhatsApp Baileys Bridge (wa_bridge.js)
  * -------------------------------------------------------------
@@ -423,9 +433,9 @@ async function startWhatsAppBridge() {
               console.warn(`[Group Message] Skipping group message with no participant JID: ${remoteJid}`);
               continue;
             }
-            cleanSenderPhone = cleanPhoneNumber(participantJid);
+            cleanSenderPhone = cleanPhoneNumber(msg.key?.senderPn || msg.key?.participantPn || participantJid);
           } else {
-            cleanSenderPhone = cleanPhoneNumber(remoteJid);
+            cleanSenderPhone = cleanPhoneNumber(msg.key?.senderPn || msg.key?.participantPn || remoteJid);
           }
           const pushName = msg.pushName || cleanSenderPhone || 'WhatsApp User';
           const messageId = msg.key?.id || `msg_${Date.now()}`;
@@ -484,9 +494,9 @@ async function startWhatsAppBridge() {
             if (!text) text = unwrappedMsg.documentMessage.fileName || '[Document]';
           }
 
-          let audioMimeType = unwrappedMsg?.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
+          let audioMimeType = unwrappedMsg?.audioMessage?.mimetype || 'audio/mp4';
           if (isVoice && !audioMimeType.includes('codecs=opus')) {
-            audioMimeType = 'audio/ogg; codecs=opus';
+            audioMimeType = 'audio/mp4';
           }
 
           // Extract quoted parent message context if present
@@ -608,7 +618,7 @@ async function startWhatsAppBridge() {
               const autoRejectMessage =
                 process.env.CALL_REJECT_MESSAGE ||
                 "Assalamu Alaikum! Direct phone calls to this number are automated.\n\n" +
-                "🎙️ Please send a voice note directly in this chat, or join our Live AI Voice Call on our dashboard:\n" +
+                "ðŸŽ™ï¸ Please send a voice note directly in this chat, or join our Live AI Voice Call on our dashboard:\n" +
                 (process.env.LIVE_VOICE_CALL_URL || "http://localhost:5000/#live-voice-call");
 
               if (sock && isConnected) {
@@ -842,10 +852,10 @@ app.post('/send-message', async (req, res, next) => {
 
     try {
       if (hasAudio) {
-        const ptt = req.body?.ptt !== false && req.body?.is_voice !== false;
-        let mimetype = req.body?.mimetype || req.body?.mime_type || 'audio/ogg; codecs=opus';
+        const ptt = false;
+        let mimetype = req.body?.mimetype || req.body?.mime_type || 'audio/mp4';
         if (ptt && !mimetype.includes('codecs=opus') && mimetype.includes('ogg')) {
-          mimetype = 'audio/ogg; codecs=opus';
+          mimetype = 'audio/mp4';
         }
 
         if (audioRaw) {
@@ -941,3 +951,4 @@ server.on('error', (err) => {
     console.error('[Bridge Server] Server error:', err);
   }
 });
+
