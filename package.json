@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node wa_bridge.js",
     "bridge": "node wa_bridge.js",
+    "dev": "node wa_bridge.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
