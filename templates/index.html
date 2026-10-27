@@ -929,7 +929,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                         </div>
                         <div style="margin-top: 6px; font-size: 12px; color: #8696a0; display: flex; align-items: center; gap: 6px;">
                             <span>💡</span>
-                            <span>Supports instant QR linking via Green-API and official Meta Cloud API WABA webhooks.</span>
+                            <span>Instant QR linking via high-speed Baileys Cloud Bridge with zero API costs.</span>
                         </div>
                     </div>
                 </div>
@@ -937,7 +937,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 <!-- Right Pane: Authentic QR Code Frame -->
                 <div class="wa-connect-right">
                     <div class="wa-qr-box" id="waQrBox">
-                        <img id="waDynamicQrImg" src="" alt="WhatsApp QR Code" style="display: none; width: 250px; height: 250px; object-fit: contain; border-radius: 8px;" />
+                        <img id="waDynamicQrImg" src="" alt="WhatsApp QR Code" style="display: none; max-width: 220px; width: 220px; height: 220px; object-fit: contain; border-radius: 8px; margin: 0 auto;" />
                         <div id="waStaticQrPlaceholder" style="width: 250px; height: 250px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative;">
                             <!-- Authentic SVG QR Code Representation -->
                             <svg viewBox="0 0 200 200" width="230" height="230" style="shape-rendering: crispEdges;">
@@ -1187,14 +1187,14 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                             </div>
                         </div>
 
-                        <!-- Dedicated Green-API Webhook Callback URL -->
+                        <!-- Dedicated WhatsApp Baileys Webhook Callback URL -->
                         <div>
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                                <label style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600;">Green-API Webhook URL (Production Ready)</label>
+                                <label style="font-size: 11px; color: var(--text-dim, #888); text-transform: uppercase; font-weight: 600;">WhatsApp Baileys Webhook URL (Production Ready)</label>
                                 <span style="font-size: 11px; color: #10b981; font-weight: 600;">● Ready</span>
                             </div>
                             <div style="display: flex; gap: 6px;">
-                                <input type="text" id="waGreenWebhookUrlInput" class="hud-input" readonly value="/api/v1/webhooks/whatsapp/green-api" style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px;">
+                                <input type="text" id="waGreenWebhookUrlInput" class="hud-input" readonly value="/api/v1/webhooks/whatsapp" style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px;">
                                 <button type="button" class="hud-btn small outline" onclick="copyGreenApiWebhookUrl()">Copy</button>
                             </div>
                         </div>
@@ -2316,7 +2316,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                         <span style="font-size: 24px;">💬</span>
                         <div>
                             <h3 style="margin: 0; font-size: 1.1rem; color: #c084fc;">Multi-Tenant WhatsApp Gateways &amp; Instance Routing</h3>
-                            <span style="font-size: 11px; color: var(--text-secondary);">Route incoming WhatsApp phone numbers and Green-API instance IDs to dedicated workspaces</span>
+                            <span style="font-size: 11px; color: var(--text-secondary);">Route incoming WhatsApp phone numbers and bridge instance IDs to dedicated workspaces</span>
                         </div>
                     </div>
                     <div class="hud-flex-row hud-gap-sm">

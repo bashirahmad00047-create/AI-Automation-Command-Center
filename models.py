@@ -858,6 +858,20 @@ class WhatsAppMessage(db.Model):
                 raw = json.loads(self.raw_payload_json)
                 if isinstance(raw, dict):
                     sender_name = raw.get("senderName") or raw.get("senderContactName")
+                    # Robust media URL and audio base64 resolution
+                    audio_b64 = (
+                        raw.get("audio_base64") or
+                        raw.get("audioBase64") or
+                        (raw.get("fileMessageData", {}).get("audioBase64") if isinstance(raw.get("fileMessageData"), dict) else None) or
+                        (raw.get("raw", {}).get("audio_base64") if isinstance(raw.get("raw"), dict) else None)
+                    )
+                    mime_type = (
+                        (raw.get("fileMessageData", {}).get("mimeType") if isinstance(raw.get("fileMessageData"), dict) else None) or
+                        raw.get("mimetype") or
+                        raw.get("mime_type") or
+                        "audio/ogg; codecs=opus"
+                    )
+
                     media_url = (
                         raw.get("download_url") or
                         raw.get("downloadUrl") or
@@ -868,6 +882,9 @@ class WhatsAppMessage(db.Model):
                         (raw.get("raw", {}).get("messageData", {}).get("fileMessageData", {}).get("downloadUrl") if isinstance(raw.get("raw"), dict) and isinstance(raw.get("raw", {}).get("messageData"), dict) else None) or
                         (raw.get("raw", {}).get("downloadUrl") if isinstance(raw.get("raw"), dict) else None)
                     )
+                    if not media_url and audio_b64:
+                        clean_b64 = str(audio_b64).split(",")[-1].strip()
+                        media_url = f"data:{mime_type};base64,{clean_b64}"
                     duration = (
                         raw.get("audioMessageData", {}).get("duration") or
                         raw.get("duration")
@@ -896,6 +913,14 @@ class WhatsAppMessage(db.Model):
                     s = s[:-len(suf)]
             s = s.split(":")[0]
             digits = "".join(filter(str.isdigit, s))
+            if digits.startswith("03") and len(digits) == 11:
+                digits = "92" + digits[1:]
+            elif digits.startswith("3") and len(digits) == 10:
+                digits = "92" + digits
+            elif digits.startswith("913") and len(digits) == 12:
+                digits = "923" + digits[3:]
+            elif digits.startswith("00"):
+                digits = digits[2:]
             return digits if len(digits) >= 7 else s
 
         clean_sender = _clean_phone(self.sender)
