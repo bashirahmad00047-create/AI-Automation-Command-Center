@@ -170,7 +170,7 @@ function normalizeJid(chatId) {
   if (!chatId) return '';
   let jid = String(chatId).trim();
 
-  if (jid.endsWith('@g.us') || jid.endsWith('@broadcast')) {
+  if (jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.endsWith('@lid')) {
     return jid;
   }
   // Strip all protocol suffixes and device ports (:0, :1, @c.us, @lid, @s.whatsapp.net)
@@ -435,7 +435,7 @@ async function startWhatsAppBridge() {
             }
             cleanSenderPhone = cleanPhoneNumber(msg.key?.senderPn || msg.key?.participantPn || participantJid);
           } else {
-            cleanSenderPhone = cleanPhoneNumber(msg.key?.senderPn || msg.key?.participantPn || remoteJid);
+            const ownPhone = sock?.user?.id ? sock.user.id.split(':')[0] : ''; const ownLid = sock?.user?.lid ? sock.user.lid.split(':')[0].split('@')[0] : ''; const remClean = remoteJid.split(':')[0].split('@')[0]; const resolvedJid = (remoteJid.endsWith('@lid') && ownPhone && (!ownLid || remClean === ownLid)) ? ownPhone : (msg.key?.senderPn || msg.key?.participantPn || remoteJid); cleanSenderPhone = cleanPhoneNumber(resolvedJid);
           }
           const pushName = msg.pushName || cleanSenderPhone || 'WhatsApp User';
           const messageId = msg.key?.id || `msg_${Date.now()}`;
@@ -951,4 +951,5 @@ server.on('error', (err) => {
     console.error('[Bridge Server] Server error:', err);
   }
 });
+
 
