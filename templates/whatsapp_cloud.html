@@ -280,12 +280,17 @@
                         <button type="button" class="wa-icon-btn" id="waEmojiToggleBtn" onclick="toggleEmojiTray()" title="Insert Emoji">😊</button>
                         <button type="button" class="wa-icon-btn" id="waTemplateToggleBtn" onclick="toggleTemplatesTray()" title="Quick Reply Templates">📎</button>
 
-                        <div style="flex: 1;">
+                        <div style="flex: 1; position: relative;">
                             <textarea id="waReplyInput" class="wa-reply-input" rows="1" placeholder="Type a message (Press Enter to send, Shift+Enter for newline)..." onkeydown="handleWaReplyKeydown(event)"></textarea>
+                            <div id="waRecordingIndicator" style="display: none; position: absolute; inset: 0; background: #202c33; border-radius: 8px; align-items: center; padding: 0 14px; gap: 10px; color: #ef4444; font-size: 13px; font-weight: 600;">
+                                <span>🔴 Recording Voice Note...</span>
+                                <span id="waRecordingTimer" style="color: #cbd5e1; font-family: monospace;">00:00</span>
+                                <button type="button" onclick="cancelVoiceRecording()" style="margin-left: auto; background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 12px;">Cancel</button>
+                            </div>
                         </div>
 
-                        <!-- Voice Note Dispatch Button -->
-                        <button type="button" class="wa-icon-btn" id="waVoiceNoteBtn" title="Send Voice Note" onclick="promptSendVoiceNote()" style="color: #00a884; font-size: 18px;">🎙️</button>
+                        <!-- Voice Note Dispatch Button (MediaRecorder API) -->
+                        <button type="button" class="wa-icon-btn" id="waVoiceNoteBtn" title="Record Voice Note" onclick="toggleVoiceRecording()" style="color: #00a884; font-size: 18px; cursor: pointer;">🎙️</button>
 
                         <!-- AI Voice Call Button -->
                         <button type="button" class="wa-icon-btn" id="waAiVoiceCallBtn" title="AI Voice Call" onclick="openLiveVoiceCallModal()" style="color: #10b981; font-size: 18px; margin: 0 4px; cursor: pointer;" aria-label="AI Voice Call">🎤</button>

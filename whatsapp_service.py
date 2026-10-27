@@ -4098,15 +4098,25 @@ class WhatsAppService:
                 logger.warning(f"Image ingress vision analysis notice: {img_err}")
 
         # Check if incoming message is an audio / voice note message (.oga, audioMessage, etc.)
-        if is_voice_inbound and (not clean_body or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]") or body_clean_str.startswith(("[voice", "[audio", "[ptt"))):
+        if is_voice_inbound and (not clean_body or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]", "(no text)") or body_clean_str.startswith(("[voice", "[audio", "[ptt"))):
             try:
-                logger.info(f"Downloading incoming voice note for {clean_phone} (message_id={message_id})...")
-                audio_bytes = cls._download_media(
-                    chat_id=sender_phone,
-                    message_id=message_id,
-                    download_url=download_url,
-                    organization_id=org_id
-                )
+                audio_bytes = kwargs.get("audio_bytes")
+                audio_b64 = kwargs.get("audio_base64")
+                if not audio_bytes and audio_b64:
+                    import base64
+                    clean_b64 = str(audio_b64).split(",")[-1]
+                    try:
+                        audio_bytes = base64.b64decode(clean_b64)
+                    except Exception:
+                        pass
+                if not audio_bytes:
+                    logger.info(f"Downloading incoming voice note for {clean_phone} (message_id={message_id})...")
+                    audio_bytes = cls._download_media(
+                        chat_id=sender_phone,
+                        message_id=message_id,
+                        download_url=download_url,
+                        organization_id=org_id
+                    )
                 if audio_bytes:
                     transcript = cls._transcribe_audio(audio_bytes, organization_id=org_id, timeout=8.0)
                     if transcript and transcript.strip():
@@ -4121,7 +4131,7 @@ class WhatsAppService:
                                     whatsapp_message_id=message_id
                                 ).first()
                                 if rec_obj:
-                                    rec_obj.body = message_body
+                                    rec_obj.body = f"🎙️ {message_body}"
                                     db.session.commit()
                             except Exception:
                                 pass
@@ -4574,14 +4584,23 @@ class WhatsAppService:
 
     @classmethod
     def format_phone_number(cls, phone: str) -> str:
-        """Formats phone number to international E.164 digits, handling Pakistani local numbers automatically."""
-        clean = "".join(filter(str.isdigit, str(phone or "")))
+        """Formats phone number to international E.164 digits, stripping @lid, @s.whatsapp.net, @c.us,
+        and device indices like :0 or :1, handling Pakistani local numbers automatically.
+        """
+        raw = str(phone or "").strip()
+        if raw.endswith("@g.us"):
+            return raw
+        for suf in ("@lid", "@s.whatsapp.net", "@c.us"):
+            if raw.lower().endswith(suf):
+                raw = raw[:-len(suf)]
+        raw = raw.split(":")[0]
+        clean = "".join(filter(str.isdigit, raw))
         # Handle Pakistani local formats like 03001234567 -> 923001234567
         if clean.startswith("03") and len(clean) == 11:
             return "92" + clean[1:]
         if clean.startswith("00"):
             return clean[2:]
-        return clean
+        return clean or raw
 
     @classmethod
     def format_phone_display(cls, phone: str) -> str:
@@ -5291,7 +5310,14 @@ class WhatsAppService:
             or data.get("from")
             or ""
         )
-        from_phone = chat_id.replace("@c.us", "").replace("@g.us", "")
+        raw_phone = (
+            data.get("from_phone")
+            or data.get("from")
+            or sender_data.get("sender")
+            or sender_data.get("chatId")
+            or chat_id
+        )
+        from_phone = cls.format_phone_number(raw_phone)
         sender_name = (
             sender_data.get("senderName")
             or sender_data.get("chatName")
@@ -5344,9 +5370,10 @@ class WhatsAppService:
         if not parent_msg_id and isinstance(data, dict):
             parent_msg_id = data.get("parent_msg_id") or data.get("parent_message_id")
 
-        # Extract direct download URL if present (avoids extra /downloadFile/ API calls)
+        # Extract direct download URL or embedded base64 audio if present
         file_data = message_data.get("fileMessageData", {}) if isinstance(message_data, dict) else {}
         download_url = ""
+        audio_base64 = data.get("audio_base64") or (file_data.get("audioBase64") if isinstance(file_data, dict) else None)
         if isinstance(file_data, dict):
             download_url = file_data.get("downloadUrl", "") or file_data.get("urlFile", "")
         if not download_url:
@@ -5386,6 +5413,7 @@ class WhatsAppService:
             "body": body,
             "parent_msg_id": parent_msg_id,
             "download_url": download_url,
+            "audio_base64": audio_base64,
             "location": location_info,
             "provider": "green_api",
             "raw": data

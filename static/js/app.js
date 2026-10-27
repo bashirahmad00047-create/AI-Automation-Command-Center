@@ -5102,13 +5102,15 @@ async function syncWhatsAppMessagesNow(silent = false) {
 
 function normalizeWaPhone(phone) {
     if (!phone) return '';
-    let clean = String(phone).replace(/@c\.us|@g\.us/g, '').replace(/[^0-9]/g, '');
+    let raw = String(phone).replace(/@lid|@s\.whatsapp\.net|@c\.us/gi, '').split(':')[0].trim();
+    if (raw.endsWith('@g.us')) return raw;
+    let clean = raw.replace(/[^0-9]/g, '');
     if (clean.startsWith('03') && clean.length === 11) {
         clean = '92' + clean.slice(1);
     } else if (clean.startsWith('00')) {
         clean = clean.slice(2);
     }
-    return clean || String(phone).replace(/@c\.us|@g\.us/g, '').trim();
+    return clean || raw;
 }
 
 function isSameWaPhone(p1, p2) {
@@ -5128,7 +5130,10 @@ function groupWhatsAppConversations(messages) {
         const isInbound = m.direction === 'inbound';
         const rawPartner = isInbound ? m.sender : m.recipient;
         const normKey = normalizeWaPhone(rawPartner) || 'Unknown';
-        const displayPhone = (rawPartner || '').replace(/@c\.us|@g\.us/g, '').trim() || normKey;
+        let displayPhone = String(rawPartner || '').replace(/@lid|@s\.whatsapp\.net|@c\.us/gi, '').split(':')[0].trim() || normKey;
+        if (!displayPhone.includes('@g.us') && displayPhone.length >= 10 && !displayPhone.startsWith('+')) {
+            displayPhone = '+' + displayPhone;
+        }
 
         if (!map[normKey]) {
             let initialMsg = m.body || (m.is_audio ? '🎙️ Voice note' : '(no text)');
@@ -5551,7 +5556,168 @@ function insertTemplateReply(text) {
     toggleTemplatesTray();
 }
 
-function promptSendVoiceNote() {
+let mediaRecorderInstance = null;
+let recordedAudioChunks = [];
+let voiceRecordingInterval = null;
+let voiceRecordingSeconds = 0;
+
+async function startVoiceRecording() {
+    if (!waActiveChatPartner) {
+        showToast('Please select a conversation from the sidebar first', 'info');
+        return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        fallbackPromptVoiceNote();
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recordedAudioChunks = [];
+        
+        let options = { mimeType: 'audio/webm;codecs=opus' };
+        if (!window.MediaRecorder || !MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            if (window.MediaRecorder && MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+                options = { mimeType: 'audio/ogg;codecs=opus' };
+            } else if (window.MediaRecorder && MediaRecorder.isTypeSupported('audio/mp4')) {
+                options = { mimeType: 'audio/mp4' };
+            } else {
+                options = {};
+            }
+        }
+
+        mediaRecorderInstance = new MediaRecorder(stream, options);
+
+        mediaRecorderInstance.ondataavailable = function(e) {
+            if (e.data && e.data.size > 0) {
+                recordedAudioChunks.push(e.data);
+            }
+        };
+
+        mediaRecorderInstance.onstop = async function() {
+            try {
+                stream.getTracks().forEach(t => t.stop());
+            } catch (_) {}
+
+            if (recordedAudioChunks.length === 0) return;
+
+            const mime = mediaRecorderInstance.mimeType || 'audio/webm';
+            const audioBlob = new Blob(recordedAudioChunks, { type: mime });
+
+            const reader = new FileReader();
+            reader.onloadend = async function() {
+                const base64DataUri = reader.result;
+                if (!base64DataUri) return;
+
+                showToast('Dispatching recorded Voice Note to WhatsApp...', 'info');
+
+                try {
+                    const recipient = waActiveChatPartner;
+                    const res = await fetch('/api/whatsapp/send', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            to: recipient,
+                            message: '[Voice note]',
+                            is_voice: true,
+                            audio_base64: base64DataUri
+                        })
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.success) {
+                        showToast(`Voice Note delivered to ${recipient}`, 'success');
+                        syncWhatsAppMessagesNow(true).catch(() => {});
+                    } else {
+                        showToast(data.error || 'Failed to dispatch voice note', 'error');
+                    }
+                } catch (err) {
+                    showToast('Failed to dispatch voice note: ' + err.message, 'error');
+                }
+            };
+            reader.readAsDataURL(audioBlob);
+        };
+
+        mediaRecorderInstance.start(250);
+        voiceRecordingSeconds = 0;
+
+        const voiceBtn = document.getElementById('waVoiceNoteBtn');
+        const recIndicator = document.getElementById('waRecordingIndicator');
+        const timerElem = document.getElementById('waRecordingTimer');
+        const replyInput = document.getElementById('waReplyInput');
+
+        if (voiceBtn) {
+            voiceBtn.textContent = '⏹️';
+            voiceBtn.title = 'Stop & Send Voice Note';
+            voiceBtn.style.color = '#ef4444';
+        }
+        if (recIndicator) recIndicator.style.display = 'flex';
+        if (replyInput) replyInput.style.visibility = 'hidden';
+
+        clearInterval(voiceRecordingInterval);
+        voiceRecordingInterval = setInterval(() => {
+            voiceRecordingSeconds++;
+            const mins = String(Math.floor(voiceRecordingSeconds / 60)).padStart(2, '0');
+            const secs = String(voiceRecordingSeconds % 60).padStart(2, '0');
+            if (timerElem) timerElem.textContent = `${mins}:${secs}`;
+        }, 1000);
+
+    } catch (err) {
+        console.warn('[Microphone Access Error]', err);
+        showToast('Microphone access unavailable or denied. Using speech prompt fallback.', 'warning');
+        fallbackPromptVoiceNote();
+    }
+}
+
+function stopVoiceRecording() {
+    clearInterval(voiceRecordingInterval);
+    const voiceBtn = document.getElementById('waVoiceNoteBtn');
+    const recIndicator = document.getElementById('waRecordingIndicator');
+    const replyInput = document.getElementById('waReplyInput');
+
+    if (voiceBtn) {
+        voiceBtn.textContent = '🎙️';
+        voiceBtn.title = 'Record Voice Note';
+        voiceBtn.style.color = '#00a884';
+    }
+    if (recIndicator) recIndicator.style.display = 'none';
+    if (replyInput) replyInput.style.visibility = 'visible';
+
+    if (mediaRecorderInstance && mediaRecorderInstance.state !== 'inactive') {
+        try { mediaRecorderInstance.stop(); } catch (_) {}
+    }
+}
+
+function cancelVoiceRecording() {
+    clearInterval(voiceRecordingInterval);
+    const voiceBtn = document.getElementById('waVoiceNoteBtn');
+    const recIndicator = document.getElementById('waRecordingIndicator');
+    const replyInput = document.getElementById('waReplyInput');
+
+    if (voiceBtn) {
+        voiceBtn.textContent = '🎙️';
+        voiceBtn.title = 'Record Voice Note';
+        voiceBtn.style.color = '#00a884';
+    }
+    if (recIndicator) recIndicator.style.display = 'none';
+    if (replyInput) replyInput.style.visibility = 'visible';
+
+    if (mediaRecorderInstance) {
+        recordedAudioChunks = [];
+        try { mediaRecorderInstance.stop(); } catch (_) {}
+    }
+    showToast('Voice recording discarded', 'info');
+}
+
+function toggleVoiceRecording() {
+    if (mediaRecorderInstance && mediaRecorderInstance.state === 'recording') {
+        stopVoiceRecording();
+    } else {
+        startVoiceRecording();
+    }
+}
+
+function fallbackPromptVoiceNote() {
     if (!waActiveChatPartner) {
         showToast('Please select a conversation from the sidebar first', 'info');
         return;
@@ -5563,6 +5729,10 @@ function promptSendVoiceNote() {
         input.value = `[voiceMessage] ${text}`;
         sendWhatsAppReply();
     }
+}
+
+function promptSendVoiceNote() {
+    toggleVoiceRecording();
 }
 
 function simulateInboundVoiceNote() {
