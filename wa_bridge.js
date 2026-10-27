@@ -16,7 +16,8 @@ const {
   fetchLatestBaileysVersion
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
-const qrcode = require('qrcode-terminal');
+const qrcodeTerminal = require('qrcode-terminal');
+const QRCode = require('qrcode');
 const pino = require('pino');
 const path = require('path');
 const fs = require('fs');
@@ -30,6 +31,8 @@ const AUTH_DIR = process.env.AUTH_DIR || path.join(__dirname, 'baileys_auth');
 let sock = null;
 let isConnected = false;
 let currentQr = null;
+let currentQrDataUrl = null;
+let currentQrSvg = null;
 
 /**
  * Normalizes phone numbers / chat IDs to Baileys JID format.
@@ -105,15 +108,43 @@ async function startWhatsAppBridge() {
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    // Display QR code in terminal when generated
+    // Display QR code in terminal when generated & pre-generate data URL and SVG
     if (qr) {
       currentQr = qr;
       console.log('\n===============================================================');
       console.log('  SCAN THIS QR CODE IN WHATSAPP TO LINK FOR FREE');
       console.log('  Steps: WhatsApp -> Settings/Menu -> Linked Devices -> Link a Device');
       console.log('===============================================================');
-      qrcode.generate(qr, { small: true });
+      try {
+        qrcodeTerminal.generate(qr, { small: true });
+      } catch (tErr) {
+        // ignore terminal write error
+      }
       console.log('===============================================================\n');
+
+      // Pre-generate base64 PNG data URL for instantaneous browser rendering
+      QRCode.toDataURL(qr, {
+        errorCorrectionLevel: 'M',
+        type: 'image/png',
+        margin: 2,
+        width: 320,
+        color: { dark: '#000000', light: '#ffffff' }
+      }).then((url) => {
+        currentQrDataUrl = url;
+      }).catch((err) => {
+        console.error('[Bridge QR] Error generating QR Data URL:', err);
+      });
+
+      // Pre-generate SVG string
+      QRCode.toString(qr, {
+        type: 'svg',
+        margin: 2,
+        width: 320
+      }).then((svg) => {
+        currentQrSvg = svg;
+      }).catch((err) => {
+        console.error('[Bridge QR] Error generating QR SVG:', err);
+      });
     }
 
     if (connection === 'close') {
@@ -131,10 +162,14 @@ async function startWhatsAppBridge() {
       } else {
         console.error('[WhatsApp Bridge] Session logged out. Remove "baileys_auth" folder to generate a new QR.');
         currentQr = null;
+        currentQrDataUrl = null;
+        currentQrSvg = null;
       }
     } else if (connection === 'open') {
       isConnected = true;
       currentQr = null;
+      currentQrDataUrl = null;
+      currentQrSvg = null;
       const userPhone = sock.user?.id ? sock.user.id.split(':')[0] : 'Linked Number';
       console.log('\n===============================================================');
       console.log(` [WhatsApp Bridge] Connected successfully!`);
@@ -269,9 +304,9 @@ app.get(['/', '/status'], (req, res) => {
 });
 
 /**
- * QR Code status endpoint (for inspection if terminal is not visible)
+ * QR Code status endpoint (for inspection and live dashboard linking)
  */
-app.get('/qr', (req, res) => {
+app.get('/qr', async (req, res) => {
   if (isConnected) {
     return res.json({
       status: 'connected',
@@ -287,12 +322,81 @@ app.get('/qr', (req, res) => {
       message: 'QR code not generated yet or renewing.'
     });
   }
+
+  // Ensure currentQrDataUrl is ready
+  let dataUrl = currentQrDataUrl;
+  if (!dataUrl) {
+    try {
+      dataUrl = await QRCode.toDataURL(currentQr, {
+        errorCorrectionLevel: 'M',
+        type: 'image/png',
+        margin: 2,
+        width: 320,
+        color: { dark: '#000000', light: '#ffffff' }
+      });
+      currentQrDataUrl = dataUrl;
+    } catch (e) {
+      console.error('[Bridge QR] Inline data URL generation error:', e);
+    }
+  }
+
+  let svgData = currentQrSvg;
+  if (!svgData) {
+    try {
+      svgData = await QRCode.toString(currentQr, { type: 'svg', margin: 2, width: 320 });
+      currentQrSvg = svgData;
+    } catch (e) {
+      // ignore
+    }
+  }
+
   res.json({
     status: 'qr_ready',
     connected: false,
     qr: currentQr,
-    qrImageUrl: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(currentQr)}`
+    qrImageUrl: dataUrl || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(currentQr)}`,
+    qrSvg: svgData,
+    fallbackUrl: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(currentQr)}`
   });
+});
+
+/**
+ * Raw PNG QR image endpoint (serves live image/png stream directly)
+ */
+app.get(['/qr.png', '/qr-image'], async (req, res) => {
+  if (!currentQr) {
+    return res.status(404).send('QR code not ready yet.');
+  }
+  try {
+    const buffer = await QRCode.toBuffer(currentQr, {
+      errorCorrectionLevel: 'M',
+      type: 'png',
+      margin: 2,
+      width: 320
+    });
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).send('Error generating QR image buffer');
+  }
+});
+
+/**
+ * Raw SVG QR endpoint
+ */
+app.get('/qr.svg', async (req, res) => {
+  if (!currentQr) {
+    return res.status(404).send('QR code not ready yet.');
+  }
+  try {
+    const svg = await QRCode.toString(currentQr, { type: 'svg', margin: 2, width: 320 });
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.send(svg);
+  } catch (err) {
+    res.status(500).send('Error generating QR SVG');
+  }
 });
 
 /**

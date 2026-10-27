@@ -58,7 +58,8 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001) -> 
         # 2. Check and provision Node.js & npm packages if node_modules missing
         node_modules = os.path.join(root_dir, "node_modules")
         baileys_dir = os.path.join(node_modules, "@whiskeysockets", "baileys")
-        if not (os.path.exists(node_modules) and os.path.exists(baileys_dir)):
+        qrcode_dir = os.path.join(node_modules, "qrcode")
+        if not (os.path.exists(node_modules) and os.path.exists(baileys_dir) and os.path.exists(qrcode_dir)):
             logger.info("[WA Bridge] node_modules missing or incomplete. Running npm install...")
             try:
                 from install_node import ensure_node_installed, install_npm_packages
