@@ -1,55 +1,41 @@
-# syntax=docker/dockerfile:1
-# Production Dockerfile for OpsFlow Enterprise AI Automation SaaS
-
-FROM python:3.11-slim AS builder
-
-WORKDIR /install
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
-
-# Final runtime image
 FROM python:3.11-slim
+
+# Prevent Python from writing .pyc files and enable unbuffered output
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    PORT=5000 \
+    WA_BRIDGE_PORT=3001
 
 WORKDIR /app
 
-# Install runtime utilities
+# Install system dependencies, curl, and Node.js 20 LTS
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    gnupg \
+    build-essential \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copy installed python dependencies from builder
-COPY --from=builder /install /usr/local
+# Copy package manifests first for optimal layer caching
+COPY requirements.txt package.json package-lock.json* ./
 
-# Create non-root system user for security
-RUN groupadd -r opsflow && useradd -r -g opsflow -d /app -s /sbin/nologin opsflow
+# Install Python requirements and npm dependencies
+RUN pip install --no-cache-dir -r requirements.txt && \
+    npm install
 
 # Copy application source code
-COPY . /app
+COPY . .
 
-# Ensure proper permissions for database and storage directories
-RUN mkdir -p /app/automation_storage/logs /app/automation_storage/output \
-    && chown -R opsflow:opsflow /app
+# Ensure start.sh is executable
+RUN chmod +x start.sh
 
-USER opsflow
+# Expose web service port and WhatsApp bridge port
+EXPOSE 5000 3001
 
-# Environment variables
-ENV FLASK_ENV=production \
-    PYTHONUNBUFFERED=1 \
-    PORT=5000 \
-    DATABASE_URL=sqlite:////app/opsflow_saas.db
-
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:5000/api/v1/system/health || exit 1
-
-EXPOSE 5000
-
-# Start production WSGI server
-CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:app"]
+# Run entrypoint script
+CMD ["/bin/bash", "start.sh"]

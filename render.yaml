@@ -1,14 +1,12 @@
 services:
   - type: web
     name: ai-automation-command-center
-    runtime: python
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: free
-    buildCommand: bash render_build.sh
-    startCommand: gunicorn --config gunicorn.conf.py app:app
     healthCheckPath: /health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
       - key: FLASK_ENV
         value: production
       - key: FLASK_DEBUG
@@ -17,6 +15,8 @@ services:
         generateValue: true
       - key: WEB_CONCURRENCY
         value: "2"
+      - key: WA_BRIDGE_PORT
+        value: "3001"
       - key: GEMINI_API_KEY
         sync: false
       - key: GOOGLE_API_KEY

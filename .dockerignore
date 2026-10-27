@@ -1,0 +1,17 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+venv
+env
+node_modules
+baileys_auth
+.node
+wa_bridge.log
+.pytest_cache
+*.db
+*.sqlite3
