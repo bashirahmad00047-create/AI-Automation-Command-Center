@@ -100,7 +100,8 @@ def install_npm_packages():
     node_modules = os.path.join(root_dir, "node_modules")
     baileys_dir = os.path.join(node_modules, "@whiskeysockets", "baileys")
     express_dir = os.path.join(node_modules, "express")
-    if os.path.exists(baileys_dir) and os.path.exists(express_dir):
+    qrcode_dir = os.path.join(node_modules, "qrcode")
+    if os.path.exists(baileys_dir) and os.path.exists(express_dir) and os.path.exists(qrcode_dir):
         print("[Node Provisioner] Node modules already present. Skipping npm install.", flush=True)
         return
 

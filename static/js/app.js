@@ -9875,11 +9875,47 @@ async function fetchBridgeQrCode(force) {
             return;
         }
 
-        if (data.status === 'qr_ready' && (data.qrImageUrl || data.qr)) {
-            const qrSrc = data.qrImageUrl || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(data.qr)}`;
-            if (qrImg) {
-                qrImg.src = qrSrc;
+        if (data.status === 'qr_ready' && (data.qrImageUrl || data.qrSvg || data.qr)) {
+            const svgContainer = document.getElementById('bridgeQrSvgContainer');
+
+            // 1. If base64 data URL is provided by local Node.js bridge, use it directly (100% offline, zero network requests)
+            if (data.qrImageUrl && data.qrImageUrl.startsWith('data:image/')) {
+                if (qrImg) {
+                    qrImg.style.display = 'block';
+                    qrImg.src = data.qrImageUrl;
+                }
+                if (svgContainer) svgContainer.style.display = 'none';
+            } else if (data.qrSvg) {
+                // 2. Direct vector SVG rendering
+                if (qrImg) qrImg.style.display = 'none';
+                if (svgContainer) {
+                    svgContainer.innerHTML = data.qrSvg;
+                    svgContainer.style.display = 'block';
+                }
+            } else {
+                // 3. Fallback to direct raw PNG proxy endpoint or fallback URL
+                const qrSrc = data.qrImageUrl || `/api/v1/whatsapp/bridge-qr.png?t=${Date.now()}` || (data.qr ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(data.qr)}` : '');
+                if (qrImg) {
+                    qrImg.style.display = 'block';
+                    qrImg.src = qrSrc;
+                }
+                if (svgContainer) svgContainer.style.display = 'none';
             }
+
+            if (qrImg) {
+                qrImg.onerror = function() {
+                    console.warn('[QR Image] Image loading error, applying SVG/provider fallback');
+                    if (data.qrSvg && svgContainer) {
+                        qrImg.style.display = 'none';
+                        svgContainer.innerHTML = data.qrSvg;
+                        svgContainer.style.display = 'block';
+                    } else if (data.qr) {
+                        qrImg.onerror = null;
+                        qrImg.src = `https://quickchart.io/qr?size=300&text=${encodeURIComponent(data.qr)}`;
+                    }
+                };
+            }
+
             if (spinner) spinner.style.display = 'none';
             if (connectedState) connectedState.style.display = 'none';
             if (imageWrapper) imageWrapper.style.display = 'block';

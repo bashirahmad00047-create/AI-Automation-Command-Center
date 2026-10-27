@@ -4729,8 +4729,9 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 </div>
 
                 <div id="qrImageWrapper" style="display: none;">
-                    <div style="background: #ffffff; padding: 12px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.4); margin-bottom: 14px;">
-                        <img id="bridgeQrImage" src="" alt="WhatsApp Link QR Code" style="width: 250px; height: 250px; display: block; object-fit: contain;" />
+                    <div style="background: #ffffff; padding: 12px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.4); margin-bottom: 14px; min-width: 250px; min-height: 250px;">
+                        <img id="bridgeQrImage" src="" alt="WhatsApp Link QR Code" style="width: 250px; height: 250px; display: block; object-fit: contain; margin: 0 auto;" />
+                        <div id="bridgeQrSvgContainer" style="display: none; width: 250px; height: 250px; margin: 0 auto;"></div>
                     </div>
                     <div style="font-size: 13px; color: #e2e8f0; font-weight: 600; margin-bottom: 4px;">
                         Open WhatsApp &gt; Linked Devices &gt; Link a Device

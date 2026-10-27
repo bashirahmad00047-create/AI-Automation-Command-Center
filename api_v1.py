@@ -2650,6 +2650,48 @@ def api_whatsapp_bridge_qr():
         }), 503
 
 
+@api_v1.route("/whatsapp/bridge-qr.png", methods=["GET"])
+def api_whatsapp_bridge_qr_png():
+    """Returns the raw PNG image of the WhatsApp Baileys bridge QR code."""
+    import requests
+    from flask import Response
+    try:
+        from wa_bridge_manager import ensure_wa_bridge_running
+        ensure_wa_bridge_running(timeout_seconds=5.0)
+    except Exception:
+        pass
+
+    bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_PNG_URL", "http://127.0.0.1:3001/qr.png")
+    try:
+        resp = requests.get(bridge_url, timeout=4.0)
+        if resp.status_code == 200:
+            return Response(resp.content, mimetype="image/png", headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+    except Exception as e:
+        logger.warning(f"[WA Bridge] qr.png proxy error: {e}")
+    return Response(b"", status=503)
+
+
+@api_v1.route("/whatsapp/bridge-qr.svg", methods=["GET"])
+def api_whatsapp_bridge_qr_svg():
+    """Returns the SVG vector of the WhatsApp Baileys bridge QR code."""
+    import requests
+    from flask import Response
+    try:
+        from wa_bridge_manager import ensure_wa_bridge_running
+        ensure_wa_bridge_running(timeout_seconds=5.0)
+    except Exception:
+        pass
+
+    bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_SVG_URL", "http://127.0.0.1:3001/qr.svg")
+    try:
+        resp = requests.get(bridge_url, timeout=4.0)
+        if resp.status_code == 200:
+            return Response(resp.content, mimetype="image/svg+xml", headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+    except Exception as e:
+        logger.warning(f"[WA Bridge] qr.svg proxy error: {e}")
+    return Response(b"", status=503)
+
+
 @api_v1.route("/whatsapp/bridge-status", methods=["GET"])
 def api_whatsapp_bridge_status():
     """Returns the Baileys bridge live connection status."""
