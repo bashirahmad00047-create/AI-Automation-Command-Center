@@ -525,10 +525,20 @@ app.get('/qr.svg', async (req, res) => {
  * POST /send-message
  * Body: { "chatId": "923001234567", "message": "Hello from Bridge!" }
  */
-app.post('/send-message', async (req, res) => {
+app.post('/send-message', async (req, res, next) => {
   try {
-    const chatId = req.body.chatId || req.body.to || req.body.phone;
-    const message = req.body.message || req.body.text || req.body.body;
+    let chatId = null;
+    let message = null;
+
+    try {
+      chatId = req.body?.chatId || req.body?.to || req.body?.phone;
+      message = req.body?.message !== undefined ? req.body.message : (req.body?.text !== undefined ? req.body.text : req.body?.body);
+    } catch (parseErr) {
+      return res.status(400).json({
+        success: false,
+        error: `Failed to parse request payload: ${parseErr.message}`
+      });
+    }
 
     if (!chatId || message === undefined || message === null) {
       return res.status(400).json({
@@ -545,7 +555,16 @@ app.post('/send-message', async (req, res) => {
       });
     }
 
-    const jid = normalizeJid(chatId);
+    let jid = '';
+    try {
+      jid = normalizeJid(chatId);
+    } catch (normErr) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid chatId formatting: ${normErr.message}`
+      });
+    }
+
     if (!jid || jid.startsWith('@')) {
       return res.status(400).json({
         success: false,
@@ -554,7 +573,16 @@ app.post('/send-message', async (req, res) => {
     }
 
     const textToSend = String(message);
-    const sent = await sock.sendMessage(jid, { text: textToSend });
+    let sent = null;
+    try {
+      sent = await sock.sendMessage(jid, { text: textToSend });
+    } catch (sendErr) {
+      console.error(`[Outbound Message Send Error to ${jid}]:`, sendErr);
+      return res.status(500).json({
+        success: false,
+        error: `Failed to send WhatsApp message via Baileys socket: ${sendErr.message || 'Unknown socket error'}`
+      });
+    }
 
     console.log(`[Outbound Message] Sent to: ${jid} | Message ID: ${sent?.key?.id}`);
 
@@ -566,10 +594,21 @@ app.post('/send-message', async (req, res) => {
       timestamp: Math.floor(Date.now() / 1000)
     });
   } catch (err) {
-    console.error('[Outbound Message Error]', err);
+    console.error('[Outbound Message Unexpected Endpoint Error]', err);
     return res.status(500).json({
       success: false,
-      error: err.message || 'Internal error while sending WhatsApp message'
+      error: err.message || 'Internal error while processing WhatsApp message request'
+    });
+  }
+});
+
+// Express global error-handling middleware (prevents any uncaught route exceptions from crashing Node)
+app.use((err, req, res, next) => {
+  console.error('[Bridge Server Global Error Handler]', err);
+  if (!res.headersSent) {
+    res.status(500).json({
+      success: false,
+      error: err.message || 'Internal bridge server error'
     });
   }
 });
