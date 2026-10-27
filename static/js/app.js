@@ -5226,6 +5226,15 @@ function groupWhatsAppConversations(messages) {
         // Strip JID suffixes from partner before normalizing so that
         // "32844168577254@s.whatsapp.net" and "32844168577254" map to the same key
         const rawPartner = isInbound ? m.sender : m.recipient;
+
+        // Skip entries where the partner is a group JID — groups are forwarded via
+        // the bridge but should not appear as individual direct-chat conversations
+        // unless explicitly supported. They're excluded here to prevent malformed
+        // outbound dispatch when the user clicks "Reply" on a group-sourced message.
+        if (rawPartner && (String(rawPartner).includes('@g.us') || String(rawPartner).includes('@broadcast'))) {
+            return;
+        }
+
         const normKey = normalizeWaPhone(rawPartner) || 'Unknown';
         const displayPhone = formatWaDisplayPhone(rawPartner) || normKey;
 
@@ -5637,11 +5646,20 @@ async function sendWhatsAppReply() {
     if (!recipient) {
         recipient = prompt('Enter recipient phone number (e.g. +923209350858):');
         if (!recipient) return;
+        // Strip all non-numeric chars (preserve leading +) and normalize
         waActiveChatPartner = normalizeWaPhone(recipient.replace(/[^0-9+]/g, ''));
         recipient = waActiveChatPartner;
     }
 
-    const cleanRecipient = normalizeWaPhone(recipient) || recipient;
+    // Normalize recipient: strip @s.whatsapp.net / @c.us suffixes cleanly.
+    // Keep @g.us intact — group sends are routed correctly by send_message().
+    // Reject obviously malformed inputs (e.g. bare '@g.us' without a group number).
+    const isGroup = String(recipient).endsWith('@g.us');
+    const cleanRecipient = isGroup ? recipient : (normalizeWaPhone(recipient) || recipient);
+    if (!cleanRecipient || cleanRecipient === '@g.us' || (!isGroup && cleanRecipient.length < 7)) {
+        showToast('Invalid recipient — please select a valid conversation first.', 'error');
+        return;
+    }
     input.value = '';
 
     const isVoice = message.startsWith('[voiceMessage]') || message.startsWith('[audioMessage]');
