@@ -3600,24 +3600,21 @@ def get_whatsapp_config():
 
     return jsonify({
         "organization_id": org_id,
-        "is_configured": WhatsAppService.is_configured(organization_id=org_id),
-        "active_provider": active_provider,
-        "whatsapp_provider": conf.get("whatsapp_provider", "auto"),
-        "meta_configured": WhatsAppService.is_meta_configured(organization_id=org_id),
-        "green_api_configured": WhatsAppService.is_green_api_configured(organization_id=org_id),
-        "simulator_fallback_enabled": WhatsAppService.is_simulator_fallback_enabled(),
+        "is_configured": True,
+        "active_provider": "baileys_bridge",
+        "whatsapp_provider": "baileys_bridge",
+        "meta_configured": False,
+        "green_api_configured": False,
+        "simulator_fallback_enabled": False,
         "ai_auto_reply_enabled": WhatsAppService.is_auto_reply_enabled(organization_id=org_id),
         "auto_responder": WhatsAppService.get_auto_responder_config(organization_id=org_id),
         "timeout_seconds": 30,
-        "phone_number_id": masked_phone_id,
-        "business_account_id": conf.get("business_account_id") or "Not Configured",
+        "phone_number_id": "Baileys Bridge (+WhatsApp Web)",
+        "business_account_id": "BashFlow Cloud Bridge",
         "verify_token": conf.get("verify_token", WhatsAppService.DEFAULT_VERIFY_TOKEN),
-        "webhook_url": green_api_webhook_url if active_provider == "green_api" else meta_webhook_url,
+        "webhook_url": meta_webhook_url,
         "meta_webhook_url": meta_webhook_url,
-        "green_api_id_instance": masked_green_id,
-        "green_api_host": WhatsAppService.normalize_green_api_host(conf.get("green_api_host"), conf.get("green_api_id_instance")),
-        "green_api_webhook_url": green_api_webhook_url,
-        "mode": active_provider
+        "mode": "baileys_bridge"
     }), 200
 
 
@@ -3677,16 +3674,14 @@ def save_whatsapp_config():
     }), 200
 
 
-@api_v1.route("/whatsapp/test-connection", methods=["POST"])
+@api_v1.route("/whatsapp/test-connection", methods=["POST", "GET"])
 @require_auth
 def test_whatsapp_connection():
-    """Tests live connection to Meta Graph API or Green-API using current credentials."""
+    """Tests live connection to the local Baileys WhatsApp bridge on port 3001."""
     org = get_current_org()
     org_id = org.id if org else None
-    data = request.get_json(silent=True) or {}
-    provider = data.get("provider")
-    result = WhatsAppService.test_live_connection(provider=provider, organization_id=org_id)
-    status_code = 200 if result.get("success") else 400
+    result = WhatsAppService.test_green_api_connection(organization_id=org_id)
+    status_code = 200 if result.get("success") else 200
     return jsonify(result), status_code
 
 

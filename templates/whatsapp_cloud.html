@@ -44,7 +44,6 @@
                     <button type="button" class="hud-btn primary small" onclick="openLinkWhatsAppQrModal()" style="background: #10b981; font-weight: 700; color: #fff;">
                         <span>📱</span> Link WhatsApp QR
                     </button>
-                    <button type="button" class="hud-btn outline small" onclick="openWhatsAppConnectGuide()">Connect Guide</button>
                 </div>
             </div>
 
@@ -73,9 +72,6 @@
                         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                             <button type="button" class="hud-btn primary" onclick="openLinkWhatsAppQrModal()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700; color: #fff; padding: 10px 18px; display: inline-flex; align-items: center; gap: 8px;">
                                 <span>📱</span> Link WhatsApp (Scan Live QR)
-                            </button>
-                            <button type="button" class="hud-btn primary" onclick="openWhatsAppConnectGuide()" style="padding: 10px 18px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px;">
-                                <span>🔗</span> Connect WhatsApp (Green-API / Meta)
                             </button>
                             <button type="button" class="hud-btn outline" onclick="enableWhatsAppDemoMode()" style="padding: 10px 16px; display: inline-flex; align-items: center; gap: 6px;">
                                 <span>🧪</span> Launch Local Sandbox (Demo)
@@ -183,7 +179,7 @@
                             </button>
                             <button type="button" class="wa-icon-btn" title="Sync Inbound Messages" id="btnSyncWhatsAppWeb" onclick="syncWhatsAppMessagesNow()">🔄</button>
                             <button type="button" class="wa-icon-btn" title="Start New Conversation" onclick="promptNewConversation()">➕</button>
-                            <button type="button" class="wa-icon-btn" title="Configure Gateway" onclick="openWhatsAppConnectGuide()">⚙️</button>
+                            <button type="button" class="wa-icon-btn" title="Link WhatsApp QR" onclick="openLinkWhatsAppQrModal()">⚙️</button>
                             <button type="button" class="wa-icon-btn" title="Link WhatsApp QR / Gateway Status" id="waBtnDisconnect" onclick="openLinkWhatsAppQrModal()" style="color: #ef4444; cursor: pointer;">⏻</button>
                         </div>
                     </div>
@@ -290,6 +286,9 @@
 
                         <!-- Voice Note Dispatch Button -->
                         <button type="button" class="wa-icon-btn" id="waVoiceNoteBtn" title="Send Voice Note" onclick="promptSendVoiceNote()" style="color: #00a884; font-size: 18px;">🎙️</button>
+
+                        <!-- AI Voice Call Button -->
+                        <button type="button" class="wa-icon-btn" id="waAiVoiceCallBtn" title="AI Voice Call" onclick="openLiveVoiceCallModal()" style="color: #10b981; font-size: 18px; margin: 0 4px; cursor: pointer;" aria-label="AI Voice Call">🎤</button>
 
                         <!-- Send Button -->
                         <button type="button" class="wa-reply-send-btn" id="waReplySendBtn" onclick="sendWhatsAppReply()" title="Send Message">
@@ -442,119 +441,6 @@
 
     </main>
     <script src="/static/js/app.js"></script>
-    <!-- WHATSAPP GATEWAY CONFIG MODAL -->
-    <div class="hud-modal-overlay" id="whatsappConnectModal" style="display:none;">
-        <div class="hud-modal" style="max-width: 620px;">
-            <div class="modal-header">
-                <div class="hud-flex-row hud-gap-sm">
-                    <span style="font-size: 20px;">💬</span>
-                    <h3 id="waConnectModalTitle">WhatsApp Business Gateway Configuration</h3>
-                </div>
-                <button class="close-btn" onclick="closeWhatsAppConnectModal()">&times;</button>
-            </div>
-            <div class="modal-body" style="padding: 20px;">
-                <p style="font-size: 0.86rem; color: #cbd5e1; margin-bottom: 14px;">
-                    Connect your WhatsApp messaging provider for automated incident dispatch, CRM outreach, and inbound webhook ingestion.
-                </p>
-
-                <!-- Provider Selector Switcher Tabs -->
-                <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color, #334155); padding-bottom: 10px;">
-                    <button type="button" class="hud-btn primary small" id="waTabBtnGreenApi" onclick="selectWaConfigProvider('green_api')">
-                        <span>⚡</span> Green-API (Instant QR / Instance)
-                    </button>
-                    <button type="button" class="hud-btn outline small" id="waTabBtnMeta" onclick="selectWaConfigProvider('meta')">
-                        <span>🏢</span> Meta Cloud API (Official WABA)
-                    </button>
-                </div>
-
-                <form id="waConfigForm" onsubmit="handleSaveWhatsAppConfig(event)">
-                    <input type="hidden" id="waSelectedProvider" value="green_api">
-
-                    <!-- GREEN-API CONFIGURATION SECTION -->
-                    <div id="waGreenApiConfigSection" style="display: block;">
-                        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; font-size: 0.82rem; color: #34d399;">
-                            <strong>Green-API Fast Setup:</strong> Copy your <code>idInstance</code> and <code>apiTokenInstance</code> from your Green-API console. No Meta app review required!
-                        </div>
-
-                        <div class="form-group hud-mb-md">
-                            <label class="hud-label">Instance ID (idInstance) *</label>
-                            <input type="text" id="waConfigGreenId" class="hud-input hud-mono-text" placeholder="e.g., 1101820000">
-                            <span class="hud-subtext">Found in Green-API Instance Dashboard</span>
-                        </div>
-
-                        <div class="form-group hud-mb-md">
-                            <label class="hud-label">API Token Instance (apiTokenInstance) *</label>
-                            <div style="display: flex; gap: 6px;">
-                                <input type="password" id="waConfigGreenToken" class="hud-input hud-mono-text" placeholder="e.g., d75b3a8c1f9e2..." style="flex: 1;">
-                                <button type="button" class="hud-btn small outline" onclick="toggleGreenTokenVisibility()">Show</button>
-                            </div>
-                            <span class="hud-subtext">Secret instance API token for outbound messages &amp; webhook authorization</span>
-                        </div>
-
-                        <div class="form-group hud-mb-md">
-                            <label class="hud-label">API Host URL</label>
-                            <input type="text" id="waConfigGreenHost" class="hud-input hud-mono-text" value="https://api.greenapi.com" placeholder="https://api.greenapi.com">
-                            <span class="hud-subtext">Default: <code>https://api.greenapi.com</code> (or custom cluster e.g. <code>https://7103.api.greenapi.com</code>)</span>
-                        </div>
-
-                        <div class="form-group hud-mb-lg">
-                            <label class="hud-label">Green-API Webhook Callback URL</label>
-                            <div style="display: flex; gap: 6px;">
-                                <input type="text" id="waModalGreenWebhookUrl" class="hud-input" readonly value="/api/v1/webhooks/whatsapp/green-api" style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px; background: rgba(0,0,0,0.25);">
-                                <button type="button" class="hud-btn small outline" onclick="copyModalGreenWebhookUrl()">Copy</button>
-                            </div>
-                            <span class="hud-subtext">Paste this URL into your Green-API console under <em>Webhook &gt; Set Webhook</em> to receive real-time chats!</span>
-                        </div>
-                    </div>
-
-                    <!-- META CLOUD API CONFIGURATION SECTION -->
-                    <div id="waMetaConfigSection" style="display: none;">
-                        <div class="form-group hud-mb-md">
-                            <label class="hud-label">Phone Number ID *</label>
-                            <input type="text" id="waConfigPhoneId" class="hud-input hud-mono-text" placeholder="e.g., 109283746509876">
-                            <span class="hud-subtext">Found in Meta App Dashboard &gt; WhatsApp &gt; API Setup</span>
-                        </div>
-
-                        <div class="form-group hud-mb-md">
-                            <label class="hud-label">System User Access Token *</label>
-                            <div style="display: flex; gap: 6px;">
-                                <input type="password" id="waConfigAccessToken" class="hud-input hud-mono-text" placeholder="EAAG..." style="flex: 1;">
-                                <button type="button" class="hud-btn small outline" onclick="toggleWaConfigTokenVisibility()">Show</button>
-                            </div>
-                            <span class="hud-subtext">Permanent System User access token with whatsapp_business_messaging permission</span>
-                        </div>
-
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-                            <div class="form-group">
-                                <label class="hud-label">WABA ID (Account ID)</label>
-                                <input type="text" id="waConfigWabaId" class="hud-input hud-mono-text" placeholder="e.g., 987654321012345">
-                            </div>
-                            <div class="form-group">
-                                <label class="hud-label">Meta App Secret</label>
-                                <input type="password" id="waConfigAppSecret" class="hud-input hud-mono-text" placeholder="App Secret for Webhook HMAC">
-                            </div>
-                        </div>
-
-                        <div class="form-group hud-mb-lg">
-                            <label class="hud-label">Webhook Verify Token</label>
-                            <input type="text" id="waConfigVerifyToken" class="hud-input hud-mono-text" value="opsflow_whatsapp_verify_2026">
-                        </div>
-                    </div>
-
-                    <!-- Connection Diagnostics Output Box -->
-                    <div id="waConnectionTestOutput" style="display: none; padding: 12px; border-radius: 6px; font-size: 12px; margin-bottom: 16px; border: 1px solid transparent;"></div>
-
-                    <div style="display: flex; gap: 8px; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 14px;">
-                        <button type="button" class="hud-btn outline" id="btnTestWaConnection" onclick="handleTestWhatsAppConnection()">⚡ Test Connection</button>
-                        <div style="display: flex; gap: 8px;">
-                            <button type="button" class="hud-btn outline" onclick="closeWhatsAppConnectModal()">Cancel</button>
-                            <button type="submit" class="hud-btn primary" id="btnSaveWaConfig">Save &amp; Activate</button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
 
     <!-- LINK WHATSAPP QR MODAL (BAILEYS BRIDGE) -->
     <div class="hud-modal-backdrop" id="linkWhatsAppQrModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); z-index: 10060; align-items: center; justify-content: center;">
@@ -579,9 +465,9 @@
                 </div>
 
                 <div id="qrImageWrapper" style="display: none;">
-                    <div style="background: #ffffff; padding: 12px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.4); margin-bottom: 14px; min-width: 250px; min-height: 250px;">
-                        <img id="bridgeQrImage" src="" alt="WhatsApp Link QR Code" style="width: 250px; height: 250px; display: block; object-fit: contain; margin: 0 auto;" />
-                        <div id="bridgeQrSvgContainer" style="display: none; width: 250px; height: 250px; margin: 0 auto;"></div>
+                    <div style="background: #ffffff; padding: 12px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.4); margin-bottom: 14px; min-width: 220px; min-height: 220px; max-width: 220px;">
+                        <img id="bridgeQrImage" src="" alt="WhatsApp Link QR Code" style="max-width: 220px; width: 220px; height: 220px; display: block; object-fit: contain; margin: 0 auto;" />
+                        <div id="bridgeQrSvgContainer" style="display: none; max-width: 220px; width: 220px; height: 220px; margin: 0 auto;"></div>
                     </div>
                     <div style="font-size: 13px; color: #e2e8f0; font-weight: 600; margin-bottom: 4px;">
                         Open WhatsApp &gt; Linked Devices &gt; Link a Device

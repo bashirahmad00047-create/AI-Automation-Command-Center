@@ -24,7 +24,8 @@ const fs = require('fs');
 
 // Configuration
 const PORT = process.env.WA_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001;
-const PYTHON_WEBHOOK_URL = process.env.PYTHON_WEBHOOK_URL || 'http://localhost:5000/api/v1/webhooks/whatsapp';
+const PYTHON_PORT = process.env.PORT || 5000;
+const PYTHON_WEBHOOK_URL = process.env.PYTHON_WEBHOOK_URL || `http://127.0.0.1:${PYTHON_PORT}/api/v1/webhooks/whatsapp`;
 const AUTH_DIR = process.env.AUTH_DIR || path.join(__dirname, 'baileys_auth');
 
 // Global socket state
@@ -210,7 +211,7 @@ async function startWhatsAppBridge() {
           errorCorrectionLevel: 'M',
           type: 'image/png',
           margin: 2,
-          width: 320,
+          width: 220,
           color: { dark: '#000000', light: '#ffffff' }
         }).then((url) => {
           currentQrUrl = url;
@@ -222,7 +223,7 @@ async function startWhatsAppBridge() {
         qrcode.toString(qr, {
           type: 'svg',
           margin: 2,
-          width: 320
+          width: 220
         }).then((svg) => {
           currentQrSvg = svg;
         }).catch((err) => {
@@ -452,7 +453,7 @@ app.get('/qr', async (req, res) => {
         errorCorrectionLevel: 'M',
         type: 'image/png',
         margin: 2,
-        width: 320,
+        width: 220,
         color: { dark: '#000000', light: '#ffffff' }
       });
       currentQrUrl = dataUrl;
@@ -464,7 +465,7 @@ app.get('/qr', async (req, res) => {
   let svgData = currentQrSvg;
   if (!svgData) {
     try {
-      svgData = await qrcode.toString(currentQr, { type: 'svg', margin: 2, width: 320 });
+      svgData = await qrcode.toString(currentQr, { type: 'svg', margin: 2, width: 220 });
       currentQrSvg = svgData;
     } catch (e) {
       // ignore
@@ -493,7 +494,7 @@ app.get(['/qr.png', '/qr-image'], async (req, res) => {
       errorCorrectionLevel: 'M',
       type: 'png',
       margin: 2,
-      width: 320
+      width: 220
     });
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
@@ -511,7 +512,7 @@ app.get('/qr.svg', async (req, res) => {
     return res.status(404).send('QR code not ready yet.');
   }
   try {
-    const svg = await qrcode.toString(currentQr, { type: 'svg', margin: 2, width: 320 });
+    const svg = await qrcode.toString(currentQr, { type: 'svg', margin: 2, width: 220 });
     res.setHeader('Content-Type', 'image/svg+xml');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.send(svg);

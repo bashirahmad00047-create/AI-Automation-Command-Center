@@ -5944,7 +5944,21 @@ async function loadWhatsAppDashboard() {
             if (tokenInput) tokenInput.value = conf.verify_token;
             updateWhatsAppHeaderAiBadge(conf.ai_auto_reply_enabled);
 
-            if (activeProvider === 'green_api') {
+            if (activeProvider === 'baileys_bridge') {
+                if (idLabel) idLabel.textContent = 'Baileys Cloud Bridge';
+                if (phoneIdInput) phoneIdInput.value = 'Port 3001 (Node.js Baileys Bridge)';
+                if (providerBadge) {
+                    providerBadge.className = 'status-pill green';
+                    providerBadge.textContent = 'Baileys Cloud Bridge';
+                }
+                if (modeBadge) {
+                    modeBadge.className = 'status-pill green';
+                    modeBadge.textContent = '● Baileys Bridge Online';
+                }
+                if (connStatus) {
+                    connStatus.innerHTML = '<span class="status-pill green" style="font-size:0.75rem;">● Connected (Baileys Bridge)</span>';
+                }
+            } else if (activeProvider === 'green_api') {
                 if (idLabel) idLabel.textContent = 'Green-API Instance ID';
                 if (phoneIdInput) phoneIdInput.value = conf.green_api_id_instance || 'Not configured';
                 if (providerBadge) {
@@ -5990,7 +6004,16 @@ async function loadWhatsAppDashboard() {
 
             const bannerAction = document.getElementById('whatsappBannerAction');
             if (banner && bannerTitle && bannerDesc) {
-                if (activeProvider === 'green_api') {
+                if (activeProvider === 'baileys_bridge') {
+                    banner.style.background = 'rgba(16, 185, 129, 0.08)';
+                    banner.style.border = '1px solid rgba(16, 185, 129, 0.25)';
+                    bannerTitle.style.color = '#10b981';
+                    bannerTitle.textContent = 'Production WhatsApp Baileys Cloud Bridge Active';
+                    bannerDesc.textContent = 'Direct Baileys session connected on port 3001. Inbound webhook notifications and outbound messaging route directly with zero fees.';
+                    if (bannerAction) {
+                        bannerAction.innerHTML = '<button type="button" class="hud-btn primary small" onclick="openLinkWhatsAppQrModal()" style="background: #10b981; font-weight: 700; color: #fff;">📱 Link WhatsApp QR</button>';
+                    }
+                } else if (activeProvider === 'green_api') {
                     banner.style.background = 'rgba(16, 185, 129, 0.08)';
                     banner.style.border = '1px solid rgba(16, 185, 129, 0.25)';
                     bannerTitle.style.color = '#10b981';
@@ -6013,16 +6036,16 @@ async function loadWhatsAppDashboard() {
                     banner.style.border = '1px solid rgba(0, 240, 255, 0.2)';
                     bannerTitle.style.color = '#00f0ff';
                     bannerTitle.textContent = 'Simulation Mode Active';
-                    bannerDesc.textContent = 'Operating in local sandbox mode. Outbound dispatches are simulated and persisted to local logs. Connect Green-API or Meta Cloud API for live messaging.';
+                    bannerDesc.textContent = 'Operating in local sandbox mode. Outbound dispatches are simulated and persisted to local logs. Connect Baileys Bridge for live messaging.';
                     if (bannerAction) {
-                        bannerAction.innerHTML = '<button type="button" class="hud-btn primary small" onclick="openWhatsAppConnectGuide()">Connect WhatsApp</button>';
+                        bannerAction.innerHTML = '<button type="button" class="hud-btn primary small" onclick="openLinkWhatsAppQrModal()" style="background: #10b981; font-weight: 700; color: #fff;">📱 Link WhatsApp QR</button>';
                     }
                 }
             }
         }
 
         // Update connection state tracking and toggle UI view
-        const isConnected = isConfigured && (activeProvider === 'green_api' || activeProvider === 'meta');
+        const isConnected = isConfigured && (activeProvider === 'baileys_bridge' || activeProvider === 'green_api' || activeProvider === 'meta');
         window._waIsConfigured = isConfigured;
         window._waActiveProvider = activeProvider;
         window._waIsConnected = isConnected;
@@ -6274,173 +6297,53 @@ function copyWhatsAppVerifyToken() {
     });
 }
 
-async function openWhatsAppConnectGuide() {
-    const modal = document.getElementById('whatsappConnectModal');
-    if (modal) modal.style.display = 'flex';
-
-    // Populate existing values if available
-    try {
-        const res = await fetch('/api/v1/whatsapp/config');
-        if (res.ok) {
-            const data = await res.json();
-            const phoneInput = document.getElementById('waConfigPhoneId');
-            const wabaInput = document.getElementById('waConfigWabaId');
-            const tokenInput = document.getElementById('waConfigVerifyToken');
-            const greenIdInput = document.getElementById('waConfigGreenId');
-            const greenHostInput = document.getElementById('waConfigGreenHost');
-            const modalGreenUrl = document.getElementById('waModalGreenWebhookUrl');
-
-            if (phoneInput && data.phone_number_id && !data.phone_number_id.includes('...')) {
-                phoneInput.value = data.phone_number_id;
-            }
-            if (wabaInput && data.business_account_id && data.business_account_id !== 'Not Configured') {
-                wabaInput.value = data.business_account_id;
-            }
-            if (tokenInput && data.verify_token) {
-                tokenInput.value = data.verify_token;
-            }
-            if (greenIdInput && data.green_api_id_instance && !data.green_api_id_instance.includes('...')) {
-                greenIdInput.value = data.green_api_id_instance;
-            }
-            if (greenHostInput && data.green_api_host) {
-                greenHostInput.value = data.green_api_host;
-            }
-            if (modalGreenUrl && data.green_api_webhook_url) {
-                modalGreenUrl.value = data.green_api_webhook_url;
-            }
-
-            // Select provider tab according to active or configured provider
-            const activeProv = data.active_provider === 'meta' ? 'meta' : 'green_api';
-            selectWaConfigProvider(activeProv);
-        }
-    } catch (e) {
-        console.warn('Could not prefill WhatsApp config:', e);
+function openWhatsAppConnectGuide() {
+    if (typeof openLinkWhatsAppQrModal === 'function') {
+        openLinkWhatsAppQrModal();
     }
 }
 
 function closeWhatsAppConnectModal() {
-    const modal = document.getElementById('whatsappConnectModal');
-    if (modal) modal.style.display = 'none';
-    const output = document.getElementById('waConnectionTestOutput');
-    if (output) output.style.display = 'none';
+    if (typeof closeLinkWhatsAppQrModal === 'function') {
+        closeLinkWhatsAppQrModal();
+    }
 }
 
 async function handleSaveWhatsAppConfig(e) {
     if (e) e.preventDefault();
-    const btn = document.getElementById('btnSaveWaConfig');
-    const provider = document.getElementById('waSelectedProvider')?.value || 'green_api';
-    const phoneId = (document.getElementById('waConfigPhoneId')?.value || '').trim();
-    const token = (document.getElementById('waConfigAccessToken')?.value || '').trim();
-    const wabaId = (document.getElementById('waConfigWabaId')?.value || '').trim();
-    const secret = (document.getElementById('waConfigAppSecret')?.value || '').trim();
-    const verifyToken = (document.getElementById('waConfigVerifyToken')?.value || '').trim();
-
-    const greenId = (document.getElementById('waConfigGreenId')?.value || '').trim();
-    const greenToken = (document.getElementById('waConfigGreenToken')?.value || '').trim();
-    const greenHost = (document.getElementById('waConfigGreenHost')?.value || '').trim();
-
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Saving...';
-    }
-
-    try {
-        const payload = {
-            whatsapp_provider: provider,
-            green_api_id_instance: greenId,
-            green_api_token_instance: greenToken,
-            green_api_host: greenHost || 'https://api.greenapi.com',
-            phone_number_id: phoneId,
-            access_token: token,
-            business_account_id: wabaId,
-            app_secret: secret,
-            verify_token: verifyToken
-        };
-
-        const res = await fetch('/api/v1/whatsapp/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        if (res.ok) {
-            showToast('WhatsApp gateway credentials saved and active!', 'success');
-            loadWhatsAppDashboard();
-            closeWhatsAppConnectModal();
-        } else {
-            showToast(data.error || 'Failed to save WhatsApp config', 'error');
-        }
-    } catch (err) {
-        showToast('Network error saving config: ' + err.message, 'error');
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = 'Save & Activate';
-        }
+    if (typeof openLinkWhatsAppQrModal === 'function') {
+        openLinkWhatsAppQrModal();
     }
 }
 
 async function handleTestWhatsAppConnection() {
     const btn = document.getElementById('btnTestWaConnection');
-    const output = document.getElementById('waConnectionTestOutput');
-    const provider = document.getElementById('waSelectedProvider')?.value || 'green_api';
-
     if (btn) {
         btn.disabled = true;
-        btn.textContent = provider === 'green_api' ? 'Testing Green-API...' : 'Testing Meta Graph API...';
-    }
-    if (output) {
-        output.style.display = 'block';
-        output.style.background = 'rgba(0, 240, 255, 0.08)';
-        output.style.borderColor = 'rgba(0, 240, 255, 0.2)';
-        output.style.color = '#00f0ff';
-        output.innerHTML = provider === 'green_api'
-            ? 'Probing Green-API getStateInstance endpoint...'
-            : 'Connecting to Meta Graph API v19.0 endpoint...';
+        btn.textContent = 'Testing Baileys Bridge...';
     }
 
     try {
         const res = await fetch('/api/v1/whatsapp/test-connection', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider })
+            body: JSON.stringify({ provider: 'baileys_bridge' })
         });
         const data = await res.json();
         if (res.ok && data.success) {
-            output.style.background = 'rgba(16, 185, 129, 0.1)';
-            output.style.borderColor = 'rgba(16, 185, 129, 0.3)';
-            output.style.color = '#10b981';
-
-            if (provider === 'green_api') {
-                output.innerHTML = `<strong>✅ Green-API Connected &amp; Authorized!</strong><br>
-                    Instance ID: <code>${escapeHtml(data.id_instance || 'Configured')}</code><br>
-                    State: <span class="status-pill green">${escapeHtml(data.status || 'authorized')}</span><br>
-                    ${escapeHtml(data.message || 'WhatsApp session is active.')}`;
-            } else {
-                output.innerHTML = `<strong>✅ Meta Connection Established!</strong><br>
-                    Verified Account: ${escapeHtml(data.verified_name || 'Meta Verified')}<br>
-                    Display Phone: ${escapeHtml(data.display_phone_number || data.phone_number_id)}<br>
-                    Quality Rating: <span class="status-pill green">${escapeHtml(data.quality_rating || 'GREEN')}</span>`;
-            }
-            showToast('WhatsApp connection probe passed!', 'success');
+            showToast('✅ WhatsApp Baileys Bridge is online and connected!', 'success');
         } else {
-            output.style.background = 'rgba(239, 68, 68, 0.1)';
-            output.style.borderColor = 'rgba(239, 68, 68, 0.3)';
-            output.style.color = '#ef4444';
-            output.innerHTML = `<strong>⚠️ Connection Probe Failed:</strong><br>${escapeHtml(data.message || data.error || 'Check credentials')}`;
-            showToast('WhatsApp connection probe returned error', 'error');
+            showToast(data.message || 'WhatsApp bridge is not linked yet. Scan the QR code.', 'warning');
+            if (typeof openLinkWhatsAppQrModal === 'function') {
+                openLinkWhatsAppQrModal();
+            }
         }
     } catch (err) {
-        if (output) {
-            output.style.background = 'rgba(239, 68, 68, 0.1)';
-            output.style.borderColor = 'rgba(239, 68, 68, 0.3)';
-            output.style.color = '#ef4444';
-            output.innerHTML = `<strong>Network Error:</strong> ${escapeHtml(err.message)}`;
-        }
+        showToast('Bridge connection error: ' + err.message, 'error');
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.textContent = provider === 'green_api' ? '⚡ Test Green-API Connection' : '⚡ Test Meta API Connection';
+            btn.textContent = '⚡ Test Connection';
         }
     }
 }
