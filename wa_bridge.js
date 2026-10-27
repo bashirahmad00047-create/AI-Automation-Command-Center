@@ -753,7 +753,7 @@ app.post('/send-message', async (req, res, next) => {
     let message = null;
 
     try {
-      chatId = req.body?.chatId || req.body?.to || req.body?.to_phone || req.body?.phone || req.body?.recipient || req.body?.target || req.body?.contact;
+      chatId = req.body?.chatId || req.body?.to || req.body?.recipient || req.body?.to_phone || req.body?.phone || req.body?.target || req.body?.contact;
       message = req.body?.message !== undefined ? req.body.message : (req.body?.text !== undefined ? req.body.text : (req.body?.body !== undefined ? req.body.body : req.body?.caption));
     } catch (parseErr) {
       return res.status(400).json({
@@ -771,7 +771,7 @@ app.post('/send-message', async (req, res, next) => {
     if (!chatId || (!hasAudio && !hasImage && !hasText)) {
       return res.status(400).json({
         success: false,
-        error: "Missing required fields. Please provide chatId and either message text or audioBase64/imageBase64."
+        error: "Missing required fields. Please provide recipient chatId (e.g. '923001234567@s.whatsapp.net') and either message text or audioBase64/imageBase64."
       });
     }
 
@@ -796,7 +796,18 @@ app.post('/send-message', async (req, res, next) => {
     if (!jid || jid.startsWith('@') || (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us'))) {
       return res.status(400).json({
         success: false,
-        error: `Invalid recipient JID: '${chatId}' -> '${jid}'`
+        error: `Invalid recipient JID: '${chatId}' -> '${jid}'. Outbound replies must strictly target a valid @s.whatsapp.net or @g.us JID.`
+      });
+    }
+
+    // Strict guard: Do not allow sending to the bot's own linked session JID as an accidental fallback
+    const botPhone = cleanPhoneNumber(sock?.user?.id || '');
+    const targetPhone = cleanPhoneNumber(jid);
+    const allowSelf = Boolean(req.body?.allow_self || req.body?.allowSelf);
+    if (botPhone && targetPhone && botPhone === targetPhone && !allowSelf) {
+      return res.status(400).json({
+        success: false,
+        error: `Recipient '${jid}' matches the bot's own active WhatsApp session number (+${botPhone}). Outbound replies must strictly target customer JIDs to prevent echo loops.`
       });
     }
 
@@ -869,13 +880,15 @@ app.post('/send-message', async (req, res, next) => {
       });
     }
 
-    console.log(`[Outbound Message] Sent to: ${jid} | Message ID: ${sent?.key?.id}`);
+    console.log(`[Outbound Message] Delivered via WhatsApp network to: ${jid} | Message ID: ${sent?.key?.id}`);
 
     return res.json({
       success: true,
       messageId: sent?.key?.id || null,
+      idMessage: sent?.key?.id || null,
       status: 'sent',
       to: jid,
+      recipient: jid,
       timestamp: Math.floor(Date.now() / 1000)
     });
   } catch (err) {

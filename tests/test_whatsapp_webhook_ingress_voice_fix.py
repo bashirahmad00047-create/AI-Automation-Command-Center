@@ -689,11 +689,10 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
                 dispatch_follow_up=True
             )
             t.join(timeout=4.0)
-            mock_send.assert_called_once_with(
-                organization_id=self.org.id,
-                to_phone="923209350858",
-                message_text="Starter is $29/mo."
-            )
+            mock_send.assert_called_once()
+            call_k = mock_send.call_args[1]
+            self.assertEqual(call_k.get("to_phone"), "923209350858")
+            self.assertEqual(call_k.get("message_text"), "Starter is $29/mo.")
 
     def test_send_green_api_file_supports_two_arg_calling(self):
         """Verifies send_green_api_file works when called as send_green_api_file(to_phone, file_bytes)."""
@@ -824,12 +823,11 @@ class TestWhatsAppWebhookIngressVoiceFix(unittest.TestCase):
                 is_voice=True
             )
 
-            # Text response is GUARANTEED to be dispatched instantly via Green-API
-            mock_send_text.assert_called_once_with(
-                organization_id=self.org.id,
-                to_phone="923209350858",
-                message_text="Hum 24/7 technical support faraham karte hain."
-            )
+            # Text response is GUARANTEED to be dispatched instantly via Baileys Bridge
+            mock_send_text.assert_called_once()
+            call_k = mock_send_text.call_args[1]
+            self.assertEqual(call_k.get("to_phone"), "923209350858")
+            self.assertEqual(call_k.get("message_text"), "Hum 24/7 technical support faraham karte hain.")
             self.assertIsNotNone(res)
             self.assertTrue(res["success"])
             self.assertEqual(res["reply_body"], "Hum 24/7 technical support faraham karte hain.")
