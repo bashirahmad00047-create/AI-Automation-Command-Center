@@ -17,17 +17,15 @@ fi
 echo "=== [2/4] Initializing Database Schema ==="
 python init_db.py || echo "init_db note: continuing..."
 
-echo "=== [3/4] Starting WhatsApp Baileys bridge supervisor on port 3001 ==="
+echo "=== [3/4] Starting WhatsApp Baileys bridge in infinite auto-restart loop ==="
 (
     while true; do
-        echo "[Bridge Supervisor] Launching node wa_bridge.js on port ${WA_BRIDGE_PORT}..."
-        node wa_bridge.js || echo "[Bridge Supervisor] wa_bridge.js process exited ($?)."
-        echo "[Bridge Supervisor] Restarting bridge in 2 seconds..."
+        node wa_bridge.js || echo "[Bridge Supervisor] wa_bridge.js exited ($?)."
         sleep 2
     done
 ) &
 WA_BRIDGE_SUPERVISOR_PID=$!
-echo "WhatsApp Baileys bridge supervisor running with PID: $WA_BRIDGE_SUPERVISOR_PID"
+echo "WhatsApp Baileys bridge supervisor running with PID: $WA_BRIDGE_SUPERVISOR_PID on port $WA_BRIDGE_PORT"
 
 echo "=== [4/4] Starting Gunicorn server ==="
 exec gunicorn app:app --bind 0.0.0.0:"$PORT" --workers "${WEB_CONCURRENCY:-2}" --timeout "${WEBHOOK_TIMEOUT_SECONDS:-120}"
