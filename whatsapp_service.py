@@ -1380,16 +1380,6 @@ class WhatsAppService:
                             message_text=reply_body,
                             allow_fallback=False
                         )
-                        if hasattr(cls.send_message, "assert_called") or getattr(cls.send_message, "_is_mock", False) or hasattr(cls.send_message, "mock"):
-                            try:
-                                cls.send_message(
-                                    organization_id=org_id,
-                                    to_phone=clean_phone,
-                                    chat_id=follow_up_chat_id,
-                                    message_text=reply_body
-                                )
-                            except Exception:
-                                pass
                         logger.info(f"Dispatched follow-up AI answer for transcribed voice note to {clean_phone} (chat_id: {follow_up_chat_id}): '{reply_body[:60]}...' result={green_res.get('status')}")
                 except Exception as resp_err:
                     logger.debug(f"Follow-up AI voice response notice: {resp_err}")
@@ -4431,6 +4421,11 @@ class WhatsAppService:
             dispatch_res = green_dispatch_res
             logger.info(f"[Force Dispatch] send_green_api_message execution result for {real_chat_id}: {green_dispatch_res}")
 
+            is_gemini = (generated.get("mode") == "gemini_ai") or bool(generated.get("is_gemini"))
+            is_groq = (generated.get("mode") == "groq_ai") or bool(generated.get("is_groq"))
+            is_real_ai = is_gemini or is_groq
+            source = "gemini_ai" if is_gemini else ("groq_ai" if is_groq else "system_fallback")
+
             # 2. VOICE SYNTHESIS & DISPATCH GUARANTEE WITH FALLBACK PROTECTION
             # Uses ElevenLabs multilingual v2 (voice_id='QwMurwQUOf6t7fnABXar', stability=0.50, similarity_boost=0.75, style=0.40, use_speaker_boost=True)
             # Synthesizes every generated Pakistani Urdu text response into .oga voice note and dispatches via send_green_api_file to real WhatsApp chat ID
@@ -4472,21 +4467,8 @@ class WhatsAppService:
                 # FALLBACK PROTECTION: If voice synthesis encounters any error, outbound text reply STILL goes through without skipping
                 logger.warning(f"[Voice Fallback Protection] Voice synthesis/dispatch notice for {real_chat_id}: {tts_err}. Text dispatch safely delivered.")
 
-            # Keep send_message synchronized for test assertions and monitoring
-            if hasattr(cls.send_message, "assert_called") or getattr(cls.send_message, "_is_mock", False) or hasattr(cls.send_message, "mock"):
-                try:
-                    mock_res = cls.send_message(
-                        organization_id=org_id,
-                        to_phone=clean_phone,
-                        chat_id=real_chat_id,
-                        message_text=clean_reply_text,
-                        quoted_message_id=message_id
-                    )
-                    if isinstance(mock_res, dict) and mock_res.get("whatsapp_message_id"):
-                        dispatch_res = mock_res
-                except Exception:
-                    pass
-            elif not green_dispatch_res or not green_dispatch_res.get("success"):
+            # Outbound text dispatch fallback if green_dispatch_res was not executed
+            if not green_dispatch_res:
                 try:
                     dispatch_res = cls.send_message(
                         organization_id=org_id,
@@ -5233,22 +5215,41 @@ class WhatsAppService:
         msg_id = data.get("idMessage")
         timestamp = data.get("timestamp")
         sender_data = data.get("senderData", {}) if isinstance(data.get("senderData"), dict) else {}
-        chat_id = (
-            sender_data.get("chatId")
-            or sender_data.get("sender")
+        raw_msg_key = data.get("rawMessage", {}).get("key", {}) if isinstance(data.get("rawMessage"), dict) else {}
+
+        # Capture remoteJid accurately from Baileys events or explicit payload fields
+        remote_jid = (
+            data.get("remoteJid")
+            or raw_msg_key.get("remoteJid")
+            or sender_data.get("chatId")
             or data.get("chatId")
-            or data.get("sender")
-            or data.get("from")
             or ""
         )
-        raw_phone = (
-            data.get("from_phone")
-            or data.get("from")
-            or sender_data.get("sender")
-            or sender_data.get("chatId")
-            or chat_id
-        )
-        from_phone = cls.format_phone_number(raw_phone)
+
+        if str(remote_jid).endswith("@g.us"):
+            chat_id = remote_jid
+            raw_participant = (
+                raw_msg_key.get("participant")
+                or data.get("rawMessage", {}).get("participant")
+                or sender_data.get("sender")
+                or data.get("from_phone")
+                or data.get("from")
+                or ""
+            )
+            from_phone = cls.format_phone_number(raw_participant)
+        else:
+            raw_phone = (
+                data.get("from_phone")
+                or data.get("from")
+                or sender_data.get("sender")
+                or sender_data.get("chatId")
+                or remote_jid
+                or data.get("chatId")
+                or ""
+            )
+            from_phone = cls.format_phone_number(raw_phone)
+            chat_id = f"{from_phone}@s.whatsapp.net" if from_phone else (remote_jid or "")
+
         sender_name = (
             sender_data.get("senderName")
             or sender_data.get("chatName")
@@ -5341,6 +5342,7 @@ class WhatsAppService:
             "message_id": msg_id,
             "from_phone": from_phone,
             "chat_id": chat_id,
+            "remoteJid": remote_jid,
             "sender_name": sender_name,
             "recipient_phone_id": instance_id,
             "display_phone_number": instance_data.get("wid", instance_id),
@@ -6684,18 +6686,12 @@ class WhatsAppService:
             raise ValueError("Recipient phone number or chat ID is required.")
 
         if "@" in raw_target:
-            if raw_target.endswith("@s.whatsapp.net"):
-                clean_to = cls.format_phone_number(raw_target.replace("@s.whatsapp.net", ""))
+            if raw_target.endswith("@g.us"):
                 real_chat_id = raw_target
-            elif raw_target.endswith("@c.us"):
-                clean_to = cls.format_phone_number(raw_target.replace("@c.us", ""))
-                real_chat_id = f"{clean_to}@s.whatsapp.net"
-            elif raw_target.endswith("@g.us"):
-                real_chat_id = raw_target
-                clean_to = raw_target.replace("@g.us", "")
+                clean_to = raw_target
             else:
-                real_chat_id = raw_target
-                clean_to = cls.format_phone_number(raw_target.split("@")[0])
+                clean_to = cls.format_phone_number(raw_target)
+                real_chat_id = f"{clean_to}@s.whatsapp.net"
         else:
             clean_to = cls.format_phone_number(raw_target)
             real_chat_id = f"{clean_to}@s.whatsapp.net"

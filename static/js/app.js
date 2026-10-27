@@ -5230,18 +5230,18 @@ function handleWhatsAppChatSearch(val) {
 }
 
 function selectWhatsAppChat(partner) {
-    waActiveChatPartner = partner;
+    waActiveChatPartner = normalizeWaPhone(partner) || partner;
     if (Array.isArray(waAllMessagesCache)) {
         waAllMessagesCache.forEach(m => {
             const mPartner = (m.direction === 'inbound' ? m.sender : m.recipient) || '';
-            if (isSameWaPhone(mPartner, partner) && m.direction === 'inbound') {
+            if (isSameWaPhone(mPartner, waActiveChatPartner) && m.direction === 'inbound') {
                 m.status = 'read';
             }
         });
     }
     renderWhatsAppWebUI(waAllMessagesCache, true);
-    if (partner) {
-        const norm = normalizeWaPhone(partner) || partner;
+    if (waActiveChatPartner) {
+        const norm = normalizeWaPhone(waActiveChatPartner) || waActiveChatPartner;
         fetch(`/api/v1/whatsapp/conversations/${encodeURIComponent(norm)}/read`, {
             method: 'POST',
             headers: typeof getAuthHeaders === 'function' ? getAuthHeaders() : { 'Content-Type': 'application/json' }
@@ -5590,10 +5590,11 @@ async function sendWhatsAppReply() {
     if (!recipient) {
         recipient = prompt('Enter recipient phone number (e.g. +923209350858):');
         if (!recipient) return;
-        waActiveChatPartner = recipient.replace(/[^0-9+]/g, '');
+        waActiveChatPartner = normalizeWaPhone(recipient.replace(/[^0-9+]/g, ''));
         recipient = waActiveChatPartner;
     }
 
+    const cleanRecipient = normalizeWaPhone(recipient) || recipient;
     input.value = '';
 
     const isVoice = message.startsWith('[voiceMessage]') || message.startsWith('[audioMessage]');
@@ -5603,7 +5604,7 @@ async function sendWhatsAppReply() {
         whatsapp_message_id: 'pending...',
         direction: 'outbound',
         sender: 'You',
-        recipient: recipient,
+        recipient: cleanRecipient,
         body: message,
         status: 'sending',
         is_audio: isVoice,
@@ -5617,11 +5618,14 @@ async function sendWhatsAppReply() {
     if (sendBtn) sendBtn.disabled = true;
 
     try {
+        const authHeaders = typeof getAuthHeaders === 'function' ? getAuthHeaders() : {};
+        const headers = Object.assign({ 'Content-Type': 'application/json' }, authHeaders);
         const res = await fetch('/api/whatsapp/send', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify({
-                to: recipient,
+                to: cleanRecipient,
+                chatId: cleanRecipient,
                 message: message,
                 is_voice: isVoice
             })
@@ -5630,7 +5634,7 @@ async function sendWhatsAppReply() {
         if (res.ok && data.success) {
             optimisticMsg.status = 'sent';
             optimisticMsg.whatsapp_message_id = data.whatsapp_message_id || 'sent';
-            showToast(`Delivered to ${recipient}`, 'success');
+            showToast(`Delivered to ${cleanRecipient}`, 'success');
         } else {
             optimisticMsg.status = 'failed';
             optimisticMsg.error_message = data.error || 'Failed';
@@ -5732,11 +5736,15 @@ async function startVoiceRecording() {
 
                 try {
                     const recipient = waActiveChatPartner;
+                    const cleanRecipient = normalizeWaPhone(recipient) || recipient;
+                    const authHeaders = typeof getAuthHeaders === 'function' ? getAuthHeaders() : {};
+                    const headers = Object.assign({ 'Content-Type': 'application/json' }, authHeaders);
                     const res = await fetch('/api/whatsapp/send', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: headers,
                         body: JSON.stringify({
-                            to: recipient,
+                            to: cleanRecipient,
+                            chatId: cleanRecipient,
                             message: '[Voice note]',
                             is_voice: true,
                             audio_base64: base64DataUri
@@ -5744,7 +5752,7 @@ async function startVoiceRecording() {
                     });
                     const data = await res.json();
                     if (res.ok && data.success) {
-                        showToast(`Voice Note delivered to ${recipient}`, 'success');
+                        showToast(`Voice Note delivered to ${cleanRecipient}`, 'success');
                         syncWhatsAppMessagesNow(true).catch(() => {});
                     } else {
                         showToast(data.error || 'Failed to dispatch voice note', 'error');
@@ -5928,7 +5936,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
             }
 
             return `
-                <div class="wa-chat-item ${isActive ? 'active' : ''}" onclick="selectWhatsAppChat('${escapeHtml(c.phone)}')">
+                <div class="wa-chat-item ${isActive ? 'active' : ''}" onclick="selectWhatsAppChat('${escapeHtml(c.normalizedPhone || c.phone)}')">
                     <div class="wa-avatar" style="background-color: ${avatarColor};">
                         ${escapeHtml(initials)}
                     </div>
@@ -6456,9 +6464,11 @@ async function handleSendWhatsAppMessage(e) {
             payload.template_language = templateLang;
         }
 
+        const authHeaders = typeof getAuthHeaders === 'function' ? getAuthHeaders() : {};
+        const headers = Object.assign({ 'Content-Type': 'application/json' }, authHeaders);
         const res = await fetch('/api/whatsapp/send', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify(payload)
         });
         const data = await res.json();

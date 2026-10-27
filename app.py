@@ -476,6 +476,16 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import whatsapp_send_message
         return whatsapp_send_message()
 
+    @application.route("/webhooks/whatsapp", methods=["GET", "POST"])
+    @application.route("/api/whatsapp/webhook", methods=["GET", "POST"])
+    def legacy_whatsapp_webhook():
+        from flask import request
+        from api_v1 import whatsapp_webhook_ingress, green_api_webhook_ingress
+        payload = request.get_json(silent=True) or {}
+        if payload.get("typeWebhook") or payload.get("instanceData") or payload.get("idInstance"):
+            return green_api_webhook_ingress()
+        return whatsapp_webhook_ingress()
+
     @application.route("/api/whatsapp/bridge-qr", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-qr", methods=["GET"])
     def route_whatsapp_bridge_qr():

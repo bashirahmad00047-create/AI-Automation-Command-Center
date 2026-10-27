@@ -2953,6 +2953,7 @@ def whatsapp_webhook_ingress():
                     WhatsAppService.handle_inbound_auto_response(
                         organization_id=target_org.id,
                         sender_phone=msg.get("from_phone", "unknown"),
+                        chat_id=msg.get("chat_id") or msg.get("from_phone"),
                         message_body=msg.get("body", ""),
                         sender_name=msg.get("sender_name", ""),
                         message_id=msg_id,
@@ -3044,6 +3045,7 @@ def whatsapp_webhook_ingress():
                             WhatsAppService.handle_inbound_auto_response(
                                 organization_id=org_id,
                                 sender_phone=msg_dict.get("from_phone", "unknown"),
+                                chat_id=msg_dict.get("chat_id") or msg_dict.get("from_phone"),
                                 message_body=msg_dict.get("body", ""),
                                 sender_name=msg_dict.get("sender_name", ""),
                                 message_id=msg_dict.get("message_id"),
@@ -3200,6 +3202,7 @@ def green_api_webhook_ingress():
                         WhatsAppService.handle_inbound_auto_response(
                             organization_id=target_org_id,
                             sender_phone=msg.get("from_phone", "unknown"),
+                            chat_id=msg.get("chat_id") or msg.get("from_phone"),
                             message_body=msg.get("body", ""),
                             sender_name=msg.get("sender_name", ""),
                             message_id=msg_id,
@@ -3265,6 +3268,7 @@ def green_api_webhook_ingress():
                                 WhatsAppService.handle_inbound_auto_response(
                                     organization_id=org_id,
                                     sender_phone=msg_dict.get("from_phone", "unknown"),
+                                    chat_id=msg_dict.get("chat_id") or msg_dict.get("from_phone"),
                                     message_body=msg_dict.get("body", ""),
                                     sender_name=msg_dict.get("sender_name", ""),
                                     message_id=msg_dict.get("message_id"),
@@ -3371,9 +3375,11 @@ def whatsapp_send_message():
             audio_bytes, _, _ = synth
 
     try:
+        chat_id = data.get("chatId") or data.get("chat_id") or to_phone
         result = WhatsAppService.send_message(
             organization_id=org.id,
             to_phone=to_phone,
+            chat_id=chat_id,
             message_text=message or "",
             preview_url=preview_url,
             template_name=template_name,
@@ -3387,7 +3393,8 @@ def whatsapp_send_message():
             "status": result.get("status"),
             "template_name": template_name
         })
-        return jsonify(result), 200
+        status_code = 200 if result.get("success") else 400
+        return jsonify(result), status_code
     except ValueError as ve:
         return jsonify({"error": str(ve), "code": "VALIDATION_ERROR"}), 400
     except Exception as e:
@@ -3445,7 +3452,7 @@ def list_whatsapp_messages():
     query = WhatsAppMessage.query.filter_by(organization_id=org.id)
 
     if chat_id:
-        clean_contact = chat_id.replace("@c.us", "").replace("@g.us", "").strip()
+        clean_contact = chat_id.replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@g.us", "").replace("@lid", "").split(":")[0].strip()
         formatted_contact = WhatsAppService.format_phone_number(clean_contact)
         digits_only = "".join(filter(str.isdigit, str(clean_contact)))
         last_digits = digits_only[-8:] if len(digits_only) >= 8 else digits_only
@@ -3459,16 +3466,18 @@ def list_whatsapp_messages():
         if formatted_contact:
             filter_conditions.extend([
                 WhatsAppMessage.sender == formatted_contact,
+                WhatsAppMessage.sender == f"{formatted_contact}@s.whatsapp.net",
                 WhatsAppMessage.sender == f"{formatted_contact}@c.us",
                 WhatsAppMessage.sender == f"+{formatted_contact}",
                 WhatsAppMessage.recipient == formatted_contact,
+                WhatsAppMessage.recipient == f"{formatted_contact}@s.whatsapp.net",
                 WhatsAppMessage.recipient == f"{formatted_contact}@c.us",
                 WhatsAppMessage.recipient == f"+{formatted_contact}",
             ])
         if last_digits:
             filter_conditions.extend([
-                WhatsAppMessage.sender.like(f"%{last_digits}"),
-                WhatsAppMessage.recipient.like(f"%{last_digits}")
+                WhatsAppMessage.sender.like(f"%{last_digits}%"),
+                WhatsAppMessage.recipient.like(f"%{last_digits}%")
             ])
         query = query.filter(db.or_(*filter_conditions))
 

@@ -13,14 +13,14 @@ class TestRealChatIdDispatch(unittest.TestCase):
 
             res = WhatsAppService.send_green_api_message(
                 to_phone="03209350858",
-                chat_id="923209350858@c.us",
+                chat_id="923209350858@s.whatsapp.net",
                 message_text="Hello WhatsApp Chat",
                 allow_fallback=False
             )
             self.assertTrue(res.get("success"))
-            self.assertEqual(res.get("chat_id"), "923209350858@c.us")
+            self.assertEqual(res.get("chat_id"), "923209350858@s.whatsapp.net")
             post_json = mock_post.call_args[1]["json"]
-            self.assertEqual(post_json.get("chatId"), "923209350858@c.us")
+            self.assertEqual(post_json.get("chatId"), "923209350858@s.whatsapp.net")
 
     def test_inbound_auto_response_routes_real_chat_id_without_fallback(self):
         """Verifies handle_inbound_auto_response routes real chat ID to text and voice dispatchers without fallback."""
@@ -35,19 +35,19 @@ class TestRealChatIdDispatch(unittest.TestCase):
             res2 = WhatsAppService.handle_inbound_auto_response(
                 organization_id="org-enterprise-default",
                 sender_phone="03209350858",
-                chat_id="923209350858@c.us",
+                chat_id="923209350858@s.whatsapp.net",
                 message_body="What are your service rates?",
                 message_id="MSG_IN_999"
             )
             self.assertTrue(res2.get("success"))
             self.assertTrue(mock_send_green.called)
             call_kwargs = mock_send_green.call_args[1]
-            self.assertEqual(call_kwargs.get("chat_id"), "923209350858@c.us")
+            self.assertEqual(call_kwargs.get("chat_id"), "923209350858@s.whatsapp.net")
             self.assertFalse(call_kwargs.get("allow_fallback"))
 
             self.assertTrue(mock_send_file.called)
             file_kwargs = mock_send_file.call_args[1]
-            self.assertEqual(file_kwargs.get("chat_id"), "923209350858@c.us")
+            self.assertEqual(file_kwargs.get("chat_id"), "923209350858@s.whatsapp.net")
             self.assertFalse(file_kwargs.get("allow_fallback"))
 
 
