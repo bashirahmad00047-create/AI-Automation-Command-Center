@@ -74,16 +74,27 @@ function cleanPhoneNumber(jid) {
   if (str.endsWith('@g.us')) return str;
   str = str.replace(/@lid|@s\.whatsapp\.net|@c\.us/gi, '');
   str = str.split(':')[0];
-  const digits = str.replace(/[^0-9]/g, '');
+  let digits = str.replace(/[^0-9]/g, '');
+  // Pakistani local phone handling: 03001234567 -> 923001234567
+  if (digits.startsWith('03') && digits.length === 11) {
+    digits = '92' + digits.slice(1);
+  } else if (digits.startsWith('3') && digits.length === 10) {
+    digits = '92' + digits;
+  } else if (digits.startsWith('913') && digits.length === 12) {
+    // Correct erroneously prefixed +91 to Pakistani +92
+    digits = '923' + digits.slice(3);
+  } else if (digits.startsWith('00')) {
+    digits = digits.slice(2);
+  }
   return digits || str;
 }
 
 /**
  * Normalizes phone numbers / chat IDs to Baileys JID format.
  * - Handles group chats: 12345-67890@g.us
- * - Handles legacy/Green-API chats: 923001234567@c.us -> 923001234567@s.whatsapp.net
- * - Handles plain numbers / international format: +92 300 1234567 -> 923001234567@s.whatsapp.net
- * - Handles LID JIDs: 12345@lid -> 12345@s.whatsapp.net
+ * - Handles Pakistani local numbers: 03209350858 -> 923209350858@s.whatsapp.net
+ * - Strips accidental +91 prefixes from Pakistani numbers (913XXXXXXXXX -> 923XXXXXXXXX)
+ * - Strips @c.us, @lid, :0 device indices
  */
 function normalizeJid(chatId) {
   if (!chatId) return '';
@@ -92,16 +103,21 @@ function normalizeJid(chatId) {
   if (jid.endsWith('@g.us')) {
     return jid;
   }
-  if (jid.endsWith('@s.whatsapp.net')) {
-    return jid;
-  }
-  if (jid.endsWith('@c.us') || jid.endsWith('@lid')) {
-    jid = jid.replace(/@c\.us|@lid/gi, '');
-  }
+  // Strip all protocol suffixes and device ports (:0, :1, @c.us, @lid, @s.whatsapp.net)
+  jid = jid.replace(/@c\.us|@lid|@s\.whatsapp\.net/gi, '');
   jid = jid.split(':')[0];
 
-  // Strip all non-digit characters
-  const cleanDigits = jid.replace(/[^0-9]/g, '');
+  let cleanDigits = jid.replace(/[^0-9]/g, '');
+  if (cleanDigits.startsWith('03') && cleanDigits.length === 11) {
+    cleanDigits = '92' + cleanDigits.slice(1);
+  } else if (cleanDigits.startsWith('3') && cleanDigits.length === 10) {
+    cleanDigits = '92' + cleanDigits;
+  } else if (cleanDigits.startsWith('913') && cleanDigits.length === 12) {
+    // Avoid wrong country code +91 for Pakistani 3xx mobile numbers
+    cleanDigits = '923' + cleanDigits.slice(3);
+  } else if (cleanDigits.startsWith('00')) {
+    cleanDigits = cleanDigits.slice(2);
+  }
   return `${cleanDigits}@s.whatsapp.net`;
 }
 
@@ -481,6 +497,8 @@ app.get(['/', '/status'], (req, res) => {
     bridge: 'WhatsApp Baileys Bridge',
     status: isConnected ? 'connected' : (currentQr ? 'waiting_for_qr_scan' : 'connecting'),
     connected: isConnected,
+    qrUrl: currentQrUrl,
+    qr: currentQr,
     user: sock?.user || null,
     target_webhook: PYTHON_WEBHOOK_URL,
     uptime_seconds: Math.floor(process.uptime())
@@ -596,8 +614,8 @@ app.post('/send-message', async (req, res, next) => {
     let message = null;
 
     try {
-      chatId = req.body?.chatId || req.body?.to || req.body?.phone || req.body?.recipient;
-      message = req.body?.message !== undefined ? req.body.message : (req.body?.text !== undefined ? req.body.text : req.body?.body);
+      chatId = req.body?.chatId || req.body?.to || req.body?.to_phone || req.body?.phone || req.body?.recipient || req.body?.target || req.body?.contact;
+      message = req.body?.message !== undefined ? req.body.message : (req.body?.text !== undefined ? req.body.text : (req.body?.body !== undefined ? req.body.body : req.body?.caption));
     } catch (parseErr) {
       return res.status(400).json({
         success: false,
@@ -605,7 +623,9 @@ app.post('/send-message', async (req, res, next) => {
       });
     }
 
-    const hasAudio = Boolean(req.body?.audioBase64 || req.body?.audio || req.body?.fileBase64 || req.body?.audioUrl || req.body?.urlFile);
+    const audioRaw = req.body?.audioBase64 || req.body?.audio_base64 || req.body?.audio || req.body?.fileBase64 || req.body?.file_base64 || req.body?.dataUri;
+    const audioUrl = req.body?.audioUrl || req.body?.audio_url || req.body?.urlFile || req.body?.url;
+    const hasAudio = Boolean(audioRaw || audioUrl);
     const hasImage = Boolean(req.body?.imageBase64 || req.body?.image || req.body?.imageUrl);
     const hasText = message !== undefined && message !== null && String(message).trim().length > 0;
 
@@ -644,13 +664,11 @@ app.post('/send-message', async (req, res, next) => {
     let sent = null;
     try {
       if (hasAudio) {
-        const audioRaw = req.body?.audioBase64 || req.body?.audio || req.body?.fileBase64;
-        const audioUrl = req.body?.audioUrl || req.body?.urlFile;
-        const ptt = req.body?.ptt !== false;
+        const ptt = req.body?.ptt !== false && req.body?.is_voice !== false;
         const mimetype = req.body?.mimetype || req.body?.mime_type || 'audio/ogg; codecs=opus';
 
         if (audioRaw) {
-          const cleanBase64 = String(audioRaw).replace(/^data:audio\/\w+;base64,/, '').replace(/^data:application\/\w+;base64,/, '');
+          const cleanBase64 = String(audioRaw).replace(/^data:[^;]+;base64,/, '');
           const audioBuffer = Buffer.from(cleanBase64, 'base64');
           sent = await sock.sendMessage(jid, {
             audio: audioBuffer,
@@ -670,7 +688,7 @@ app.post('/send-message', async (req, res, next) => {
         const caption = message ? String(message) : '';
 
         if (imageRaw) {
-          const cleanBase64 = String(imageRaw).replace(/^data:image\/\w+;base64,/, '');
+          const cleanBase64 = String(imageRaw).replace(/^data:[^;]+;base64,/, '');
           const imageBuffer = Buffer.from(cleanBase64, 'base64');
           sent = await sock.sendMessage(jid, {
             image: imageBuffer,

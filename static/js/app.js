@@ -4946,6 +4946,8 @@ function formatAudioSeconds(sec) {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
+let waQrInlinePollInterval = null;
+
 function setWhatsAppViewMode(mode) {
     window._waCurrentViewMode = mode;
     const btnWeb = document.getElementById('btnViewWaWeb');
@@ -4956,6 +4958,11 @@ function setWhatsAppViewMode(mode) {
     const banner = document.getElementById('whatsappModeBanner');
 
     const isConnected = Boolean(window._waIsConnected || window._waDemoMode);
+
+    if (waQrInlinePollInterval) {
+        clearInterval(waQrInlinePollInterval);
+        waQrInlinePollInterval = null;
+    }
 
     if (mode === 'web') {
         if (btnWeb) btnWeb.classList.add('active');
@@ -4972,6 +4979,14 @@ function setWhatsAppViewMode(mode) {
             if (connectContainer) {
                 connectContainer.style.display = 'flex';
                 fetchWhatsAppQrCode();
+                waQrInlinePollInterval = setInterval(() => {
+                    if (window._waIsConnected) {
+                        clearInterval(waQrInlinePollInterval);
+                        waQrInlinePollInterval = null;
+                        return;
+                    }
+                    fetchWhatsAppQrCode();
+                }, 3000);
             }
         }
     } else {
@@ -4997,24 +5012,50 @@ async function fetchWhatsAppQrCode() {
     const qrStatic = document.getElementById('waStaticQrPlaceholder');
     const qrStatus = document.getElementById('waQrStatusText');
     try {
-        const res = await fetch('/api/v1/whatsapp/qr');
-        if (res.ok) {
+        let res = null;
+        try {
+            res = await fetch('/api/v1/whatsapp/bridge-qr');
+        } catch (_) {
+            res = await fetch('/api/whatsapp/bridge-qr');
+        }
+        if (res && res.ok) {
             const data = await res.json();
-            if (data.type === 'qrCode' && data.qr_data) {
-                if (qrImg) {
-                    qrImg.src = data.qr_data.startsWith('data:') ? data.qr_data : `data:image/png;base64,${data.qr_data}`;
-                    qrImg.style.display = 'block';
-                }
-                if (qrStatic) qrStatic.style.display = 'none';
-                if (qrStatus) qrStatus.innerHTML = '<span>●</span><span>Scan QR code with WhatsApp</span>';
-            } else if (data.type === 'alreadyLogged') {
-                if (qrStatus) qrStatus.innerHTML = '<span>●</span><span>Already linked! Transitioning...</span>';
+            if (data.status === 'connected' || data.connected) {
+                if (qrStatus) qrStatus.innerHTML = '<span>●</span><span>WhatsApp Connected! Loading...</span>';
                 window._waIsConnected = true;
-                setTimeout(() => loadWhatsAppDashboard(), 600);
+                if (waQrInlinePollInterval) {
+                    clearInterval(waQrInlinePollInterval);
+                    waQrInlinePollInterval = null;
+                }
+                setTimeout(() => {
+                    setWhatsAppViewMode('web');
+                    loadWhatsAppDashboard();
+                }, 400);
+                return;
+            }
+
+            const qrSrc = data.qrUrl || data.qrImageUrl;
+            if ((data.status === 'qr_ready' || qrSrc || data.qr) && (qrSrc || data.qrSvg || data.qr)) {
+                if (qrSrc && (qrSrc.startsWith('data:') || qrSrc.startsWith('http'))) {
+                    if (qrImg) {
+                        qrImg.src = qrSrc;
+                        qrImg.style.display = 'block';
+                    }
+                    if (qrStatic) qrStatic.style.display = 'none';
+                } else if (data.qrSvg && qrStatic) {
+                    qrStatic.innerHTML = data.qrSvg;
+                    qrStatic.style.display = 'flex';
+                    if (qrImg) qrImg.style.display = 'none';
+                } else if (data.qr && qrImg) {
+                    qrImg.src = `https://quickchart.io/qr?size=220&text=${encodeURIComponent(data.qr)}`;
+                    qrImg.style.display = 'block';
+                    if (qrStatic) qrStatic.style.display = 'none';
+                }
+                if (qrStatus) qrStatus.innerHTML = '<span>●</span><span>Scan QR code with WhatsApp</span>';
             } else {
                 if (qrImg) qrImg.style.display = 'none';
                 if (qrStatic) qrStatic.style.display = 'flex';
-                if (qrStatus) qrStatus.innerHTML = '<span>●</span><span>Scan with WhatsApp or click Connect</span>';
+                if (qrStatus) qrStatus.innerHTML = `<span>●</span><span>${data.message || 'Connecting to WhatsApp Baileys bridge...'}</span>`;
             }
         }
     } catch (e) {
@@ -5105,8 +5146,14 @@ function normalizeWaPhone(phone) {
     let raw = String(phone).replace(/@lid|@s\.whatsapp\.net|@c\.us/gi, '').split(':')[0].trim();
     if (raw.endsWith('@g.us')) return raw;
     let clean = raw.replace(/[^0-9]/g, '');
+    // Handle Pakistani local 03001234567 -> 923001234567
     if (clean.startsWith('03') && clean.length === 11) {
         clean = '92' + clean.slice(1);
+    } else if (clean.startsWith('3') && clean.length === 10) {
+        clean = '92' + clean;
+    } else if (clean.startsWith('913') && clean.length === 12) {
+        // Strip erroneous +91 country prefix from Pakistani 3xx mobile numbers
+        clean = '923' + clean.slice(3);
     } else if (clean.startsWith('00')) {
         clean = clean.slice(2);
     }
@@ -5204,13 +5251,39 @@ function promptNewConversation() {
     if (replyInput) replyInput.focus();
 }
 
+function dataUriToBlob(dataUri) {
+    try {
+        if (!dataUri || typeof dataUri !== 'string' || !dataUri.includes(',')) return null;
+        const parts = dataUri.split(',');
+        const mimeMatch = parts[0].match(/:(.*?);/);
+        const mime = mimeMatch ? mimeMatch[1] : 'audio/ogg';
+        const b64 = parts[1].trim();
+        const bstr = atob(b64);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+        }
+        return new Blob([u8arr], { type: mime });
+    } catch (e) {
+        console.warn('[dataUriToBlob error]', e);
+        return null;
+    }
+}
+
 function resetVoicePlayback(id) {
     if (waVoiceProgressInterval) {
         clearInterval(waVoiceProgressInterval);
         waVoiceProgressInterval = null;
     }
     if (waCurrentAudio) {
-        try { waCurrentAudio.pause(); } catch(e) {}
+        try {
+            waCurrentAudio.pause();
+            if (waCurrentAudio._blobUrl) {
+                URL.revokeObjectURL(waCurrentAudio._blobUrl);
+                waCurrentAudio._blobUrl = null;
+            }
+        } catch(e) {}
         waCurrentAudio = null;
     }
     if (typeof window !== 'undefined' && window.speechSynthesis) {
@@ -5266,7 +5339,7 @@ function fallbackSpeechPlayback(id, textBody) {
     window.speechSynthesis.speak(utter);
 }
 
-function togglePlayVoiceMessage(id, mediaUrl, textBody) {
+function togglePlayVoiceMessage(id, explicitMediaUrl, explicitText) {
     if (waCurrentAudioMsgId === id) {
         resetVoicePlayback(id);
         return;
@@ -5279,29 +5352,62 @@ function togglePlayVoiceMessage(id, mediaUrl, textBody) {
     const btn = document.getElementById(`waPlayBtn_${id}`);
     if (btn) btn.innerHTML = '❚❚';
 
-    if (mediaUrl && (mediaUrl.startsWith('http://') || mediaUrl.startsWith('https://'))) {
-        const proxyUrl = `/api/v1/whatsapp/media/proxy?url=${encodeURIComponent(mediaUrl)}`;
-        const audio = new Audio(proxyUrl);
-        waCurrentAudio = audio;
+    // Look up the cached message object for reliable media extraction
+    const targetMsg = (waAllMessagesCache || []).find(x => String(x.id) === String(id) || String(x.whatsapp_message_id) === String(id));
+    const mediaUrl = explicitMediaUrl || targetMsg?.media_url || targetMsg?.raw_payload?.audio_base64 || targetMsg?.audio_base64 || '';
+    const textBody = explicitText || targetMsg?.body || '';
 
-        audio.ontimeupdate = () => {
-            const prog = document.getElementById(`waAudioProg_${id}`);
-            const timeEl = document.getElementById(`waAudioTime_${id}`);
-            if (audio.duration && !isNaN(audio.duration)) {
-                const pct = (audio.currentTime / audio.duration) * 100;
-                if (prog) prog.style.width = `${pct}%`;
-                if (timeEl) timeEl.textContent = `${formatAudioSeconds(audio.currentTime)} / ${formatAudioSeconds(audio.duration)}`;
+    if (mediaUrl) {
+        let playSrc = mediaUrl;
+        let blobUrl = null;
+
+        if (mediaUrl.startsWith('data:')) {
+            const blob = dataUriToBlob(mediaUrl);
+            if (blob) {
+                blobUrl = URL.createObjectURL(blob);
+                playSrc = blobUrl;
             }
-        };
-        audio.onended = () => resetVoicePlayback(id);
-        audio.onerror = () => fallbackSpeechPlayback(id, textBody);
-        audio.play().catch(e => {
-            console.warn('Audio element play failed, falling back to speech synthesizer:', e);
-            fallbackSpeechPlayback(id, textBody);
-        });
-    } else {
-        fallbackSpeechPlayback(id, textBody);
+        } else if (mediaUrl.startsWith('http://') || mediaUrl.startsWith('https://')) {
+            playSrc = `/api/v1/whatsapp/media/proxy?url=${encodeURIComponent(mediaUrl)}`;
+        }
+
+        try {
+            const audio = new Audio(playSrc);
+            if (blobUrl) audio._blobUrl = blobUrl;
+            waCurrentAudio = audio;
+
+            audio.ontimeupdate = () => {
+                const prog = document.getElementById(`waAudioProg_${id}`);
+                const timeEl = document.getElementById(`waAudioTime_${id}`);
+                if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+                    const pct = Math.min(100, (audio.currentTime / audio.duration) * 100);
+                    if (prog) prog.style.width = `${pct}%`;
+                    if (timeEl) timeEl.textContent = `${formatAudioSeconds(audio.currentTime)} / ${formatAudioSeconds(audio.duration)}`;
+                } else if (audio.currentTime > 0 && timeEl) {
+                    timeEl.textContent = formatAudioSeconds(audio.currentTime);
+                }
+            };
+
+            audio.onended = () => resetVoicePlayback(id);
+            audio.onerror = (e) => {
+                console.warn('[Audio Playback Error, using speech fallback]', e);
+                fallbackSpeechPlayback(id, textBody);
+            };
+
+            const playPromise = audio.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(e => {
+                    console.warn('[Audio play() rejected, using speech fallback]', e);
+                    fallbackSpeechPlayback(id, textBody);
+                });
+            }
+            return;
+        } catch (initErr) {
+            console.warn('[Audio constructor failed]', initErr);
+        }
     }
+
+    fallbackSpeechPlayback(id, textBody);
 }
 
 async function deleteWhatsAppMsg(msgId) {
@@ -5908,11 +6014,11 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                     const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage');
                     bodyHtml = `
                         <div class="wa-voice-bubble">
-                            <button type="button" class="wa-play-btn" id="waPlayBtn_${m.id}" onclick="togglePlayVoiceMessage('${m.id}', '${escapeHtml(safeMediaUrl)}', '${escapeHtml(safeBody)}')">
+                            <button type="button" class="wa-play-btn" id="waPlayBtn_${m.id}" onclick="togglePlayVoiceMessage('${m.id}')">
                                 ▶
                             </button>
                             <div class="wa-voice-track">
-                                <div class="wa-prog-bar-bg" onclick="togglePlayVoiceMessage('${m.id}', '${escapeHtml(safeMediaUrl)}', '${escapeHtml(safeBody)}')">
+                                <div class="wa-prog-bar-bg" onclick="togglePlayVoiceMessage('${m.id}')">
                                     <div class="wa-prog-bar-fill" id="waAudioProg_${m.id}"></div>
                                 </div>
                                 <div class="wa-voice-meta">
@@ -6215,8 +6321,20 @@ async function loadWhatsAppDashboard() {
             }
         }
 
+        // Check real-time Baileys bridge socket connectivity
+        let bridgeIsLive = false;
+        if (activeProvider === 'baileys_bridge') {
+            try {
+                const bRes = await fetch('/api/v1/whatsapp/bridge-status');
+                if (bRes.ok) {
+                    const bData = await bRes.json();
+                    bridgeIsLive = Boolean(bData.connected);
+                }
+            } catch (_) {}
+        }
+
         // Update connection state tracking and toggle UI view
-        const isConnected = isConfigured && (activeProvider === 'baileys_bridge' || activeProvider === 'green_api' || activeProvider === 'meta');
+        const isConnected = Boolean(window._waDemoMode || (isConfigured && (activeProvider === 'baileys_bridge' ? bridgeIsLive : (activeProvider === 'green_api' || activeProvider === 'meta'))));
         window._waIsConfigured = isConfigured;
         window._waActiveProvider = activeProvider;
         window._waIsConnected = isConnected;
@@ -6229,7 +6347,15 @@ async function loadWhatsAppDashboard() {
             sidebarStatus.onclick = function() {
                 if (window.openLinkWhatsAppQrModal) window.openLinkWhatsAppQrModal();
             };
-            if (activeProvider === 'green_api' || activeProvider === 'baileys_bridge') {
+            if (activeProvider === 'baileys_bridge') {
+                if (bridgeIsLive) {
+                    sidebarStatus.textContent = '● Live Sync Active';
+                    sidebarStatus.style.color = '#00a884';
+                } else {
+                    sidebarStatus.textContent = '● Awaiting QR Link';
+                    sidebarStatus.style.color = '#f59e0b';
+                }
+            } else if (activeProvider === 'green_api') {
                 sidebarStatus.textContent = '● Live Sync Active';
                 sidebarStatus.style.color = '#00a884';
             } else if (activeProvider === 'meta') {
