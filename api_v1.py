@@ -2644,10 +2644,11 @@ def api_whatsapp_bridge_qr():
         return jsonify(data), resp.status_code
     except Exception as e:
         return jsonify({
-            "status": "offline",
+            "status": "waiting",
             "connected": False,
-            "message": f"WhatsApp Baileys bridge starting up or offline on port 3001 ({str(e)})"
-        }), 503
+            "qrUrl": None,
+            "message": f"WhatsApp Baileys bridge is initializing... ({str(e)})"
+        }), 200
 
 
 @api_v1.route("/whatsapp/bridge-qr.png", methods=["GET"])

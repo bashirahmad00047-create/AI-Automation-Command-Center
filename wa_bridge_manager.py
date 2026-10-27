@@ -49,6 +49,15 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001) -> 
         if is_port_reachable("127.0.0.1", port, timeout=0.3):
             return True
 
+        # If a subprocess was already launched and is still running, avoid duplicate spawns
+        if _bridge_proc is not None and _bridge_proc.poll() is None:
+            start_time = time.time()
+            while time.time() - start_time < timeout_seconds:
+                if is_port_reachable("127.0.0.1", port, timeout=0.25):
+                    return True
+                time.sleep(0.25)
+            return is_port_reachable("127.0.0.1", port, timeout=0.3)
+
         root_dir = os.path.dirname(os.path.abspath(__file__))
         bridge_script = os.path.join(root_dir, "wa_bridge.js")
         if not os.path.exists(bridge_script):
