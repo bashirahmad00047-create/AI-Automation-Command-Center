@@ -5144,7 +5144,7 @@ async function syncWhatsAppMessagesNow(silent = false) {
 function normalizeWaPhone(phone) {
     if (!phone) return '';
     let raw = String(phone).replace(/@lid|@s\.whatsapp\.net|@c\.us/gi, '').split(':')[0].trim();
-    if (raw.endsWith('@g.us')) return raw;
+    if (raw.endsWith('@g.us') || raw.endsWith('@broadcast')) return raw;
     let clean = raw.replace(/[^0-9]/g, '');
     // Handle Pakistani local 03001234567 -> 923001234567
     if (clean.startsWith('03') && clean.length === 11) {
@@ -5158,6 +5158,21 @@ function normalizeWaPhone(phone) {
         clean = clean.slice(2);
     }
     return clean || raw;
+}
+
+function formatWaDisplayPhone(phone) {
+    if (!phone) return '';
+    const norm = normalizeWaPhone(phone);
+    if (!norm) return '';
+    if (norm.endsWith('@g.us')) return 'WhatsApp Group';
+    if (norm.endsWith('@broadcast')) return 'Status Broadcast';
+    if (norm.startsWith('92') && norm.length === 12) {
+        return `+92 ${norm.slice(2, 5)} ${norm.slice(5)}`;
+    }
+    if (norm.length >= 8) {
+        return `+${norm}`;
+    }
+    return norm;
 }
 
 function isSameWaPhone(p1, p2) {
@@ -5177,13 +5192,10 @@ function groupWhatsAppConversations(messages) {
         const isInbound = m.direction === 'inbound';
         const rawPartner = isInbound ? m.sender : m.recipient;
         const normKey = normalizeWaPhone(rawPartner) || 'Unknown';
-        let displayPhone = String(rawPartner || '').replace(/@lid|@s\.whatsapp\.net|@c\.us/gi, '').split(':')[0].trim() || normKey;
-        if (!displayPhone.includes('@g.us') && displayPhone.length >= 10 && !displayPhone.startsWith('+')) {
-            displayPhone = '+' + displayPhone;
-        }
+        const displayPhone = formatWaDisplayPhone(rawPartner) || normKey;
 
         if (!map[normKey]) {
-            let initialMsg = m.body || (m.is_audio ? '🎙️ Voice note' : '(no text)');
+            let initialMsg = (m.body && m.body !== '(no text)') ? m.body : (m.is_audio ? '🎙️ Voice note' : '(no text)');
             if (initialMsg.includes('[quotedMessage]')) {
                 initialMsg = initialMsg.replace(/\[quotedMessage\]/gi, 'Quoted message');
             }
@@ -5943,11 +5955,13 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
 
     if (waActiveChatPartner) {
         const activeConv = conversations.find(c => isSameWaPhone(c.normalizedPhone || c.phone, waActiveChatPartner));
-        const contactName = activeConv ? activeConv.name : waActiveChatPartner;
+        const normPartner = normalizeWaPhone(waActiveChatPartner);
+        const displayFormatted = formatWaDisplayPhone(normPartner || waActiveChatPartner);
+        const contactName = activeConv ? activeConv.name : displayFormatted;
         if (activeHeaderName) activeHeaderName.textContent = contactName;
-        if (activeHeaderPhone) activeHeaderPhone.textContent = `+${waActiveChatPartner.replace(/^\+/, '')} · Online`;
+        if (activeHeaderPhone) activeHeaderPhone.textContent = `${displayFormatted} · Online`;
         if (activeHeaderAvatar) {
-            activeHeaderAvatar.style.backgroundColor = getWaAvatarColor(waActiveChatPartner);
+            activeHeaderAvatar.style.backgroundColor = getWaAvatarColor(normPartner || waActiveChatPartner);
             activeHeaderAvatar.textContent = (contactName || '?').substring(0, 2).toUpperCase();
         }
         if (activeChatActions) activeChatActions.style.display = 'flex';
@@ -5977,20 +5991,22 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
     }
 
     const partnerMsgs = (messages || []).filter(m => {
-        const cleanSender = (m.sender || '').replace(/@c\.us|@g\.us/g, '').trim();
-        const cleanRecipient = (m.recipient || '').replace(/@c\.us|@g\.us/g, '').trim();
-        return isSameWaPhone(cleanSender, waActiveChatPartner) || isSameWaPhone(cleanRecipient, waActiveChatPartner);
+        const cleanSender = normalizeWaPhone(m.sender);
+        const cleanRecipient = normalizeWaPhone(m.recipient);
+        const target = normalizeWaPhone(waActiveChatPartner);
+        return isSameWaPhone(cleanSender, target) || isSameWaPhone(cleanRecipient, target);
     });
 
     // Sort chronologically (oldest to newest for chat stream)
     partnerMsgs.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
 
     if (partnerMsgs.length === 0) {
+        const displayPhone = formatWaDisplayPhone(waActiveChatPartner);
         msgStream.innerHTML = `
             <div class="wa-date-divider">New Conversation</div>
             <div style="margin: auto; text-align: center; color: #8696a0;">
                 <div style="font-size: 2.2rem; margin-bottom: 8px;">👋</div>
-                <div style="color: #e9edef; font-weight: 600;">No messages yet with +${escapeHtml(waActiveChatPartner)}</div>
+                <div style="color: #e9edef; font-weight: 600;">No messages yet with ${escapeHtml(displayPhone)}</div>
                 <p style="font-size: 12px; margin-top: 4px;">Type a message in the box below to start chatting!</p>
             </div>
         `;

@@ -7,6 +7,21 @@ export WA_BRIDGE_PORT="${WA_BRIDGE_PORT:-3001}"
 export BRIDGE_PORT="${BRIDGE_PORT:-3001}"
 export PYTHON_WEBHOOK_URL="${PYTHON_WEBHOOK_URL:-http://127.0.0.1:${PORT}/api/v1/webhooks/whatsapp}"
 
+# Configure Baileys multi-file auth persistence directory (Render persistent disk mounts)
+if [ -z "$AUTH_DIR" ]; then
+    if [ -d "/var/data" ]; then
+        export AUTH_DIR="/var/data/baileys_auth"
+    elif [ -d "/data" ]; then
+        export AUTH_DIR="/data/baileys_auth"
+    elif [ -n "$RENDER_DISK_PATH" ] && [ -d "$RENDER_DISK_PATH" ]; then
+        export AUTH_DIR="${RENDER_DISK_PATH}/baileys_auth"
+    else
+        export AUTH_DIR="$(pwd)/baileys_auth"
+    fi
+fi
+export AUTH_DIR
+mkdir -p "$AUTH_DIR"
+
 if [ ! -d "node_modules/@whiskeysockets/baileys" ] || [ ! -d "node_modules/qrcode" ]; then
     echo "=== [1/4] Installing missing node dependencies ==="
     npm install --omit=dev --no-audit --no-fund || true
