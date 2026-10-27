@@ -1,3 +1,14 @@
+﻿from __future__ import annotations
+from flask import Flask
+app = Flask(__name__)
+def clean_phone_number(raw):
+    if not raw:
+        return ""
+    digits = "".join(filter(str.isdigit, str(raw)))
+    if digits.startswith("92") and len(digits) == 12:
+        return "0" + digits[2:]
+    return digits
+
 """Version 1 Enterprise REST API for OpsFlow SaaS Platform.
 
 Provides secure, authenticated, and tenant-isolated endpoints for:
@@ -16,7 +27,7 @@ Provides secure, authenticated, and tenant-isolated endpoints for:
 - System Telemetry & Health Checks
 """
 
-from __future__ import annotations
+
 
 import datetime
 import hashlib
@@ -3452,34 +3463,59 @@ def list_whatsapp_messages():
     query = WhatsAppMessage.query.filter_by(organization_id=org.id)
 
     if chat_id:
-        clean_contact = chat_id.replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@g.us", "").replace("@lid", "").split(":")[0].strip()
-        formatted_contact = WhatsAppService.format_phone_number(clean_contact)
-        digits_only = "".join(filter(str.isdigit, str(clean_contact)))
-        last_digits = digits_only[-8:] if len(digits_only) >= 8 else digits_only
+        raw_chat = str(chat_id).strip()
 
-        filter_conditions = [
-            WhatsAppMessage.sender == clean_contact,
-            WhatsAppMessage.sender == chat_id,
-            WhatsAppMessage.recipient == clean_contact,
-            WhatsAppMessage.recipient == chat_id,
-        ]
-        if formatted_contact:
-            filter_conditions.extend([
-                WhatsAppMessage.sender == formatted_contact,
-                WhatsAppMessage.sender == f"{formatted_contact}@s.whatsapp.net",
-                WhatsAppMessage.sender == f"{formatted_contact}@c.us",
-                WhatsAppMessage.sender == f"+{formatted_contact}",
-                WhatsAppMessage.recipient == formatted_contact,
-                WhatsAppMessage.recipient == f"{formatted_contact}@s.whatsapp.net",
-                WhatsAppMessage.recipient == f"{formatted_contact}@c.us",
-                WhatsAppMessage.recipient == f"+{formatted_contact}",
-            ])
-        if last_digits:
-            filter_conditions.extend([
-                WhatsAppMessage.sender.like(f"%{last_digits}%"),
-                WhatsAppMessage.recipient.like(f"%{last_digits}%")
-            ])
-        query = query.filter(db.or_(*filter_conditions))
+        # For group chats (@g.us), query the exact group JID stored in sender/recipient
+        if raw_chat.endswith("@g.us"):
+            query = query.filter(
+                db.or_(
+                    WhatsAppMessage.sender == raw_chat,
+                    WhatsAppMessage.recipient == raw_chat,
+                )
+            )
+        else:
+            # Strip all JID suffixes to get clean digits
+            clean_contact = (
+                raw_chat
+                .replace("@s.whatsapp.net", "")
+                .replace("@c.us", "")
+                .replace("@lid", "")
+                .split(":")[0]
+                .strip()
+            )
+            # Normalize through format_phone_number to resolve PK local formats etc.
+            formatted_contact = WhatsAppService.format_phone_number(clean_contact)
+            digits_only = "".join(filter(str.isdigit, str(formatted_contact or clean_contact)))
+
+            # Use last 8 digits as a suffix-match anchor — safe for both PK and international numbers
+            last_digits = digits_only[-8:] if len(digits_only) >= 8 else digits_only
+
+            filter_conditions = [
+                WhatsAppMessage.sender == clean_contact,
+                WhatsAppMessage.sender == raw_chat,
+                WhatsAppMessage.recipient == clean_contact,
+                WhatsAppMessage.recipient == raw_chat,
+            ]
+            if formatted_contact and formatted_contact != clean_contact:
+                filter_conditions.extend([
+                    WhatsAppMessage.sender == formatted_contact,
+                    WhatsAppMessage.sender == f"{formatted_contact}@s.whatsapp.net",
+                    WhatsAppMessage.sender == f"+{formatted_contact}",
+                    WhatsAppMessage.recipient == formatted_contact,
+                    WhatsAppMessage.recipient == f"{formatted_contact}@s.whatsapp.net",
+                    WhatsAppMessage.recipient == f"+{formatted_contact}",
+                ])
+            if last_digits and len(last_digits) >= 7:
+                # Anchor the LIKE to a suffix match — avoids false positives from short digit
+                # sequences matching unrelated records (e.g. "12345678" matching "912345678")
+                filter_conditions.extend([
+                    WhatsAppMessage.sender.like(f"%{last_digits}"),
+                    WhatsAppMessage.recipient.like(f"%{last_digits}"),
+                    # Also match when stored with @s.whatsapp.net suffix
+                    WhatsAppMessage.sender.like(f"%{last_digits}@%"),
+                    WhatsAppMessage.recipient.like(f"%{last_digits}@%"),
+                ])
+            query = query.filter(db.or_(*filter_conditions))
 
     messages = query.order_by(WhatsAppMessage.created_at.desc()).limit(limit).all()
 
@@ -6192,4 +6228,5 @@ def get_broadcast_audiences_summary():
             "opted_out_contacts": opted_out
         }
     }), 200
-
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=5000, debug=True)
