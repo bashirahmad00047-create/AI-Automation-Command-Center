@@ -496,10 +496,11 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             return jsonify(data), resp.status_code
         except Exception as e:
             return jsonify({
-                "status": "offline",
+                "status": "waiting",
                 "connected": False,
-                "message": f"WhatsApp Baileys bridge starting up on port 3001 ({str(e)})... Please wait a moment."
-            }), 503
+                "qrUrl": None,
+                "message": f"WhatsApp Baileys bridge is initializing... ({str(e)})"
+            }), 200
 
     @application.route("/api/whatsapp/bridge-qr.png", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-qr.png", methods=["GET"])

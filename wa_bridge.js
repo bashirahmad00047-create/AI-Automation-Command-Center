@@ -33,6 +33,34 @@ let isConnected = false;
 let currentQr = null;
 let currentQrUrl = null;
 let currentQrSvg = null;
+let isStarting = false;
+let reconnectTimer = null;
+
+// Process-wide guard against unhandled network crashes
+process.on('uncaughtException', (err) => {
+  console.error('[WhatsApp Bridge] Uncaught Exception (guarded):', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[WhatsApp Bridge] Unhandled Rejection (guarded):', reason);
+});
+
+/**
+ * Safely terminates and removes all event listeners from an existing socket
+ * before initializing a new one to prevent memory leaks and file locks.
+ */
+function destroyOldSocket() {
+  if (sock) {
+    try {
+      if (sock.ev && typeof sock.ev.removeAllListeners === 'function') {
+        sock.ev.removeAllListeners();
+      }
+      if (typeof sock.end === 'function') {
+        sock.end(undefined);
+      }
+    } catch (_) {}
+    sock = null;
+  }
+}
 
 /**
  * Normalizes phone numbers / chat IDs to Baileys JID format.
@@ -83,204 +111,295 @@ function extractMessageText(message) {
  * Initializes and manages the Baileys WhatsApp Web socket.
  */
 async function startWhatsAppBridge() {
-  // Ensure auth storage directory exists
-  if (!fs.existsSync(AUTH_DIR)) {
-    fs.mkdirSync(AUTH_DIR, { recursive: true });
+  if (isStarting) {
+    console.log('[WhatsApp Bridge] Connection initialization already in progress, skipping duplicate request.');
+    return;
   }
+  isStarting = true;
 
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  const { version, isLatest } = await fetchLatestBaileysVersion();
-  console.log(`[WhatsApp Bridge] Using WA Web v${version.join('.')}, isLatest: ${isLatest}`);
+  try {
+    destroyOldSocket();
 
-  // Create socket with silent logger to keep terminal QR clean
-  sock = makeWASocket({
-    version,
-    auth: state,
-    logger: pino({ level: 'silent' }),
-    printQRInTerminal: false,
-    syncFullHistory: false
-  });
-
-  // Persist session credentials
-  sock.ev.on('creds.update', saveCreds);
-
-  // Connection life-cycle handler
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    // Display QR code in terminal when generated & pre-generate data URL and SVG
-    if (qr) {
-      currentQr = qr;
-      console.log('\n===============================================================');
-      console.log('  SCAN THIS QR CODE IN WHATSAPP TO LINK FOR FREE');
-      console.log('  Steps: WhatsApp -> Settings/Menu -> Linked Devices -> Link a Device');
-      console.log('===============================================================');
-      try {
-        qrcodeTerminal.generate(qr, { small: true });
-      } catch (tErr) {
-        // ignore terminal write error
-      }
-      console.log('===============================================================\n');
-
-      // Convert raw Baileys QR string into base64 Data URI using qrcode.toDataURL()
-      qrcode.toDataURL(qr, {
-        errorCorrectionLevel: 'M',
-        type: 'image/png',
-        margin: 2,
-        width: 320,
-        color: { dark: '#000000', light: '#ffffff' }
-      }).then((url) => {
-        currentQrUrl = url;
-      }).catch((err) => {
-        console.error('[Bridge QR] Error generating QR Data URL:', err);
-      });
-
-      // Pre-generate SVG string
-      qrcode.toString(qr, {
-        type: 'svg',
-        margin: 2,
-        width: 320
-      }).then((svg) => {
-        currentQrSvg = svg;
-      }).catch((err) => {
-        console.error('[Bridge QR] Error generating QR SVG:', err);
-      });
+    // Ensure auth storage directory exists
+    if (!fs.existsSync(AUTH_DIR)) {
+      fs.mkdirSync(AUTH_DIR, { recursive: true });
     }
 
-    if (connection === 'close') {
-      isConnected = false;
-      const statusCode =
-        lastDisconnect?.error instanceof Boom
-          ? lastDisconnect.error.output?.statusCode
-          : lastDisconnect?.error?.output?.statusCode;
+    // Load or reset multi-file auth credentials safely
+    let state, saveCreds;
+    try {
+      const auth = await useMultiFileAuthState(AUTH_DIR);
+      state = auth.state;
+      saveCreds = auth.saveCreds;
+    } catch (authErr) {
+      console.error('[WhatsApp Bridge] Auth state corrupted or unreadable. Resetting auth directory:', authErr.message);
+      try {
+        if (fs.existsSync(AUTH_DIR)) {
+          fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+          fs.mkdirSync(AUTH_DIR, { recursive: true });
+        }
+        const auth = await useMultiFileAuthState(AUTH_DIR);
+        state = auth.state;
+        saveCreds = auth.saveCreds;
+      } catch (resetErr) {
+        console.error('[WhatsApp Bridge] Fatal error resetting auth state:', resetErr);
+        throw resetErr;
+      }
+    }
 
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      console.warn(`[WhatsApp Bridge] Connection closed (code: ${statusCode}). Reconnecting: ${shouldReconnect}`);
+    // Version discovery with safe default fallback
+    let version = [2, 3000, 1043857760];
+    let isLatest = false;
+    try {
+      const vInfo = await fetchLatestBaileysVersion();
+      if (vInfo && Array.isArray(vInfo.version)) {
+        version = vInfo.version;
+        isLatest = !!vInfo.isLatest;
+      }
+    } catch (vErr) {
+      console.warn('[WhatsApp Bridge] Version check skipped, using standard version:', vErr.message);
+    }
+    console.log(`[WhatsApp Bridge] Using WA Web v${version.join('.')}, isLatest: ${isLatest}`);
 
-      if (shouldReconnect) {
-        setTimeout(startWhatsAppBridge, 3000);
-      } else {
-        console.error('[WhatsApp Bridge] Session logged out. Remove "baileys_auth" folder to generate a new QR.');
+    // Create Baileys socket with high resilience settings
+    sock = makeWASocket({
+      version,
+      auth: state,
+      logger: pino({ level: 'silent' }),
+      printQRInTerminal: false,
+      syncFullHistory: false,
+      connectTimeoutMs: 60000,
+      defaultQueryTimeoutMs: 60000,
+      keepAliveIntervalMs: 25000,
+      browser: ['BashFlow Cloud', 'Chrome', '1.0.0']
+    });
+
+    // Safely persist session credentials
+    sock.ev.on('creds.update', async () => {
+      try {
+        if (typeof saveCreds === 'function') {
+          await saveCreds();
+        }
+      } catch (saveErr) {
+        console.error('[WhatsApp Bridge] Failed to save creds:', saveErr.message);
+      }
+    });
+
+    // Connection life-cycle handler
+    sock.ev.on('connection.update', (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      // Display QR code in terminal when generated & pre-generate data URL and SVG
+      if (qr) {
+        currentQr = qr;
+        console.log('\n===============================================================');
+        console.log('  SCAN THIS QR CODE IN WHATSAPP TO LINK FOR FREE');
+        console.log('  Steps: WhatsApp -> Settings/Menu -> Linked Devices -> Link a Device');
+        console.log('===============================================================');
+        try {
+          if (process.stdout.isTTY || process.env.RENDER) {
+            qrcodeTerminal.generate(qr, { small: true });
+          }
+        } catch (tErr) {
+          // ignore terminal write error in non-TTY environments
+        }
+        console.log('===============================================================\n');
+
+        // Convert raw Baileys QR string into base64 Data URI using qrcode.toDataURL()
+        qrcode.toDataURL(qr, {
+          errorCorrectionLevel: 'M',
+          type: 'image/png',
+          margin: 2,
+          width: 320,
+          color: { dark: '#000000', light: '#ffffff' }
+        }).then((url) => {
+          currentQrUrl = url;
+        }).catch((err) => {
+          console.error('[Bridge QR] Error generating QR Data URL:', err);
+        });
+
+        // Pre-generate SVG string
+        qrcode.toString(qr, {
+          type: 'svg',
+          margin: 2,
+          width: 320
+        }).then((svg) => {
+          currentQrSvg = svg;
+        }).catch((err) => {
+          console.error('[Bridge QR] Error generating QR SVG:', err);
+        });
+      }
+
+      if (connection === 'close') {
+        isConnected = false;
+        const statusCode =
+          lastDisconnect?.error instanceof Boom
+            ? lastDisconnect.error.output?.statusCode
+            : lastDisconnect?.error?.output?.statusCode;
+
+        const isLoggedOut = (statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 403);
+        console.warn(`[WhatsApp Bridge] Connection closed (code: ${statusCode}, isLoggedOut: ${isLoggedOut}).`);
+
+        // If session was logged out or credentials became invalid, wipe auth directory
+        // so a fresh QR code is immediately generated on restart
+        if (isLoggedOut) {
+          console.warn('[WhatsApp Bridge] Session logged out or invalidated. Clearing auth folder to refresh QR...');
+          try {
+            if (fs.existsSync(AUTH_DIR)) {
+              fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+            }
+          } catch (rmErr) {
+            console.error('[WhatsApp Bridge] Failed to clean auth directory:', rmErr.message);
+          }
+          currentQr = null;
+          currentQrUrl = null;
+          currentQrSvg = null;
+        }
+
+        destroyOldSocket();
+
+        // Self-healing: automatically restart the socket so the bridge never stays dead
+        const restartDelay = isLoggedOut ? 2000 : 3000;
+        console.log(`[WhatsApp Bridge] Scheduling restart in ${restartDelay}ms...`);
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => {
+          startWhatsAppBridge().catch((retryErr) => {
+            console.error('[WhatsApp Bridge] Reconnect attempt failed:', retryErr.message);
+          });
+        }, restartDelay);
+      } else if (connection === 'open') {
+        isConnected = true;
         currentQr = null;
         currentQrUrl = null;
         currentQrSvg = null;
+        const userPhone = sock?.user?.id ? sock.user.id.split(':')[0] : 'Linked Number';
+        console.log('\n===============================================================');
+        console.log(` [WhatsApp Bridge] Connected successfully!`);
+        console.log(` Active Phone: +${userPhone}`);
+        console.log(` REST API listening on port ${PORT}`);
+        console.log(` Python Webhook target: ${PYTHON_WEBHOOK_URL}`);
+        console.log('===============================================================\n');
       }
-    } else if (connection === 'open') {
-      isConnected = true;
-      currentQr = null;
-      currentQrUrl = null;
-      currentQrSvg = null;
-      const userPhone = sock.user?.id ? sock.user.id.split(':')[0] : 'Linked Number';
-      console.log('\n===============================================================');
-      console.log(` [WhatsApp Bridge] Connected successfully!`);
-      console.log(` Active Phone: +${userPhone}`);
-      console.log(` REST API listening on port ${PORT}`);
-      console.log(` Python Webhook target: ${PYTHON_WEBHOOK_URL}`);
-      console.log('===============================================================\n');
-    }
-  });
+    });
 
-  // Forward incoming messages to Python backend webhook
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-
-    for (const msg of messages) {
-      // Ignore outgoing messages sent from this phone
-      if (msg.key?.fromMe) continue;
-
-      // Ignore broadcast status stories
-      if (msg.key?.remoteJid === 'status@broadcast') continue;
-
-      const remoteJid = msg.key?.remoteJid || '';
-      const senderPhone = remoteJid.replace(/@.*$/, '');
-      const pushName = msg.pushName || senderPhone || 'WhatsApp User';
-      const messageId = msg.key?.id || `msg_${Date.now()}`;
-      const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
-      const text = extractMessageText(msg.message);
-
-      console.log(`[Incoming Message] From: +${senderPhone} (${pushName}) | ID: ${messageId} | Text: "${text}"`);
-
-      // Prepare payload: includes standard Green-API / OpsFlow ingress format & flat properties
-      const payload = {
-        typeWebhook: 'incomingMessageReceived',
-        instanceData: {
-          idInstance: 'baileys_bridge',
-          wid: `${sock?.user?.id?.split(':')[0] || 'bridge'}@c.us`
-        },
-        timestamp,
-        idMessage: messageId,
-        senderData: {
-          chatId: remoteJid,
-          sender: remoteJid,
-          chatName: pushName,
-          senderName: pushName
-        },
-        messageData: {
-          typeMessage: 'textMessage',
-          textMessageData: {
-            textMessage: text
-          }
-        },
-        // Flat properties for direct consumption
-        chatId: remoteJid,
-        from: senderPhone,
-        from_phone: senderPhone,
-        senderName: pushName,
-        message: text,
-        body: text,
-        rawMessage: msg
-      };
-
-      // Forward to Python backend
+    // Forward incoming messages to Python backend webhook
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
       try {
-        const response = await fetch(PYTHON_WEBHOOK_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'WhatsApp-Baileys-Bridge/1.0'
-          },
-          body: JSON.stringify(payload)
-        });
+        if (type !== 'notify' || !messages || !Array.isArray(messages)) return;
 
-        console.log(`[Webhook Forward] Dispatched to ${PYTHON_WEBHOOK_URL} -> HTTP ${response.status}`);
-      } catch (err) {
-        console.error(`[Webhook Forward Error] Could not forward message to ${PYTHON_WEBHOOK_URL}:`, err.message);
-      }
-    }
-  });
+        for (const msg of messages) {
+          // Ignore outgoing messages sent from this phone
+          if (msg.key?.fromMe) continue;
 
-  // -----------------------------------------------------------
-  // Auto-reject incoming calls and send guidance message
-  // -----------------------------------------------------------
-  sock.ev.on('call', async (callEvents) => {
-    for (const call of callEvents) {
-      if (call.status === 'offer') {
-        const callerJid = call.from || call.chatId;
-        console.log(`[Incoming Call] Auto-rejecting incoming call from ${callerJid} (Call ID: ${call.id})`);
-        try {
-          await sock.rejectCall(call.id, call.from);
-          console.log(`[Incoming Call] Call ${call.id} rejected successfully.`);
-        } catch (rejErr) {
-          console.error(`[Incoming Call] Could not reject call ${call.id}:`, rejErr.message);
+          // Ignore broadcast status stories
+          if (msg.key?.remoteJid === 'status@broadcast') continue;
+
+          const remoteJid = msg.key?.remoteJid || '';
+          const senderPhone = remoteJid.replace(/@.*$/, '');
+          const pushName = msg.pushName || senderPhone || 'WhatsApp User';
+          const messageId = msg.key?.id || `msg_${Date.now()}`;
+          const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
+          const text = extractMessageText(msg.message);
+
+          console.log(`[Incoming Message] From: +${senderPhone} (${pushName}) | ID: ${messageId} | Text: "${text}"`);
+
+          const payload = {
+            typeWebhook: 'incomingMessageReceived',
+            instanceData: {
+              idInstance: 'baileys_bridge',
+              wid: `${sock?.user?.id?.split(':')[0] || 'bridge'}@c.us`
+            },
+            timestamp,
+            idMessage: messageId,
+            senderData: {
+              chatId: remoteJid,
+              sender: remoteJid,
+              chatName: pushName,
+              senderName: pushName
+            },
+            messageData: {
+              typeMessage: 'textMessage',
+              textMessageData: {
+                textMessage: text
+              }
+            },
+            chatId: remoteJid,
+            from: senderPhone,
+            from_phone: senderPhone,
+            senderName: pushName,
+            message: text,
+            body: text,
+            rawMessage: msg
+          };
+
+          try {
+            const response = await fetch(PYTHON_WEBHOOK_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'WhatsApp-Baileys-Bridge/1.0'
+              },
+              body: JSON.stringify(payload)
+            });
+
+            console.log(`[Webhook Forward] Dispatched to ${PYTHON_WEBHOOK_URL} -> HTTP ${response.status}`);
+          } catch (err) {
+            console.error(`[Webhook Forward Error] Could not forward message to ${PYTHON_WEBHOOK_URL}:`, err.message);
+          }
         }
-
-        // Send message asking caller to send a voice note or join the Live AI Voice Call
-        try {
-          const targetJid = normalizeJid(callerJid);
-          const autoRejectMessage =
-            process.env.CALL_REJECT_MESSAGE ||
-            "Assalamu Alaikum! Direct phone calls to this number are automated.\n\n" +
-            "🎙️ Please send a voice note directly in this chat, or join our Live AI Voice Call on our dashboard:\n" +
-            (process.env.LIVE_VOICE_CALL_URL || "http://localhost:5000/#live-voice-call");
-
-          await sock.sendMessage(targetJid, { text: autoRejectMessage });
-          console.log(`[Incoming Call] Sent voice note / Live AI Voice Call prompt to ${targetJid}`);
-        } catch (sendErr) {
-          console.error(`[Incoming Call] Failed to send rejection message:`, sendErr.message);
-        }
+      } catch (upsertErr) {
+        console.error('[WhatsApp Bridge] messages.upsert processing error:', upsertErr.message);
       }
-    }
-  });
+    });
+
+    // Auto-reject incoming calls and send guidance message
+    sock.ev.on('call', async (callEvents) => {
+      try {
+        if (!callEvents || !Array.isArray(callEvents)) return;
+
+        for (const call of callEvents) {
+          if (call.status === 'offer') {
+            const callerJid = call.from || call.chatId;
+            console.log(`[Incoming Call] Auto-rejecting incoming call from ${callerJid} (Call ID: ${call.id})`);
+            try {
+              if (typeof sock?.rejectCall === 'function') {
+                await sock.rejectCall(call.id, call.from);
+                console.log(`[Incoming Call] Call ${call.id} rejected successfully.`);
+              }
+            } catch (rejErr) {
+              console.error(`[Incoming Call] Could not reject call ${call.id}:`, rejErr.message);
+            }
+
+            try {
+              const targetJid = normalizeJid(callerJid);
+              const autoRejectMessage =
+                process.env.CALL_REJECT_MESSAGE ||
+                "Assalamu Alaikum! Direct phone calls to this number are automated.\n\n" +
+                "🎙️ Please send a voice note directly in this chat, or join our Live AI Voice Call on our dashboard:\n" +
+                (process.env.LIVE_VOICE_CALL_URL || "http://localhost:5000/#live-voice-call");
+
+              if (sock && isConnected) {
+                await sock.sendMessage(targetJid, { text: autoRejectMessage });
+                console.log(`[Incoming Call] Sent voice note / Live AI Voice Call prompt to ${targetJid}`);
+              }
+            } catch (sendErr) {
+              console.error(`[Incoming Call] Failed to send rejection message:`, sendErr.message);
+            }
+          }
+        }
+      } catch (callErr) {
+        console.error('[WhatsApp Bridge] call event error:', callErr.message);
+      }
+    });
+  } catch (fatalInitErr) {
+    console.error('[WhatsApp Bridge] startWhatsAppBridge fatal error:', fatalInitErr);
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      startWhatsAppBridge().catch(() => {});
+    }, 5000);
+  } finally {
+    isStarting = false;
+  }
 }
 
 // -------------------------------------------------------------
@@ -419,9 +538,10 @@ app.post('/send-message', async (req, res) => {
     }
 
     if (!sock || !isConnected) {
-      return res.status(503).json({
+      return res.status(400).json({
         success: false,
-        error: "WhatsApp bridge is not connected. Please scan the QR code in the terminal to link your WhatsApp."
+        connected: false,
+        error: "WhatsApp bridge is not connected yet. Please click 'Link WhatsApp QR' on the dashboard and scan the QR code."
       });
     }
 
@@ -455,11 +575,19 @@ app.post('/send-message', async (req, res) => {
 });
 
 // Start Express server & WhatsApp bridge
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`[Bridge Server] HTTP API server listening on http://localhost:${PORT}`);
   console.log(`[Bridge Server] Endpoint available: POST http://localhost:${PORT}/send-message`);
   console.log(`[Bridge Server] Initializing Baileys WhatsApp connection...`);
   startWhatsAppBridge().catch((err) => {
     console.error('[WhatsApp Bridge] Fatal startup error:', err);
   });
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.warn(`[Bridge Server] Port ${PORT} already bound by an active bridge instance.`);
+  } else {
+    console.error('[Bridge Server] Server error:', err);
+  }
 });
