@@ -27,7 +27,37 @@ const fs = require('fs');
 const PORT = process.env.WA_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001;
 const PYTHON_PORT = process.env.PORT || 5000;
 const PYTHON_WEBHOOK_URL = process.env.PYTHON_WEBHOOK_URL || `http://127.0.0.1:${PYTHON_PORT}/api/v1/webhooks/whatsapp`;
-const AUTH_DIR = process.env.AUTH_DIR || path.join(__dirname, 'baileys_auth');
+
+/**
+ * Resolves the Baileys multi-file authentication storage path.
+ * Supports explicit AUTH_DIR environment variable or detects persistent
+ * disk mount directories on Render and container hosts (/var/data, /data, etc.)
+ * to guarantee that sessions persist across restarts without re-scans.
+ */
+function resolveAuthDir() {
+  if (process.env.AUTH_DIR && process.env.AUTH_DIR.trim()) {
+    return path.resolve(process.env.AUTH_DIR.trim());
+  }
+  const candidateMounts = [
+    process.env.RENDER_DISK_PATH,
+    process.env.PERSISTENT_DATA_DIR,
+    '/var/data',
+    '/data',
+    '/mnt/data'
+  ].filter(Boolean);
+
+  for (const mount of candidateMounts) {
+    try {
+      if (fs.existsSync(mount)) {
+        const candidateAuth = path.join(mount, 'baileys_auth');
+        return candidateAuth;
+      }
+    } catch (_) {}
+  }
+  return path.join(__dirname, 'baileys_auth');
+}
+
+const AUTH_DIR = resolveAuthDir();
 
 // Global socket state
 let sock = null;
@@ -92,21 +122,25 @@ function unwrapMessage(msgContent) {
 /**
  * Cleans phone numbers / JIDs by stripping @lid, @s.whatsapp.net, @c.us,
  * and device indices like :0 or :1 to return clean numbers.
+ * Strictly preserves and formats Pakistani mobile numbers while eliminating
+ * incorrect foreign prefixes like +91.
  */
 function cleanPhoneNumber(jid) {
   if (!jid) return '';
   let str = String(jid).trim();
-  if (str.endsWith('@g.us')) return str;
+  if (str.endsWith('@g.us') || str.endsWith('@broadcast')) return str;
   str = str.replace(/@lid|@s\.whatsapp\.net|@c\.us/gi, '');
-  str = str.split(':')[0];
+  str = str.split(':')[0].trim();
   let digits = str.replace(/[^0-9]/g, '');
-  // Pakistani local phone handling: 03001234567 -> 923001234567
+  // Pakistani local phone handling:
+  // 03001234567 (11 digits with 03) -> 923001234567
   if (digits.startsWith('03') && digits.length === 11) {
     digits = '92' + digits.slice(1);
   } else if (digits.startsWith('3') && digits.length === 10) {
+    // 3001234567 (10 digits starting with 3) -> 923001234567
     digits = '92' + digits;
   } else if (digits.startsWith('913') && digits.length === 12) {
-    // Correct erroneously prefixed +91 to Pakistani +92
+    // Correct erroneously prefixed +91 to Pakistani +92 (913001234567 -> 923001234567)
     digits = '923' + digits.slice(3);
   } else if (digits.startsWith('00')) {
     digits = digits.slice(2);
@@ -120,19 +154,22 @@ function cleanPhoneNumber(jid) {
  * - Handles Pakistani local numbers: 03209350858 -> 923209350858@s.whatsapp.net
  * - Strips accidental +91 prefixes from Pakistani numbers (913XXXXXXXXX -> 923XXXXXXXXX)
  * - Strips @c.us, @lid, :0 device indices
+ * - Returns empty string if no valid digits exist
  */
 function normalizeJid(chatId) {
   if (!chatId) return '';
   let jid = String(chatId).trim();
 
-  if (jid.endsWith('@g.us')) {
+  if (jid.endsWith('@g.us') || jid.endsWith('@broadcast')) {
     return jid;
   }
   // Strip all protocol suffixes and device ports (:0, :1, @c.us, @lid, @s.whatsapp.net)
   jid = jid.replace(/@c\.us|@lid|@s\.whatsapp\.net/gi, '');
-  jid = jid.split(':')[0];
+  jid = jid.split(':')[0].trim();
 
   let cleanDigits = jid.replace(/[^0-9]/g, '');
+  if (!cleanDigits) return '';
+
   if (cleanDigits.startsWith('03') && cleanDigits.length === 11) {
     cleanDigits = '92' + cleanDigits.slice(1);
   } else if (cleanDigits.startsWith('3') && cleanDigits.length === 10) {
@@ -192,18 +229,36 @@ async function startWhatsAppBridge() {
       state = auth.state;
       saveCreds = auth.saveCreds;
     } catch (authErr) {
-      console.error('[WhatsApp Bridge] Auth state corrupted or unreadable. Resetting auth directory:', authErr.message);
-      try {
-        if (fs.existsSync(AUTH_DIR)) {
-          fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-          fs.mkdirSync(AUTH_DIR, { recursive: true });
+      console.error('[WhatsApp Bridge] Auth state read error:', authErr.message);
+      const credsFile = path.join(AUTH_DIR, 'creds.json');
+      let isCorruptJson = false;
+      if (fs.existsSync(credsFile)) {
+        try {
+          JSON.parse(fs.readFileSync(credsFile, 'utf8'));
+        } catch (_) {
+          isCorruptJson = true;
         }
+      }
+      if (isCorruptJson) {
+        console.warn('[WhatsApp Bridge] creds.json is corrupted JSON. Resetting auth directory...');
+        try {
+          if (fs.existsSync(AUTH_DIR)) {
+            fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+            fs.mkdirSync(AUTH_DIR, { recursive: true });
+          }
+          const auth = await useMultiFileAuthState(AUTH_DIR);
+          state = auth.state;
+          saveCreds = auth.saveCreds;
+        } catch (resetErr) {
+          console.error('[WhatsApp Bridge] Fatal error resetting auth state:', resetErr);
+          throw resetErr;
+        }
+      } else {
+        // Transient filesystem access delay; wait briefly and retry once
+        await new Promise(r => setTimeout(r, 1000));
         const auth = await useMultiFileAuthState(AUTH_DIR);
         state = auth.state;
         saveCreds = auth.saveCreds;
-      } catch (resetErr) {
-        console.error('[WhatsApp Bridge] Fatal error resetting auth state:', resetErr);
-        throw resetErr;
       }
     }
 
@@ -378,19 +433,28 @@ async function startWhatsAppBridge() {
             if (!text) text = isVoice ? '[Voice note]' : '[Audio message]';
 
             try {
-              const msgToDownload = {
-                key: msg.key,
-                message: unwrappedMsg
-              };
-              const buffer = await downloadMediaMessage(
-                msgToDownload,
-                'buffer',
-                {},
-                {
-                  logger: pino({ level: 'silent' }),
-                  reuploadRequest: sock?.updateMediaMessage
-                }
-              );
+              let buffer = null;
+              try {
+                buffer = await downloadMediaMessage(
+                  { key: msg.key, message: unwrappedMsg },
+                  'buffer',
+                  {},
+                  {
+                    logger: pino({ level: 'silent' }),
+                    reuploadRequest: sock?.updateMediaMessage
+                  }
+                );
+              } catch (_) {
+                buffer = await downloadMediaMessage(
+                  msg,
+                  'buffer',
+                  {},
+                  {
+                    logger: pino({ level: 'silent' }),
+                    reuploadRequest: sock?.updateMediaMessage
+                  }
+                );
+              }
               if (buffer && buffer.length > 0) {
                 audioBase64 = buffer.toString('base64');
                 console.log(`[Media Download] Downloaded voice note (${buffer.length} bytes) for +${cleanSenderPhone}`);
@@ -405,6 +469,11 @@ async function startWhatsAppBridge() {
           } else if (unwrappedMsg?.documentMessage) {
             typeMessage = 'documentMessage';
             if (!text) text = unwrappedMsg.documentMessage.fileName || '[Document]';
+          }
+
+          let audioMimeType = unwrappedMsg?.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
+          if (isVoice && !audioMimeType.includes('codecs=opus')) {
+            audioMimeType = 'audio/ogg; codecs=opus';
           }
 
           console.log(`[Incoming Message] From: +${cleanSenderPhone} (${pushName}) | ID: ${messageId} | Type: ${typeMessage} | Audio: ${Boolean(audioBase64)} | Text: "${text}"`);
@@ -430,7 +499,7 @@ async function startWhatsAppBridge() {
               },
               fileMessageData: (isAudio || isVoice || isImage) ? {
                 caption: text,
-                mimeType: unwrappedMsg?.audioMessage?.mimetype || unwrappedMsg?.imageMessage?.mimetype || 'audio/ogg',
+                mimeType: isAudio ? audioMimeType : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg'),
                 audioBase64: audioBase64
               } : undefined
             },
@@ -443,6 +512,9 @@ async function startWhatsAppBridge() {
             is_voice: isVoice,
             is_audio: isAudio,
             audio_base64: audioBase64,
+            audioBase64: audioBase64,
+            mimetype: isAudio ? audioMimeType : undefined,
+            mime_type: isAudio ? audioMimeType : undefined,
             message_type: typeMessage,
             rawMessage: msg
           };
@@ -688,10 +760,10 @@ app.post('/send-message', async (req, res, next) => {
       });
     }
 
-    if (!jid || jid.startsWith('@')) {
+    if (!jid || jid.startsWith('@') || (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us'))) {
       return res.status(400).json({
         success: false,
-        error: `Invalid chatId provided: '${chatId}'`
+        error: `Invalid recipient JID: '${chatId}' -> '${jid}'`
       });
     }
 
@@ -714,10 +786,13 @@ app.post('/send-message', async (req, res, next) => {
     try {
       if (hasAudio) {
         const ptt = req.body?.ptt !== false && req.body?.is_voice !== false;
-        const mimetype = req.body?.mimetype || req.body?.mime_type || 'audio/ogg; codecs=opus';
+        let mimetype = req.body?.mimetype || req.body?.mime_type || 'audio/ogg; codecs=opus';
+        if (ptt && !mimetype.includes('codecs=opus') && mimetype.includes('ogg')) {
+          mimetype = 'audio/ogg; codecs=opus';
+        }
 
         if (audioRaw) {
-          const cleanBase64 = String(audioRaw).replace(/^data:[^;]+;base64,/, '');
+          const cleanBase64 = String(audioRaw).replace(/^data:[^;]+;base64,/, '').trim();
           const audioBuffer = Buffer.from(cleanBase64, 'base64');
           sent = await sock.sendMessage(jid, {
             audio: audioBuffer,
@@ -737,7 +812,7 @@ app.post('/send-message', async (req, res, next) => {
         const caption = message ? String(message) : '';
 
         if (imageRaw) {
-          const cleanBase64 = String(imageRaw).replace(/^data:[^;]+;base64,/, '');
+          const cleanBase64 = String(imageRaw).replace(/^data:[^;]+;base64,/, '').trim();
           const imageBuffer = Buffer.from(cleanBase64, 'base64');
           sent = await sock.sendMessage(jid, {
             image: imageBuffer,

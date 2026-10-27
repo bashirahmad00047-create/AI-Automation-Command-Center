@@ -874,6 +874,9 @@ class WhatsAppService:
         elif audio_bytes.startswith(b"OggS"):
             audio_fn = "voice_note.ogg"
             audio_mt = "audio/ogg; codecs=opus"
+        elif audio_bytes.startswith(b"\x1a\x45\xdf\xa3"):
+            audio_fn = "voice_note.webm"
+            audio_mt = "audio/webm; codecs=opus"
         else:
             audio_fn = "voice_note.ogg"
             audio_mt = "audio/ogg"
@@ -1068,7 +1071,8 @@ class WhatsAppService:
         message_type=None,
         body=None,
         download_url=None,
-        file_name=None
+        file_name=None,
+        audio_base64=None
     ) -> bool:
         """Determines if an incoming message is an audio / voice note message (.oga, .ogg, audioMessage, etc.)."""
         m_type = str(message_type or "").strip()
@@ -1076,7 +1080,8 @@ class WhatsAppService:
         dl_url = str(download_url or "").strip().lower()
         fn = str(file_name or "").strip().lower()
         return bool(
-            m_type in ("audioMessage", "voiceMessage", "ptt", "audio")
+            bool(audio_base64)
+            or m_type in ("audioMessage", "voiceMessage", "ptt", "audio")
             or b_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]")
             or b_str.startswith(("[voice", "[audio", "[ptt"))
             or dl_url.endswith((".oga", ".ogg", ".opus", ".mp3", ".wav", ".m4a", ".aac"))
@@ -5294,7 +5299,12 @@ class WhatsAppService:
         # Extract direct download URL or embedded base64 audio if present
         file_data = message_data.get("fileMessageData", {}) if isinstance(message_data, dict) else {}
         download_url = ""
-        audio_base64 = data.get("audio_base64") or (file_data.get("audioBase64") if isinstance(file_data, dict) else None)
+        audio_base64 = (
+            data.get("audio_base64")
+            or data.get("audioBase64")
+            or (file_data.get("audioBase64") if isinstance(file_data, dict) else None)
+            or (file_data.get("audio_base64") if isinstance(file_data, dict) else None)
+        )
         if isinstance(file_data, dict):
             download_url = file_data.get("downloadUrl", "") or file_data.get("urlFile", "")
         if not download_url:

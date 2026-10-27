@@ -2946,7 +2946,8 @@ def whatsapp_webhook_ingress():
                 is_v_meta = WhatsAppService.is_audio_message(
                     message_type=msg.get("message_type"),
                     body=msg.get("body"),
-                    download_url=msg.get("download_url")
+                    download_url=msg.get("download_url"),
+                    audio_base64=msg.get("audio_base64")
                 )
                 try:
                     WhatsAppService.handle_inbound_auto_response(
@@ -3037,7 +3038,8 @@ def whatsapp_webhook_ingress():
                             is_v = WhatsAppService.is_audio_message(
                                 message_type=msg_dict.get("message_type"),
                                 body=msg_dict.get("body"),
-                                download_url=msg_dict.get("download_url")
+                                download_url=msg_dict.get("download_url"),
+                                audio_base64=msg_dict.get("audio_base64")
                             )
                             WhatsAppService.handle_inbound_auto_response(
                                 organization_id=org_id,
