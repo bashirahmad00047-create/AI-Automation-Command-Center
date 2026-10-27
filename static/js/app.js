@@ -9875,14 +9875,15 @@ async function fetchBridgeQrCode(force) {
             return;
         }
 
-        if (data.status === 'qr_ready' && (data.qrImageUrl || data.qrSvg || data.qr)) {
+        const qrDataUri = data.qrUrl || data.qrImageUrl;
+        if (data.status === 'qr_ready' && (qrDataUri || data.qrSvg || data.qr)) {
             const svgContainer = document.getElementById('bridgeQrSvgContainer');
 
-            // 1. If base64 data URL is provided by local Node.js bridge, use it directly (100% offline, zero network requests)
-            if (data.qrImageUrl && data.qrImageUrl.startsWith('data:image/')) {
+            // 1. If base64 data URI is provided by local Node.js bridge, set the <img> src attribute directly (100% offline, zero network requests)
+            if (qrDataUri && (qrDataUri.startsWith('data:image/') || qrDataUri.startsWith('data:'))) {
                 if (qrImg) {
                     qrImg.style.display = 'block';
-                    qrImg.src = data.qrImageUrl;
+                    qrImg.src = qrDataUri;
                 }
                 if (svgContainer) svgContainer.style.display = 'none';
             } else if (data.qrSvg) {
@@ -9894,7 +9895,7 @@ async function fetchBridgeQrCode(force) {
                 }
             } else {
                 // 3. Fallback to direct raw PNG proxy endpoint or fallback URL
-                const qrSrc = data.qrImageUrl || `/api/v1/whatsapp/bridge-qr.png?t=${Date.now()}` || (data.qr ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(data.qr)}` : '');
+                const qrSrc = qrDataUri || `/api/v1/whatsapp/bridge-qr.png?t=${Date.now()}` || (data.qr ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(data.qr)}` : '');
                 if (qrImg) {
                     qrImg.style.display = 'block';
                     qrImg.src = qrSrc;
