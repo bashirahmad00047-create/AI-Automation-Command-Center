@@ -9884,3 +9884,8 @@ async function fetchBridgeQrCode(force) {
         if (statusText) statusText.textContent = 'WhatsApp bridge starting up on port 3001... Please wait 5s.';
     }
 }
+
+// Global window exposure for Link WhatsApp QR Modal
+window.openLinkWhatsAppQrModal = openLinkWhatsAppQrModal;
+window.closeLinkWhatsAppQrModal = closeLinkWhatsAppQrModal;
+window.fetchBridgeQrCode = fetchBridgeQrCode;

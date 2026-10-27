@@ -22,7 +22,7 @@ const path = require('path');
 const fs = require('fs');
 
 // Configuration
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.WA_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001;
 const PYTHON_WEBHOOK_URL = process.env.PYTHON_WEBHOOK_URL || 'http://localhost:5000/api/v1/webhooks/whatsapp';
 const AUTH_DIR = process.env.AUTH_DIR || path.join(__dirname, 'baileys_auth');
 
@@ -349,7 +349,7 @@ app.post('/send-message', async (req, res) => {
 });
 
 // Start Express server & WhatsApp bridge
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`[Bridge Server] HTTP API server listening on http://localhost:${PORT}`);
   console.log(`[Bridge Server] Endpoint available: POST http://localhost:${PORT}/send-message`);
   console.log(`[Bridge Server] Initializing Baileys WhatsApp connection...`);

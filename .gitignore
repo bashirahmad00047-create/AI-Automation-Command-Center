@@ -69,4 +69,7 @@ fix_*.py
 # Node.js dependencies & Baileys session storage
 node_modules/
 baileys_auth/
+.node/
+wa_bridge.log
+
 

@@ -214,6 +214,11 @@
                     <div id="hudClock" style="display:none;">00:00:00</div>
                 </div>
 
+                <!-- Live WhatsApp QR Topbar Quick Action -->
+                <button type="button" class="hud-btn small primary topbar-qr-btn" onclick="openLinkWhatsAppQrModal()" title="Link WhatsApp QR Code directly on Render" style="background: #10b981; color: #fff; font-weight: 700; border: none; border-radius: 6px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);">
+                    <span>📱</span> Link WhatsApp QR
+                </button>
+
                 <!-- Theme Toggle Button (Dark / Light) -->
                 <button type="button" class="hud-icon-btn topbar-icon-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle Theme (Dark / Light Mode)" aria-label="Toggle Theme">
                     <span id="themeToggleIcon">🌙</span>
@@ -328,6 +333,10 @@
                     </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 10px;">
+                    <button type="button" class="hud-btn primary" id="dashLinkWhatsAppQrBtn" onclick="openLinkWhatsAppQrModal()" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); font-weight: 700; font-size: 13px; padding: 9px 18px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 15px rgba(5, 150, 105, 0.35); border: 1px solid rgba(255,255,255,0.2); cursor: pointer; color: #ffffff;">
+                        <span style="font-size: 16px;">📱</span>
+                        <span>Link WhatsApp QR</span>
+                    </button>
                     <button type="button" class="hud-btn primary" id="liveAiVoiceCallBtn" onclick="openLiveVoiceCallModal()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700; font-size: 13px; padding: 9px 20px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.35); border: none; cursor: pointer; color: #ffffff;">
                         <span style="font-size: 16px;">📞</span>
                         <span>Live AI Voice Call</span>
@@ -881,8 +890,11 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                         </div>
                     </div>
                 </div>
-                <div id="whatsappBannerAction">
-                    <button type="button" class="hud-btn primary small" onclick="openWhatsAppConnectGuide()">Connect WhatsApp</button>
+                <div id="whatsappBannerAction" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button type="button" class="hud-btn primary small" onclick="openLinkWhatsAppQrModal()" style="background: #10b981; font-weight: 700; color: #fff;">
+                        <span>📱</span> Link WhatsApp QR
+                    </button>
+                    <button type="button" class="hud-btn outline small" onclick="openWhatsAppConnectGuide()">Connect Guide</button>
                 </div>
             </div>
 
@@ -909,7 +921,10 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
 
                     <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
                         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                            <button type="button" class="hud-btn primary" onclick="openWhatsAppConnectGuide()" style="padding: 10px 18px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px;">
+                            <button type="button" class="hud-btn primary" onclick="openLinkWhatsAppQrModal()" style="padding: 10px 18px; font-weight: 700; background: #10b981; color: #fff; display: inline-flex; align-items: center; gap: 8px;">
+                                <span>📱</span> Link WhatsApp (Scan Live QR)
+                            </button>
+                            <button type="button" class="hud-btn outline" onclick="openWhatsAppConnectGuide()" style="padding: 10px 18px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px;">
                                 <span>🔗</span> Connect WhatsApp (Green-API / Meta)
                             </button>
                             <button type="button" class="hud-btn outline" onclick="enableWhatsAppDemoMode()" style="padding: 10px 16px; display: inline-flex; align-items: center; gap: 6px;">
