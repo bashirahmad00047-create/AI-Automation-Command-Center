@@ -1,0 +1,17 @@
+with open("api_v1.py", "r", encoding="utf-8") as f:
+    content = f.read()
+
+# Number formatting helper logic ko sync functions mein add/update karna
+number_cleaner_logic = """
+    # --- Pakistani Number Formatter ---
+    def clean_phone_number(raw):
+        if not raw:
+            return ""
+        digits = "".join(filter(str.isdigit, str(raw)))
+        if digits.startswith("92") and len(digits) == 12:
+            return "0" + digits[2:]
+        return digits
+"""
+
+# Agar file mein pehle se function mojood hai toh usay update kar denge
+print("Number cleaning logic ready.")
