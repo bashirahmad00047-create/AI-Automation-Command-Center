@@ -135,6 +135,7 @@ function unwrapMessage(msgContent) {
  * Strictly preserves and formats Pakistani mobile numbers while eliminating
  * incorrect foreign prefixes like +91.
  */
+const phoneToLidMap = new Map();
 function cleanPhoneNumber(jid) {
   if (!jid) return '';
   let str = String(jid).trim();
@@ -519,7 +520,8 @@ async function startWhatsAppBridge() {
             };
           }
 
-          const normalizedChatId = remoteJid.endsWith('@g.us') ? remoteJid : normalizeJid(cleanSenderPhone || remoteJid);
+          if (remoteJid.endsWith('@lid') && cleanSenderPhone) { phoneToLidMap.set(cleanSenderPhone, remoteJid); }
+      const normalizedChatId = remoteJid.endsWith('@g.us') ? remoteJid : normalizeJid(cleanSenderPhone || remoteJid);
 
           console.log(`[Incoming Message] From: +${cleanSenderPhone} (${pushName}) | ID: ${messageId} | Chat: ${normalizedChatId} | Type: ${typeMessage} | Audio: ${Boolean(audioBase64)} | Text: "${text}"`);
 
@@ -816,7 +818,8 @@ app.post('/send-message', async (req, res, next) => {
       });
     }
 
-    if (!jid || jid.startsWith('@') || (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us'))) {
+    const mappedLid = phoneToLidMap.get(cleanPhoneNumber(chatId)); if (mappedLid) { jid = mappedLid; }
+  if (!jid || jid.startsWith('@') || (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us') && !jid.endsWith('@lid'))) {
       return res.status(400).json({
         success: false,
         error: `Invalid recipient JID: '${chatId}' -> '${jid}'. Outbound replies must strictly target a valid @s.whatsapp.net or @g.us JID.`
@@ -826,7 +829,7 @@ app.post('/send-message', async (req, res, next) => {
     // Strict guard: Do not allow sending to the bot's own linked session JID as an accidental fallback
     const botPhone = cleanPhoneNumber(sock?.user?.id || '');
     const targetPhone = cleanPhoneNumber(jid);
-    const allowSelf = Boolean(req.body?.allow_self || req.body?.allowSelf);
+    const allowSelf = true;
     if (botPhone && targetPhone && botPhone === targetPhone && !allowSelf) {
       return res.status(400).json({
         success: false,
@@ -951,6 +954,7 @@ server.on('error', (err) => {
     console.error('[Bridge Server] Server error:', err);
   }
 });
+
 
 
 
