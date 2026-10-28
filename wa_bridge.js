@@ -435,7 +435,7 @@ async function startWhatsAppBridge() {
             }
             cleanSenderPhone = cleanPhoneNumber(msg.key?.senderPn || msg.key?.participantPn || participantJid);
           } else {
-            const ownPhone = sock?.user?.id ? sock.user.id.split(':')[0] : ''; const ownLid = sock?.user?.lid ? sock.user.lid.split(':')[0].split('@')[0] : ''; const remClean = remoteJid.split(':')[0].split('@')[0]; const resolvedJid = (remoteJid.endsWith('@lid') && ownPhone && (!ownLid || remClean === ownLid)) ? ownPhone : (msg.key?.senderPn || msg.key?.participantPn || remoteJid); cleanSenderPhone = cleanPhoneNumber(resolvedJid);
+            const ownPhone = sock?.user?.id ? sock.user.id.split(':')[0] : ''; const ownLid = sock?.user?.lid ? sock.user.lid.split(':')[0].split('@')[0] : ''; const remClean = remoteJid.split(':')[0].split('@')[0]; const resolvedJid = (remoteJid.endsWith('@lid')) ? (msg.key?.senderPn || msg.key?.participantPn || ownPhone || remoteJid) : (msg.key?.senderPn || msg.key?.participantPn || remoteJid); cleanSenderPhone = cleanPhoneNumber(resolvedJid);
           }
           const pushName = msg.pushName || cleanSenderPhone || 'WhatsApp User';
           const messageId = msg.key?.id || `msg_${Date.now()}`;
@@ -951,5 +951,6 @@ server.on('error', (err) => {
     console.error('[Bridge Server] Server error:', err);
   }
 });
+
 
 
