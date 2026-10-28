@@ -33,6 +33,7 @@ import datetime
 import hashlib
 import hmac
 import base64
+import mimetypes
 import json
 import logging
 import os
@@ -2730,16 +2731,31 @@ def api_whatsapp_bridge_status():
 
 
 
+
+# ==========================================
+# Render Persistent Disk & Baileys Storage
+# ==========================================
+
+RENDER_DISK_MOUNT = os.getenv("RENDER_DISK_PATH", "/var/data")
+if os.path.exists(RENDER_DISK_MOUNT):
+    BASE_STORAGE = RENDER_DISK_MOUNT
+    logger.info(f"[*] Render Persistent Disk detected at: {BASE_STORAGE}")
+else:
+    BASE_STORAGE = os.path.abspath(os.path.join(os.path.dirname(__file__), "storage"))
+    logger.info(f"[*] Local storage fallback: {BASE_STORAGE}")
+
+SESSION_DIR = os.path.join(BASE_STORAGE, "baileys_sessions")
+AUDIO_STORAGE_DIR = os.path.join(BASE_STORAGE, "uploads", "audio")
+os.makedirs(SESSION_DIR, exist_ok=True)
+os.makedirs(AUDIO_STORAGE_DIR, exist_ok=True)
+BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000").rstrip("/")
+
+
 # ==========================================
 # Baileys Webhook & Voice Note Utilities
 # ==========================================
 
-AUDIO_STORAGE_DIR = "public/uploads/audio"
-BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000")
-os.makedirs(AUDIO_STORAGE_DIR, exist_ok=True)
-
-
-def extract_real_phone_number(message_payload: Dict[str, Any]) -> Tuple[Optional[str], bool]:
+def extract_real_phone_number(payload: dict):
     """Extracts the real phone number from a Baileys webhook message payload.
 
     Handles personal chats, group messages (extracts participant),
@@ -2748,16 +2764,16 @@ def extract_real_phone_number(message_payload: Dict[str, Any]) -> Tuple[Optional
     Returns:
         Tuple of (phone_number_digits_or_None, is_group_bool).
     """
-    key = message_payload.get("key", {})
+    key = payload.get("key", {})
     remote_jid = key.get("remoteJid", "")
 
-    if not remote_jid or "@broadcast" in remote_jid or "@newsletter" in remote_jid:
+    if not remote_jid or any(x in remote_jid for x in ["@broadcast", "@newsletter"]):
         return None, False
 
     is_group = remote_jid.endswith("@g.us")
 
     target_jid = (
-        key.get("participant") or message_payload.get("participant") or ""
+        key.get("participant") or payload.get("participant") or ""
         if is_group
         else remote_jid
     )
@@ -2765,9 +2781,8 @@ def extract_real_phone_number(message_payload: Dict[str, Any]) -> Tuple[Optional
     if not target_jid or "@lid" in target_jid:
         return None, is_group
 
-    raw_user = target_jid.split("@")[0]
-    base_user = raw_user.split(":")[0]
-    clean_digits = re.sub(r"\D", "", base_user)
+    raw_user = target_jid.split("@")[0].split(":")[0]
+    clean_digits = re.sub(r"\D", "", raw_user)
 
     if 10 <= len(clean_digits) <= 15:
         return clean_digits, is_group
@@ -2775,101 +2790,217 @@ def extract_real_phone_number(message_payload: Dict[str, Any]) -> Tuple[Optional
     return None, is_group
 
 
-def process_and_save_voice_note(
-    message_payload: Dict[str, Any],
-    raw_audio_bytes: Optional[bytes] = None
-) -> Optional[Dict[str, Any]]:
+def process_and_save_voice_note(payload: dict, raw_audio_bytes: bytes = None):
     """Processes a Baileys audioMessage, saves the .ogg file to disk,
     and returns metadata including public URL and base64 data URI.
 
+    Includes robust base64 decoding with padding fix and data URI stripping.
+
     Returns:
         Dict with file_name, file_path, public_url, data_uri,
-        duration_seconds, and file_size — or None if no audio found.
+        duration, and file_size — or None if no audio found.
     """
-    message = message_payload.get("message", {})
-    audio_message = message.get("audioMessage")
-    if not audio_message:
+    msg_container = payload.get("message", {})
+    audio_msg = msg_container.get("audioMessage")
+    if not audio_msg:
         return None
 
-    msg_id = message_payload.get("key", {}).get("id", f"vn_{int(time.time() * 1000)}")
+    msg_id = payload.get("key", {}).get("id", f"vn_{int(time.time() * 1000)}")
     file_name = f"{msg_id}.ogg"
     file_path = os.path.join(AUDIO_STORAGE_DIR, file_name)
 
     if raw_audio_bytes is None:
-        base64_str = audio_message.get("mediaData") or audio_message.get("base64")
-        if base64_str:
+        base64_str = audio_msg.get("mediaData") or audio_msg.get("base64") or ""
+        if not base64_str:
+            return None
+        # Strip data URI prefix if present
+        if "," in base64_str:
+            base64_str = base64_str.split(",")[1]
+        base64_str = base64_str.strip().replace(" ", "+")
+        # Fix missing padding
+        missing_padding = len(base64_str) % 4
+        if missing_padding:
+            base64_str += "=" * (4 - missing_padding)
+        try:
             raw_audio_bytes = base64.b64decode(base64_str)
+        except Exception as e:
+            logger.warning(f"[Baileys] Base64 decode error: {e}")
+            return None
 
-    if not raw_audio_bytes:
+    if not raw_audio_bytes or len(raw_audio_bytes) < 100:
         return None
 
     with open(file_path, "wb") as f:
         f.write(raw_audio_bytes)
 
-    base64_encoded = base64.b64encode(raw_audio_bytes).decode("utf-8")
-    data_uri = f"data:audio/ogg;codecs=opus;base64,{base64_encoded}"
-
-    clean_base_url = BASE_URL.rstrip("/")
-    public_url = f"{clean_base_url}/uploads/audio/{file_name}"
+    encoded_b64 = base64.b64encode(raw_audio_bytes).decode("utf-8")
+    data_uri = f"data:audio/ogg;codecs=opus;base64,{encoded_b64}"
+    public_url = f"{BASE_URL}/uploads/audio/{file_name}"
 
     return {
         "file_name": file_name,
         "file_path": file_path,
         "public_url": public_url,
         "data_uri": data_uri,
-        "duration_seconds": audio_message.get("seconds", 0),
+        "duration": audio_msg.get("seconds", 0),
         "file_size": len(raw_audio_bytes),
     }
 
 
-def handle_incoming_baileys_webhook(
-    payload: Dict[str, Any],
-    audio_bytes: Optional[bytes] = None
-) -> Dict[str, Any]:
-    """Core handler for incoming Baileys webhook payloads.
+# ------------------------------------------
+# Voice Note Audio Streaming (206 Partial Content)
+# ------------------------------------------
 
-    Extracts sender phone number, detects group messages,
-    and processes voice notes if present.
+@app.route("/uploads/audio/<filename>", methods=["GET"])
+def stream_audio(filename):
+    """Streams voice note audio with HTTP 206 Partial Content (Range) support.
 
-    Returns:
-        Dict with status, sender_phone, is_group, and optional audio metadata.
+    Enables seek/scrub in browser <audio> players and mobile WhatsApp previews.
+    Falls back to full 200 response when no Range header is present.
     """
-    phone_number, is_group = extract_real_phone_number(payload)
-    if not phone_number:
-        return {"status": "ignored", "reason": "Not a valid personal WhatsApp sender"}
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(AUDIO_STORAGE_DIR, safe_filename)
+
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Audio file not found"}), 404
+
+    file_size = os.path.getsize(file_path)
+    range_header = request.headers.get("Range", None)
+
+    if range_header:
+        byte1, byte2 = 0, None
+        match = re.search(r"bytes=(\d+)-(\d*)", range_header)
+        if match:
+            groups = match.groups()
+            byte1 = int(groups[0])
+            if groups[1]:
+                byte2 = int(groups[1])
+
+        byte2 = byte2 if byte2 is not None else file_size - 1
+        length = byte2 - byte1 + 1
+
+        with open(file_path, "rb") as f:
+            f.seek(byte1)
+            data = f.read(length)
+
+        rv = Response(
+            data, 206,
+            mimetype="audio/ogg; codecs=opus",
+            direct_passthrough=True,
+        )
+        rv.headers.add("Content-Range", f"bytes {byte1}-{byte2}/{file_size}")
+        rv.headers.add("Accept-Ranges", "bytes")
+        rv.headers.add("Content-Length", str(length))
+        return rv
+
+    # Full file response (no Range header)
+    with open(file_path, "rb") as f:
+        data = f.read()
+
+    response = Response(data, 200, mimetype="audio/ogg; codecs=opus")
+    response.headers.add("Accept-Ranges", "bytes")
+    response.headers.add("Content-Length", str(file_size))
+    response.headers.add("Cache-Control", "public, max-age=86400")
+    return response
+
+
+# ------------------------------------------
+# Baileys Session Persistent Storage
+# ------------------------------------------
+
+@api_v1.route("/sessions/path", methods=["GET"])
+def get_session_storage_path():
+    """Returns the Baileys session persistent storage path for a tenant.
+
+    Uses Render Persistent Disk when available, otherwise local fallback.
+    """
+    tenant_id = request.args.get("tenantId", "default")
+    tenant_dir = os.path.join(SESSION_DIR, tenant_id)
+    os.makedirs(tenant_dir, exist_ok=True)
+    return jsonify({
+        "persistent_path": tenant_dir,
+        "is_persistent_disk": os.path.exists(RENDER_DISK_MOUNT),
+    })
+
+
+# ------------------------------------------
+# Baileys Incoming Webhook (Enhanced)
+# ------------------------------------------
+
+@api_v1.route("/whatsapp/webhook", methods=["POST"])
+def handle_incoming_webhook():
+    """Receives incoming Baileys webhook payloads with full message parsing.
+
+    Extracts sender phone, detects group/personal, processes voice notes,
+    and extracts text content from conversation/extendedTextMessage.
+    """
+    payload = request.get_json(force=True, silent=True)
+    if not payload:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    clean_number, is_group = extract_real_phone_number(payload)
+    if not clean_number:
+        return jsonify({"status": "ignored", "reason": "Invalid or non-personal JID"}), 200
 
     audio_info = None
     if "audioMessage" in payload.get("message", {}):
-        audio_info = process_and_save_voice_note(payload, raw_audio_bytes=audio_bytes)
+        audio_info = process_and_save_voice_note(payload)
 
-    return {
+    msg_box = payload.get("message", {})
+    text_content = (
+        msg_box.get("conversation")
+        or msg_box.get("extendedTextMessage", {}).get("text")
+        or ""
+    )
+
+    response_data = {
         "status": "success",
-        "sender_phone": phone_number,
+        "sender_phone": clean_number,
         "is_group": is_group,
-        "audio_url": audio_info["public_url"] if audio_info else None,
-        "audio_data_uri": audio_info["data_uri"] if audio_info else None,
-        "audio_duration": audio_info["duration_seconds"] if audio_info else 0,
+        "text": text_content.strip() if text_content else None,
+        "audio": audio_info,
     }
+    return jsonify(response_data), 200
 
 
 @api_v1.route("/whatsapp/baileys/incoming", methods=["POST"])
 def api_baileys_incoming_webhook():
     """Receives incoming Baileys webhook payloads (messages, voice notes).
 
-    Extracts sender phone, detects group/personal, and processes
-    voice notes with automatic .ogg file storage and public URL generation.
+    Legacy-compatible endpoint — internally delegates to handle_incoming_webhook logic.
     """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(force=True, silent=True) or {}
     if not payload:
         return jsonify({"status": "error", "detail": "Empty payload received"}), 400
 
     try:
-        result = handle_incoming_baileys_webhook(payload)
-        status_code = 200 if result.get("status") == "success" else 200
-        return jsonify(result), status_code
+        clean_number, is_group = extract_real_phone_number(payload)
+        if not clean_number:
+            return jsonify({"status": "ignored", "reason": "Not a valid personal WhatsApp sender"}), 200
+
+        audio_info = None
+        if "audioMessage" in payload.get("message", {}):
+            audio_info = process_and_save_voice_note(payload)
+
+        msg_box = payload.get("message", {})
+        text_content = (
+            msg_box.get("conversation")
+            or msg_box.get("extendedTextMessage", {}).get("text")
+            or ""
+        )
+
+        return jsonify({
+            "status": "success",
+            "sender_phone": clean_number,
+            "is_group": is_group,
+            "text": text_content.strip() if text_content else None,
+            "audio": audio_info,
+        }), 200
     except Exception as exc:
         logger.error(f"[Baileys Webhook] Processing error: {exc}", exc_info=True)
         return jsonify({"status": "error", "detail": str(exc)}), 500
+
+
 
 
 @api_v1.route("/voice/chat", methods=["POST"])
