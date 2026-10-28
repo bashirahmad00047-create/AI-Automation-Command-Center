@@ -5144,19 +5144,17 @@ async function syncWhatsAppMessagesNow(silent = false) {
 function normalizeWaPhone(phone) {
     if (!phone) return '';
     let str = String(phone).trim();
-    // NEVER format a JID as a phone number if it ends with @lid!
+    if (!str || /[a-zA-Z]/.test(str)) return str;
     if (str.endsWith('@lid') || str.includes('@lid')) return str;
     if (str.endsWith('@g.us') || str.endsWith('@broadcast')) return str;
     let raw = str.replace(/@s\.whatsapp\.net|@c\.us/gi, '').split(':')[0].trim();
     let clean = raw.replace(/[^0-9]/g, '');
     if (clean.length > 13) return str;
-    // Handle Pakistani local 03001234567 -> 923001234567
     if (clean.startsWith('03') && clean.length === 11) {
         clean = '92' + clean.slice(1);
     } else if (clean.startsWith('3') && clean.length === 10) {
         clean = '92' + clean;
     } else if (clean.startsWith('913') && clean.length === 12) {
-        // Strip erroneous +91 country prefix from Pakistani 3xx mobile numbers
         clean = '923' + clean.slice(3);
     } else if (clean.startsWith('00')) {
         clean = clean.slice(2);
@@ -5167,60 +5165,63 @@ function normalizeWaPhone(phone) {
 function formatWaDisplayPhone(phone) {
     if (!phone) return '';
     let str = String(phone).trim();
-    if (str.endsWith('@lid') || str.includes('@lid')) {
-        return 'WhatsApp User';
+    if (!str || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return '';
+
+    // CRITICAL: If string contains any alphabetic characters, it is a contact name or text label (e.g. 'WhatsApp Contact', 'WhatsApp User')
+    // NEVER prepend '+' or split spaces into non-numeric strings!
+    if (/[a-zA-Z]/.test(str)) {
+        return str;
     }
+
+    if (str.endsWith('@g.us')) return 'WhatsApp Group';
+    if (str.endsWith('@broadcast')) return 'Status Broadcast';
+
     const cleanDigits = str.replace(/[^0-9]/g, '');
-    if (cleanDigits.length > 13 && (cleanDigits.startsWith('91') || cleanDigits.startsWith('98'))) {
-        return 'WhatsApp User';
+    if (!cleanDigits || cleanDigits.length < 7) {
+        return str;
     }
-    // Strip JID suffixes before formatting
-    const norm = normalizeWaPhone(phone);
-    if (!norm) return '';
-    if (norm.endsWith('@g.us')) return 'WhatsApp Group';
-    if (norm.endsWith('@broadcast')) return 'Status Broadcast';
-    if (norm.endsWith('@lid') || (norm.replace(/[^0-9]/g, '').length > 13)) {
-        return 'WhatsApp User';
+    if (str.endsWith('@lid') || cleanDigits.length > 13) {
+        return 'WhatsApp Contact';
     }
 
     // Pakistani number: 923XXXXXXXXX (12 digits starting with 92)
-    if (norm.startsWith('92') && norm.length === 12) {
-        return `+92 ${norm.slice(2, 5)} ${norm.slice(5)}`;
+    if (cleanDigits.startsWith('92') && cleanDigits.length === 12) {
+        return `+92 ${cleanDigits.slice(2, 5)} ${cleanDigits.slice(5)}`;
     }
 
     // Known international formats — add spacing after country code
-    if (norm.length >= 10 && norm.length <= 13) {
-        // Belgium +32 (2-digit cc, remaining ~9 digits)
-        if (norm.startsWith('32') && norm.length >= 11) {
-            return `+32 ${norm.slice(2, 5)} ${norm.slice(5, 8)} ${norm.slice(8)}`;
+    if (cleanDigits.length >= 10 && cleanDigits.length <= 13) {
+        // Belgium +32
+        if (cleanDigits.startsWith('32') && cleanDigits.length >= 11) {
+            return `+32 ${cleanDigits.slice(2, 5)} ${cleanDigits.slice(5, 8)} ${cleanDigits.slice(8)}`;
         }
-        // UK +44 (2-digit cc)
-        if (norm.startsWith('44') && norm.length >= 12) {
-            return `+44 ${norm.slice(2, 6)} ${norm.slice(6)}`;
+        // UK +44
+        if (cleanDigits.startsWith('44') && cleanDigits.length >= 12) {
+            return `+44 ${cleanDigits.slice(2, 6)} ${cleanDigits.slice(6)}`;
         }
-        // USA/Canada +1 (1-digit cc)
-        if (norm.startsWith('1') && norm.length === 11) {
-            return `+1 (${norm.slice(1, 4)}) ${norm.slice(4, 7)}-${norm.slice(7)}`;
+        // USA/Canada +1
+        if (cleanDigits.startsWith('1') && cleanDigits.length === 11) {
+            return `+1 (${cleanDigits.slice(1, 4)}) ${cleanDigits.slice(4, 7)}-${cleanDigits.slice(7)}`;
         }
-        // UAE +971 (3-digit cc)
-        if (norm.startsWith('971') && norm.length >= 12) {
-            return `+971 ${norm.slice(3, 5)} ${norm.slice(5)}`;
+        // UAE +971
+        if (cleanDigits.startsWith('971') && cleanDigits.length >= 12) {
+            return `+971 ${cleanDigits.slice(3, 5)} ${cleanDigits.slice(5)}`;
         }
-        // India +91 (2-digit cc)
-        if (norm.startsWith('91') && norm.length === 12) {
-            return `+91 ${norm.slice(2, 7)} ${norm.slice(7)}`;
+        // India +91
+        if (cleanDigits.startsWith('91') && cleanDigits.length === 12) {
+            return `+91 ${cleanDigits.slice(2, 7)} ${cleanDigits.slice(7)}`;
         }
-        // Generic: insert space after guessed country code (2 digits) and every 3 digits after
-        const cc = norm.slice(0, 2);
-        const rest = norm.slice(2);
+        // Generic: insert space after country code (2 digits) and every 3 digits after
+        const cc = cleanDigits.slice(0, 2);
+        const rest = cleanDigits.slice(2);
         const grouped = rest.replace(/(\d{3})(?=\d)/g, '$1 ').trim();
         return `+${cc} ${grouped}`;
     }
 
-    if (norm.length >= 8 && norm.length <= 13) {
-        return `+${norm}`;
+    if (cleanDigits.length >= 8 && cleanDigits.length <= 13) {
+        return `+${cleanDigits}`;
     }
-    return norm;
+    return str;
 }
 
 function isSameWaPhone(p1, p2) {
@@ -6110,12 +6111,13 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                 const isSent = m.status === 'sent' || m.status === 'received' || isRead;
                 const ticks = isSending ? '🕒' : (isRead ? '<span style="color:#53bdeb;font-weight:bold;">✓✓</span>' : (isSent ? '✓✓' : '✓'));
                 const mediaUrl = m.mediaUrl || m.media_url || m.audioUrl || m.audio_url || (m.raw_payload && (m.raw_payload.mediaUrl || m.raw_payload.audioUrl || m.raw_payload.audio_base64)) || '';
-                const isVoice = Boolean(m.is_audio || m.type === 'audio' || m.message_type === 'audio' || (typeof mediaUrl === 'string' && mediaUrl.startsWith('data:audio')));
+                const hasPlayableAudio = Boolean(mediaUrl && typeof mediaUrl === 'string' && (mediaUrl.startsWith('data:audio') || mediaUrl.startsWith('http') || mediaUrl.startsWith('/api/')));
+                const isVoice = Boolean(hasPlayableAudio && (m.is_audio || m.type === 'audio' || m.message_type === 'audio' || m.message_type === 'voiceMessage'));
                 const safeMediaUrl = mediaUrl || '';
                 const safeBody = (m.body || m.message || '').replace(/\[.*?\]/g, '').trim();
 
                 let bodyHtml = '';
-                if (isVoice || (typeof safeMediaUrl === 'string' && safeMediaUrl.startsWith('data:audio'))) {
+                if (isVoice) {
                     const audioSrc = safeMediaUrl.startsWith('data:audio') ? safeMediaUrl : (safeMediaUrl ? `/api/v1/whatsapp/media/proxy?url=${encodeURIComponent(safeMediaUrl)}` : '');
                     const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage' && safeBody !== '🎤 Voice message' && safeBody !== '(no text)');
                     bodyHtml = `

@@ -491,16 +491,20 @@ class ExecutionStep(db.Model):
 
 def format_phone_display(phone: Optional[str]) -> str:
     """Formats an E.164 phone number into a standardized human-readable display string, e.g. +92 320 9350858.
-    Never prepends '+' to @lid JIDs or >13-digit pseudo-numbers.
+    Never prepends '+' to @lid JIDs, non-numeric strings, or >13-digit pseudo-numbers.
     """
     raw = str(phone or "").strip()
     if not raw or raw.upper() in ("N/A", "NONE", "NULL"):
         return ""
+    if any(c.isalpha() for c in raw):
+        return raw
     if raw.lower().endswith("@lid"):
-        return "WhatsApp User"
+        return "WhatsApp Contact"
     clean = "".join(filter(str.isdigit, raw))
+    if not clean or len(clean) < 7:
+        return raw
     if len(clean) > 13 and (clean.startswith("91") or clean.startswith("98")):
-        return "WhatsApp User"
+        return "WhatsApp Contact"
     if clean.startswith("03") and len(clean) == 11:
         clean = "92" + clean[1:]
     if clean.startswith("92") and len(clean) == 12:
@@ -907,10 +911,17 @@ class WhatsAppMessage(db.Model):
             except Exception:
                 pass
 
-        is_audio = (
+        has_playable_audio = bool(media_url and (
+            str(media_url).startswith("data:audio") or
+            any(str(media_url).lower().split("?")[0].endswith(ext) for ext in (".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aac", ".opus")) or
+            "/api/v1/whatsapp/media/" in str(media_url) or
+            "download" in str(media_url).lower()
+        ))
+
+        is_audio = has_playable_audio and (
             self.message_type in ("audioMessage", "voiceMessage", "audio", "voice", "ptt") or
             bool(self.body and any(tag in self.body.lower() for tag in ("[audiomessage]", "[voicemessage]", "[voice note]", "voice message"))) or
-            bool(media_url and (str(media_url).startswith("data:audio") or any(str(media_url).lower().split("?")[0].endswith(ext) for ext in (".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aac", ".opus"))))
+            bool(media_url)
         )
 
         msg_body = self.body

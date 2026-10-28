@@ -166,16 +166,19 @@ function cleanPhoneNumber(jid) {
 }
 
 // Helper function to resolve sender identity accurately without fake +91/+98 LIDs
-function resolveSender(msg) {
+async function resolveSender(msg, activeSock) {
   const key = msg.key || {};
   const remoteJid = key.remoteJid || '';
   // Check all possible real phone fields in Baileys
   const candidateJid =
     key.remoteJidAlt ||
     key.senderPn ||
+    msg.key?.senderPn ||
+    msg.key?.participantPn ||
     (key.participant?.endsWith('@s.whatsapp.net') ? key.participant : null) ||
     msg.participant ||
     (remoteJid.endsWith('@s.whatsapp.net') ? remoteJid : null);
+
   if (candidateJid && candidateJid.includes('@s.whatsapp.net')) {
     const phone = candidateJid.split('@')[0].split(':')[0];
     if (remoteJid.endsWith('@lid')) {
@@ -189,10 +192,31 @@ function resolveSender(msg) {
     const phone = lidToPhoneMap.get(remoteJid);
     return { phone: `+${phone}`, displayName: msg.pushName || `+${phone}`, replyJid: remoteJid };
   }
-  // FALLBACK: NEVER prepend '+' to @lid digits! Show PushName instead.
+
+  // Query Baileys onWhatsApp to resolve @lid to real phone number
+  if (activeSock && typeof activeSock.onWhatsApp === 'function' && remoteJid) {
+    try {
+      const results = await activeSock.onWhatsApp(remoteJid);
+      const res = results?.[0];
+      if (res && res.exists) {
+        const ph = res.jid ? cleanPhoneNumber(res.jid) : '';
+        const lid = res.lid || (remoteJid.endsWith('@lid') ? remoteJid : null);
+        if (ph && lid) {
+          lidToPhoneMap.set(lid, ph);
+          phoneToLidMap.set(ph, lid);
+        }
+        if (ph) {
+          return { phone: `+${ph}`, displayName: msg.pushName || `+${ph}`, replyJid: remoteJid };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // FALLBACK: NEVER use bot's own number or prepend '+' to non-numeric strings! Use msg.pushName || 'WhatsApp Contact'
+  const fallbackName = msg.pushName || 'WhatsApp Contact';
   return {
-    phone: msg.pushName || 'WhatsApp User',
-    displayName: msg.pushName || 'WhatsApp User (Hidden Number)',
+    phone: fallbackName,
+    displayName: fallbackName,
     replyJid: remoteJid
   };
 }
@@ -410,7 +434,7 @@ async function startWhatsAppBridge() {
 
         // Only consider true logouts (e.g. user linked device removed) or 401 as logged out.
         // Do NOT wipe auth directory on transient 403s or network dropouts!
-        const isLoggedOut = (statusCode === DisconnectReason.loggedOut || statusCode === 401);
+        const isLoggedOut = (statusCode === DisconnectReason.loggedOut);
         console.warn(`[WhatsApp Bridge] Connection closed (code: ${statusCode}, isLoggedOut: ${isLoggedOut}).`);
 
         // If session was explicitly logged out, wipe auth directory
@@ -503,7 +527,7 @@ async function startWhatsAppBridge() {
             senderPhone = cleanPhoneNumber(msg.key?.senderPn || msg.key?.participantPn || participantJid);
             displayName = msg.pushName || (senderPhone ? `+${senderPhone}` : 'WhatsApp Group User');
           } else {
-            const senderRes = resolveSender(msg);
+            const senderRes = await resolveSender(msg, sock);
             senderPhone = senderRes.phone;
             displayName = senderRes.displayName;
             replyJid = senderRes.replyJid;
@@ -556,7 +580,7 @@ async function startWhatsAppBridge() {
               }
               if (buffer && buffer.length > 0) {
                 audioBase64 = buffer.toString('base64');
-                audioDataUrl = "data:audio/ogg;base64," + audioBase64;
+                audioDataUrl = `data:audio/ogg; codecs=opus;base64,${buffer.toString('base64')}`;
                 console.log(`[Media Download] Downloaded voice note (${buffer.length} bytes) for ${senderPhone}`);
               }
             } catch (dlErr) {
@@ -900,7 +924,23 @@ app.post('/send-message', async (req, res, next) => {
       });
     }
 
-    const mappedLid = phoneToLidMap.get(cleanPhoneNumber(chatId)); if (mappedLid) { jid = mappedLid; }
+    // Link phone to LID using sock.onWhatsApp
+    if (sock && typeof sock.onWhatsApp === 'function' && jid) {
+      try {
+        const results = await sock.onWhatsApp(jid);
+        const res = results?.[0];
+        if (res && res.exists) {
+          const ph = res.jid ? cleanPhoneNumber(res.jid) : cleanPhoneNumber(chatId);
+          const lid = res.lid;
+          if (ph && lid) {
+            lidToPhoneMap.set(lid, ph);
+            phoneToLidMap.set(ph, lid);
+          }
+        }
+      } catch (_) {}
+    }
+    const mappedLid = phoneToLidMap.get(cleanPhoneNumber(chatId)) || (chatId.startsWith('+') ? phoneToLidMap.get(cleanPhoneNumber(chatId.slice(1))) : null);
+    if (mappedLid) { jid = mappedLid; }
   if (!jid || jid.startsWith('@') || (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us') && !jid.endsWith('@lid'))) {
       return res.status(400).json({
         success: false,

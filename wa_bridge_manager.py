@@ -22,35 +22,45 @@ if not logger.handlers:
 import base64, json, zipfile, io
 from sqlalchemy import text
 
+def _resolve_auth_dir(root_dir):
+    auth_env = os.environ.get("AUTH_DIR", "").strip()
+    if auth_env:
+        return os.path.abspath(auth_env)
+    for mount in [os.environ.get("RENDER_DISK_PATH"), os.environ.get("PERSISTENT_DATA_DIR"), "/var/data", "/data"]:
+        if mount and os.path.exists(mount):
+            d = os.path.join(mount, "baileys_auth")
+            os.makedirs(d, exist_ok=True)
+            return d
+    return os.path.join(root_dir, "baileys_auth")
+
 def _restore_wa_auth_from_db(root_dir):
     try:
-        from app import app
         from database import db
-        auth_dir = os.path.join(root_dir, "auth_info_baileys")
+        auth_dir = _resolve_auth_dir(root_dir)
         creds_file = os.path.join(auth_dir, "creds.json")
-        if os.path.exists(creds_file):
+        if os.path.exists(creds_file) and os.path.getsize(creds_file) > 10:
             return
-        with app.app_context():
-            db.session.execute(text("CREATE TABLE IF NOT EXISTS wa_session_store (id INT PRIMARY KEY, zip_b64 TEXT)"))
-            db.session.commit()
-            row = db.session.execute(text("SELECT zip_b64 FROM wa_session_store WHERE id = 1")).fetchone()
+        with db.engine.connect() as conn:
+            conn.execute(text("CREATE TABLE IF NOT EXISTS wa_session_store (id INT PRIMARY KEY, zip_b64 TEXT)"))
+            conn.commit()
+            row = conn.execute(text("SELECT zip_b64 FROM wa_session_store WHERE id = 1")).fetchone()
             if row and row[0]:
                 os.makedirs(auth_dir, exist_ok=True)
                 zf = zipfile.ZipFile(io.BytesIO(base64.b64decode(row[0])))
                 zf.extractall(auth_dir)
-                logger.info("[WA Bridge] Restored permanent WhatsApp session from Database!")
+                logger.info(f"[WA Bridge] Restored permanent WhatsApp session from Database into {auth_dir}!")
     except Exception as e:
         logger.warning(f"[WA Bridge] DB session restore skipped: {e}")
 
 def _start_wa_auth_backup_loop(root_dir):
     def _loop():
         last_mtime = 0
-        auth_dir = os.path.join(root_dir, "auth_info_baileys")
+        auth_dir = _resolve_auth_dir(root_dir)
         while True:
             time.sleep(10)
             try:
                 creds_file = os.path.join(auth_dir, "creds.json")
-                if not os.path.exists(creds_file):
+                if not os.path.exists(creds_file) or os.path.getsize(creds_file) < 10:
                     continue
                 mtime = os.path.getmtime(creds_file)
                 if mtime == last_mtime:
@@ -63,13 +73,13 @@ def _start_wa_auth_backup_loop(root_dir):
                         if os.path.isfile(fpath):
                             zf.write(fpath, arcname=fname)
                 b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
-                from app import app
                 from database import db
-                with app.app_context():
-                    db.session.execute(text("CREATE TABLE IF NOT EXISTS wa_session_store (id INT PRIMARY KEY, zip_b64 TEXT)"))
-                    db.session.execute(text("DELETE FROM wa_session_store WHERE id = 1"))
-                    db.session.execute(text("INSERT INTO wa_session_store (id, zip_b64) VALUES (1, :d)"), {"d": b64_data})
-                    db.session.commit()
+                with db.engine.connect() as conn:
+                    conn.execute(text("CREATE TABLE IF NOT EXISTS wa_session_store (id INT PRIMARY KEY, zip_b64 TEXT)"))
+                    conn.execute(text("DELETE FROM wa_session_store WHERE id = 1"))
+                    conn.execute(text("INSERT INTO wa_session_store (id, zip_b64) VALUES (1, :d)"), {"d": b64_data})
+                    conn.commit()
+                logger.info(f"[WA Bridge] Persisted Baileys session backup to Database ({len(b64_data)} bytes)")
             except Exception:
                 pass
     t = threading.Thread(target=_loop, daemon=True)
