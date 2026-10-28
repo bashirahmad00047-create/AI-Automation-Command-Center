@@ -520,7 +520,10 @@ async function startWhatsAppBridge() {
           }
 
           if (remoteJid.endsWith('@lid') && cleanSenderPhone) { phoneToLidMap.set(cleanSenderPhone, remoteJid); }
-      const normalizedChatId = remoteJid.endsWith('@g.us') ? remoteJid : normalizeJid(cleanSenderPhone || remoteJid);
+          // FIX: Ensure chat ID and sender phone correctly map to the customer instead of echoing bot's own session number
+          const actualSender = isGroupChat ? cleanSenderPhone : (remClean === ownPhone ? (msg.key?.participant || remoteJid) : remClean);
+          const cleanSender = cleanPhoneNumber(actualSender);
+          const normalizedChatId = remoteJid.endsWith('@g.us') ? remoteJid : normalizeJid(cleanSender || remoteJid);
 
           console.log(`[Incoming Message] From: +${cleanSenderPhone} (${pushName}) | ID: ${messageId} | Chat: ${normalizedChatId} | Type: ${typeMessage} | Audio: ${Boolean(audioBase64)} | Text: "${text}"`);
 
