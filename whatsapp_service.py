@@ -4630,15 +4630,21 @@ class WhatsAppService:
 
     @classmethod
     def format_phone_display(cls, phone: str) -> str:
-        """Formats an E.164 phone number into an attractive human-readable format, e.g. +92 320 9350858."""
+        """Formats an E.164 phone number into an attractive human-readable format, e.g. +92 320 9350858.
+        Never prepends '+' or splits spaces on contact names or text labels.
+        """
         raw = str(phone or "").strip()
         if not raw or raw.upper() in ("N/A", "NONE", "NULL"):
             return ""
+        if any(c.isalpha() for c in raw):
+            return raw
         if raw.lower().endswith("@lid"):
-            return "WhatsApp User"
+            return "WhatsApp Contact"
         clean = "".join(filter(str.isdigit, raw))
+        if not clean or len(clean) < 7:
+            return raw
         if len(clean) > 13 and (clean.startswith("91") or clean.startswith("98")):
-            return "WhatsApp User"
+            return "WhatsApp Contact"
         if clean.startswith("03") and len(clean) == 11:
             clean = "92" + clean[1:]
         elif clean.startswith("3") and len(clean) == 10:
