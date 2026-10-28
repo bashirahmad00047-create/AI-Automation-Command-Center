@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 from flask import Flask
 app = Flask(__name__)
 def clean_phone_number(raw):
@@ -32,6 +32,7 @@ Provides secure, authenticated, and tenant-isolated endpoints for:
 import datetime
 import hashlib
 import hmac
+import base64
 import json
 import logging
 import os
@@ -2725,6 +2726,150 @@ def api_whatsapp_bridge_status():
             "connected": False,
             "message": f"Bridge starting up ({str(e)})"
         }), 503
+
+
+
+
+# ==========================================
+# Baileys Webhook & Voice Note Utilities
+# ==========================================
+
+AUDIO_STORAGE_DIR = "public/uploads/audio"
+BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000")
+os.makedirs(AUDIO_STORAGE_DIR, exist_ok=True)
+
+
+def extract_real_phone_number(message_payload: Dict[str, Any]) -> Tuple[Optional[str], bool]:
+    """Extracts the real phone number from a Baileys webhook message payload.
+
+    Handles personal chats, group messages (extracts participant),
+    and filters out broadcast/newsletter/LID-based JIDs.
+
+    Returns:
+        Tuple of (phone_number_digits_or_None, is_group_bool).
+    """
+    key = message_payload.get("key", {})
+    remote_jid = key.get("remoteJid", "")
+
+    if not remote_jid or "@broadcast" in remote_jid or "@newsletter" in remote_jid:
+        return None, False
+
+    is_group = remote_jid.endswith("@g.us")
+
+    target_jid = (
+        key.get("participant") or message_payload.get("participant") or ""
+        if is_group
+        else remote_jid
+    )
+
+    if not target_jid or "@lid" in target_jid:
+        return None, is_group
+
+    raw_user = target_jid.split("@")[0]
+    base_user = raw_user.split(":")[0]
+    clean_digits = re.sub(r"\D", "", base_user)
+
+    if 10 <= len(clean_digits) <= 15:
+        return clean_digits, is_group
+
+    return None, is_group
+
+
+def process_and_save_voice_note(
+    message_payload: Dict[str, Any],
+    raw_audio_bytes: Optional[bytes] = None
+) -> Optional[Dict[str, Any]]:
+    """Processes a Baileys audioMessage, saves the .ogg file to disk,
+    and returns metadata including public URL and base64 data URI.
+
+    Returns:
+        Dict with file_name, file_path, public_url, data_uri,
+        duration_seconds, and file_size — or None if no audio found.
+    """
+    message = message_payload.get("message", {})
+    audio_message = message.get("audioMessage")
+    if not audio_message:
+        return None
+
+    msg_id = message_payload.get("key", {}).get("id", f"vn_{int(time.time() * 1000)}")
+    file_name = f"{msg_id}.ogg"
+    file_path = os.path.join(AUDIO_STORAGE_DIR, file_name)
+
+    if raw_audio_bytes is None:
+        base64_str = audio_message.get("mediaData") or audio_message.get("base64")
+        if base64_str:
+            raw_audio_bytes = base64.b64decode(base64_str)
+
+    if not raw_audio_bytes:
+        return None
+
+    with open(file_path, "wb") as f:
+        f.write(raw_audio_bytes)
+
+    base64_encoded = base64.b64encode(raw_audio_bytes).decode("utf-8")
+    data_uri = f"data:audio/ogg;codecs=opus;base64,{base64_encoded}"
+
+    clean_base_url = BASE_URL.rstrip("/")
+    public_url = f"{clean_base_url}/uploads/audio/{file_name}"
+
+    return {
+        "file_name": file_name,
+        "file_path": file_path,
+        "public_url": public_url,
+        "data_uri": data_uri,
+        "duration_seconds": audio_message.get("seconds", 0),
+        "file_size": len(raw_audio_bytes),
+    }
+
+
+def handle_incoming_baileys_webhook(
+    payload: Dict[str, Any],
+    audio_bytes: Optional[bytes] = None
+) -> Dict[str, Any]:
+    """Core handler for incoming Baileys webhook payloads.
+
+    Extracts sender phone number, detects group messages,
+    and processes voice notes if present.
+
+    Returns:
+        Dict with status, sender_phone, is_group, and optional audio metadata.
+    """
+    phone_number, is_group = extract_real_phone_number(payload)
+    if not phone_number:
+        return {"status": "ignored", "reason": "Not a valid personal WhatsApp sender"}
+
+    audio_info = None
+    if "audioMessage" in payload.get("message", {}):
+        audio_info = process_and_save_voice_note(payload, raw_audio_bytes=audio_bytes)
+
+    return {
+        "status": "success",
+        "sender_phone": phone_number,
+        "is_group": is_group,
+        "audio_url": audio_info["public_url"] if audio_info else None,
+        "audio_data_uri": audio_info["data_uri"] if audio_info else None,
+        "audio_duration": audio_info["duration_seconds"] if audio_info else 0,
+    }
+
+
+@api_v1.route("/whatsapp/baileys/incoming", methods=["POST"])
+def api_baileys_incoming_webhook():
+    """Receives incoming Baileys webhook payloads (messages, voice notes).
+
+    Extracts sender phone, detects group/personal, and processes
+    voice notes with automatic .ogg file storage and public URL generation.
+    """
+    payload = request.get_json(silent=True) or {}
+    if not payload:
+        return jsonify({"status": "error", "detail": "Empty payload received"}), 400
+
+    try:
+        result = handle_incoming_baileys_webhook(payload)
+        status_code = 200 if result.get("status") == "success" else 200
+        return jsonify(result), status_code
+    except Exception as exc:
+        logger.error(f"[Baileys Webhook] Processing error: {exc}", exc_info=True)
+        return jsonify({"status": "error", "detail": str(exc)}), 500
 
 
 @api_v1.route("/voice/chat", methods=["POST"])
