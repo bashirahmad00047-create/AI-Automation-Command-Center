@@ -254,7 +254,7 @@ async function startWhatsAppBridge() {
         console.warn('[WhatsApp Bridge] creds.json is corrupted JSON. Resetting auth directory...');
         try {
           if (fs.existsSync(AUTH_DIR)) {
-            fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+            // Prevent auto-wiping session so login stays permanent
             fs.mkdirSync(AUTH_DIR, { recursive: true });
           }
           const auth = await useMultiFileAuthState(AUTH_DIR);
@@ -375,7 +375,7 @@ async function startWhatsAppBridge() {
           console.warn('[WhatsApp Bridge] Session logged out or invalidated. Clearing auth folder to refresh QR...');
           try {
             if (fs.existsSync(AUTH_DIR)) {
-              fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+              // Prevent auto-wiping session so login stays permanent
             }
           } catch (rmErr) {
             console.error('[WhatsApp Bridge] Failed to clean auth directory:', rmErr.message);
@@ -954,6 +954,7 @@ server.on('error', (err) => {
     console.error('[Bridge Server] Server error:', err);
   }
 });
+
 
 
 
