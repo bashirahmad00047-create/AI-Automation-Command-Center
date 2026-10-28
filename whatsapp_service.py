@@ -1086,8 +1086,8 @@ class WhatsAppService:
         return bool(
             bool(audio_base64)
             or m_type in ("audioMessage", "voiceMessage", "ptt", "audio")
-            or b_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]")
-            or b_str.startswith(("[voice", "[audio", "[ptt"))
+            or b_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]", "🎤 voice message", "🎤 voice note", "🎤 audio message")
+            or b_str.startswith(("[voice", "[audio", "[ptt", "🎤 voice", "🎤 audio"))
             or dl_url.endswith((".oga", ".ogg", ".opus", ".mp3", ".wav", ".m4a", ".aac"))
             or fn.endswith((".oga", ".ogg", ".opus", ".mp3", ".wav", ".m4a", ".aac"))
             or ".oga" in dl_url
@@ -2007,7 +2007,7 @@ class WhatsAppService:
         mappings = cls.get_instance_mappings()
         if clean_id in mappings:
             return mappings[clean_id]
-        if clean_id in ("710722761603", "71072276103"):
+        if clean_id in ("710722761603", "71072276103", "baileys_bridge", "baileys"):
             return "org-enterprise-default"
 
         # Resolve against configured instance IDs across tenant / environment
@@ -3491,13 +3491,13 @@ class WhatsAppService:
             "قیمت", "قېمت", "نرخ", "څومره", "پکار", "واخلئ", "اخستل", "qimat", "narkh", "tsomra", "somra", "pakar", "ghwaram", "ghwari",
             # Urdu Arabic & Roman
             "پیکج", "پیکیج", "پیکیجز", "پلان", "تفصیل", "تفصیلات", "ریٹ", "خرچہ", "خریدنا", "کتنا", "کتنے", "کتنی", "چاہیئے", "چاہئے",
-            "chahiye", "chahye", "kitna", "kitne", "kharacha", "rates", "package", "packages"
+            "chahiye", "chahye", "kitna", "kitne", "kharacha", "rates", "package", "packages", "services", "service", "automation", "features", "tafseelat", "details", "maloomat", "kaam", "kya karte ho", "kya karte hain", "batao", "sawal", "info", "information"
         )
         support_markers = (
             # Pashto
             "مرسته", "خراب", "ستونزه", "ستونزی", "marasta", "kharab", "stwonza",
             # Urdu
-            "مسئلہ", "مدد", "خراب", "مسلہ", "madad", "masla", "issue"
+            "مسئلہ", "مدد", "خراب", "مسلہ", "madad", "masla", "issue", "help", "problem", "ticket", "support"
         )
         if any(w in lower_raw for w in sales_markers) and intent in ("general_query", "unknown"):
             intent = "lead_inquiry"
@@ -3795,7 +3795,7 @@ class WhatsAppService:
             elif intent in ("support_request", "incident_ticket") or route_dept == "Support":
                 final_reply = "Technical support team ko aapki darkhwast assign kar di gayi hai, hum jald madad ke liye rabta karenge."
             else:
-                final_reply = "Ji bilkul! OpsFlow Cloud mein khush-amdeed, main aapki kya madad kar sakta hoon?"
+                final_reply = "Ji bilkul! OpsFlow Cloud automated WhatsApp routing, alert monitoring aur business workflows provide karta hai. Main aapko packages ya integration ke bare mein mazeed tafseelat bata sakta hoon, aapka kya sawal hai?"
 
         else:
             # Default: English
@@ -3806,7 +3806,7 @@ class WhatsAppService:
             elif intent in ("support_request", "incident_ticket") or route_dept == "Support":
                 final_reply = "A technical support specialist has been assigned to your request and will assist you shortly."
             else:
-                final_reply = "Hello! How can I assist you with OpsFlow Cloud today?" 
+                final_reply = "Hello! OpsFlow Cloud provides automated WhatsApp routing, alert monitoring, and business workflow integrations. How can I assist you with our services or packages today?" 
 
         return {
             "reply_body": final_reply,
@@ -4098,7 +4098,7 @@ class WhatsAppService:
                 logger.warning(f"Image ingress vision analysis notice: {img_err}")
 
         # Check if incoming message is an audio / voice note message (.oga, audioMessage, etc.)
-        if is_voice_inbound and (not clean_body or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]", "(no text)") or body_clean_str.startswith(("[voice", "[audio", "[ptt"))):
+        if is_voice_inbound and (not clean_body or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]", "(no text)", "🎤 voice message", "🎤 voice note", "🎤 audio message") or body_clean_str.startswith(("[voice", "[audio", "[ptt", "🎤 voice", "🎤 audio"))):
             try:
                 audio_bytes = kwargs.get("audio_bytes")
                 audio_b64 = kwargs.get("audio_base64")
