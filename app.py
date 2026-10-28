@@ -186,6 +186,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     env_name = config_name or os.environ.get("FLASK_ENV") or ("production" if os.environ.get("RENDER") else "development")
     cfg = config_by_name.get(env_name, config_by_name["default"])
     application.config.from_object(cfg)
+    application.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "opsflow-permanent-enterprise-secret-key-2026-bashir")
+    application.config["SESSION_COOKIE_HTTPONLY"] = True
+    application.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(days=30)
 
     # Initialize SQLAlchemy & Database Migrations
     db.init_app(application)
@@ -346,10 +349,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/")
     @application.route("/dashboard")
     def index():
-        id_inst = os.environ.get("ID_INSTANCE", "710722761603")
-        api_tok = os.environ.get("API_TOKEN_INSTANCE", "99a87a7e1eb542c28e5cbf8ea4fff03bee0d631fa544e75b1")
         jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
-        return render_template("index.html", id_instance=id_inst, api_token=api_tok, jazzcash_number=jc_num)
+        return render_template("index.html", jazzcash_number=jc_num)
 
     @application.route("/dashboard", endpoint="dashboard")
     def dashboard():
@@ -479,11 +480,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/webhooks/whatsapp", methods=["GET", "POST"])
     @application.route("/api/whatsapp/webhook", methods=["GET", "POST"])
     def legacy_whatsapp_webhook():
-        from flask import request
-        from api_v1 import whatsapp_webhook_ingress, green_api_webhook_ingress
-        payload = request.get_json(silent=True) or {}
-        if payload.get("typeWebhook") or payload.get("instanceData") or payload.get("idInstance"):
-            return green_api_webhook_ingress()
+        from api_v1 import whatsapp_webhook_ingress
         return whatsapp_webhook_ingress()
 
     @application.route("/api/whatsapp/bridge-qr", methods=["GET"])

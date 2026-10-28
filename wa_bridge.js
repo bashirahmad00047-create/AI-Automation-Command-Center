@@ -417,26 +417,25 @@ async function startWhatsAppBridge() {
         if (type !== 'notify' || !messages || !Array.isArray(messages)) return;
 
         for (const msg of messages) {
-          // Ignore outgoing messages sent from this phone
-          if (msg.key?.fromMe) continue;
-
-          // Ignore broadcast status stories
-          if (msg.key?.remoteJid === 'status@broadcast') continue;
-
+          const ownPhone = sock?.user?.id ? cleanPhoneNumber(sock.user.id.split(':')[0]) : '';
+          const ownLid = sock?.user?.lid ? sock.user.lid.split(':')[0].split('@')[0] : '';
           const remoteJid = msg.key?.remoteJid || '';
+          const remClean = remoteJid.split(':')[0].split('@')[0];
+          const isSelfChat = (remClean === ownPhone || (ownLid && remClean === ownLid));
+          // Allow self-chat messages from user for testing, but block bot echo loops
+          if (msg.key?.fromMe && !isSelfChat) continue;
+          if (msg.key?.fromMe && (msg.key?.id?.startsWith('BAE5') || msg.key?.id?.startsWith('3EB0'))) continue;
+          if (remoteJid === 'status@broadcast') continue;
           const isGroupChat = remoteJid.endsWith('@g.us') || remoteJid.endsWith('@broadcast');
-          // For group chats, always use msg.key.participant (the actual sender's JID).
-          // If participant is empty for a group message, skip it (we can't determine the sender).
           const participantJid = msg.key?.participant || '';
           let cleanSenderPhone;
           if (isGroupChat) {
-            if (!participantJid) {
-              console.warn(`[Group Message] Skipping group message with no participant JID: ${remoteJid}`);
-              continue;
-            }
+            if (!participantJid) continue;
             cleanSenderPhone = cleanPhoneNumber(msg.key?.senderPn || msg.key?.participantPn || participantJid);
           } else {
-            const ownPhone = sock?.user?.id ? sock.user.id.split(':')[0] : ''; const ownLid = sock?.user?.lid ? sock.user.lid.split(':')[0].split('@')[0] : ''; const remClean = remoteJid.split(':')[0].split('@')[0]; const resolvedJid = (remoteJid.endsWith('@lid')) ? (msg.key?.senderPn || msg.key?.participantPn || ownPhone || remoteJid) : (msg.key?.senderPn || msg.key?.participantPn || remoteJid); cleanSenderPhone = cleanPhoneNumber(resolvedJid);
+            // REMOVED `ownPhone` fallback so customer @lid messages never show as the logged-in number
+            const resolvedJid = msg.key?.senderPn || msg.key?.participantPn || remoteJid;
+            cleanSenderPhone = cleanPhoneNumber(resolvedJid);
           }
           const pushName = msg.pushName || cleanSenderPhone || 'WhatsApp User';
           const messageId = msg.key?.id || `msg_${Date.now()}`;
@@ -855,25 +854,31 @@ app.post('/send-message', async (req, res, next) => {
 
     try {
       if (hasAudio) {
-        const ptt = false;
-        let mimetype = req.body?.mimetype || req.body?.mime_type || 'audio/mp4';
-        if (ptt && !mimetype.includes('codecs=opus') && mimetype.includes('ogg')) {
-          mimetype = 'audio/mp4';
+        let cleanBase64 = audioRaw ? String(audioRaw).replace(/^data:[^;]+;base64,/, '').trim() : '';
+        // Auto-detect MP3 vs OGG/MP4 from base64 header so mobile WhatsApp plays it properly
+        let detectedMime = 'audio/mpeg';
+        if (cleanBase64.startsWith('T2dn')) {
+          detectedMime = 'audio/ogg; codecs=opus';
+        } else if (cleanBase64.startsWith('AAAA')) {
+          detectedMime = 'audio/mp4';
         }
-
+        let mimetype = req.body?.mimetype || req.body?.mime_type || detectedMime;
+        if (mimetype === 'audio/mp3') mimetype = 'audio/mpeg';
+        const ptt = mimetype.includes('ogg');
         if (audioRaw) {
-          const cleanBase64 = String(audioRaw).replace(/^data:[^;]+;base64,/, '').trim();
           const audioBuffer = Buffer.from(cleanBase64, 'base64');
           sent = await sock.sendMessage(jid, {
             audio: audioBuffer,
-            mimetype,
-            ptt
+            mimetype: mimetype,
+            ptt: ptt,
+            fileName: 'voice_reply.mp3'
           }, sendOptions);
         } else if (audioUrl) {
           sent = await sock.sendMessage(jid, {
             audio: { url: audioUrl },
-            mimetype,
-            ptt
+            mimetype: mimetype,
+            ptt: ptt,
+            fileName: 'voice_reply.mp3'
           }, sendOptions);
         }
       } else if (hasImage) {
