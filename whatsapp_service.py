@@ -4599,17 +4599,22 @@ class WhatsAppService:
 
     @classmethod
     def format_phone_number(cls, phone: str) -> str:
-        """Formats phone number to international E.164 digits, stripping @lid, @s.whatsapp.net, @c.us,
+        """Formats phone number to international E.164 digits, stripping @s.whatsapp.net, @c.us,
         and device indices like :0 or :1, strictly preserving Pakistani numbers and preventing wrongful +91 prefixes.
+        NEVER formats @lid or >13-digit pseudo-numbers.
         """
         raw = str(phone or "").strip()
         if raw.endswith("@g.us"):
             return raw
-        for suf in ("@lid", "@s.whatsapp.net", "@c.us"):
+        if raw.lower().endswith("@lid"):
+            return raw.split("@")[0]
+        for suf in ("@s.whatsapp.net", "@c.us"):
             if raw.lower().endswith(suf):
                 raw = raw[:-len(suf)]
         raw = raw.split(":")[0]
         clean = "".join(filter(str.isdigit, raw))
+        if len(clean) > 13:
+            return raw
         # Handle Pakistani local formats like 03001234567 -> 923001234567
         if clean.startswith("03") and len(clean) == 11:
             return "92" + clean[1:]
@@ -4629,7 +4634,11 @@ class WhatsAppService:
         raw = str(phone or "").strip()
         if not raw or raw.upper() in ("N/A", "NONE", "NULL"):
             return ""
+        if raw.lower().endswith("@lid"):
+            return "WhatsApp User"
         clean = "".join(filter(str.isdigit, raw))
+        if len(clean) > 13 and (clean.startswith("91") or clean.startswith("98")):
+            return "WhatsApp User"
         if clean.startswith("03") and len(clean) == 11:
             clean = "92" + clean[1:]
         elif clean.startswith("3") and len(clean) == 10:
@@ -4638,7 +4647,7 @@ class WhatsAppService:
             clean = "923" + clean[3:]
         if clean.startswith("92") and len(clean) == 12:
             return f"+92 {clean[2:5]} {clean[5:]}"
-        elif len(clean) >= 10:
+        elif 10 <= len(clean) <= 13:
             return f"+{clean}"
         return raw
 
