@@ -1,4 +1,4 @@
-﻿
+
 function cleanPakistaniNumber(jid) {
     if (!jid) return "";
     let digits = jid.replace(/\D/g, "");
@@ -136,13 +136,19 @@ function unwrapMessage(msgContent) {
  * incorrect foreign prefixes like +91.
  */
 const phoneToLidMap = new Map();
+const lidToPhoneMap = new Map(); // Keep persisted in memory/DB
+
 function cleanPhoneNumber(jid) {
   if (!jid) return '';
   let str = String(jid).trim();
+  // NEVER format a JID as a phone number if it ends with @lid!
+  if (str.endsWith('@lid') || str.includes('@lid')) return '';
   if (str.endsWith('@g.us') || str.endsWith('@broadcast')) return str;
-  str = str.replace(/@lid|@s\.whatsapp\.net|@c\.us/gi, '');
+  str = str.replace(/@s\.whatsapp\.net|@c\.us/gi, '');
   str = str.split(':')[0].trim();
   let digits = str.replace(/[^0-9]/g, '');
+  // If digits > 13 (e.g. 14-digit LID masquerading as phone number), reject as fake number
+  if (digits.length > 13) return '';
   // Pakistani local phone handling:
   // 03001234567 (11 digits with 03) -> 923001234567
   if (digits.startsWith('03') && digits.length === 11) {
@@ -157,6 +163,38 @@ function cleanPhoneNumber(jid) {
     digits = digits.slice(2);
   }
   return digits || str;
+}
+
+// Helper function to resolve sender identity accurately without fake +91/+98 LIDs
+function resolveSender(msg) {
+  const key = msg.key || {};
+  const remoteJid = key.remoteJid || '';
+  // Check all possible real phone fields in Baileys
+  const candidateJid =
+    key.remoteJidAlt ||
+    key.senderPn ||
+    (key.participant?.endsWith('@s.whatsapp.net') ? key.participant : null) ||
+    msg.participant ||
+    (remoteJid.endsWith('@s.whatsapp.net') ? remoteJid : null);
+  if (candidateJid && candidateJid.includes('@s.whatsapp.net')) {
+    const phone = candidateJid.split('@')[0].split(':')[0];
+    if (remoteJid.endsWith('@lid')) {
+      lidToPhoneMap.set(remoteJid, phone);
+      phoneToLidMap.set(phone, remoteJid);
+    }
+    return { phone: `+${phone}`, displayName: msg.pushName || `+${phone}`, replyJid: remoteJid };
+  }
+  // Check cached mapping
+  if (remoteJid.endsWith('@lid') && lidToPhoneMap.has(remoteJid)) {
+    const phone = lidToPhoneMap.get(remoteJid);
+    return { phone: `+${phone}`, displayName: msg.pushName || `+${phone}`, replyJid: remoteJid };
+  }
+  // FALLBACK: NEVER prepend '+' to @lid digits! Show PushName instead.
+  return {
+    phone: msg.pushName || 'WhatsApp User',
+    displayName: msg.pushName || 'WhatsApp User (Hidden Number)',
+    replyJid: remoteJid
+  };
 }
 
 /**
@@ -190,6 +228,12 @@ function normalizeJid(chatId) {
     cleanDigits = '923' + cleanDigits.slice(3);
   } else if (cleanDigits.startsWith('00')) {
     cleanDigits = cleanDigits.slice(2);
+  }
+  if (cleanDigits.length > 13) {
+    if (lidToPhoneMap.has(`${cleanDigits}@lid`)) {
+      return `${lidToPhoneMap.get(`${cleanDigits}@lid`)}@s.whatsapp.net`;
+    }
+    return `${cleanDigits}@lid`;
   }
   return `${cleanDigits}@s.whatsapp.net`;
 }
@@ -411,6 +455,26 @@ async function startWhatsAppBridge() {
       }
     });
 
+    // 1. Capture mappings from contacts events to map LIDs to real phone numbers
+    sock.ev.on('contacts.upsert', (contacts) => {
+      for (const c of contacts) {
+        if (c.lid && c.id?.endsWith('@s.whatsapp.net')) {
+          const ph = c.id.split('@')[0].split(':')[0];
+          lidToPhoneMap.set(c.lid, ph);
+          phoneToLidMap.set(ph, c.lid);
+        }
+      }
+    });
+    sock.ev.on('contacts.update', (updates) => {
+      for (const c of updates) {
+        if (c.lid && c.id?.endsWith('@s.whatsapp.net')) {
+          const ph = c.id.split('@')[0].split(':')[0];
+          lidToPhoneMap.set(c.lid, ph);
+          phoneToLidMap.set(ph, c.lid);
+        }
+      }
+    });
+
     // Forward incoming messages to Python backend webhook
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       try {
@@ -426,40 +490,52 @@ async function startWhatsAppBridge() {
           if (msg.key?.fromMe && !isSelfChat) continue;
           if (msg.key?.fromMe && (msg.key?.id?.startsWith('BAE5') || msg.key?.id?.startsWith('3EB0'))) continue;
           if (remoteJid === 'status@broadcast') continue;
+
           const isGroupChat = remoteJid.endsWith('@g.us') || remoteJid.endsWith('@broadcast');
           const participantJid = msg.key?.participant || '';
-          let cleanSenderPhone;
+          
+          let senderPhone;
+          let displayName;
+          let replyJid = remoteJid;
+
           if (isGroupChat) {
             if (!participantJid) continue;
-            cleanSenderPhone = cleanPhoneNumber(msg.key?.senderPn || msg.key?.participantPn || participantJid);
+            senderPhone = cleanPhoneNumber(msg.key?.senderPn || msg.key?.participantPn || participantJid);
+            displayName = msg.pushName || (senderPhone ? `+${senderPhone}` : 'WhatsApp Group User');
           } else {
-            // REMOVED `ownPhone` fallback so customer @lid messages never show as the logged-in number
-            const resolvedJid = msg.key?.senderPn || msg.key?.participantPn || remoteJid;
-            cleanSenderPhone = cleanPhoneNumber(resolvedJid);
+            const senderRes = resolveSender(msg);
+            senderPhone = senderRes.phone;
+            displayName = senderRes.displayName;
+            replyJid = senderRes.replyJid;
           }
-          const pushName = msg.pushName || cleanSenderPhone || 'WhatsApp User';
+
+          const pushName = msg.pushName || displayName || 'WhatsApp User';
           const messageId = msg.key?.id || `msg_${Date.now()}`;
           const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
           
-          const unwrappedMsg = unwrapMessage(msg.message) || msg.message;
+          // 1. Unwrap ephemeral/viewOnce wrappers first:
+          const unwrappedMsg = msg.message?.ephemeralMessage?.message || msg.message?.viewOnceMessage?.message || unwrapMessage(msg.message) || msg.message;
           let text = extractMessageText(unwrappedMsg);
           let isVoice = false;
           let isAudio = false;
           let isImage = false;
           let typeMessage = 'textMessage';
           let audioBase64 = null;
+          let audioDataUrl = null;
 
-          if (unwrappedMsg?.audioMessage) {
+          // 2. Detect audio:
+          const audioMsg = unwrappedMsg?.audioMessage;
+          if (audioMsg) {
             isAudio = true;
-            isVoice = Boolean(unwrappedMsg.audioMessage.ptt);
+            isVoice = Boolean(audioMsg.ptt);
             typeMessage = isVoice ? 'voiceMessage' : 'audioMessage';
-            if (!text) text = isVoice ? '[Voice note]' : '[Audio message]';
 
+            // 3. Download media and convert directly to a Base64 Data URL
             try {
               let buffer = null;
               try {
                 buffer = await downloadMediaMessage(
-                  { key: msg.key, message: unwrappedMsg },
+                  msg,
                   'buffer',
                   {},
                   {
@@ -469,7 +545,7 @@ async function startWhatsAppBridge() {
                 );
               } catch (_) {
                 buffer = await downloadMediaMessage(
-                  msg,
+                  { key: msg.key, message: unwrappedMsg },
                   'buffer',
                   {},
                   {
@@ -480,11 +556,13 @@ async function startWhatsAppBridge() {
               }
               if (buffer && buffer.length > 0) {
                 audioBase64 = buffer.toString('base64');
-                console.log(`[Media Download] Downloaded voice note (${buffer.length} bytes) for +${cleanSenderPhone}`);
+                audioDataUrl = "data:audio/ogg;base64," + audioBase64;
+                console.log(`[Media Download] Downloaded voice note (${buffer.length} bytes) for ${senderPhone}`);
               }
             } catch (dlErr) {
               console.warn('[Media Download Error] Could not download voice buffer:', dlErr.message);
             }
+            if (!text) text = '🎤 Voice message';
           } else if (unwrappedMsg?.imageMessage) {
             isImage = true;
             typeMessage = 'imageMessage';
@@ -494,10 +572,7 @@ async function startWhatsAppBridge() {
             if (!text) text = unwrappedMsg.documentMessage.fileName || '[Document]';
           }
 
-          let audioMimeType = unwrappedMsg?.audioMessage?.mimetype || 'audio/mp4';
-          if (isVoice && !audioMimeType.includes('codecs=opus')) {
-            audioMimeType = 'audio/mp4';
-          }
+          let audioMimeType = unwrappedMsg?.audioMessage?.mimetype || 'audio/ogg';
 
           // Extract quoted parent message context if present
           const contextInfo = unwrappedMsg?.extendedTextMessage?.contextInfo ||
@@ -519,13 +594,9 @@ async function startWhatsAppBridge() {
             };
           }
 
-          if (remoteJid.endsWith('@lid') && cleanSenderPhone) { phoneToLidMap.set(cleanSenderPhone, remoteJid); }
-          // FIX: Ensure chat ID and sender phone correctly map to the customer instead of echoing bot's own session number
-          const actualSender = isGroupChat ? cleanSenderPhone : (remClean === ownPhone ? (msg.key?.participant || remoteJid) : remClean);
-          const cleanSender = cleanPhoneNumber(actualSender);
-          const normalizedChatId = remoteJid.endsWith('@g.us') ? remoteJid : normalizeJid(cleanSender || remoteJid);
+          const normalizedChatId = remoteJid.endsWith('@g.us') ? remoteJid : (remoteJid.endsWith('@lid') ? remoteJid : normalizeJid(senderPhone || remoteJid));
 
-          console.log(`[Incoming Message] From: +${cleanSenderPhone} (${pushName}) | ID: ${messageId} | Chat: ${normalizedChatId} | Type: ${typeMessage} | Audio: ${Boolean(audioBase64)} | Text: "${text}"`);
+          console.log(`[Incoming Message] From: ${senderPhone} (${pushName}) | ID: ${messageId} | Chat: ${normalizedChatId} | Type: ${typeMessage} | Audio: ${Boolean(audioDataUrl || audioBase64)} | Text: "${text}"`);
 
           const payload = {
             typeWebhook: 'incomingMessageReceived',
@@ -537,12 +608,12 @@ async function startWhatsAppBridge() {
             idMessage: messageId,
             senderData: {
               chatId: normalizedChatId,
-              sender: cleanSenderPhone,
+              sender: senderPhone,
               chatName: pushName,
               senderName: pushName
             },
             messageData: {
-              typeMessage: typeMessage,
+              typeMessage: isAudio ? 'audio' : typeMessage,
               textMessageData: {
                 textMessage: text
               },
@@ -551,27 +622,36 @@ async function startWhatsAppBridge() {
               stanzaId: quotedStanzaId,
               fileMessageData: (isAudio || isVoice || isImage) ? {
                 caption: text,
-                mimeType: isAudio ? audioMimeType : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg'),
-                audioBase64: audioBase64
+                mimeType: isAudio ? 'audio/ogg' : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg'),
+                audioBase64: audioBase64,
+                mediaUrl: audioDataUrl,
+                audioUrl: audioDataUrl,
+                downloadUrl: audioDataUrl
               } : undefined
             },
             chatId: normalizedChatId,
             remoteJid: remoteJid,
-            from: cleanSenderPhone,
-            from_phone: cleanSenderPhone,
+            from: senderPhone,
+            from_phone: senderPhone,
+            sender: senderPhone,
             senderName: pushName,
             chatName: pushName,
             message: text,
             body: text,
+            type: isAudio ? 'audio' : typeMessage,
+            message_type: isAudio ? 'audio' : typeMessage,
+            mediaUrl: audioDataUrl,
+            audioUrl: audioDataUrl,
+            media_url: audioDataUrl,
+            audio_url: audioDataUrl,
+            audio_base64: audioBase64,
+            audioBase64: audioBase64,
             parent_msg_id: quotedStanzaId,
             parent_message_id: quotedStanzaId,
             is_voice: isVoice,
             is_audio: isAudio,
-            audio_base64: audioBase64,
-            audioBase64: audioBase64,
-            mimetype: isAudio ? audioMimeType : undefined,
-            mime_type: isAudio ? audioMimeType : undefined,
-            message_type: typeMessage,
+            mimetype: isAudio ? 'audio/ogg' : undefined,
+            mime_type: isAudio ? 'audio/ogg' : undefined,
             rawMessage: msg
           };
 

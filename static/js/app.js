@@ -5143,9 +5143,13 @@ async function syncWhatsAppMessagesNow(silent = false) {
 
 function normalizeWaPhone(phone) {
     if (!phone) return '';
-    let raw = String(phone).replace(/@lid|@s\.whatsapp\.net|@c\.us/gi, '').split(':')[0].trim();
-    if (raw.endsWith('@g.us') || raw.endsWith('@broadcast')) return raw;
+    let str = String(phone).trim();
+    // NEVER format a JID as a phone number if it ends with @lid!
+    if (str.endsWith('@lid') || str.includes('@lid')) return str;
+    if (str.endsWith('@g.us') || str.endsWith('@broadcast')) return str;
+    let raw = str.replace(/@s\.whatsapp\.net|@c\.us/gi, '').split(':')[0].trim();
     let clean = raw.replace(/[^0-9]/g, '');
+    if (clean.length > 13) return str;
     // Handle Pakistani local 03001234567 -> 923001234567
     if (clean.startsWith('03') && clean.length === 11) {
         clean = '92' + clean.slice(1);
@@ -5162,11 +5166,22 @@ function normalizeWaPhone(phone) {
 
 function formatWaDisplayPhone(phone) {
     if (!phone) return '';
+    let str = String(phone).trim();
+    if (str.endsWith('@lid') || str.includes('@lid')) {
+        return 'WhatsApp User';
+    }
+    const cleanDigits = str.replace(/[^0-9]/g, '');
+    if (cleanDigits.length > 13 && (cleanDigits.startsWith('91') || cleanDigits.startsWith('98'))) {
+        return 'WhatsApp User';
+    }
     // Strip JID suffixes before formatting
     const norm = normalizeWaPhone(phone);
     if (!norm) return '';
     if (norm.endsWith('@g.us')) return 'WhatsApp Group';
     if (norm.endsWith('@broadcast')) return 'Status Broadcast';
+    if (norm.endsWith('@lid') || (norm.replace(/[^0-9]/g, '').length > 13)) {
+        return 'WhatsApp User';
+    }
 
     // Pakistani number: 923XXXXXXXXX (12 digits starting with 92)
     if (norm.startsWith('92') && norm.length === 12) {
@@ -5174,7 +5189,7 @@ function formatWaDisplayPhone(phone) {
     }
 
     // Known international formats — add spacing after country code
-    if (norm.length >= 10) {
+    if (norm.length >= 10 && norm.length <= 13) {
         // Belgium +32 (2-digit cc, remaining ~9 digits)
         if (norm.startsWith('32') && norm.length >= 11) {
             return `+32 ${norm.slice(2, 5)} ${norm.slice(5, 8)} ${norm.slice(8)}`;
@@ -5202,7 +5217,7 @@ function formatWaDisplayPhone(phone) {
         return `+${cc} ${grouped}`;
     }
 
-    if (norm.length >= 8) {
+    if (norm.length >= 8 && norm.length <= 13) {
         return `+${norm}`;
     }
     return norm;
@@ -5257,7 +5272,7 @@ function groupWhatsAppConversations(messages) {
         map[normKey].messages.push(m);
         // Update last message preview to the most recent message (last in array)
         const latestMsg = map[normKey].messages[map[normKey].messages.length - 1];
-        let latestText = (latestMsg.body && latestMsg.body !== '(no text)') ? latestMsg.body : (latestMsg.is_audio ? '🎙️ Voice note' : '(no text)');
+        let latestText = (latestMsg.body && latestMsg.body !== '(no text)') ? latestMsg.body : ((latestMsg.is_audio || latestMsg.type === 'audio' || latestMsg.message_type === 'audio') ? '🎤 Voice message' : '(no text)');
         if (latestText.includes('[quotedMessage]')) {
             latestText = latestText.replace(/\[quotedMessage\]/gi, 'Quoted message');
         }
@@ -6094,15 +6109,18 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                 const isRead = m.status === 'read';
                 const isSent = m.status === 'sent' || m.status === 'received' || isRead;
                 const ticks = isSending ? '🕒' : (isRead ? '<span style="color:#53bdeb;font-weight:bold;">✓✓</span>' : (isSent ? '✓✓' : '✓'));
-                const isVoice = Boolean(m.is_audio);
-                const safeMediaUrl = m.media_url || '';
-                const safeBody = (m.body || '').replace(/\[.*?\]/g, '').trim();
+                const mediaUrl = m.mediaUrl || m.media_url || m.audioUrl || m.audio_url || (m.raw_payload && (m.raw_payload.mediaUrl || m.raw_payload.audioUrl || m.raw_payload.audio_base64)) || '';
+                const isVoice = Boolean(m.is_audio || m.type === 'audio' || m.message_type === 'audio' || (typeof mediaUrl === 'string' && mediaUrl.startsWith('data:audio')));
+                const safeMediaUrl = mediaUrl || '';
+                const safeBody = (m.body || m.message || '').replace(/\[.*?\]/g, '').trim();
 
                 let bodyHtml = '';
-                if (isVoice) {
-                    const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage');
+                if (isVoice || (typeof safeMediaUrl === 'string' && safeMediaUrl.startsWith('data:audio'))) {
+                    const audioSrc = safeMediaUrl.startsWith('data:audio') ? safeMediaUrl : (safeMediaUrl ? `/api/v1/whatsapp/media/proxy?url=${encodeURIComponent(safeMediaUrl)}` : '');
+                    const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage' && safeBody !== '🎤 Voice message' && safeBody !== '(no text)');
                     bodyHtml = `
-                        <div class="wa-voice-bubble">
+                        <div class="wa-voice-bubble" style="padding: 4px 0;">
+                            ${audioSrc ? `<audio controls preload="metadata" src="${audioSrc}" style="max-width: 250px; width: 100%; height: 38px; outline: none; border-radius: 20px;"></audio>` : `
                             <button type="button" class="wa-play-btn" id="waPlayBtn_${m.id}" onclick="togglePlayVoiceMessage('${m.id}')">
                                 ▶
                             </button>
@@ -6112,11 +6130,12 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                                 </div>
                                 <div class="wa-voice-meta">
                                     <span id="waAudioTime_${m.id}">0:00</span>
-                                    <span>🎙️ Voice Note</span>
+                                    <span>🎤 Voice message</span>
                                 </div>
                             </div>
+                            `}
                         </div>
-                        ${hasTranscript ? `<div class="wa-voice-transcript" style="margin-top:6px;font-size:0.86em;padding:6px 10px;background:rgba(0,0,0,0.22);border-left:3px solid #00a884;border-radius:4px;word-break:break-word;"><span style="color:#00a884;font-size:0.75em;font-weight:700;display:block;margin-bottom:2px;">🎙️ Urdu Audio Transcript</span>${escapeHtml(safeBody)}</div>` : ''}
+                        ${hasTranscript ? `<div class="wa-voice-transcript" style="margin-top:6px;font-size:0.86em;padding:6px 10px;background:rgba(0,0,0,0.22);border-left:3px solid #00a884;border-radius:4px;word-break:break-word;"><span style="color:#00a884;font-size:0.75em;font-weight:700;display:block;margin-bottom:2px;">🎤 Audio Transcript</span>${escapeHtml(safeBody)}</div>` : ''}
                     `;
                 } else {
                     const rawBody = (m.body || '').trim();

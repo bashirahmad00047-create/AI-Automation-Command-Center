@@ -490,16 +490,22 @@ class ExecutionStep(db.Model):
 
 
 def format_phone_display(phone: Optional[str]) -> str:
-    """Formats an E.164 phone number into a standardized human-readable display string, e.g. +92 320 9350858."""
+    """Formats an E.164 phone number into a standardized human-readable display string, e.g. +92 320 9350858.
+    Never prepends '+' to @lid JIDs or >13-digit pseudo-numbers.
+    """
     raw = str(phone or "").strip()
     if not raw or raw.upper() in ("N/A", "NONE", "NULL"):
         return ""
+    if raw.lower().endswith("@lid"):
+        return "WhatsApp User"
     clean = "".join(filter(str.isdigit, raw))
+    if len(clean) > 13 and (clean.startswith("91") or clean.startswith("98")):
+        return "WhatsApp User"
     if clean.startswith("03") and len(clean) == 11:
         clean = "92" + clean[1:]
     if clean.startswith("92") and len(clean) == 12:
         return f"+92 {clean[2:5]} {clean[5:]}"
-    elif len(clean) >= 10:
+    elif 10 <= len(clean) <= 13:
         return f"+{clean}"
     return raw
 
@@ -873,11 +879,16 @@ class WhatsAppMessage(db.Model):
                     )
 
                     media_url = (
+                        raw.get("mediaUrl") or
+                        raw.get("audioUrl") or
+                        raw.get("media_url") or
+                        raw.get("audio_url") or
                         raw.get("download_url") or
                         raw.get("downloadUrl") or
                         raw.get("urlFile") or
-                        raw.get("media_url") or
                         (raw.get("fileMessageData", {}).get("downloadUrl") if isinstance(raw.get("fileMessageData"), dict) else None) or
+                        (raw.get("fileMessageData", {}).get("mediaUrl") if isinstance(raw.get("fileMessageData"), dict) else None) or
+                        (raw.get("fileMessageData", {}).get("audioUrl") if isinstance(raw.get("fileMessageData"), dict) else None) or
                         (raw.get("audioMessageData", {}).get("downloadUrl") if isinstance(raw.get("audioMessageData"), dict) else None) or
                         (raw.get("raw", {}).get("messageData", {}).get("fileMessageData", {}).get("downloadUrl") if isinstance(raw.get("raw"), dict) and isinstance(raw.get("raw", {}).get("messageData"), dict) else None) or
                         (raw.get("raw", {}).get("downloadUrl") if isinstance(raw.get("raw"), dict) else None)
@@ -898,9 +909,13 @@ class WhatsAppMessage(db.Model):
 
         is_audio = (
             self.message_type in ("audioMessage", "voiceMessage", "audio", "voice", "ptt") or
-            bool(self.body and any(tag in self.body.lower() for tag in ("[audiomessage]", "[voicemessage]", "[voice note]"))) or
-            bool(media_url and any(str(media_url).lower().split("?")[0].endswith(ext) for ext in (".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aac", ".opus")))
+            bool(self.body and any(tag in self.body.lower() for tag in ("[audiomessage]", "[voicemessage]", "[voice note]", "voice message"))) or
+            bool(media_url and (str(media_url).startswith("data:audio") or any(str(media_url).lower().split("?")[0].endswith(ext) for ext in (".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aac", ".opus"))))
         )
+
+        msg_body = self.body
+        if is_audio and (not msg_body or msg_body.strip() in ("", "(no text)", "[Voice note]", "[Audio message]")):
+            msg_body = "🎤 Voice message"
 
         def _clean_phone(v: str) -> str:
             if not v:
@@ -909,12 +924,18 @@ class WhatsAppMessage(db.Model):
             # Preserve group JIDs intact — they are valid identifiers for group conversations
             if s.endswith("@g.us"):
                 return s
+            if s.lower().endswith("@lid"):
+                # NEVER format a JID as a phone number if it ends with @lid!
+                return s.split("@")[0]
             # Strip all known JID suffixes and device index ports
-            for suf in ("@lid", "@s.whatsapp.net", "@c.us"):
+            for suf in ("@s.whatsapp.net", "@c.us"):
                 if s.lower().endswith(suf):
                     s = s[:-len(suf)]
             s = s.split(":")[0]
             digits = "".join(filter(str.isdigit, s))
+            # If digits has more than 13 characters, it is a 14-digit LID masquerading as phone
+            if len(digits) > 13:
+                return s
             # Pakistani local number normalisation
             if digits.startswith("03") and len(digits) == 11:
                 digits = "92" + digits[1:]
@@ -925,9 +946,7 @@ class WhatsAppMessage(db.Model):
                 digits = "923" + digits[3:]
             elif digits.startswith("00"):
                 digits = digits[2:]
-            # Return clean digits if they look like a real phone number (>=7 digits);
-            # otherwise fall back to the raw stripped string so we don't lose data
-            return digits if len(digits) >= 7 else s
+            return digits if 7 <= len(digits) <= 13 else s
 
         clean_sender = _clean_phone(self.sender)
         clean_recipient = _clean_phone(self.recipient)
@@ -944,9 +963,13 @@ class WhatsAppMessage(db.Model):
             "raw_sender": self.sender,
             "raw_recipient": self.recipient,
             "sender_name": sender_name,
-            "message_type": self.message_type,
-            "body": self.body,
+            "message_type": "audio" if is_audio else self.message_type,
+            "type": "audio" if is_audio else self.message_type,
+            "body": msg_body,
             "media_url": media_url,
+            "mediaUrl": media_url,
+            "audioUrl": media_url,
+            "audio_url": media_url,
             "is_audio": is_audio,
             "audio_duration": duration,
             "is_ai_response": is_ai_response,
@@ -958,6 +981,28 @@ class WhatsAppMessage(db.Model):
             "error_message": self.error_message,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
         }
+
+    @classmethod
+    def purge_fake_lid_records(cls) -> int:
+        """Purges old fake +91/+98 conversations from WhatsAppMessage table
+        where the phone number has more than 13 digits (14-digit LIDs masquerading as phone numbers).
+        """
+        try:
+            records = cls.query.all()
+            purged = 0
+            for r in records:
+                s_digits = "".join(filter(str.isdigit, str(r.sender or "")))
+                rec_digits = "".join(filter(str.isdigit, str(r.recipient or "")))
+                if (len(s_digits) > 13 and (s_digits.startswith("91") or s_digits.startswith("98"))) or \
+                   (len(rec_digits) > 13 and (rec_digits.startswith("91") or rec_digits.startswith("98"))):
+                    db.session.delete(r)
+                    purged += 1
+            if purged > 0:
+                db.session.commit()
+            return purged
+        except Exception:
+            db.session.rollback()
+            return 0
 
     @classmethod
     def hard_delete_conversation(cls, organization_id: str, contact_phone: str) -> int:

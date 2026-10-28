@@ -3893,6 +3893,15 @@ def clear_whatsapp_conversation(contact_phone: str):
     return jsonify(result), 200
 
 
+@api_v1.route("/whatsapp/purge-fake-conversations", methods=["POST", "DELETE"])
+@require_auth
+@require_role(["owner", "admin", "member"])
+def route_purge_fake_conversations():
+    """Purges old fake +91/+98 conversations (>13-digit LIDs) from database records."""
+    purged = WhatsAppMessage.purge_fake_lid_records()
+    return jsonify({"success": True, "purged_count": purged}), 200
+
+
 @api_v1.route("/whatsapp/messages/<message_id>/read", methods=["POST"])
 @require_auth
 def mark_whatsapp_message_read(message_id: str):

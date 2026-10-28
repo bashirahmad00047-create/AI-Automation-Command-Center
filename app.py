@@ -262,6 +262,15 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     pass
                 application.logger.warning(f"Audit log auto-seed check: {_seed_log_err}")
 
+            # Purge legacy fake +91/+98 conversations from WhatsAppMessage table (14-digit LIDs)
+            try:
+                from models import WhatsAppMessage
+                purged_count = WhatsAppMessage.purge_fake_lid_records()
+                if purged_count:
+                    application.logger.info(f"Purged {purged_count} fake +91/+98 LID records from WhatsAppMessage table.")
+            except Exception as _purge_err:
+                application.logger.warning(f"Purge fake LID notice: {_purge_err}")
+
             # Auto-sync admin user from environment variables on startup
             try:
                 db.session.rollback()
