@@ -24,7 +24,9 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
-  downloadMediaMessage
+  downloadMediaMessage,
+  normalizeMessageContent,
+  extractMessageContent
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const qrcodeTerminal = require('qrcode-terminal');
@@ -114,17 +116,29 @@ function destroyOldSocket() {
 function unwrapMessage(msgContent) {
   if (!msgContent) return null;
   let unwrapped = msgContent;
-  while (
-    unwrapped?.ephemeralMessage?.message ||
-    unwrapped?.viewOnceMessage?.message ||
-    unwrapped?.viewOnceMessageV2?.message ||
-    unwrapped?.documentWithCaptionMessage?.message
-  ) {
-    unwrapped =
-      unwrapped.ephemeralMessage?.message ||
-      unwrapped.viewOnceMessage?.message ||
-      unwrapped.viewOnceMessageV2?.message ||
-      unwrapped.documentWithCaptionMessage?.message;
+  if (typeof normalizeMessageContent === 'function') {
+    try {
+      unwrapped = normalizeMessageContent(unwrapped) || unwrapped;
+    } catch (_) {}
+  }
+  if (typeof extractMessageContent === 'function') {
+    try {
+      unwrapped = extractMessageContent(unwrapped) || unwrapped;
+    } catch (_) {}
+  }
+  let depth = 0;
+  while (depth < 8) {
+    depth++;
+    const next =
+      unwrapped?.ephemeralMessage?.message ||
+      unwrapped?.viewOnceMessage?.message ||
+      unwrapped?.viewOnceMessageV2?.message ||
+      unwrapped?.viewOnceMessageV2Extension?.message ||
+      unwrapped?.documentWithCaptionMessage?.message ||
+      unwrapped?.editedMessage?.message?.protocolMessage?.editedMessage ||
+      unwrapped?.associatedChildMessage?.message;
+    if (!next) break;
+    unwrapped = next;
   }
   return unwrapped;
 }
@@ -266,6 +280,7 @@ function normalizeJid(chatId) {
  * Extracts plain text from various Baileys message types, unwrapping nested structures.
  */
 function extractMessageText(message) {
+  if (!message) return '';
   const unwrapped = unwrapMessage(message) || message;
   if (!unwrapped) return '';
 
@@ -275,12 +290,17 @@ function extractMessageText(message) {
     unwrapped.imageMessage?.caption ||
     unwrapped.videoMessage?.caption ||
     unwrapped.documentMessage?.caption ||
+    unwrapped.documentWithCaptionMessage?.message?.documentMessage?.caption ||
+    unwrapped.buttonsResponseMessage?.selectedDisplayText ||
     unwrapped.buttonsResponseMessage?.selectedButtonId ||
+    unwrapped.templateButtonReplyMessage?.selectedDisplayText ||
     unwrapped.templateButtonReplyMessage?.selectedId ||
+    unwrapped.listResponseMessage?.title ||
     unwrapped.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    unwrapped.interactiveResponseMessage?.body?.text ||
     unwrapped.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
     ''
-  );
+  ).trim();
 }
 
 /**
@@ -586,7 +606,7 @@ async function startWhatsAppBridge() {
             } catch (dlErr) {
               console.warn('[Media Download Error] Could not download voice buffer:', dlErr.message);
             }
-            if (!text) text = '🎤 Voice message';
+if (!text) text = '[Voice note]';
           } else if (unwrappedMsg?.imageMessage) {
             isImage = true;
             typeMessage = 'imageMessage';
@@ -594,6 +614,12 @@ async function startWhatsAppBridge() {
           } else if (unwrappedMsg?.documentMessage) {
             typeMessage = 'documentMessage';
             if (!text) text = unwrappedMsg.documentMessage.fileName || '[Document]';
+          }
+
+          // Guard: Ignore empty or non-content message events (reactions, protocol acks, typing events)
+          if (!text && !isAudio && !isImage && !unwrappedMsg?.documentMessage && !unwrappedMsg?.locationMessage) {
+            console.log(`[WhatsApp Bridge] Ignoring empty/non-content message event (${messageId}) from ${senderPhone}`);
+            continue;
           }
 
           let audioMimeType = unwrappedMsg?.audioMessage?.mimetype || 'audio/ogg';
@@ -609,12 +635,16 @@ async function startWhatsAppBridge() {
           const quotedParticipant = cleanPhoneNumber(contextInfo?.participant || '');
 
           let extendedData = undefined;
-          if (contextInfo || quotedStanzaId || quotedMessage) {
+          if (quotedMessage || quotedStanzaId) {
             extendedData = {
               text: text,
               stanzaId: quotedStanzaId,
               participant: quotedParticipant,
               quotedMessage: quotedMessage
+            };
+          } else if (text) {
+            extendedData = {
+              text: text
             };
           }
 
