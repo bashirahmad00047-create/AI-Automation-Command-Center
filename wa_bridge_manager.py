@@ -1,4 +1,4 @@
-"""WhatsApp Baileys Bridge Process Manager.
+﻿"""WhatsApp Baileys Bridge Process Manager.
 
 Ensures that the Node.js Baileys bridge is running on port 3001.
 If port 3001 is unreachable, installs missing node dependencies (npm install)
@@ -19,6 +19,61 @@ logger = logging.getLogger("wa_bridge_manager")
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO)
 
+import base64, json, zipfile, io
+from sqlalchemy import text
+
+def _restore_wa_auth_from_db(root_dir):
+    try:
+        from app import app
+        from database import db
+        auth_dir = os.path.join(root_dir, "auth_info_baileys")
+        creds_file = os.path.join(auth_dir, "creds.json")
+        if os.path.exists(creds_file):
+            return
+        with app.app_context():
+            db.session.execute(text("CREATE TABLE IF NOT EXISTS wa_session_store (id INT PRIMARY KEY, zip_b64 TEXT)"))
+            db.session.commit()
+            row = db.session.execute(text("SELECT zip_b64 FROM wa_session_store WHERE id = 1")).fetchone()
+            if row and row[0]:
+                os.makedirs(auth_dir, exist_ok=True)
+                zf = zipfile.ZipFile(io.BytesIO(base64.b64decode(row[0])))
+                zf.extractall(auth_dir)
+                logger.info("[WA Bridge] Restored permanent WhatsApp session from Database!")
+    except Exception as e:
+        logger.warning(f"[WA Bridge] DB session restore skipped: {e}")
+
+def _start_wa_auth_backup_loop(root_dir):
+    def _loop():
+        last_mtime = 0
+        auth_dir = os.path.join(root_dir, "auth_info_baileys")
+        while True:
+            time.sleep(10)
+            try:
+                creds_file = os.path.join(auth_dir, "creds.json")
+                if not os.path.exists(creds_file):
+                    continue
+                mtime = os.path.getmtime(creds_file)
+                if mtime == last_mtime:
+                    continue
+                last_mtime = mtime
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for fname in os.listdir(auth_dir):
+                        fpath = os.path.join(auth_dir, fname)
+                        if os.path.isfile(fpath):
+                            zf.write(fpath, arcname=fname)
+                b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
+                from app import app
+                from database import db
+                with app.app_context():
+                    db.session.execute(text("CREATE TABLE IF NOT EXISTS wa_session_store (id INT PRIMARY KEY, zip_b64 TEXT)"))
+                    db.session.execute(text("DELETE FROM wa_session_store WHERE id = 1"))
+                    db.session.execute(text("INSERT INTO wa_session_store (id, zip_b64) VALUES (1, :d)"), {"d": b64_data})
+                    db.session.commit()
+            except Exception:
+                pass
+    t = threading.Thread(target=_loop, daemon=True)
+    t.start()
 _bridge_proc = None
 _bridge_proc_lock = threading.Lock()
 
@@ -59,7 +114,7 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001) -> 
             return is_port_reachable("127.0.0.1", port, timeout=0.3)
 
         root_dir = os.path.dirname(os.path.abspath(__file__))
-        bridge_script = os.path.join(root_dir, "wa_bridge.js")
+        _restore_wa_auth_from_db(root_dir); _start_wa_auth_backup_loop(root_dir); bridge_script = os.path.join(root_dir, "wa_bridge.js")
         if not os.path.exists(bridge_script):
             logger.error(f"[WA Bridge] Script not found at {bridge_script}")
             return False
@@ -136,3 +191,4 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001) -> 
         else:
             logger.warning(f"[WA Bridge] Port {port} did not respond within {timeout_seconds}s timeout.")
         return online
+
