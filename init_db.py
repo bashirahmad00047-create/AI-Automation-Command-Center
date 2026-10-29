@@ -664,3 +664,7 @@ if __name__ == "__main__":
     else:
         seed_flag = True if args.seed_demo else (False if args.migrate_only else None)
         init_and_seed_database(seed_data=seed_flag)
+    import sys, os
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
