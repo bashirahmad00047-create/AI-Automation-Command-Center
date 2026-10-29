@@ -3247,7 +3247,8 @@ def whatsapp_webhook_ingress():
                         message_timestamp=msg.get("timestamp"),
                         is_voice=is_v_meta,
                         download_url=msg.get("download_url"),
-                        audio_base64=msg.get("audio_base64")
+                        audio_base64=msg.get("audio_base64"),
+                        media_url=msg.get("media_url") or msg.get("download_url")
                     )
                 except Exception as auto_err:
                     logger.error(f"AI Auto-Responder error in Meta webhook: {auto_err}")
@@ -3339,7 +3340,8 @@ def whatsapp_webhook_ingress():
                                 message_timestamp=msg_dict.get("timestamp"),
                                 is_voice=is_v,
                                 download_url=msg_dict.get("download_url"),
-                                audio_base64=msg_dict.get("audio_base64")
+                                audio_base64=msg_dict.get("audio_base64"),
+                                media_url=msg_dict.get("media_url") or msg_dict.get("download_url")
                             )
                     except Exception as err:
                         logger.error(f"Async inbound webhook processing error: {err}")
@@ -3495,7 +3497,9 @@ def green_api_webhook_ingress():
                             message_id=msg_id,
                             message_timestamp=msg.get("timestamp"),
                             is_voice=is_v_green,
-                            download_url=msg.get("download_url")
+                            download_url=msg.get("download_url"),
+                            audio_base64=msg.get("audio_base64"),
+                            media_url=msg.get("media_url") or msg.get("download_url")
                         )
                     except Exception as auto_err:
                         logger.error(f"AI Auto-Responder error in Green-API webhook: {auto_err}")
@@ -3561,7 +3565,9 @@ def green_api_webhook_ingress():
                                     message_id=msg_dict.get("message_id"),
                                     message_timestamp=msg_dict.get("timestamp"),
                                     is_voice=is_v,
-                                    download_url=msg_dict.get("download_url")
+                                    download_url=msg_dict.get("download_url"),
+                                    audio_base64=msg_dict.get("audio_base64"),
+                                    media_url=msg_dict.get("media_url") or msg_dict.get("download_url")
                                 )
                         except Exception as err:
                             logger.error(f"Async Green-API webhook error: {err}")
