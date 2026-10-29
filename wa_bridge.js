@@ -35,6 +35,30 @@ const qrcode = require('qrcode');
 const pino = require('pino');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
+
+// Auto-spawn Gunicorn if wa_bridge.js was accidentally started directly by Render/cloud
+if ((process.env.RENDER || process.env.PORT) && process.env.GUNICORN_STARTED !== '1' && !process.env.WA_BRIDGE_INTERNAL) {
+  process.env.GUNICORN_STARTED = '1';
+  const webPort = process.env.PORT || '10000';
+  console.log(`[Safety Guard] Detected cloud environment without Gunicorn. Spawning Gunicorn web server on 0.0.0.0:${webPort}...`);
+  try {
+    const pyProc = spawn('gunicorn', [
+      'app:app',
+      '--bind', `0.0.0.0:${webPort}`,
+      '--workers', process.env.WEB_CONCURRENCY || '2',
+      '--timeout', process.env.WEBHOOK_TIMEOUT_SECONDS || '120'
+    ], {
+      stdio: 'inherit',
+      detached: false
+    });
+    pyProc.on('error', (err) => {
+      console.warn('[Safety Guard] Gunicorn spawn error:', err.message);
+    });
+  } catch (spawnErr) {
+    console.warn('[Safety Guard] Could not spawn Gunicorn:', spawnErr.message);
+  }
+}
 
 // Configuration
 const PORT = process.env.WA_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001;
@@ -513,7 +537,7 @@ async function startWhatsAppBridge() {
         console.log('  Steps: WhatsApp -> Settings/Menu -> Linked Devices -> Link a Device');
         console.log('===============================================================');
         try {
-          if (process.stdout.isTTY || process.env.RENDER) {
+          if (process.stdout.isTTY && !process.env.RENDER) {
             qrcodeTerminal.generate(qr, { small: true });
           }
         } catch (tErr) {
