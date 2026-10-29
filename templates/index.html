@@ -4661,11 +4661,14 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                         ✓
                     </div>
                     <h4 style="margin: 0 0 6px 0; color: #10b981; font-size: 18px; font-weight: 700;">WhatsApp Connected!</h4>
-                    <p id="qrConnectedNumber" style="font-size: 13px; color: #94a3b8; margin: 0 0 16px 0;">Your device is active and ready for unlimited free messaging.</p>
+                    <p id="qrConnectedNumber" style="font-size: 13px; color: #94a3b8; margin: 0 0 16px 0;">Your device is active and permanently synced for unlimited free messaging.</p>
+                    <button type="button" class="hud-btn danger small" onclick="disconnectWhatsAppDevice()" style="background: #ef4444; color: #fff; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                        <span>⏻</span> Disconnect / Unlink WhatsApp
+                    </button>
                 </div>
 
                 <div style="display: flex; gap: 10px; justify-content: center; margin-top: 10px;">
-                    <button type="button" onclick="fetchBridgeQrCode(true)" class="hud-btn outline small" style="font-size: 12px;">
+                    <button type="button" id="qrRefreshBtn" onclick="fetchBridgeQrCode(true)" class="hud-btn outline small" style="font-size: 12px;">
                         🔄 Refresh QR
                     </button>
                     <button type="button" onclick="closeLinkWhatsAppQrModal()" class="hud-btn small" style="background: #334155; color: #cbd5e1; font-size: 12px;">

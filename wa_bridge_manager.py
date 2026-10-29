@@ -29,11 +29,19 @@ _backup_loop_started = False
 _backup_lock = threading.Lock()
 _bridge_proc = None
 _bridge_proc_lock = threading.Lock()
+_cached_app = None
 
 
 @contextmanager
-def safe_app_context():
+def safe_app_context(app=None):
     """Ensures that database operations always run within an active Flask app context."""
+    global _cached_app
+    if app is not None:
+        _cached_app = app
+        with app.app_context():
+            yield
+        return
+
     has_ctx = False
     try:
         from flask import has_app_context
@@ -44,20 +52,23 @@ def safe_app_context():
     if has_ctx:
         yield
     else:
-        app = None
-        try:
-            from migrations_manager import _resolve_app
-            app = _resolve_app()
-        except Exception:
-            pass
-        if not app:
+        flask_app = _cached_app
+        if not flask_app:
             try:
-                from app import app as _flask_app
-                app = _flask_app
+                import app as app_module
+                flask_app = getattr(app_module, "app", None)
             except Exception:
                 pass
-        if app:
-            with app.app_context():
+        if not flask_app:
+            try:
+                from migrations_manager import _resolve_app
+                flask_app = _resolve_app()
+            except Exception:
+                pass
+
+        if flask_app:
+            _cached_app = flask_app
+            with flask_app.app_context():
                 yield
         else:
             yield
@@ -80,7 +91,7 @@ def resolve_auth_dir(root_dir: str = None) -> str:
     return os.path.join(root_dir, "baileys_auth")
 
 
-def restore_wa_session_from_db(root_dir: str = None) -> bool:
+def restore_wa_session_from_db(root_dir: str = None, app=None) -> bool:
     """Restores the WhatsApp Baileys credentials from the database into the auth dir
     if local credentials are missing or corrupted.
     """
@@ -97,7 +108,7 @@ def restore_wa_session_from_db(root_dir: str = None) -> bool:
             logger.warning("[WA Bridge] Existing creds.json is invalid JSON. Restoring from DB backup...")
 
     try:
-        with safe_app_context():
+        with safe_app_context(app):
             from database import db
             from sqlalchemy import text
             with db.engine.connect() as conn:
@@ -124,7 +135,7 @@ def restore_wa_session_from_db(root_dir: str = None) -> bool:
     return False
 
 
-def backup_wa_session_to_db(root_dir: str = None) -> bool:
+def backup_wa_session_to_db(root_dir: str = None, app=None) -> bool:
     """Compresses all files in the Baileys auth folder and persists them as a Base64
     zip in the database (wa_session_store table) so the QR session survives redeployments.
     """
@@ -155,7 +166,7 @@ def backup_wa_session_to_db(root_dir: str = None) -> bool:
 
         b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-        with safe_app_context():
+        with safe_app_context(app):
             from database import db
             from sqlalchemy import text
             with db.engine.connect() as conn:
@@ -181,10 +192,10 @@ def backup_wa_session_to_db(root_dir: str = None) -> bool:
         return False
 
 
-def clear_wa_session_in_db() -> bool:
+def clear_wa_session_in_db(app=None) -> bool:
     """Clears the session from the database when a user explicitly logs out or unlinks device."""
     try:
-        with safe_app_context():
+        with safe_app_context(app):
             from database import db
             from sqlalchemy import text
             with db.engine.connect() as conn:
@@ -197,7 +208,7 @@ def clear_wa_session_in_db() -> bool:
         return False
 
 
-def start_wa_session_auto_backup(root_dir: str = None):
+def start_wa_session_auto_backup(root_dir: str = None, app=None):
     """Spawns a background thread that periodically monitors the Baileys auth folder
     and persists changes to the database whenever credentials update.
     """
@@ -227,7 +238,7 @@ def start_wa_session_auto_backup(root_dir: str = None):
                 current_signature = (len(files), max_mtime)
 
                 if current_signature != last_signature:
-                    success = backup_wa_session_to_db(root_dir)
+                    success = backup_wa_session_to_db(root_dir, app=app)
                     if success:
                         last_signature = current_signature
             except Exception:
@@ -248,7 +259,7 @@ def is_port_reachable(host: str = "127.0.0.1", port: int = 3001, timeout: float 
         return False
 
 
-def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001) -> bool:
+def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app=None) -> bool:
     """Guarantees session restoration, background backup thread execution,
     and checks if port 3001 is reachable; if not, spawns `node wa_bridge.js`.
     """
@@ -257,12 +268,12 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001) -> 
 
     # 1. Unconditionally ensure DB session restore and start background backup thread
     try:
-        restore_wa_session_from_db(root_dir)
+        restore_wa_session_from_db(root_dir, app=app)
     except Exception as r_err:
         logger.warning(f"[WA Bridge] restore_wa_session_from_db notice: {r_err}")
 
     try:
-        start_wa_session_auto_backup(root_dir)
+        start_wa_session_auto_backup(root_dir, app=app)
     except Exception as b_err:
         logger.warning(f"[WA Bridge] start_wa_session_auto_backup notice: {b_err}")
 

@@ -10271,13 +10271,56 @@ let bridgeQrPollInterval = null;
 
 function openLinkWhatsAppQrModal() {
     const modal = document.getElementById('linkWhatsAppQrModal');
-    if (modal) {
-        modal.style.display = 'flex';
-        fetchBridgeQrCode(true);
-        if (bridgeQrPollInterval) clearInterval(bridgeQrPollInterval);
-        bridgeQrPollInterval = setInterval(() => fetchBridgeQrCode(false), 3000);
+    if (!modal) return;
+    modal.style.display = 'flex';
+
+    // GUARD: If WhatsApp is already connected, display connected confirmation and NEVER reset session or re-poll
+    if (window._waIsConnected) {
+        const spinner = document.getElementById('qrLoadingSpinner');
+        const imageWrapper = document.getElementById('qrImageWrapper');
+        const connectedState = document.getElementById('qrConnectedState');
+        const refreshBtn = document.getElementById('qrRefreshBtn');
+        if (spinner) spinner.style.display = 'none';
+        if (imageWrapper) imageWrapper.style.display = 'none';
+        if (connectedState) connectedState.style.display = 'block';
+        if (refreshBtn) refreshBtn.style.display = 'none';
+        return;
+    }
+
+    fetchBridgeQrCode(true);
+    if (bridgeQrPollInterval) clearInterval(bridgeQrPollInterval);
+    bridgeQrPollInterval = setInterval(() => fetchBridgeQrCode(false), 3000);
+}
+
+async function disconnectWhatsAppDevice() {
+    if (!confirm('Are you sure you want to log out and unlink your WhatsApp device? This will clear the session and generate a new QR code.')) {
+        return;
+    }
+    try {
+        const res = await fetch('/api/v1/whatsapp/bridge-disconnect', { method: 'POST' });
+        const data = await res.json();
+        window._waIsConnected = false;
+        if (window.showToast) window.showToast('WhatsApp device unlinked successfully.', 'info');
+        
+        const spinner = document.getElementById('qrLoadingSpinner');
+        const imageWrapper = document.getElementById('qrImageWrapper');
+        const connectedState = document.getElementById('qrConnectedState');
+        const refreshBtn = document.getElementById('qrRefreshBtn');
+        if (connectedState) connectedState.style.display = 'none';
+        if (spinner) spinner.style.display = 'flex';
+        if (imageWrapper) imageWrapper.style.display = 'none';
+        if (refreshBtn) refreshBtn.style.display = 'inline-block';
+        
+        setTimeout(() => {
+            fetchBridgeQrCode(true);
+            if (bridgeQrPollInterval) clearInterval(bridgeQrPollInterval);
+            bridgeQrPollInterval = setInterval(() => fetchBridgeQrCode(false), 3000);
+        }, 1200);
+    } catch (err) {
+        if (window.showToast) window.showToast('Failed to disconnect: ' + err.message, 'error');
     }
 }
+window.disconnectWhatsAppDevice = disconnectWhatsAppDevice;
 
 function closeLinkWhatsAppQrModal() {
     const modal = document.getElementById('linkWhatsAppQrModal');
@@ -10315,12 +10358,25 @@ async function fetchBridgeQrCode(force) {
         const data = await res.json();
 
         if (data.status === 'connected' || data.connected) {
+            window._waIsConnected = true;
+            if (bridgeQrPollInterval) {
+                clearInterval(bridgeQrPollInterval);
+                bridgeQrPollInterval = null;
+            }
             if (spinner) spinner.style.display = 'none';
             if (imageWrapper) imageWrapper.style.display = 'none';
             if (connectedState) connectedState.style.display = 'block';
-            if (connectedNumber && data.user) {
-                const phone = data.user.id ? data.user.id.split(':')[0] : 'Linked';
-                connectedNumber.textContent = `Connected as +${phone} (Unlimited Free Messaging Ready).`;
+            const refreshBtn = document.getElementById('qrRefreshBtn');
+            if (refreshBtn) refreshBtn.style.display = 'none';
+
+            if (connectedNumber) {
+                const phone = data.user?.id ? data.user.id.split(':')[0] : 'Linked';
+                connectedNumber.textContent = `Connected as +${phone} (Permanent Active Session).`;
+            }
+            const sidebarStatus = document.getElementById('waSidebarStatus');
+            if (sidebarStatus) {
+                sidebarStatus.textContent = '● Live Sync Active';
+                sidebarStatus.style.color = '#00a884';
             }
             return;
         }
