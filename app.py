@@ -186,7 +186,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     env_name = config_name or os.environ.get("FLASK_ENV") or ("production" if os.environ.get("RENDER") else "development")
     cfg = config_by_name.get(env_name, config_by_name["default"])
     application.config.from_object(cfg)
-    application.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "bashflow-enterprise-permanent-secret-key-2026-prod")
+    application.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "bashflow-absolute-permanent-production-secret-key-2026")
     application.secret_key = application.config["SECRET_KEY"]
     application.config["SESSION_PERMANENT"] = True
     application.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(days=365)

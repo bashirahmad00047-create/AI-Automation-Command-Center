@@ -23,7 +23,7 @@ class ProductionArchitectFixesTestCase(unittest.TestCase):
         self.assertTrue(self.app.config.get("SESSION_COOKIE_HTTPONLY"))
         self.assertTrue(self.app.config.get("SESSION_REFRESH_EACH_REQUEST"))
         import os
-        expected_secret = os.environ.get("SECRET_KEY", "bashflow-enterprise-permanent-secret-key-2026-prod")
+        expected_secret = os.environ.get("SECRET_KEY", "bashflow-absolute-permanent-production-secret-key-2026")
         self.assertEqual(self.app.secret_key, expected_secret)
 
     def test_streaming_audio_endpoint_and_range_support(self):

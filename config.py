@@ -44,7 +44,7 @@ if os.path.exists("/etc/secrets") and os.path.isdir("/etc/secrets"):
 
 class Config:
     """Base application configuration."""
-    SECRET_KEY = os.environ.get("SECRET_KEY", "bashflow-enterprise-permanent-secret-key-2026-prod")
+    SECRET_KEY = os.environ.get("SECRET_KEY", "bashflow-absolute-permanent-production-secret-key-2026")
     
     # SQLAlchemy configuration
     SQLALCHEMY_TRACK_MODIFICATIONS = False
