@@ -54,6 +54,18 @@ class AuthenticationSecurityTestCase(unittest.TestCase):
         self.assertEqual(r_after.status_code, 302)
         self.assertIn("/login", r_after.headers.get("Location", ""))
 
+    def test_root_route_resilience_rollback_on_error(self):
+        """When an exception occurs during root handling, it safely rolls back and redirects without 500."""
+        from unittest.mock import patch
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = "admin-user-id"
+            sess["is_super_admin"] = True
+        with patch("app.render_template", side_effect=Exception("Simulated template failure")):
+            r = self.client.get("/")
+            self.assertEqual(r.status_code, 302)
+            self.assertIn("/login", r.headers.get("Location", ""))
+
+
 
 if __name__ == "__main__":
     unittest.main()
