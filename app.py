@@ -47,7 +47,7 @@ def start_wa_bridge_subprocess(app_ref=None):
     """Spawns `node wa_bridge.js` on port 3001 as a persistent background subprocess when the server starts."""
     try:
         from wa_bridge_manager import ensure_wa_bridge_running
-        ensure_wa_bridge_running(timeout_seconds=5.0)
+        ensure_wa_bridge_running(timeout_seconds=5.0, app=app_ref)
     except Exception as e:
         if app_ref:
             app_ref.logger.warning(f"[WhatsApp Bridge] Failed to start bridge subprocess: {e}")

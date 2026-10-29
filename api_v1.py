@@ -2640,10 +2640,28 @@ def stripe_webhook():
 @api_v1.route("/whatsapp/bridge-qr", methods=["GET"])
 def api_whatsapp_bridge_qr():
     """Returns the Baileys bridge QR code and pairing status for web dashboard scanning.
-    Checks if port 3001 is reachable; if not, automatically runs npm install (if node_modules is missing)
-    and spawns `node wa_bridge.js` using subprocess.Popen, waiting up to 5 seconds for port 3001 to come online.
+    Guarded: If bridge is already connected, returns connected status immediately without touching bridge.
     """
     import requests
+
+    # 1. Guard check: if bridge is already live & connected, return immediately without re-initializing
+    bridge_status_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://127.0.0.1:3001/status")
+    try:
+        sresp = requests.get(bridge_status_url, timeout=1.5)
+        if sresp.status_code == 200:
+            sdata = sresp.json()
+            if sdata.get("connected") or sdata.get("status") == "connected":
+                return jsonify({
+                    "status": "connected",
+                    "connected": True,
+                    "qrUrl": None,
+                    "qr": None,
+                    "message": "WhatsApp is already linked and connected.",
+                    "user": sdata.get("user")
+                }), 200
+    except Exception:
+        pass
+
     try:
         from wa_bridge_manager import ensure_wa_bridge_running
         ensure_wa_bridge_running(timeout_seconds=5.0)
@@ -2662,6 +2680,32 @@ def api_whatsapp_bridge_qr():
             "qrUrl": None,
             "message": f"WhatsApp Baileys bridge is initializing... ({str(e)})"
         }), 200
+
+
+@api_v1.route("/whatsapp/bridge-disconnect", methods=["POST", "DELETE"])
+def api_whatsapp_bridge_disconnect():
+    """Explicitly unlinks the WhatsApp device, clears DB session backup and local auth folder."""
+    import requests
+
+    # 1. Clear database session store and local auth files
+    try:
+        from wa_bridge_manager import clear_wa_session_in_db, resolve_auth_dir
+        clear_wa_session_in_db()
+        auth_dir = resolve_auth_dir()
+        if os.path.exists(auth_dir):
+            import shutil
+            shutil.rmtree(auth_dir, ignore_errors=True)
+            os.makedirs(auth_dir, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"[WA Bridge] Error clearing DB/local auth on disconnect: {e}")
+
+    # 2. Notify Node bridge
+    bridge_url = os.environ.get("BAILEYS_BRIDGE_LOGOUT_URL", "http://127.0.0.1:3001/disconnect")
+    try:
+        resp = requests.post(bridge_url, timeout=4.0)
+        return jsonify(resp.json() if resp.text else {"success": True}), resp.status_code
+    except Exception:
+        return jsonify({"success": True, "message": "WhatsApp session cleared from database."}), 200
 
 
 @api_v1.route("/whatsapp/bridge-qr.png", methods=["GET"])

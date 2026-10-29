@@ -390,6 +390,11 @@ function extractMessageText(message) {
  * Initializes and manages the Baileys WhatsApp Web socket.
  */
 async function startWhatsAppBridge() {
+  // GUARD: If WhatsApp is already connected and active, never destroy or recreate socket!
+  if (isConnected && sock) {
+    console.log('[WhatsApp Bridge] Guard active: WhatsApp is already connected. Skipping re-initialization.');
+    return;
+  }
   if (isStarting) {
     console.log('[WhatsApp Bridge] Connection initialization already in progress, skipping duplicate request.');
     return;
@@ -949,11 +954,13 @@ app.get(['/', '/status'], (req, res) => {
  * QR Code status endpoint (for inspection and live dashboard linking)
  */
 app.get('/qr', async (req, res) => {
-  if (isConnected) {
+  // GUARD: If WhatsApp is already connected, return connected status immediately without resetting
+  if (isConnected || (sock?.user && !currentQr)) {
     return res.json({
       status: 'connected',
       connected: true,
       qrUrl: null,
+      qr: null,
       message: 'WhatsApp is already linked and connected.',
       user: sock?.user || null
     });
@@ -1048,6 +1055,46 @@ app.get('/qr.svg', async (req, res) => {
  * POST /send-message
  * Body: { "chatId": "923001234567", "message": "Hello from Bridge!" }
  */
+/**
+ * Explicit disconnect / logout endpoint
+ * Unlinks the device ONLY when user intentionally clicks Disconnect
+ */
+app.post(['/disconnect', '/logout'], async (req, res) => {
+  console.log('[WhatsApp Bridge] Explicit logout requested by user.');
+  try {
+    if (sock && typeof sock.logout === 'function') {
+      await sock.logout();
+    }
+  } catch (_) {}
+
+  isConnected = false;
+  currentQr = null;
+  currentQrUrl = null;
+  currentQrSvg = null;
+
+  try {
+    if (fs.existsSync(AUTH_DIR)) {
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+      fs.mkdirSync(AUTH_DIR, { recursive: true });
+    }
+  } catch (err) {
+    console.error('[WhatsApp Bridge] Failed to clean auth directory on logout:', err.message);
+  }
+
+  triggerSessionClear();
+  destroyOldSocket();
+
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    startWhatsAppBridge().catch(() => {});
+  }, 1000);
+
+  return res.json({
+    success: true,
+    message: 'WhatsApp device logged out and session cleared.'
+  });
+});
+
 app.post(['/send-message', '/send'], async (req, res, next) => {
   try {
     let chatId = null;
