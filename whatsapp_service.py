@@ -3139,7 +3139,7 @@ class WhatsAppService:
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
             f"DEEP CONTEXTUAL REASONING & ACCURACY PROTOCOL (لازمی ہدایات):\n"
-            f"0. Direct Inquiry Resolution (براہ راست جواب): Always reply directly, helpfully, and conversationally to the customer's transcribed voice message or inquiry. Even if spoken in Pashto, address their substantive questions directly regarding OpsFlow pricing, packages, automations, orders, or support. NEVER refuse service or state that you cannot provide Pashto-to-Urdu transcription service.\n" 
+            f"0. Direct Inquiry Resolution (براہ راست جواب): Customer ne jo specific sawal poocha hai (maslan sirf Starter plan ke baare mein, ya specific feature ke baare mein), sirf usi ka natural, point-to-point aur mukhtasir jawab Roman Urdu ya Urdu mein soch samajh kar do. Pura ratta hua catalog ya unasked plans mat bhejo. Even if spoken in Pashto, address their substantive questions directly regarding OpsFlow pricing, packages, automations, orders, or support. NEVER refuse service or state that you cannot provide Pashto-to-Urdu transcription service.\n" 
             f"1. Deep Reasoning & Intent Comprehension (گہری فہم و ادراک): Thoroughly analyze every inquiry point, implied concern, invoice/order query, or logistical request in context. Use the recent conversation history to provide coherent, contextual responses.\n"
             f"2. Point-by-Point Accurate Resolution (تمام سوالات کا جامع و درست جواب): If the customer asks multiple questions (e.g., shipping charges, delivery time, billing breakdown, or payment methods), answer every single inquiry point accurately based on verified knowledge. Do not skip any detail.\n"
             f"3. Natural Pakistani Urdu Cadence & Warmth (ElevenLabs / Edge-TTS Optimization): Your reply is directly synthesized into an authentic WhatsApp voice note. Always formulate your response in simple, warm, conversational Roman Urdu or Urdu (e.g., 'Assalam-o-Alaikum! Ji bilkul...', 'Aap tension na lein, main batata hoon...'). Avoid complex English jargon, tongue-twister phrasing, or awkward vocabulary so ElevenLabs (QwMurwQUOf6t7fnABXar) and Edge-TTS (hi-IN-MadhurNeural / ur-PK-UzmaNeural) pronounce every single word with 100% smooth, natural Pakistani human inflection.\n"
@@ -3358,7 +3358,7 @@ class WhatsAppService:
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
             f"DEEP CONTEXTUAL REASONING & ACCURACY PROTOCOL:\n"
-            f"0. Direct Inquiry Resolution: Always reply directly, helpfully, and conversationally to the customer's transcribed voice message or inquiry. Even if spoken in Pashto, address their substantive questions directly regarding OpsFlow pricing, packages, automations, orders, or support. NEVER refuse service or state that you cannot provide Pashto-to-Urdu transcription service.\n" 
+            f"0. Direct Inquiry Resolution: Customer ne jo specific sawal poocha hai (maslan sirf Starter plan ke baare mein, ya specific feature ke baare mein), sirf usi ka natural, point-to-point aur mukhtasir jawab Roman Urdu ya Urdu mein soch samajh kar do. Pura ratta hua catalog ya unasked plans mat bhejo. Even if spoken in Pashto, address their substantive questions directly regarding OpsFlow pricing, packages, automations, orders, or support. NEVER refuse service or state that you cannot provide Pashto-to-Urdu transcription service.\n" 
             f"1. Deep Intent Comprehension: Reason through customer needs, context, and conversation history.\n"
             f"2. Point-by-Point Accuracy: Accurately resolve every specific inquiry point (rates, tracking, billing).\n"
             f"3. Natural Pakistani Urdu Cadence & Warmth (ElevenLabs / Edge-TTS Optimization): Your reply is directly synthesized into an authentic WhatsApp voice note. Formulate your response in simple, warm, conversational Roman Urdu or Urdu so ElevenLabs (QwMurwQUOf6t7fnABXar) and Edge-TTS (hi-IN-MadhurNeural / ur-PK-UzmaNeural) pronounce it with 100% smooth, natural Pakistani human inflection.\n"
@@ -3492,6 +3492,12 @@ class WhatsAppService:
         clean_text = str(message_body or "").strip().lower()
         cust_greeting = f" {sender_name.strip()}" if (sender_name and sender_name.strip() and not "@" in sender_name and len(sender_name) < 25) else ""
 
+        # Specific Tier Queries
+        is_starter = "starter" in clean_text
+        is_pro = "pro" in clean_text or "professional" in clean_text
+        is_enterprise = "enterprise" in clean_text
+        is_free = "free" in clean_text or "muft" in clean_text
+
         # Topic 1: Pricing, packages, costs, or payment methods
         is_pricing_query = any(w in clean_text for w in (
             "price", "pricing", "rate", "rates", "package", "packages", "kitna", "kitne", "kharacha", "cost", "fee", "fees",
@@ -3510,7 +3516,31 @@ class WhatsAppService:
         )) or intent in ("support_request", "critical_incident")
 
         if lang_fmt == "roman_urdu":
-            if is_pricing_query:
+            if is_starter:
+                return (
+                    f"Ji bilkul{cust_greeting}! BashFlow Cloud ka Starter Plan $29/month (PKR 7,500/month) ka hai. "
+                    "Isme aapko 10 automated workflow rules, 5,000 monthly events, custom webhooks, aur automated alert notifications milti hain. "
+                    "Iske sath 2-Day Free Trial bhi shamil hai. Payment aap JazzCash (03209350858, Title: Bashir Uddin) ya Card se kar sakte hain. "
+                    "Kya aap Starter Plan ka free trial shuru karna chahte hain?"
+                )
+            elif is_pro:
+                return (
+                    f"Ji bilkul{cust_greeting}! BashFlow Cloud ka Professional Plan $99/month (PKR 25,000/month) ka hai. "
+                    "Isme aapko 50 automated rules, 200,000 monthly events, full Google Gemini AI integration, aur real-time voice notes milti hain مع 2-Day Free Trial. "
+                    "Payment JazzCash (03209350858) ya Card se kar sakte hain. Kya main aapka Pro trial activate kar doon?"
+                )
+            elif is_enterprise:
+                return (
+                    f"Ji bilkul{cust_greeting}! BashFlow Cloud ka Enterprise Plan $499/month (PKR 125,000/month) ka hai. "
+                    "Yeh high-volume operations ke liye hai jisme 250 automated rules, 1,000,000 events, dedicated 24/7 SLA, aur custom integrations shamil hain. "
+                    "Kya aap dedicated enterprise demo ya setup chahte hain?"
+                )
+            elif is_free:
+                return (
+                    f"Ji bilkul{cust_greeting}! BashFlow Cloud ka Free Plan $0/month (bilkul muft) hai. "
+                    "Isme aapko 3 automated rules aur 1,000 monthly events milte hain taake aap platform test kar sakein. Kisi credit card ki zaroorat nahi hai."
+                )
+            elif is_pricing_query:
                 return (
                     f"Ji bilkul{cust_greeting}! BashFlow Cloud ke verified packages yeh hain: "
                     "(1) Free Plan: $0/mo (3 automation rules, 1,000 events), "
@@ -3576,7 +3606,27 @@ class WhatsAppService:
 
         else:
             # Default: English
-            if is_pricing_query:
+            if is_starter:
+                return (
+                    f"Hello{cust_greeting}! BashFlow Cloud's Starter Plan is $29/month (PKR 7,500/month). "
+                    "It includes 10 automated workflow rules, 5,000 monthly events, custom webhooks, and priority alert routing, plus a 2-day free trial. "
+                    "Payment is available via JazzCash (03209350858, Title: Bashir Uddin) or Stripe. Would you like to activate the Starter Plan trial?"
+                )
+            elif is_pro:
+                return (
+                    f"Hello{cust_greeting}! BashFlow Cloud's Professional Plan is $99/month (PKR 25,000/month). "
+                    "It features 50 automated rules, 200,000 monthly events, full Gemini AI integration, and real-time voice notes with a 2-day free trial. "
+                    "Would you like to get started with the Pro tier?"
+                )
+            elif is_enterprise:
+                return (
+                    f"Hello{cust_greeting}! The Enterprise Plan is $499/month (PKR 125,000/month) for mission-critical operations, offering 250 rules, 1M monthly events, dedicated SLA, and white-glove onboarding."
+                )
+            elif is_free:
+                return (
+                    f"Hello{cust_greeting}! The Free Plan is $0/month and includes 3 automated rules and 1,000 monthly events to test our platform. No credit card required."
+                )
+            elif is_pricing_query:
                 return (
                     f"Hello{cust_greeting}! Here are BashFlow Cloud's verified subscription tiers: "
                     "(1) Free Plan: $0/mo (3 automated rules, 1,000 events), "
