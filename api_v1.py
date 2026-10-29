@@ -3249,12 +3249,20 @@ def whatsapp_webhook_ingress():
             logger.info(f"Duplicate WhatsApp message ignored: {msg_id}")
             continue
 
+        media_candidate = (
+            msg.get("media_url")
+            or msg.get("download_url")
+            or msg.get("audio_url")
+            or msg.get("mediaUrl")
+            or msg.get("downloadUrl")
+        )
         record = WhatsAppService.record_message(
             organization_id=target_org.id,
             sender=msg.get("from_phone", "unknown"),
             recipient=msg.get("recipient_phone_id", "system"),
             direction="inbound",
             body=msg.get("body", ""),
+            media_url=media_candidate,
             status="received",
             whatsapp_message_id=msg_id,
             message_type=msg.get("message_type", "text"),

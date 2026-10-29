@@ -6721,6 +6721,16 @@ class WhatsAppService:
                 clean_b64 = str(b64_val).split(",")[-1].strip()
                 m_url = f"data:audio/ogg;base64,{clean_b64}"
 
+        # Clean giant Base64 strings from raw_payload before json.dumps to keep DB lean & fast
+        safe_payload = None
+        if isinstance(raw_payload, dict):
+            safe_payload = {}
+            for k, v in raw_payload.items():
+                if k in ("rawMessage", "audioBase64", "audio_base64", "imageBase64") and isinstance(v, (str, dict)) and len(str(v)) > 200:
+                    safe_payload[k] = "[omitted_from_json_log]"
+                else:
+                    safe_payload[k] = v
+
         msg = WhatsAppMessage(
             id=generate_uuid("wam"),
             organization_id=organization_id or "org-enterprise-default",
@@ -6735,7 +6745,7 @@ class WhatsAppService:
             status=status,
             execution_id=execution_id,
             error_message=error_message,
-            raw_payload_json=json.dumps(raw_payload) if raw_payload else None,
+            raw_payload_json=json.dumps(safe_payload) if safe_payload else None,
             created_at=created_at
         )
         if has_app_context():
@@ -6984,7 +6994,7 @@ class WhatsAppService:
         bridge_chat_id = real_chat_id
         bridge_message = message_text or ""
         bridge_url = os.environ.get("BAILEYS_BRIDGE_URL", "http://127.0.0.1:3001/send-message")
-        bridge_timeout = float(os.environ.get("BAILEYS_BRIDGE_TIMEOUT", "8.0"))
+        bridge_timeout = float(os.environ.get("BAILEYS_BRIDGE_TIMEOUT", "20.0"))
 
         # Resolve audio / voice / media bytes
         f_bytes = kwargs.get("file_bytes") or kwargs.get("audio_bytes")
@@ -7060,6 +7070,7 @@ class WhatsAppService:
                         direction="outbound",
                         body=message_text,
                         message_type=saved_msg_type,
+                        media_url=audio_data_url,
                         status="sent",
                         whatsapp_message_id=msg_id,
                         execution_id=execution_id,
