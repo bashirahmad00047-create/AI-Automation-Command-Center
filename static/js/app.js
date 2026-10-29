@@ -5337,11 +5337,18 @@ function promptNewConversation() {
 
 function dataUriToBlob(dataUri) {
     try {
-        if (!dataUri || typeof dataUri !== 'string' || !dataUri.includes(',')) return null;
-        const parts = dataUri.split(',');
-        const mimeMatch = parts[0].match(/:(.*?);/);
-        const mime = mimeMatch ? mimeMatch[1] : 'audio/ogg';
-        const b64 = parts[1].trim();
+        if (!dataUri || typeof dataUri !== 'string') return null;
+        let b64 = '';
+        let mime = 'audio/ogg';
+        if (dataUri.includes(',')) {
+            const parts = dataUri.split(',');
+            const mimeMatch = parts[0].match(/:(.*?);/);
+            mime = mimeMatch ? mimeMatch[1] : 'audio/ogg';
+            b64 = parts[1].trim();
+        } else {
+            b64 = dataUri.trim();
+        }
+        mime = mime.replace(/;\s*codecs=[^;,]+/i, '').trim();
         const bstr = atob(b64);
         let n = bstr.length;
         const u8arr = new Uint8Array(n);
@@ -5438,7 +5445,16 @@ function togglePlayVoiceMessage(id, explicitMediaUrl, explicitText) {
 
     // Look up the cached message object for reliable media extraction
     const targetMsg = (waAllMessagesCache || []).find(x => String(x.id) === String(id) || String(x.whatsapp_message_id) === String(id));
-    const mediaUrl = explicitMediaUrl || targetMsg?.media_url || targetMsg?.raw_payload?.audio_base64 || targetMsg?.audio_base64 || '';
+    let mediaUrl = explicitMediaUrl || targetMsg?.media_url || targetMsg?.raw_payload?.audio_base64 || targetMsg?.audio_base64 || '';
+    if (mediaUrl && typeof mediaUrl === 'string') {
+        mediaUrl = mediaUrl.trim();
+        if (!mediaUrl.startsWith('data:') && !mediaUrl.startsWith('http') && !mediaUrl.startsWith('/api/') && mediaUrl.length > 50) {
+            mediaUrl = `data:audio/ogg;base64,${mediaUrl}`;
+        }
+        if (mediaUrl.startsWith('data:')) {
+            mediaUrl = mediaUrl.replace(/;\s*codecs=[^;,]+/i, '');
+        }
+    }
     const textBody = explicitText || targetMsg?.body || '';
 
     if (mediaUrl) {
@@ -5996,7 +6012,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
             const isActive = isSameWaPhone(c.normalizedPhone || c.phone, waActiveChatPartner);
             const avatarColor = getWaAvatarColor(c.phone);
             const initials = (c.name || c.phone || '?').substring(0, 2).toUpperCase();
-            const previewIcon = c.is_audio ? '🎙️ ' : '';
+            const previewIcon = (c.is_audio && !previewText.startsWith('🎙️') && !previewText.startsWith('🎤')) ? '🎙️ ' : '';
             const unreadCount = (c.messages || []).filter(m => m.direction === 'inbound' && m.status !== 'read').length;
 
             let previewText = c.lastMessage || '';
@@ -6110,30 +6126,30 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                 const isRead = m.status === 'read';
                 const isSent = m.status === 'sent' || m.status === 'received' || isRead;
                 const ticks = isSending ? '🕒' : (isRead ? '<span style="color:#53bdeb;font-weight:bold;">✓✓</span>' : (isSent ? '✓✓' : '✓'));
-                const mediaUrl = m.mediaUrl || m.media_url || m.audioUrl || m.audio_url || (m.raw_payload && (m.raw_payload.mediaUrl || m.raw_payload.audioUrl || m.raw_payload.audio_base64)) || '';
-                const hasPlayableAudio = Boolean(mediaUrl && typeof mediaUrl === 'string' && (mediaUrl.startsWith('data:audio') || mediaUrl.startsWith('http') || mediaUrl.startsWith('/api/')));
-                const isVoice = Boolean(hasPlayableAudio && (m.is_audio || m.type === 'audio' || m.message_type === 'audio' || m.message_type === 'voiceMessage'));
-                const safeMediaUrl = mediaUrl || '';
+                let rawMedia = m.mediaUrl || m.media_url || m.audioUrl || m.audio_url || (m.raw_payload && (m.raw_payload.mediaUrl || m.raw_payload.audioUrl || m.raw_payload.audio_base64)) || '';
+                if (rawMedia && typeof rawMedia === 'string') {
+                    rawMedia = rawMedia.trim();
+                    if (!rawMedia.startsWith('data:') && !rawMedia.startsWith('http') && !rawMedia.startsWith('/api/') && rawMedia.length > 50) {
+                        rawMedia = `data:audio/ogg;base64,${rawMedia}`;
+                    }
+                    if (rawMedia.startsWith('data:')) {
+                        rawMedia = rawMedia.replace(/;\s*codecs=[^;,]+/i, '');
+                    }
+                }
+                const hasPlayableAudio = Boolean(rawMedia && typeof rawMedia === 'string' && (rawMedia.startsWith('data:audio') || rawMedia.startsWith('http') || rawMedia.startsWith('/api/')));
+                const isVoice = Boolean(hasPlayableAudio || m.is_audio || m.type === 'audio' || m.message_type === 'audio' || m.message_type === 'voiceMessage' || (m.body && (m.body.startsWith('🎤') || m.body.startsWith('🎙️'))));
+                const safeMediaUrl = rawMedia || '';
                 const safeBody = (m.body || m.message || '').replace(/\[.*?\]/g, '').trim();
 
                 let bodyHtml = '';
                 if (isVoice) {
-                    const audioSrc = safeMediaUrl.startsWith('data:audio') ? safeMediaUrl : (safeMediaUrl ? `/api/v1/whatsapp/media/proxy?url=${encodeURIComponent(safeMediaUrl)}` : '');
-                    const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage' && safeBody !== '🎤 Voice message' && safeBody !== '(no text)');
+                    const audioSrc = hasPlayableAudio ? (safeMediaUrl.startsWith('data:audio') ? safeMediaUrl : `/api/v1/whatsapp/media/proxy?url=${encodeURIComponent(safeMediaUrl)}`) : '';
+                    const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage' && safeBody !== '🎤 Voice message' && safeBody !== '🎙️ Voice note' && safeBody !== '(no text)');
                     bodyHtml = `
                         <div class="wa-voice-bubble" style="padding: 4px 0;">
                             ${audioSrc ? `<audio controls preload="metadata" src="${audioSrc}" style="max-width: 250px; width: 100%; height: 38px; outline: none; border-radius: 20px;"></audio>` : `
-                            <button type="button" class="wa-play-btn" id="waPlayBtn_${m.id}" onclick="togglePlayVoiceMessage('${m.id}')">
-                                ▶
-                            </button>
-                            <div class="wa-voice-track">
-                                <div class="wa-prog-bar-bg" onclick="togglePlayVoiceMessage('${m.id}')">
-                                    <div class="wa-prog-bar-fill" id="waAudioProg_${m.id}"></div>
-                                </div>
-                                <div class="wa-voice-meta">
-                                    <span id="waAudioTime_${m.id}">0:00</span>
-                                    <span>🎤 Voice message</span>
-                                </div>
+                            <div style="display:inline-flex; align-items:center; gap:6px; color:#aebac1; font-size:0.88em; padding:4px 0;">
+                                <span>🎤</span> <em>Voice message (Audio unavailable)</em>
                             </div>
                             `}
                         </div>
