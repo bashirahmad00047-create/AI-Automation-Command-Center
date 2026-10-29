@@ -22,7 +22,7 @@ import sys
 import threading
 from typing import Any, Dict, Optional
 import requests
-from flask import Flask, Response, g, jsonify, render_template, request, send_from_directory, session, url_for
+from flask import Flask, Response, g, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 
 from api_v1 import api_v1
 from auth import get_current_org, log_audit_event, require_auth
@@ -367,14 +367,17 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         exposition = telemetry.generate_prometheus_exposition(engine=eng)
         return exposition, 200, {"Content-Type": "text/plain; version=0.0.4; charset=utf-8"}
 
-    # Frontend Dashboard View
+    # Frontend Dashboard View (Strict Authentication Required)
     @application.route("/")
-    @application.route("/dashboard")
+    @application.route("/dashboard", endpoint="dashboard")
     def index():
+        from auth import get_current_user
+        user = get_current_user()
+        if not user and not session.get("user_id") and not session.get("is_super_admin"):
+            return redirect(url_for("top_level_login"))
         jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
         return render_template("index.html", jazzcash_number=jc_num)
 
-    @application.route("/dashboard", endpoint="dashboard")
     def dashboard():
         return index()
 
@@ -411,6 +414,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Top-Level Authentication Endpoints
     @application.route("/login", methods=["GET", "POST"])
     def top_level_login():
+        from auth import get_current_user
+        if request.method == "GET":
+            user = get_current_user()
+            if user or session.get("user_id") or session.get("is_super_admin"):
+                return redirect(url_for("index"))
+            return render_template("login.html")
+
         if request.method == "POST":
             # Direct Master Admin Login Override
             import os
@@ -428,26 +438,31 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 session['is_super_admin'] = True
                 session['is_enterprise_bypass'] = True
                 session['plan'] = 'enterprise'
-                return jsonify({'status': 'success', 'redirect': url_for('dashboard')})
+                if request.is_json:
+                    return jsonify({'status': 'success', 'redirect': url_for('index')})
+                return redirect(url_for('index'))
 
             from api_v1 import auth_login
-            return auth_login()
-        return render_template("index.html")
+            resp = auth_login()
+            if not request.is_json and isinstance(resp, tuple) and resp[1] == 200:
+                return redirect(url_for('index'))
+            return resp
 
     @application.route("/register", methods=["GET", "POST"])
     def top_level_register():
         if request.method == "POST":
             from api_v1 import auth_register
             return auth_register()
-        return render_template("index.html")
+        return render_template("login.html")
 
     @application.route("/logout", methods=["GET", "POST"])
     def top_level_logout():
         from api_v1 import auth_logout
         auth_logout()
-        if request.headers.get("Accept", "").startswith("application/json"):
-            return jsonify({"success": True, "message": "Successfully logged out."})
-        return render_template("index.html")
+        session.clear()
+        if request.headers.get("Accept", "").startswith("application/json") and request.method == "POST":
+            return jsonify({"success": True, "message": "Successfully logged out.", "redirect": url_for("top_level_login")})
+        return redirect(url_for("top_level_login"))
 
     # Global Readiness Check (Render, K8s, Cloud Load Balancers)
     @application.route("/ready", methods=["GET"])
