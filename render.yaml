@@ -6,6 +6,7 @@ services:
     dockerContext: .
     plan: free
     healthCheckPath: /health
+    startCommand: bash start.sh
     envVars:
       - key: FLASK_ENV
         value: production
