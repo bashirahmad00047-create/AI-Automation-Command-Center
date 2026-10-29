@@ -44,7 +44,7 @@ if os.path.exists("/etc/secrets") and os.path.isdir("/etc/secrets"):
 
 class Config:
     """Base application configuration."""
-    SECRET_KEY = os.environ.get("SECRET_KEY", "opsflow-enterprise-secret-key-2026-production")
+    SECRET_KEY = os.environ.get("SECRET_KEY", "bashflow-enterprise-permanent-secret-key-2026-prod")
     
     # SQLAlchemy configuration
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -64,10 +64,12 @@ class Config:
         SQLALCHEMY_ENGINE_OPTIONS["poolclass"] = NullPool
 
     # Session security
-    PERMANENT_SESSION_LIFETIME = timedelta(days=7)
+    SESSION_PERMANENT = True
+    PERMANENT_SESSION_LIFETIME = timedelta(days=365)
     SESSION_COOKIE_NAME = "opsflow_session"
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
+    SESSION_REFRESH_EACH_REQUEST = True
     SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "0") == "1"
 
     # Engine & Security limits

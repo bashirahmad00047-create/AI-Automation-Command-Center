@@ -716,8 +716,27 @@ async function startWhatsAppBridge() {
                     }
                   );
                 } catch (_2) {
+                  try {
+                    buffer = await downloadMediaMessage(
+                      { key: msg.key, message: { audioMessage: audioMsg } },
+                      'buffer',
+                      {},
+                      {
+                        logger: pino({ level: 'silent' }),
+                        reuploadRequest: sock?.updateMediaMessage
+                      }
+                    );
+                  } catch (_3) {}
+                }
+              }
+
+              // Before encryption keys expire, if download failed once, call sock.updateMediaMessage(msg) and retry immediately
+              if (!buffer && sock && typeof sock.updateMediaMessage === 'function') {
+                try {
+                  console.log(`[Media Download] Retrying audio download via sock.updateMediaMessage for ${senderPhone}...`);
+                  const refreshedMsg = await sock.updateMediaMessage(msg);
                   buffer = await downloadMediaMessage(
-                    { key: msg.key, message: { audioMessage: audioMsg } },
+                    refreshedMsg || msg,
                     'buffer',
                     {},
                     {
@@ -725,8 +744,11 @@ async function startWhatsAppBridge() {
                       reuploadRequest: sock?.updateMediaMessage
                     }
                   );
+                } catch (retryErr) {
+                  console.warn('[Media Download] updateMediaMessage retry notice:', retryErr.message);
                 }
               }
+
               if (buffer && buffer.length > 0) {
                 audioBase64 = buffer.toString('base64');
                 audioDataUrl = `data:audio/ogg; codecs=opus;base64,${buffer.toString('base64')}`;
@@ -1220,20 +1242,22 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
         const isVoiceReq = req.body?.ptt !== undefined ? Boolean(req.body.ptt) : (req.body?.is_voice !== undefined ? Boolean(req.body.is_voice) : true);
         const ptt = isVoiceReq;
         const audioFileName = ptt ? (mimetype.includes('mp4') ? 'voice_message.m4a' : 'voice_message.oga') : 'audio.mp3';
-        if (audioRaw) {
-          const audioBuffer = Buffer.from(cleanBase64, 'base64');
+        const audioPayload = audioRaw ? Buffer.from(cleanBase64, 'base64') : { url: audioUrl };
+        try {
+          // Send audio with detected or audio/mp4 mimetype (which WhatsApp Android/iOS plays natively without requiring ffmpeg)
           sent = await sock.sendMessage(jid, {
-            audio: audioBuffer,
+            audio: audioPayload,
             mimetype: mimetype,
             ptt: ptt,
             fileName: audioFileName
           }, sendOptions);
-        } else if (audioUrl) {
+        } catch (firstAudioErr) {
+          console.warn('[Audio Send Warning] First attempt failed (possibly ffmpeg missing), retrying with direct audio/mp4:', firstAudioErr.message);
           sent = await sock.sendMessage(jid, {
-            audio: { url: audioUrl },
-            mimetype: mimetype,
-            ptt: ptt,
-            fileName: audioFileName
+            audio: audioPayload,
+            mimetype: 'audio/mp4',
+            ptt: true,
+            fileName: 'voice_message.m4a'
           }, sendOptions);
         }
       } else if (hasImage) {

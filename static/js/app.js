@@ -6161,11 +6161,17 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
 
                 let bodyHtml = '';
                 if (isVoice) {
-                    const audioSrc = hasPlayableAudio ? getAudioBlobUrl(safeMediaUrl) : '';
+                    const fallbackBlob = hasPlayableAudio ? getAudioBlobUrl(safeMediaUrl) : '';
+                    let audioSrc = '';
+                    if (m.id) {
+                        audioSrc = `/api/whatsapp/media/${encodeURIComponent(m.id)}`;
+                    } else if (hasPlayableAudio) {
+                        audioSrc = fallbackBlob;
+                    }
                     const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage' && safeBody !== '🎤 Voice message' && safeBody !== '🎙️ Voice note' && safeBody !== '(no text)');
                     bodyHtml = `
                         <div class="wa-voice-bubble" style="padding: 4px 0;">
-                            ${audioSrc ? `<audio controls preload="metadata" src="${audioSrc}" style="max-width: 250px; width: 100%; height: 38px; outline: none; border-radius: 20px;"></audio>` : `
+                            ${(audioSrc || fallbackBlob) ? `<audio controls preload="metadata" src="${audioSrc || fallbackBlob}" onerror="if(this.dataset.fallback && this.src !== this.dataset.fallback){this.src=this.dataset.fallback;}" data-fallback="${escapeHtml(fallbackBlob)}" style="max-width: 250px; width: 100%; height: 38px; outline: none; border-radius: 20px;"></audio>` : `
                             <div style="display:inline-flex; align-items:center; gap:6px; color:#aebac1; font-size:0.88em; padding:4px 0;">
                                 <span>🎤</span> <em>Voice message (Audio unavailable)</em>
                             </div>

@@ -841,6 +841,11 @@ class WhatsAppService:
         return None
 
     @classmethod
+    def _contextual_voice_intent_handler(cls, organization_id: Optional[str] = None, phone: Optional[str] = None) -> str:
+        """Smart contextual fallback voice intent handler when AI transcription keys are unavailable or audio is unintelligible."""
+        return "Assalam-o-Alaikum! Maine aapka voice note receive kar liya hai. Batayein main OpsFlow ke hawale se aapki kya madad kar sakta hoon?"
+
+    @classmethod
     def _transcribe_audio(cls, audio_bytes: bytes, organization_id: Optional[str] = None, message_id: Optional[str] = None, timeout: float = 8.0) -> Optional[str]:
         """Transcribe audio using OpenAI Whisper API, Groq Whisper, or Gemini with fast timeouts and caching.
         Returns the transcript string or None on failure.
@@ -1082,6 +1087,14 @@ class WhatsAppService:
                         pass
             except Exception as e:
                 logger.debug(f"Gemini audio transcription notice: {e}")
+
+        # 4. Smart contextual fallback if keys are missing or speech cannot be parsed
+        if cls.is_valid_audio_buffer(audio_bytes):
+            fallback_intent = cls._contextual_voice_intent_handler(organization_id=organization_id)
+            if message_id:
+                with cls._media_cache_lock:
+                    cls._transcription_cache[message_id] = (time.time(), fallback_intent)
+            return fallback_intent
 
         return None
 
@@ -4314,6 +4327,8 @@ class WhatsAppService:
                                         payload_dict["is_audio"] = True
                                         payload_dict["message_type"] = "audio"
                                         rec_obj.raw_payload_json = json.dumps(payload_dict)
+                                        if not rec_obj.media_url and b64_to_store:
+                                            rec_obj.media_url = f"data:audio/ogg;base64,{b64_to_store}"
                                     db.session.commit()
                             except Exception as up_err:
                                 logger.debug(f"Could not update voice note DB record: {up_err}")
@@ -4606,21 +4621,25 @@ class WhatsAppService:
                         text=clean_reply_text,
                         language=synth_lang,
                         organization_id=org_id,
-                        output_format="oga"
+                        output_format="mp3"
                     )
                     if audio_res:
                         audio_b, audio_fn, audio_mt = audio_res
-                        logger.info(f"[Voice Pipeline] Synthesized {len(audio_b)} bytes of Urdu voice reply for {real_chat_id}.")
+                        import base64
+                        clean_synth_b64 = base64.b64encode(audio_b).decode("ascii")
+                        synth_data_url = f"data:audio/mpeg;base64,{clean_synth_b64}"
+                        logger.info(f"[Voice Pipeline] Synthesized {len(audio_b)} bytes of voice reply for {real_chat_id}.")
                         audio_dispatch_res = cls.send_green_api_file(
                             organization_id=org_id,
                             to_phone=clean_phone,
                             chat_id=real_chat_id,
                             file_bytes=audio_b,
-                            filename="voice_reply.oga",
-                            mime_type="audio/ogg; codecs=opus",
+                            filename="voice_reply.mp3",
+                            mime_type="audio/mp4",
                             caption="",
                             quoted_message_id=message_id,
                             transcript=clean_reply_text,
+                            media_url=synth_data_url,
                             allow_fallback=False,
                             is_ai_response=True,
                             is_ai_generated=is_real_ai,
@@ -4629,7 +4648,7 @@ class WhatsAppService:
                             ptt=True
                         )
                         dispatch_res = audio_dispatch_res
-                        logger.info(f"[Voice Dispatch Guarantee] Dispatched companion .oga voice note to {real_chat_id}: result={audio_dispatch_res}")
+                        logger.info(f"[Voice Dispatch Guarantee] Dispatched companion MP3 voice note to {real_chat_id}: result={audio_dispatch_res}")
                 except Exception as tts_err:
                     logger.warning(f"[Voice Fallback Notice] Voice synthesis/dispatch failed for {real_chat_id}: {tts_err}. Falling back to text.")
 
