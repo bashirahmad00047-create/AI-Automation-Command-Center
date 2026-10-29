@@ -87,7 +87,8 @@ async function initAuthAndTenancy() {
             state.userRole = 'guest';
             updateUserBadgeUI();
             updateAuthHeaderUI(false);
-            openAuthModal('login', true);
+            window.location.href = '/login';
+            return;
         }
     } catch (e) {
         console.error('Failed to load user/org state:', e);
@@ -96,7 +97,8 @@ async function initAuthAndTenancy() {
         state.userRole = 'guest';
         updateUserBadgeUI();
         updateAuthHeaderUI(false);
-        openAuthModal('login', true);
+        window.location.href = '/login';
+        return;
     }
 }
 
@@ -4384,7 +4386,7 @@ async function handleRegister(e) {
 
 async function handleLogout() {
     try {
-        await fetch('/api/v1/auth/logout', { method: 'POST' });
+        await fetch('/logout', { method: 'POST', headers: { 'Accept': 'application/json' } });
     } catch (e) {
         console.error('Logout error:', e);
     }
@@ -4394,7 +4396,7 @@ async function handleLogout() {
     updateUserBadgeUI();
     updateAuthHeaderUI(false);
     showToast('Signed out of BashFlow Cloud.', 'info');
-    openAuthModal('login', true);
+    window.location.href = '/login';
 }
 
 // Onboarding Wizard Implementation
