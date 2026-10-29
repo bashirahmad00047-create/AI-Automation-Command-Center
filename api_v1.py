@@ -2729,6 +2729,59 @@ def api_whatsapp_bridge_status():
         }), 503
 
 
+@api_v1.route("/whatsapp/session-state", methods=["GET"])
+def api_whatsapp_session_state():
+    """Returns database-backed session state information."""
+    try:
+        from database import db
+        from sqlalchemy import text
+        with db.engine.connect() as conn:
+            row = conn.execute(text("SELECT file_count, length(zip_b64), updated_at FROM wa_session_store WHERE id = 1")).fetchone()
+            if row and row[1]:
+                return jsonify({
+                    "has_saved_session": True,
+                    "file_count": row[0] or 0,
+                    "size_bytes": row[1] or 0,
+                    "updated_at": str(row[2]) if row[2] else None
+                }), 200
+    except Exception as e:
+        logger.warning(f"[WA Bridge] session-state error: {e}")
+    return jsonify({"has_saved_session": False, "file_count": 0, "size_bytes": 0}), 200
+
+
+@api_v1.route("/whatsapp/session-backup", methods=["POST", "GET"])
+def api_whatsapp_session_backup():
+    """Triggers an immediate database backup of Baileys auth files."""
+    try:
+        from wa_bridge_manager import backup_wa_session_to_db
+        success = backup_wa_session_to_db()
+        return jsonify({"success": success, "message": "WhatsApp session backed up to DB" if success else "No credentials to backup"}), 200 if success else 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/whatsapp/session-restore", methods=["POST", "GET"])
+def api_whatsapp_session_restore():
+    """Restores Baileys session files from DB into the auth folder."""
+    try:
+        from wa_bridge_manager import restore_wa_session_from_db
+        restored = restore_wa_session_from_db()
+        return jsonify({"success": True, "restored": restored, "message": "WhatsApp session restored from DB" if restored else "No session found in DB"}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/whatsapp/session-clear", methods=["POST", "DELETE"])
+def api_whatsapp_session_clear():
+    """Clears the session from the DB when device is explicitly logged out."""
+    try:
+        from wa_bridge_manager import clear_wa_session_in_db
+        cleared = clear_wa_session_in_db()
+        return jsonify({"success": cleared, "message": "WhatsApp session cleared from DB"}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 
 
 

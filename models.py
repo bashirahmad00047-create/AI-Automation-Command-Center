@@ -1774,3 +1774,25 @@ class AbandonedCart(db.Model):
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }
 
+
+
+class WASessionStore(db.Model):
+    """Permanent WhatsApp Baileys session storage table.
+    Preserves encrypted multi-file auth credentials across container restarts
+    and Render redeploys so WhatsApp Web never requires re-scanning QR.
+    """
+    __tablename__ = "wa_session_store"
+
+    id = db.Column(db.Integer, primary_key=True, default=1)
+    zip_b64 = db.Column(db.Text, nullable=False)
+    file_count = db.Column(db.Integer, nullable=False, default=0)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "has_session": bool(self.zip_b64),
+            "file_count": self.file_count,
+            "size_bytes": len(self.zip_b64) if self.zip_b64 else 0,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }

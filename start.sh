@@ -31,6 +31,7 @@ fi
 
 echo "=== [2/4] Initializing Database Schema ==="
 python init_db.py || echo "init_db note: continuing..."
+python -c "from wa_bridge_manager import restore_wa_session_from_db; restore_wa_session_from_db()" || echo "Session restore note: continuing..."
 
 echo "=== [3/4] Starting WhatsApp Baileys bridge in infinite auto-restart loop ==="
 (
