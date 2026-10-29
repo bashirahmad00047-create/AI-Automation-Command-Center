@@ -1850,13 +1850,8 @@ async function saveRuleForm(e) {
         });
 
         if (res.status === 401) {
-            // Automatically re-authenticate as default admin persona and retry
-            await quickLoginPersona('admin@opsflow.io', 'AdminSecure2026!');
-            res = await fetch(url, {
-                method: method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+            window.location.href = '/login';
+            return;
         }
 
         const data = await res.json();
@@ -4214,10 +4209,7 @@ async function handleResetPassword(e) {
 
 
 function fillDemoCredentials() {
-    const email = document.getElementById('loginEmail');
-    const pass = document.getElementById('loginPassword');
-    if (email) email.value = 'admin@opsflow.io';
-    if (pass) pass.value = 'AdminSecure2026!';
+    // Demo auto-fill disabled for security perimeter
 }
 
 let slugDebounceTimer = null;

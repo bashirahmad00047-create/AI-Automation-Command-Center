@@ -544,6 +544,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/whatsapp/bridge-qr", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-qr", methods=["GET"])
+    @require_auth
     def route_whatsapp_bridge_qr():
         """Returns the Baileys bridge QR code and pairing status for web dashboard scanning.
         Checks if port 3001 is reachable; if not, automatically runs npm install (if node_modules is missing)
@@ -570,6 +571,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/whatsapp/bridge-qr.png", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-qr.png", methods=["GET"])
+    @require_auth
     def route_whatsapp_bridge_qr_png():
         """Returns the raw PNG image of the WhatsApp Baileys bridge QR code."""
         from flask import Response
@@ -590,6 +592,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/whatsapp/bridge-qr.svg", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-qr.svg", methods=["GET"])
+    @require_auth
     def route_whatsapp_bridge_qr_svg():
         """Returns the SVG vector of the WhatsApp Baileys bridge QR code."""
         from flask import Response
@@ -610,6 +613,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/whatsapp/bridge-status", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-status", methods=["GET"])
+    @require_auth
     def route_whatsapp_bridge_status():
         """Returns the Baileys bridge live connection status."""
         try:
