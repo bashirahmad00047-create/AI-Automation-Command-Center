@@ -110,6 +110,15 @@ def init_and_seed_database(seed_data: Optional[bool] = None):
         except Exception as _db_err:
             print(f"[WARN] db.create_all notice: {_db_err}")
 
+        # Ensure permanent WhatsApp Baileys session is synced
+        try:
+            from wa_bridge_manager import restore_wa_session_from_db, backup_wa_session_to_db
+            restored = restore_wa_session_from_db()
+            backed_up = backup_wa_session_to_db()
+            print(f"[OK] WhatsApp session persistence initialized (restored={restored}, backed_up={backed_up}).")
+        except Exception as _wa_err:
+            print(f"[WARN] WhatsApp session sync notice: {_wa_err}")
+
         can_seed = should_seed_demo_data(seed_data)
         if not can_seed:
             try:

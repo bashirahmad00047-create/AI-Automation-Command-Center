@@ -26,7 +26,8 @@ const {
   fetchLatestBaileysVersion,
   downloadMediaMessage,
   normalizeMessageContent,
-  extractMessageContent
+  extractMessageContent,
+  Browsers
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const qrcodeTerminal = require('qrcode-terminal');
@@ -70,6 +71,85 @@ function resolveAuthDir() {
 }
 
 const AUTH_DIR = resolveAuthDir();
+
+function getBackendBaseUrl() {
+  const envUrl = process.env.PYTHON_WEBHOOK_URL;
+  if (envUrl && envUrl.includes('/api/v1/webhooks')) {
+    return envUrl.split('/api/v1/webhooks')[0];
+  }
+  return `http://127.0.0.1:${PYTHON_PORT}`;
+}
+
+let sessionBackupDebounce = null;
+function triggerSessionBackup() {
+  if (sessionBackupDebounce) return;
+  sessionBackupDebounce = setTimeout(async () => {
+    sessionBackupDebounce = null;
+    try {
+      const backupUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-backup`;
+      const http = backupUrl.startsWith('https') ? require('https') : require('http');
+      const u = new URL(backupUrl);
+      const req = http.request({
+        hostname: u.hostname,
+        port: u.port,
+        path: u.pathname,
+        method: 'POST',
+        timeout: 4000
+      }, (res) => { res.resume(); });
+      req.on('error', () => {});
+      req.end();
+    } catch (_) {}
+  }, 2500);
+}
+
+function triggerSessionClear() {
+  try {
+    const clearUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-clear`;
+    const http = clearUrl.startsWith('https') ? require('https') : require('http');
+    const u = new URL(clearUrl);
+    const req = http.request({
+      hostname: u.hostname,
+      port: u.port,
+      path: u.pathname,
+      method: 'POST',
+      timeout: 4000
+    }, (res) => { res.resume(); });
+    req.on('error', () => {});
+    req.end();
+  } catch (_) {}
+}
+
+async function tryRestoreFromPythonBackend() {
+  return new Promise((resolve) => {
+    try {
+      const restoreUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-restore`;
+      const http = restoreUrl.startsWith('https') ? require('https') : require('http');
+      const u = new URL(restoreUrl);
+      const req = http.request({
+        hostname: u.hostname,
+        port: u.port,
+        path: u.pathname,
+        method: 'GET',
+        timeout: 5000
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => { body += chunk; });
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            resolve(!!data.restored);
+          } catch (_) {
+            resolve(false);
+          }
+        });
+      });
+      req.on('error', () => resolve(false));
+      req.end();
+    } catch (_) {
+      resolve(false);
+    }
+  });
+}
 
 // Global socket state
 let sock = null;
@@ -324,6 +404,18 @@ async function startWhatsAppBridge() {
       fs.mkdirSync(AUTH_DIR, { recursive: true });
     }
 
+    // Query DB for session credentials if local creds are absent
+    const credsCheckPath = path.join(AUTH_DIR, 'creds.json');
+    if (!fs.existsSync(credsCheckPath) || fs.statSync(credsCheckPath).size < 20) {
+      try {
+        console.log('[WhatsApp Bridge] Checking database for saved session credentials...');
+        const restored = await tryRestoreFromPythonBackend();
+        if (restored) {
+          console.log('[WhatsApp Bridge] Restored permanent session from Database!');
+        }
+      } catch (_) {}
+    }
+
     // Load or reset multi-file auth credentials safely
     let state, saveCreds;
     try {
@@ -388,7 +480,7 @@ async function startWhatsAppBridge() {
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
-      browser: ['BashFlow Cloud', 'Chrome', '1.0.0'],
+      browser: Browsers.macOS('Desktop'),
       getMessage: async (key) => undefined
     });
 
@@ -398,6 +490,7 @@ async function startWhatsAppBridge() {
         if (typeof saveCreds === 'function') {
           await saveCreds();
         }
+        triggerSessionBackup();
       } catch (saveErr) {
         console.error('[WhatsApp Bridge] Failed to save creds:', saveErr.message);
       }
@@ -460,17 +553,18 @@ async function startWhatsAppBridge() {
         const isLoggedOut = (statusCode === DisconnectReason.loggedOut);
         console.warn(`[WhatsApp Bridge] Connection closed (code: ${statusCode}, isLoggedOut: ${isLoggedOut}).`);
 
-        // If session was explicitly logged out, wipe auth directory
-        // so a fresh QR code is immediately generated on restart
+        // Only wipe credentials if the device was explicitly unlinked / logged out by the user (401)
         if (isLoggedOut) {
-          console.warn('[WhatsApp Bridge] Session logged out or invalidated. Clearing auth folder to refresh QR...');
+          console.warn('[WhatsApp Bridge] True user logout detected (code 401). Clearing auth directory & DB store...');
           try {
             if (fs.existsSync(AUTH_DIR)) {
-              // Prevent auto-wiping session so login stays permanent
+              fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+              fs.mkdirSync(AUTH_DIR, { recursive: true });
             }
           } catch (rmErr) {
             console.error('[WhatsApp Bridge] Failed to clean auth directory:', rmErr.message);
           }
+          triggerSessionClear();
           currentQr = null;
           currentQrUrl = null;
           currentQrSvg = null;
@@ -485,10 +579,16 @@ async function startWhatsAppBridge() {
         reconnectTimer = setTimeout(() => {
           startWhatsAppBridge().catch((retryErr) => {
             console.error('[WhatsApp Bridge] Reconnect attempt failed:', retryErr.message);
+            // Reschedule retry so the bridge never halts on transient errors
+            clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(() => {
+              startWhatsAppBridge().catch(() => {});
+            }, 5000);
           });
         }, restartDelay);
       } else if (connection === 'open') {
         isConnected = true;
+        triggerSessionBackup();
         currentQr = null;
         currentQrUrl = null;
         currentQrSvg = null;
