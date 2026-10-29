@@ -1202,11 +1202,9 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
 
     try {
       if (hasAudio) {
-        // Show 'recording' presence for 2.5s before voice note dispatch
+        // Non-blocking recording presence
         try {
-          await sock.sendPresenceUpdate('recording', jid);
-          console.log(`[Anti-Ban Security] Showing 'recording' presence to ${jid} for 2.5s...`);
-          await new Promise(r => setTimeout(r, 2500));
+          sock.sendPresenceUpdate('recording', jid).catch(() => {});
         } catch (_) {}
         let cleanBase64 = audioRaw ? String(audioRaw).replace(/^data:[^;]+;base64,/, '').trim() : '';
         // Auto-detect MP3 vs OGG/MP4 from base64 header so mobile WhatsApp plays it properly
@@ -1259,11 +1257,9 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
         }
         try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {}
       } else {
-        // Show 'composing' presence for 3.0s before sending text message
+        // Non-blocking composing presence
         try {
-          await sock.sendPresenceUpdate('composing', jid);
-          console.log(`[Anti-Ban Security] Showing 'composing' presence to ${jid} for 3.0s...`);
-          await new Promise(r => setTimeout(r, 3000));
+          sock.sendPresenceUpdate('composing', jid).catch(() => {});
         } catch (_) {}
 
         const textToSend = String(message || '');

@@ -329,20 +329,15 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
-    # Global Health Check (Render, K8s, Cloud Load Balancers)
+    # Ultra-fast, zero-overhead Health Check for Render & Cloud Monitors (<2ms)
     @application.route("/health", methods=["GET"])
+    @application.route("/healthz", methods=["GET"])
     def root_health_check():
-        db_uri = application.config.get("SQLALCHEMY_DATABASE_URI", "")
-        dialect = "postgresql" if "postgres" in db_uri else "sqlite_wal"
-        eng = application.config.get("AUTOMATION_ENGINE")
         return jsonify({
-            "status": "healthy",
-            "service": "opsflow-enterprise",
-            "database": dialect,
-            "engine_online": eng.is_running if eng else True,
+            "status": "ok",
+            "service": "BashFlow Cloud",
             "keep_alive": True,
-            "timestamp": datetime.datetime.utcnow().isoformat(),
-            "version": "2.4.0-enterprise"
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
         }), 200
 
     # Prometheus Metrics Exporter (Grafana, K8s, Cloud Monitoring)
@@ -1180,10 +1175,10 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     except Exception as _ka_err:
         application.logger.warning(f"Could not start Keep-Alive service: {_ka_err}")
 
-    # Start WhatsApp Baileys Bridge background subprocess on port 3001
+    # Start WhatsApp Baileys Bridge background subprocess non-blocking
     if not application.config.get("TESTING"):
         try:
-            start_wa_bridge_subprocess(application)
+            threading.Thread(target=start_wa_bridge_subprocess, args=(application,), daemon=True, name="BridgeSubprocessInit").start()
         except Exception as _bridge_err:
             application.logger.warning(f"Could not initialize WhatsApp bridge subprocess: {_bridge_err}")
 
