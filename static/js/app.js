@@ -5335,6 +5335,30 @@ function promptNewConversation() {
     if (replyInput) replyInput.focus();
 }
 
+window._audioBlobUrlCache = window._audioBlobUrlCache || new Map();
+
+function getAudioBlobUrl(mediaUrl) {
+    if (!mediaUrl || typeof mediaUrl !== 'string') return '';
+    const cleanMedia = mediaUrl.trim();
+    if (!cleanMedia.startsWith('data:audio')) {
+        if (cleanMedia.startsWith('http://') || cleanMedia.startsWith('https://')) {
+            return `/api/v1/whatsapp/media/proxy?url=${encodeURIComponent(cleanMedia)}`;
+        }
+        return cleanMedia;
+    }
+    if (window._audioBlobUrlCache.has(cleanMedia)) {
+        return window._audioBlobUrlCache.get(cleanMedia);
+    }
+    const blob = dataUriToBlob(cleanMedia);
+    if (blob) {
+        const blobUrl = URL.createObjectURL(blob);
+        window._audioBlobUrlCache.set(cleanMedia, blobUrl);
+        return blobUrl;
+    }
+    return cleanMedia;
+}
+window.getAudioBlobUrl = getAudioBlobUrl;
+
 function dataUriToBlob(dataUri) {
     try {
         if (!dataUri || typeof dataUri !== 'string') return null;
@@ -6143,7 +6167,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
 
                 let bodyHtml = '';
                 if (isVoice) {
-                    const audioSrc = hasPlayableAudio ? (safeMediaUrl.startsWith('data:audio') ? safeMediaUrl : `/api/v1/whatsapp/media/proxy?url=${encodeURIComponent(safeMediaUrl)}`) : '';
+                    const audioSrc = hasPlayableAudio ? getAudioBlobUrl(safeMediaUrl) : '';
                     const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage' && safeBody !== '🎤 Voice message' && safeBody !== '🎙️ Voice note' && safeBody !== '(no text)');
                     bodyHtml = `
                         <div class="wa-voice-bubble" style="padding: 4px 0;">

@@ -848,6 +848,7 @@ class WhatsAppMessage(db.Model):
     recipient = db.Column(db.String(64), nullable=False)  # Phone number or System
     message_type = db.Column(db.String(32), nullable=False, default="text")  # text, template, interactive
     body = db.Column(db.Text, nullable=True)
+    media_url = db.Column(db.Text, nullable=True)  # db.Text prevents truncation of base64 audio
     status = db.Column(db.String(32), nullable=False, default="received")  # received, sent, mock_sent, failed
     execution_id = db.Column(db.Integer, db.ForeignKey("workflow_executions.id", ondelete="SET NULL"), nullable=True, index=True)
     raw_payload_json = db.Column(db.Text, nullable=True)
@@ -855,7 +856,7 @@ class WhatsAppMessage(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
 
     def to_dict(self) -> Dict[str, Any]:
-        media_url = None
+        media_url = getattr(self, "media_url", None)
         sender_name = None
         duration = None
         is_ai_response = False
