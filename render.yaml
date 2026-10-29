@@ -15,7 +15,7 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: WEB_CONCURRENCY
-        value: "2"
+        value: "1"
       - key: WA_BRIDGE_PORT
         value: "3001"
       - key: GEMINI_API_KEY

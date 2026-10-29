@@ -8,6 +8,7 @@ export BRIDGE_PORT="${BRIDGE_PORT:-3001}"
 export PYTHON_WEBHOOK_URL="${PYTHON_WEBHOOK_URL:-http://127.0.0.1:${PORT}/api/v1/webhooks/whatsapp}"
 export WA_BRIDGE_INTERNAL="1"
 export GUNICORN_STARTED="1"
+export NODE_OPTIONS="--max-old-space-size=192"
 
 # Ensure node is in PATH if installed in local project directory
 if [ -d "$(pwd)/.node/node-v20.18.0-linux-x64/bin" ]; then
@@ -31,11 +32,11 @@ fi
 export AUTH_DIR
 mkdir -p "$AUTH_DIR" 2>/dev/null || true
 
-# 1. Start WhatsApp Baileys bridge in background after brief delay to allow Gunicorn to bind port first
+# 1. Start WhatsApp Baileys bridge in background with 192MB max heap to protect Render 512MB RAM
 (
     sleep 2
     while true; do
-        node wa_bridge.js >> wa_bridge.log 2>&1 || true
+        node --max-old-space-size=192 wa_bridge.js >> wa_bridge.log 2>&1 || true
         sleep 3
     done
 ) &
@@ -48,6 +49,6 @@ echo "[start.sh] WhatsApp Baileys bridge supervisor queued in background."
 ) &
 echo "[start.sh] Background DB session restore queued."
 
-# 3. IMMEDIATELY start Gunicorn so 0.0.0.0:$PORT opens within <1 second
-echo "=== Starting Gunicorn immediately on 0.0.0.0:$PORT ==="
-exec gunicorn app:app --bind 0.0.0.0:"$PORT" --workers "${WEB_CONCURRENCY:-2}" --timeout "${WEBHOOK_TIMEOUT_SECONDS:-120}"
+# 3. IMMEDIATELY start Gunicorn with 1 worker and 4 threads to stay strictly under Render 512MB RAM
+echo "=== Starting Gunicorn immediately on 0.0.0.0:${PORT:-10000} ==="
+exec gunicorn app:app --bind 0.0.0.0:"${PORT:-10000}" --workers 1 --threads 4 --timeout 120

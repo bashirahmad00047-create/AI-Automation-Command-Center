@@ -372,6 +372,11 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/dashboard", endpoint="dashboard")
     def index():
         try:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
             user_id = session.get("user_id")
             is_super = session.get("is_super_admin")
             if not user_id and not is_super:
@@ -393,9 +398,21 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 return redirect(url_for("top_level_login"))
 
             jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
-            return render_template("index.html", jazzcash_number=jc_num)
+            try:
+                return render_template("index.html", jazzcash_number=jc_num)
+            except Exception as _render_err:
+                application.logger.error(f"Template render error on /: {_render_err}", exc_info=True)
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                return redirect(url_for("top_level_login"))
         except Exception as e:
             application.logger.error(f"Error serving dashboard /: {e}", exc_info=True)
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
             return redirect(url_for("top_level_login"))
 
     @application.route("/favicon.ico")
