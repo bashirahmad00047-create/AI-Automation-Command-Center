@@ -6820,7 +6820,7 @@ class WhatsAppService:
                         "recipient": clean_to,
                         "chat_id": real_chat_id,
                         "message_type": out_msg_type,
-                        "media_url": f"data:{bridge_payload.get('mimetype', 'audio/ogg')};base64,{bridge_payload.get('audioBase64')}" if bridge_payload.get("audioBase64") else None
+                        "media_url": f"data:{str(bridge_payload.get('mimetype', 'audio/ogg')).split(';')[0].strip() or 'audio/ogg'};base64,{bridge_payload.get('audioBase64')}" if bridge_payload.get("audioBase64") else None
                     }
                 else:
                     err_text = bridge_resp.text[:200]
@@ -6853,7 +6853,7 @@ class WhatsAppService:
                 "recipient": clean_to,
                 "chat_id": real_chat_id,
                 "message_type": out_msg_type,
-                "media_url": f"data:{bridge_payload.get('mimetype', 'audio/ogg')};base64,{bridge_payload.get('audioBase64')}" if bridge_payload.get("audioBase64") else None
+                "media_url": f"data:{str(bridge_payload.get('mimetype', 'audio/ogg')).split(';')[0].strip() or 'audio/ogg'};base64,{bridge_payload.get('audioBase64')}" if bridge_payload.get("audioBase64") else None
             }
 
         record = cls.record_message(

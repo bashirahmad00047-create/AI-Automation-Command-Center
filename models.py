@@ -899,7 +899,10 @@ class WhatsAppMessage(db.Model):
                     )
                     if not media_url and audio_b64:
                         clean_b64 = str(audio_b64).split(",")[-1].strip()
-                        media_url = f"data:{mime_type};base64,{clean_b64}"
+                        clean_mime = str(mime_type).split(";")[0].strip() or "audio/ogg"
+                        media_url = f"data:{clean_mime};base64,{clean_b64}"
+                    elif media_url and str(media_url).startswith("data:audio/"):
+                        media_url = re.sub(r";\s*codecs=[^;,]+", "", str(media_url))
                     duration = (
                         raw.get("audioMessageData", {}).get("duration") or
                         raw.get("duration")

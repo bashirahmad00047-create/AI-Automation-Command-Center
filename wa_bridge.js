@@ -602,7 +602,7 @@ async function startWhatsAppBridge() {
               }
               if (buffer && buffer.length > 0) {
                 audioBase64 = buffer.toString('base64');
-                audioDataUrl = `data:audio/ogg; codecs=opus;base64,${buffer.toString('base64')}`;
+                audioDataUrl = `data:audio/ogg;base64,${buffer.toString('base64')}`;
                 console.log(`[Media Download] Downloaded voice note (${buffer.length} bytes) for ${senderPhone}`);
               }
             } catch (dlErr) {
@@ -1019,21 +1019,23 @@ app.post('/send-message', async (req, res, next) => {
         }
         let mimetype = req.body?.mimetype || req.body?.mime_type || detectedMime;
         if (mimetype === 'audio/mp3') mimetype = 'audio/mpeg';
-        const ptt = mimetype.includes('ogg');
+        const isVoiceReq = req.body?.ptt !== undefined ? Boolean(req.body.ptt) : (req.body?.is_voice !== undefined ? Boolean(req.body.is_voice) : true);
+        const ptt = isVoiceReq && (mimetype.includes('ogg') || mimetype.includes('opus'));
+        const audioFileName = ptt ? 'voice_message.oga' : 'audio.mp3';
         if (audioRaw) {
           const audioBuffer = Buffer.from(cleanBase64, 'base64');
           sent = await sock.sendMessage(jid, {
             audio: audioBuffer,
             mimetype: mimetype,
             ptt: ptt,
-            fileName: 'voice_reply.mp3'
+            fileName: audioFileName
           }, sendOptions);
         } else if (audioUrl) {
           sent = await sock.sendMessage(jid, {
             audio: { url: audioUrl },
             mimetype: mimetype,
             ptt: ptt,
-            fileName: 'voice_reply.mp3'
+            fileName: audioFileName
           }, sendOptions);
         }
       } else if (hasImage) {
