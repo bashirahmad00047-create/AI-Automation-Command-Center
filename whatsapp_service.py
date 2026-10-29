@@ -3653,6 +3653,10 @@ class WhatsAppService:
             "masla", "madad", "help", "issue", "problem", "ticket", "error", "bug", "support", "kharab", "attack", "down"
         )) or intent in ("support_request", "critical_incident")
 
+        is_greeting = any(w in clean_text for w in (
+            "salam", "assalam", "aoa", "slam", "kaise ho", "kya haal", "kese ho", "hello", "hi", "hey"
+        )) and len(clean_text) < 30
+
         if lang_fmt == "roman_urdu":
             if is_mobile_shop_query:
                 if not has_already_sent("complete automated system", "customer auto-reply"):
