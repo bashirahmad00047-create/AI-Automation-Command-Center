@@ -3488,6 +3488,83 @@ class WhatsAppService:
         return getattr(cls, "_last_groq_diagnostics", [])
 
     @classmethod
+    def call_pollinations_ai(
+        cls,
+        user_message: Union[str, Dict[str, Any]],
+        system_prompt: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        customer_name: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> Optional[str]:
+        """Free no-key dynamic LLM provider via Pollinations AI.
+        Guarantees generative AI responses to arbitrary customer inquiries without paid API keys.
+        """
+        user_msg_text = user_message.get("text", "") if isinstance(user_message, dict) else str(user_message)
+        clean_text = user_msg_text.strip()
+        if not clean_text:
+            return None
+
+        import requests
+        import urllib.parse
+
+        sys_content = (
+            "You are BashFlow AI Assistant for businesses and mobile shops.\n"
+            "Answer directly and helpfully in natural conversational Roman Urdu (or English if customer speaks English).\n"
+            "Key knowledge:\n"
+            "- Mobile Shop: 24/7 WhatsApp auto-replies, mobile repair status tracking by token, phone IMEI number saving and tracking in database, live stock and rates, warranty records.\n"
+            "- Payment: JazzCash Account: 03209350858, Title: Bashir Uddin.\n"
+            "- Plans: Free ($0), Starter ($29/mo, PKR 7,500), Pro ($99/mo, PKR 25,000), Enterprise ($499/mo, PKR 125,000) with 2-Day Free Trial.\n"
+            "Rules: Deliver answer in 2 to 4 smooth, friendly sentences. Do not repeat greeting if conversation is ongoing. No markdown asterisks or bullet symbols."
+        )
+        if system_prompt:
+            sys_content += f"\n{system_prompt}"
+
+        messages = [{"role": "system", "content": sys_content}]
+        if conversation_history:
+            for item in conversation_history[-4:]:
+                r = "assistant" if item.get("role") in ("Assistant", "model") else "user"
+                c = item.get("content", "").strip()
+                if c:
+                    messages.append({"role": r, "content": c})
+
+        cust_label = f"[Customer {customer_name.strip()}]: " if customer_name and customer_name.strip() else ""
+        messages.append({"role": "user", "content": f"{cust_label}{clean_text}"})
+
+        # 1. Try OpenAI-compatible endpoint
+        try:
+            resp = requests.post(
+                "https://text.pollinations.ai/openai/chat/completions",
+                json={"model": "openai", "messages": messages, "temperature": 0.7, "max_tokens": 250},
+                headers={"Content-Type": "application/json", "User-Agent": "BashFlow-AI/1.0"},
+                timeout=6.0
+            )
+            if resp.status_code == 200:
+                data = resp.json() if resp.text else {}
+                choices = data.get("choices", [])
+                if choices:
+                    text = choices[0].get("message", {}).get("content", "").strip()
+                    if text and not text.lower().startswith("free limit") and "error" not in text.lower():
+                        logger.info(f"[Pollinations AI] Generated dynamic response: '{text[:60]}...'")
+                        return text
+        except Exception as e:
+            logger.debug(f"[Pollinations AI Chat] notice: {e}")
+
+        # 2. Try direct text endpoint
+        try:
+            prompt_str = f"{sys_content}\nUser: {clean_text}\nAssistant:"
+            get_url = f"https://text.pollinations.ai/{urllib.parse.quote(prompt_str[:1000])}"
+            resp = requests.get(get_url, headers={"User-Agent": "BashFlow-AI/1.0"}, timeout=6.0)
+            if resp.status_code == 200 and resp.text:
+                text = resp.text.strip()
+                if text and not text.lower().startswith("free limit") and "error" not in text.lower() and not text.startswith("{"):
+                    logger.info(f"[Pollinations AI Direct] Generated dynamic response: '{text[:60]}...'")
+                    return text
+        except Exception as e:
+            logger.debug(f"[Pollinations AI Direct] notice: {e}")
+
+        return None
+
+    @classmethod
     def generate_smart_conversational_fallback(
         cls,
         message_body: str,
@@ -3495,7 +3572,8 @@ class WhatsAppService:
         org_name: str = "BashFlow Cloud",
         sender_name: Optional[str] = None,
         is_voice: bool = False,
-        intent: Optional[str] = None
+        intent: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> str:
         """Dynamically generates an authentic, helpful conversational response explaining BashFlow Cloud's
 
@@ -3503,7 +3581,54 @@ class WhatsAppService:
         Never returns static canned placeholders like 'A solutions specialist is reviewing' or 'We received your voice note'.
         """
         clean_text = str(message_body or "").strip().lower()
-        cust_greeting = f" {sender_name.strip()}" if (sender_name and sender_name.strip() and not "@" in sender_name and len(sender_name) < 25) else ""
+        cust_greeting = f" {sender_name.strip()}" if (sender_name and sender_name.strip() and "@" not in sender_name and len(sender_name) < 25) else ""
+
+        # Gather previous assistant replies from conversation history to prevent repetition
+        prev_replies = []
+        if conversation_history:
+            for item in conversation_history:
+                if isinstance(item, dict) and item.get("role") in ("Assistant", "model", "system"):
+                    c = item.get("content", "").strip().lower()
+                    if c:
+                        prev_replies.append(c)
+
+        def has_already_sent(*keywords) -> bool:
+            for kw in keywords:
+                kw_low = kw.lower()
+                for pr in prev_replies:
+                    if kw_low in pr or pr in kw_low:
+                        return True
+            return False
+
+        # Domain 1: Mobile Shop Usage ("Mara mobile shop k Liya Kaisa Kam karaga ya")
+        is_mobile_shop_query = any(w in clean_text for w in (
+            "mobile shop", "mobile dukan", "shop k liya", "shop ke liye", "phone shop",
+            "mara mobile", "mera mobile", "meri shop", "mera shop", "mobile ka kaam", "mobile store",
+            "mobile business", "dukan k liya", "dukan ke liye", "kaisa kam karaga", "kaisa kaam karega"
+        ))
+
+        # Domain 2: IMEI Number Saving & Tracking
+        is_imei_query = any(w in clean_text for w in (
+            "imei", "imei number", "imei saving", "imei tracking", "imei record"
+        ))
+
+        # Domain 3: Mobile Repairing & Token Status
+        is_repair_query = any(w in clean_text for w in (
+            "repair", "repairing", "fault", "display", "panel", "battery", "sahi karna",
+            "theek karna", "kharaab", "kharab", "token", "repair status"
+        ))
+
+        # Domain 4: Live Stock & Phone Rates
+        is_stock_query = any(w in clean_text for w in (
+            "stock", "rate list", "mobile rate", "phone price", "iphone", "samsung",
+            "vivo", "oppo", "infinix", "redmi", "dastiyab", "available"
+        ))
+
+        # Domain 5: JazzCash & Payment Details
+        is_jazzcash_query = any(w in clean_text for w in (
+            "jazzcash", "jazz cash", "account", "03209350858", "bashir uddin",
+            "paise", "bhejna", "bhejoon", "payment method", "pay kaise"
+        ))
 
         # Specific Tier Queries
         is_starter = "starter" in clean_text
@@ -3529,7 +3654,81 @@ class WhatsAppService:
         )) or intent in ("support_request", "critical_incident")
 
         if lang_fmt == "roman_urdu":
-            if is_starter:
+            if is_mobile_shop_query:
+                if not has_already_sent("complete automated system", "customer auto-reply"):
+                    return (
+                        f"Ji bilkul{cust_greeting}! BashFlow Cloud mobile shops ke liye ek complete automated system hai: "
+                        "(1) Customer Auto-Reply: Jab bhi customer WhatsApp par model ya rate pooche to yeh 24/7 foran stock aur rate list bhej deta hai. "
+                        "(2) Repair Status Tracking: Customer ko token number milta hai aur wo WhatsApp par hi mobile repair status check kar sakta hai. "
+                        "(3) IMEI Saving: Khareede ya beche gaye har phone ka 15-digit IMEI number customer ke phone number ke sath mehfooz rehta hai taake warranty aur record hamesha clear rahe. "
+                        "Aapka shop kis city mein hai aur aap daily kitne customers handle karte hain?"
+                    )
+                elif not has_already_sent("rozana rates aur repair status"):
+                    return (
+                        f"Ji bilkul{cust_greeting}! Mobile shop par rozana rates aur repair status batane mein bohot waqt lagta hai. "
+                        "BashFlow Cloud customer inquiries, repair tokens, aur phone IMEI records ko 100% automate kar deta hai. "
+                        "Iske sath 2-Day Free Trial bilkul muft hai, kya aap apna free trial shuru karna chahte hain?"
+                    )
+                else:
+                    return (
+                        f"Ji bilkul{cust_greeting}! Mobile shop ke liye aap Starter Plan ($29/mo ya PKR 7,500) se start kar sakte hain jisme WhatsApp bot aur repair tracking shamil hai. "
+                        "Payment aap JazzCash (03209350858, Title: Bashir Uddin) par kar sakte hain."
+                    )
+
+            elif is_imei_query:
+                if not has_already_sent("imei saving ka bohot zabardast"):
+                    return (
+                        f"Ji bilkul{cust_greeting}! BashFlow Cloud mein IMEI saving ka bohot zabardast feature hai. "
+                        "Jab bhi aap koi mobile sale ya repair ke liye enter karte hain, system 15-digit IMEI number customer ke phone number ke sath save kar leta hai. "
+                        "Customer jab bhi apna IMEI ya phone number WhatsApp par bhejega, system warranty, sale date, aur repair history foran bata dega."
+                    )
+                else:
+                    return (
+                        f"Ji bilkul! IMEI tracking se aapke shop ka record 100% digital aur fraud-proof rehta hai. "
+                        "Chori ya warranty verification ke waqt aap aik click par poora phone record check kar sakte hain."
+                    )
+
+            elif is_repair_query:
+                if not has_already_sent("unique token number"):
+                    return (
+                        f"Ji bilkul{cust_greeting}! Mobile repair status ke liye system har mobile ko ek unique token number (maslan #REP-101) assign karta hai. "
+                        "Customer ghar bethe WhatsApp par sirf token likh kar status jaan sakta hai (jaise 'In Progress', 'Parts Pending', ya 'Ready for Pickup'). "
+                        "Jaise hi phone theek ho jata hai, customer ko automatic WhatsApp alert chala jata hai ke 'Aapka mobile tayyar hai'."
+                    )
+                else:
+                    return (
+                        f"Repairing management se aapke customers bar-bar shop par call karne ke bajaye seedha WhatsApp par status dekh lete hain, "
+                        "jisse aapka waqt bachta hai aur customers ka trust barhta hai."
+                    )
+
+            elif is_stock_query:
+                if not has_already_sent("live stock aur rate list"):
+                    return (
+                        f"Ji bilkul{cust_greeting}! Aap apne shop ka live stock aur rate list BashFlow Cloud mein update kar sakte hain. "
+                        "Customer jab bhi kisi phone (iPhone, Samsung, Vivo, Infinix vaghera) ka rate ya availability poochega, bot foran latest rates automatically send kar dega."
+                    )
+                else:
+                    return (
+                        f"Ji bilkul! Automated stock updates se aapke regular customers aur dealers ko daily fresh rate list WhatsApp par foran deliver ho jati hai."
+                    )
+
+            elif is_jazzcash_query:
+                return (
+                    f"Ji bilkul{cust_greeting}! Payment ke verified details yeh hain:\n"
+                    "- JazzCash Account: 03209350858\n"
+                    "- Account Title: Bashir Uddin\n"
+                    "Payment transfer karne ke baad screenshot ya TID (Transaction ID) yahan share karein taake aapka account foran activate kar diya jaye."
+                )
+
+            elif is_greeting:
+                if not has_already_sent("walaikum assalam"):
+                    return f"Walaikum Assalam{cust_greeting}! Umeed hai aap khairiyat se honge. Batayein main BashFlow Cloud aur mobile shop automation ke hawale se aapki kya madad kar sakta hoon?"
+                elif not has_already_sent("main bilkul theek hoon"):
+                    return f"Ji bilkul{cust_greeting}! Main bilkul theek hoon, shukriya. Batayein aaj aap apne business ya shop ke liye kya maloomat lena chahte hain?"
+                else:
+                    return f"Ji farmayein{cust_greeting}! Main aapki mukammal rehnumai ke liye hazir hoon."
+
+            elif is_starter:
                 return (
                     f"Ji bilkul{cust_greeting}! BashFlow Cloud ka Starter Plan $29/month (PKR 7,500/month) ka hai. "
                     "Isme aapko 10 automated workflow rules, 5,000 monthly events, custom webhooks, aur automated alert notifications milti hain. "
@@ -3540,13 +3739,12 @@ class WhatsAppService:
                 return (
                     f"Ji bilkul{cust_greeting}! BashFlow Cloud ka Professional Plan $99/month (PKR 25,000/month) ka hai. "
                     "Isme aapko 50 automated rules, 200,000 monthly events, full Google Gemini AI integration, aur real-time voice notes milti hain مع 2-Day Free Trial. "
-                    "Payment JazzCash (03209350858) ya Card se kar sakte hain. Kya main aapka Pro trial activate kar doon?"
+                    "Payment JazzCash (03209350858, Title: Bashir Uddin) ya Card se kar sakte hain. Kya main aapka Pro trial activate kar doon?"
                 )
             elif is_enterprise:
                 return (
                     f"Ji bilkul{cust_greeting}! BashFlow Cloud ka Enterprise Plan $499/month (PKR 125,000/month) ka hai. "
-                    "Yeh high-volume operations ke liye hai jisme 250 automated rules, 1,000,000 events, dedicated 24/7 SLA, aur custom integrations shamil hain. "
-                    "Kya aap dedicated enterprise demo ya setup chahte hain?"
+                    "Yeh high-volume operations ke liye hai jisme 250 automated rules, 1,000,000 events, dedicated 24/7 SLA, aur custom integrations shamil hain."
                 )
             elif is_free:
                 return (
@@ -3568,14 +3766,32 @@ class WhatsAppService:
                     "Humari engineering team isay review kar rahi hai. Agar koi specific error message, screenshot, ya system issue hai to yahan share karein taake hum foran hal kar sakein."
                 )
             else:
-                return (
-                    f"Ji bilkul{cust_greeting}! BashFlow Cloud ek powerful Enterprise AI Automation Command Center hai. "
-                    "Hum provide karte hain: (1) 24/7 WhatsApp AI Auto-Responder aur Voice Note Processing jo customer ke sawalat sun kar foran jawab deta hai, "
-                    "(2) Real-time CRM Lead Capture aur automated scoring, "
-                    "(3) Intelligent Workflow Orchestration aur Logistics Dispatching. "
-                    "Humare packages Free ($0/mo), Starter ($29/mo), Professional ($99/mo), aur Enterprise ($499/mo) se shuru hote hain jisme 2-Day Free Trial shamil hai. "
-                    "Aap kis feature ya package ki mazeed tafseelat chahte hain?"
-                )
+                # Progressive Fallbacks to guarantee anti-repetition across multiple turns
+                if not has_already_sent("powerful enterprise ai automation command center"):
+                    return (
+                        f"Ji bilkul{cust_greeting}! BashFlow Cloud ek powerful Enterprise AI Automation Command Center hai. "
+                        "Hum provide karte hain: (1) 24/7 WhatsApp AI Auto-Responder aur Voice Note Processing jo customer ke sawalat sun kar foran jawab deta hai, "
+                        "(2) Mobile Shop aur E-Commerce ke liye live stock, IMEI saving, aur repair status tracking, "
+                        "(3) Real-time CRM Lead Capture aur automated scoring. "
+                        "Humare packages Free ($0/mo), Starter ($29/mo), aur Professional ($99/mo) se shuru hote hain مع 2-Day Free Trial. "
+                        "Aap kis feature ya service ke bare mein mazeed janna chahte hain?"
+                    )
+                elif not has_already_sent("2-day free trial test kar sakte"):
+                    return (
+                        f"Ji bilkul{cust_greeting}! Aap apne business ya mobile shop ke liye 2-Day Free Trial test kar sakte hain. "
+                        "Isme aapko WhatsApp bot, customer messaging, aur lead capture ki poori suhoolat milti hai. "
+                        "Kya main aapka account setup shuru karwa doon?"
+                    )
+                elif not has_already_sent("jazzcash (03209350858)"):
+                    return (
+                        f"Ji bilkul{cust_greeting}! Agar aapka koi specific sawal hai ya aap JazzCash (03209350858, Title: Bashir Uddin) ke zariye package activate karna chahte hain, "
+                        "to bila-jhijhak batayein, main foran guide kar doonga."
+                    )
+                else:
+                    return (
+                        f"Ji farmayein{cust_greeting}! Main aapke sawal ka jawab dene ke liye hazir hoon. "
+                        "Aap mobile shop features, pricing, ya JazzCash payment ke bare mein mazeed pooch sakte hain."
+                    )
 
         elif lang_fmt == "urdu_arabic":
             if is_pricing_query:
@@ -3954,11 +4170,36 @@ class WhatsAppService:
                 "confidence": 96
             }
 
-        # 3. Clean Language-Matched Fallback when both AI providers are offline
+        # 3. Tertiary Pollinations AI Generation (Free no-key dynamic LLM fallback)
+        pollinations_reply = cls.call_pollinations_ai(
+            message_body,
+            system_prompt=custom_prompt,
+            organization_id=organization_id,
+            customer_name=sender_name,
+            conversation_history=history
+        )
+        if pollinations_reply:
+            return {
+                "reply_body": pollinations_reply.strip(),
+                "intent": intent,
+                "urgency": urgency,
+                "lead_score": lead_score,
+                "route_department": route_dept,
+                "entities": entities,
+                "mode": "pollinations_ai",
+                "detected_language": detected_lang["language"],
+                "detected_script": detected_lang["script"],
+                "language_format": lang_fmt,
+                "is_gemini": False,
+                "is_groq": False,
+                "is_ai_generated": True,
+                "confidence": 94
+            }
+
+        # 4. Clean Language-Matched Fallback with Domain Intelligence & Anti-Repetition
         logger.warning(
-            f"[WhatsApp AI Auto-Responder] Gemini AI generation was unavailable or failed (Groq fallback also unavailable) for inbound message: "
-            f"'{message_body[:60]}'. Falling back to non-AI response rather than presenting as Gemini answer. "
-            f"Generating natural {detected_lang['name']} fallback response."
+            f"[WhatsApp AI Auto-Responder] Gemini/Groq/Pollinations unavailable for inbound message: "
+            f"'{message_body[:60]}'. Generating context-aware {detected_lang['name']} domain response."
         )
 
         final_reply = cls.generate_smart_conversational_fallback(
@@ -3967,7 +4208,8 @@ class WhatsAppService:
             org_name=org_name,
             sender_name=sender_name,
             is_voice=False,
-            intent=intent
+            intent=intent,
+            conversation_history=history
         ) 
 
         return {
