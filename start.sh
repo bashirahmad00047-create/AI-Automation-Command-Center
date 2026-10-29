@@ -31,22 +31,23 @@ fi
 export AUTH_DIR
 mkdir -p "$AUTH_DIR" 2>/dev/null || true
 
-# 1. Start WhatsApp Baileys bridge strictly in the background with &
+# 1. Start WhatsApp Baileys bridge in background after brief delay to allow Gunicorn to bind port first
 (
+    sleep 2
     while true; do
         node wa_bridge.js >> wa_bridge.log 2>&1 || true
         sleep 3
     done
 ) &
-echo "[start.sh] WhatsApp Baileys bridge started in background."
+echo "[start.sh] WhatsApp Baileys bridge supervisor queued in background."
 
-# 2. Run session restore and DB initialization strictly in the background with &
+# 2. Run session restore in background after Gunicorn binds
 (
+    sleep 3
     python -c "from wa_bridge_manager import restore_wa_session_from_db; restore_wa_session_from_db()" >> wa_bridge.log 2>&1 || true
-    python init_db.py >> wa_bridge.log 2>&1 || true
 ) &
-echo "[start.sh] Background DB session restore started."
+echo "[start.sh] Background DB session restore queued."
 
-# 3. Start Gunicorn in foreground immediately binding to 0.0.0.0:$PORT
+# 3. IMMEDIATELY start Gunicorn so 0.0.0.0:$PORT opens within <1 second
 echo "=== Starting Gunicorn immediately on 0.0.0.0:$PORT ==="
 exec gunicorn app:app --bind 0.0.0.0:"$PORT" --workers "${WEB_CONCURRENCY:-2}" --timeout "${WEBHOOK_TIMEOUT_SECONDS:-120}"
