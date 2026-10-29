@@ -668,7 +668,7 @@ class WhatsAppService:
         """Validates that bytes represent actual audio data and not an error response, HTML, or JSON."""
         if not content or not isinstance(content, (bytes, bytearray)):
             return False
-        if len(content) < 64:
+        if len(content) < 32:
             return False
         stripped = bytes(content[:64]).lstrip()
         if stripped.startswith((b"{", b"[", b"<", b"<!DOCTYPE", b"<html>", b"<HTML", b"error", b"Error", b"404")):
@@ -3140,7 +3140,7 @@ class WhatsAppService:
             f"0. Direct Inquiry Resolution (براہ راست جواب): Always reply directly, helpfully, and conversationally to the customer's transcribed voice message or inquiry. Even if spoken in Pashto, address their substantive questions directly regarding OpsFlow pricing, packages, automations, orders, or support. NEVER refuse service or state that you cannot provide Pashto-to-Urdu transcription service.\n" 
             f"1. Deep Reasoning & Intent Comprehension (گہری فہم و ادراک): Thoroughly analyze every inquiry point, implied concern, invoice/order query, or logistical request in context. Use the recent conversation history to provide coherent, contextual responses.\n"
             f"2. Point-by-Point Accurate Resolution (تمام سوالات کا جامع و درست جواب): If the customer asks multiple questions (e.g., shipping charges, delivery time, billing breakdown, or payment methods), answer every single inquiry point accurately based on verified knowledge. Do not skip any detail.\n"
-            f"3. Natural Conversational Voice Note Cadence (ElevenLabs / Edge-TTS Optimization): Your reply is directly synthesized into an authentic WhatsApp voice note. Always formulate your response in simple, warm, conversational Roman Urdu or Urdu (e.g., 'Assalam-o-Alaikum! Ji bilkul...', 'Aap tension na lein, main batata hoon...'). Avoid complex English jargon, tongue-twister phrasing, or awkward vocabulary so ElevenLabs (QwMurwQUOf6t7fnABXar) and Edge-TTS (hi-IN-MadhurNeural / ur-PK-UzmaNeural) pronounce every single word with 100% smooth, natural Pakistani human inflection.\n"
+            f"3. Natural Pakistani Urdu Cadence & Warmth (ElevenLabs / Edge-TTS Optimization): Your reply is directly synthesized into an authentic WhatsApp voice note. Always formulate your response in simple, warm, conversational Roman Urdu or Urdu (e.g., 'Assalam-o-Alaikum! Ji bilkul...', 'Aap tension na lein, main batata hoon...'). Avoid complex English jargon, tongue-twister phrasing, or awkward vocabulary so ElevenLabs (QwMurwQUOf6t7fnABXar) and Edge-TTS (hi-IN-MadhurNeural / ur-PK-UzmaNeural) pronounce every single word with 100% smooth, natural Pakistani human inflection.\n"
             f"4. Concise Human Pacing: Deliver your answer in 2 to 4 smooth, well-crafted conversational sentences covering all points thoroughly.\n"
             f"5. Pure Spoken Clean Text: DO NOT use markdown symbols (no asterisks '*', hashtags '#', underscores '_', backticks, bullet symbols). Provide pure, clean conversational text ready for natural human speech synthesis and WhatsApp messaging."
         )
@@ -3149,13 +3149,14 @@ class WhatsAppService:
         # Direct, ultra-fast candidate models eliminating list_models() overhead and invalid models
         primary_candidates = [
             configured_model,
-            "gemini-1.5-flash",
+            "gemini-2.5-flash",
             "gemini-2.0-flash",
+            "gemini-1.5-flash",
             "gemini-1.5-flash-8b"
         ]
         models_to_try = []
         for m in primary_candidates:
-            if m and m not in models_to_try and m not in ("gemini-3.8-flash", "gemini-2.5-flash"):
+            if m and m not in models_to_try and m not in ("gemini-3.8-flash",):
                 models_to_try.append(m.replace("models/", ""))
 
         diagnostics: List[str] = []
@@ -3358,7 +3359,7 @@ class WhatsAppService:
             f"0. Direct Inquiry Resolution: Always reply directly, helpfully, and conversationally to the customer's transcribed voice message or inquiry. Even if spoken in Pashto, address their substantive questions directly regarding OpsFlow pricing, packages, automations, orders, or support. NEVER refuse service or state that you cannot provide Pashto-to-Urdu transcription service.\n" 
             f"1. Deep Intent Comprehension: Reason through customer needs, context, and conversation history.\n"
             f"2. Point-by-Point Accuracy: Accurately resolve every specific inquiry point (rates, tracking, billing).\n"
-            f"3. Natural Conversational Voice Note Cadence (ElevenLabs / Edge-TTS Optimization): Your reply is directly synthesized into an authentic WhatsApp voice note. Formulate your response in simple, warm, conversational Roman Urdu or Urdu so ElevenLabs (QwMurwQUOf6t7fnABXar) and Edge-TTS (hi-IN-MadhurNeural / ur-PK-UzmaNeural) pronounce it with 100% smooth, natural Pakistani human inflection.\n"
+            f"3. Natural Pakistani Urdu Cadence & Warmth (ElevenLabs / Edge-TTS Optimization): Your reply is directly synthesized into an authentic WhatsApp voice note. Formulate your response in simple, warm, conversational Roman Urdu or Urdu so ElevenLabs (QwMurwQUOf6t7fnABXar) and Edge-TTS (hi-IN-MadhurNeural / ur-PK-UzmaNeural) pronounce it with 100% smooth, natural Pakistani human inflection.\n"
             f"4. Length & Pacing: 2 to 4 smooth sentences with natural conversational flow.\n"
             f"5. Pure Clean Text: DO NOT use markdown symbols (*, #, _, `, bullets). Keep text 100% clean for voice reading."
         )
@@ -3396,11 +3397,10 @@ class WhatsAppService:
         models_to_try = []
         candidate_groq_models = [
             configured_groq_model,
-            "openai/gpt-oss-20b",
-            "openai/gpt-oss-120b",
-            "qwen/qwen3.8-27b",
             "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant"
+            "llama-3.1-8b-instant",
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b"
         ] + dynamic_groq_models
         for m in candidate_groq_models:
             if m and m not in models_to_try:
@@ -3471,6 +3471,132 @@ class WhatsAppService:
     def get_last_groq_diagnostics(cls) -> List[str]:
         """Returns detailed breakdown of all attempted Groq models and endpoints."""
         return getattr(cls, "_last_groq_diagnostics", [])
+
+    @classmethod
+    def generate_smart_conversational_fallback(
+        cls,
+        message_body: str,
+        lang_fmt: str,
+        org_name: str = "BashFlow Cloud",
+        sender_name: Optional[str] = None,
+        is_voice: bool = False,
+        intent: Optional[str] = None
+    ) -> str:
+        """Dynamically generates an authentic, helpful conversational response explaining BashFlow Cloud's
+
+        WhatsApp AI automation, CRM lead scoring, voice notes, and subscription pricing packages.
+        Never returns static canned placeholders like 'A solutions specialist is reviewing' or 'We received your voice note'.
+        """
+        clean_text = str(message_body or "").strip().lower()
+        cust_greeting = f" {sender_name.strip()}" if (sender_name and sender_name.strip() and not "@" in sender_name and len(sender_name) < 25) else ""
+
+        # Topic 1: Pricing, packages, costs, or payment methods
+        is_pricing_query = any(w in clean_text for w in (
+            "price", "pricing", "rate", "rates", "package", "packages", "kitna", "kitne", "kharacha", "cost", "fee", "fees",
+            "plan", "plans", "trial", "payment", "pay", "jazzcash", "easy paisa", "easypaisa", "card", "stripe", "discount"
+        )) or intent in ("payment_query", "pricing_inquiry")
+
+        # Topic 2: Services, features, automation, voice notes, capabilities ("APNI service k bat e batawo")
+        is_services_query = any(w in clean_text for w in (
+            "service", "services", "feature", "features", "kaam", "kya karte ho", "kya karte hain", "batao", "batawo",
+            "details", "tafseelat", "maloomat", "automation", "voice note", "voicenote", "bot", "ai", "solution", "solutions"
+        )) or is_voice or intent == "lead_inquiry"
+
+        # Topic 3: Support, technical issue, incident, bug, help
+        is_support_query = any(w in clean_text for w in (
+            "masla", "madad", "help", "issue", "problem", "ticket", "error", "bug", "support", "kharab", "attack", "down"
+        )) or intent in ("support_request", "critical_incident")
+
+        if lang_fmt == "roman_urdu":
+            if is_pricing_query:
+                return (
+                    f"Ji bilkul{cust_greeting}! BashFlow Cloud ke verified packages yeh hain: "
+                    "(1) Free Plan: $0/mo (3 automation rules, 1,000 events), "
+                    "(2) Starter Plan: $29/mo (PKR 7,500) (10 rules, 5,000 events, webhooks), "
+                    "(3) Professional Plan: $99/mo (PKR 25,000) (50 rules, 200,000 events, full Gemini AI), "
+                    "(4) Enterprise: $499/mo (PKR 125,000) (250 rules, 1M events, dedicated SLA). "
+                    "Har plan ke sath 2-Day Free Trial dastiyab hai. Payment aap JazzCash (03209350858, Title: Bashir Uddin) ya Card se kar sakte hain. Aap kaunsa plan start karna chahte hain?"
+                )
+            elif is_support_query:
+                return (
+                    f"Assalam-o-Alaikum{cust_greeting}! Aapka support request darj kar liya gaya hai. "
+                    "Humari engineering team isay review kar rahi hai. Agar koi specific error message, screenshot, ya system issue hai to yahan share karein taake hum foran hal kar sakein."
+                )
+            else:
+                return (
+                    f"Ji bilkul{cust_greeting}! BashFlow Cloud ek powerful Enterprise AI Automation Command Center hai. "
+                    "Hum provide karte hain: (1) 24/7 WhatsApp AI Auto-Responder aur Voice Note Processing jo customer ke sawalat sun kar foran jawab deta hai, "
+                    "(2) Real-time CRM Lead Capture aur automated scoring, "
+                    "(3) Intelligent Workflow Orchestration aur Logistics Dispatching. "
+                    "Humare packages Free ($0/mo), Starter ($29/mo), Professional ($99/mo), aur Enterprise ($499/mo) se shuru hote hain jisme 2-Day Free Trial shamil hai. "
+                    "Aap kis feature ya package ki mazeed tafseelat chahte hain?"
+                )
+
+        elif lang_fmt == "urdu_arabic":
+            if is_pricing_query:
+                return (
+                    f"جی بالکل{cust_greeting}! BashFlow Cloud کے تصدیق شدہ پیکجز درج ذیل ہیں: "
+                    "(1) فری پلان: $0 ماہانہ (3 آٹومیشن رولز، 1,000 ایونٹس)، "
+                    "(2) اسٹارٹر پلان: $29/ماہ (PKR 7,500) (10 رولز، 5,000 ایونٹس)، "
+                    "(3) پروفیشنل پلان: $99/ماہ (PKR 25,000) (50 رولز، 200,000 ایونٹس مع Gemini AI)، "
+                    "(4) انٹرپرائز پلان: $499/ماہ (PKR 125,000) (250 رولز، 1M ایونٹس، وقف شدہ سپورٹ)۔ "
+                    "تمام پلانز پر 2 دن کا فری ٹرائل دستیاب ہے۔ ادائیگی JazzCash (03209350858 - بشیر الدین) یا کارڈ سے کی جا سکتی ہے۔ آپ کونسا پیکج منتخب کرنا چاہتے ہیں؟"
+                )
+            elif is_support_query:
+                return (
+                    f"السلام علیکم{cust_greeting}! آپ کی سپورٹ کی درخواست موصول ہو گئی ہے۔ "
+                    "ہماری ٹیکنیکل ٹیم فوری مدد کے لیے حاضر ہے۔ براہ کرم مسئلے کی تفصیل یا ایرر کوڈ شیئر کریں تاکہ اسے فوراً حل کیا جا سکے۔"
+                )
+            else:
+                return (
+                    f"جی بالکل{cust_greeting}! BashFlow Cloud ایک جدید انٹرپرائز AI آٹومیشن کمانڈ سینٹر ہے۔ "
+                    "ہماری بنیادی خدمات میں شامل ہیں: (1) واٹس ایپ AI آٹو ریسپانڈر اور وائس نوٹ پروسیسنگ جو گاہک کے سوالات سن کر فوری جواب دیتا ہے، "
+                    "(2) خودکار CRM لیڈ کیپچر اور انٹیلیجنٹ اسکورنگ، "
+                    "(3) الرٹ مانیٹرنگ اور لاجسٹکس ورک فلو آٹومیشن۔ "
+                    "ہمارے پیکجز $0 (فری)، $29 (اسٹارٹر)، $99 (پروفیشنل) اور $499 (انٹرپرائز) سے شروع ہوتے ہیں مع 2 روزہ فری ٹرائل۔ آپ کس سروس کے بارے میں مزید جاننا چاہتے ہیں؟"
+                )
+
+        elif lang_fmt in ("pashto_arabic", "roman_pashto"):
+            if lang_fmt == "roman_pashto":
+                return (
+                    f"Salam{cust_greeting}! BashFlow Cloud da AI Automation Command Center de. "
+                    "Zamung core features: (1) WhatsApp AI Auto-Responder au Voice Note processing che staso inquiry ta foran jawab warki, "
+                    "(2) Automated CRM Lead capture, "
+                    "(3) Workflow automations. Zamung packages Free ($0), Starter ($29/mo), Pro ($99/mo), au Enterprise ($499/mo) de sara da 2-Day Free Trial. "
+                    "Taso da kum package ya service pa bara k maloomat ghwarai?"
+                )
+            else:
+                return (
+                    f"سلام{cust_greeting}! BashFlow Cloud د پرمختللي AI اتومات کمانډ سنټر دی. "
+                    "زموږ خدمات: (1) د واټساپ AI آټو ریسپانډر او وائس نوټ ځوابونه، (2) خودکاره CRM لیډ مدیریت، (3) د اتوماتیک خبرتیاو سیسټم. "
+                    "زموږ کڅوړې له وړیا ($0)، سټارټر ($29)، پرو ($99) او انټرپرايز ($499) څخه پیل کیږي له 2 ورځني وړیا ازموینې سره. تاسو د کومې برخې په اړه معلومات غواړئ؟"
+                )
+
+        else:
+            # Default: English
+            if is_pricing_query:
+                return (
+                    f"Hello{cust_greeting}! Here are BashFlow Cloud's verified subscription tiers: "
+                    "(1) Free Plan: $0/mo (3 automated rules, 1,000 events), "
+                    "(2) Starter Plan: $29/mo / PKR 7,500 (10 rules, 5,000 events, custom webhooks), "
+                    "(3) Professional Plan: $99/mo / PKR 25,000 (50 rules, 200,000 events, Gemini & Groq AI), "
+                    "(4) Enterprise Plan: $499/mo / PKR 125,000 (250 rules, 1M events, dedicated SLA). "
+                    "All plans include a 2-Day Free Trial. We accept JazzCash (03209350858, Title: Bashir Uddin) and Stripe/Cards. Which plan would you like to get started with?"
+                )
+            elif is_support_query:
+                return (
+                    f"Hello{cust_greeting}! Your support request has been logged with highest priority. "
+                    "Our engineering team is actively investigating. Please share any error messages, logs, or system details so we can resolve this immediately for you."
+                )
+            else:
+                return (
+                    f"Hello{cust_greeting}! BashFlow Cloud is an enterprise AI Automation Command Center providing: "
+                    "(1) Two-way WhatsApp AI Auto-Responder with voice note transcription and spoken audio replies, "
+                    "(2) Real-time CRM lead capture and smart qualification scoring, "
+                    "(3) Workflow orchestration, alert routing, and logistics dispatch. "
+                    "Our tiers start from Free ($0/mo), Starter ($29/mo), Professional ($99/mo) to Enterprise ($499/mo) with a 2-day free trial. "
+                    "Which feature or pricing tier would you like to explore today?"
+                )
 
     @classmethod
     def generate_ai_auto_response(
@@ -3637,23 +3763,15 @@ class WhatsAppService:
                     intent = "support_request"
                     route_dept = "Support"
             else:
-                # Transcription genuinely failed or voice note is empty: use canned fallback acknowledgement
-                if lang_fmt == "pashto_arabic":
-                    media_reply = "ستاسو غږیز پیغام ترلاسه شو، مننه! زموږ ټیم به یې واوري او ژر به اړیکه ونیسي. د فوري معلوماتو لپاره دلته لیکلی هم شئ."
-                elif lang_fmt == "roman_pashto":
-                    media_reply = "Staso voice note rasegdaly de, dera manana! Zamung team ba ye wauri au rabta ba waki. Fauri maloomat dapara text ham kawale she."
-                elif lang_fmt == "urdu_arabic":
-                    media_reply = "آپ کا وائس میسج موصول ہو گیا ہے، شکریہ! ہماری ٹیم سن کر فالو اپ کرے گی۔ فوری معلومات کے لیے آپ ٹیکسٹ بھی کر سکتے ہیں۔"
-                elif lang_fmt == "roman_urdu":
-                    media_reply = (
-                        "Aapka voice note receive ho gaya hai, shukriya! Humari team isay sun kar follow-up karegi. "
-                        "Fauri maloomat ya pricing ke liye aap yahan text bhi kar sakte hain."
-                    )
-                else:
-                    media_reply = (
-                        "We received your voice note, thank you! Our team will listen and follow up shortly. "
-                        "You may also reply here in text for immediate information."
-                    )
+                # Voice note transcription fallback: dynamically answer customer about BashFlow Cloud capabilities
+                media_reply = cls.generate_smart_conversational_fallback(
+                    message_body=message_body,
+                    lang_fmt=lang_fmt,
+                    org_name=org_name,
+                    sender_name=sender_name,
+                    is_voice=True,
+                    intent=intent
+                )
                 return {
                     "reply_body": media_reply,
                     "intent": "support_request",
@@ -3773,56 +3891,14 @@ class WhatsAppService:
             f"Generating natural {detected_lang['name']} fallback response."
         )
 
-        if lang_fmt == "pashto_arabic":
-            if intent == "lead_inquiry" or route_dept == "Sales":
-                final_reply = "ډېره مننه! د OpsFlow Cloud ټیم ستاسو پوښتنه ترلاسه کړه او ژر به د نرخونو او بشپړ معلوماتو سره له تاسو سره اړیکه ونیسي."
-            elif intent in ("critical_incident", "security_threat") or route_dept in ("Priority Support", "Security Operations"):
-                final_reply = "ستاسو عاجل راپور په لوړ لومړیتوب ثبت شو او زموږ تخنیکي انجنیرانو ته وسپارل شو."
-            elif intent in ("support_request", "incident_ticket") or route_dept == "Support":
-                final_reply = "مننه! ستاسو د مرستې غوښتنه ترلاسه شوه، زموږ تخنیکي ملاتړ ډله به ژر له تاسو سره مرسته وکړي."
-            else:
-                final_reply = "سلام! په خېر راغلئ. زه د OpsFlow Cloud په اړه ستاسو څه مرسته کولی شم؟"
-
-        elif lang_fmt == "roman_pashto":
-            if intent == "lead_inquiry" or route_dept == "Sales":
-                final_reply = "Dera manana! Da OpsFlow Cloud sales team staso inquiry review kawi au jald ba staso sara da rates au details sara rabta waki."
-            elif intent in ("critical_incident", "security_threat") or route_dept in ("Priority Support", "Security Operations"):
-                final_reply = "Staso urgent incident report pa high priority darj shwa au engineering team ta wasparal shwa."
-            elif intent in ("support_request", "incident_ticket") or route_dept == "Support":
-                final_reply = "Dera manana! Staso da support request rasegdaly de, zamung technical team ba jald staso marasta waki."
-            else:
-                final_reply = "Salam! Sanga ye? Pa kher raghle. Da OpsFlow Cloud pa bara k staso sa marasta kawale sham?"
-
-        elif lang_fmt == "urdu_arabic":
-            if intent == "lead_inquiry" or route_dept == "Sales":
-                final_reply = "بہت شکریہ! OpsFlow Cloud کی سیلز ٹیم آپ کی انکوائری کا جائزہ لے رہی ہے اور جلد تفصیلات کے ساتھ آپ سے رابطہ کرے گی۔"
-            elif intent in ("critical_incident", "security_threat") or route_dept in ("Priority Support", "Security Operations"):
-                final_reply = "آپ کی فوری رپورٹ ہائی پرائیورٹی پر درج کر کے انجینئرنگ ٹیم کو بھیج دی گئی ہے۔"
-            elif intent in ("support_request", "incident_ticket") or route_dept == "Support":
-                final_reply = "شکریہ! آپ کی سپورٹ کی درخواست موصول ہو گئی ہے، ہماری ٹیکنیکل ٹیم جلد آپ کی مدد کے لیے حاضر ہو گی۔"
-            else:
-                final_reply = "السلام علیکم! OpsFlow Cloud میں خوش آمدید، میں آپ کی کیا مدد کر سکتا ہوں؟"
-
-        elif lang_fmt == "roman_urdu":
-            if intent == "lead_inquiry" or route_dept == "Sales":
-                final_reply = "Shukriya! OpsFlow Cloud ki sales team aapki inquiry review kar rahi hai aur jald tafseelat ke sath rabta karegi."
-            elif intent in ("critical_incident", "security_threat") or route_dept in ("Priority Support", "Security Operations"):
-                final_reply = "Aapka critical incident report high priority par darj kar ke engineering team ko bhej diya gaya hai."
-            elif intent in ("support_request", "incident_ticket") or route_dept == "Support":
-                final_reply = "Technical support team ko aapki darkhwast assign kar di gayi hai, hum jald madad ke liye rabta karenge."
-            else:
-                final_reply = "Ji bilkul! OpsFlow Cloud automated WhatsApp routing, alert monitoring aur business workflows provide karta hai. Main aapko packages ya integration ke bare mein mazeed tafseelat bata sakta hoon, aapka kya sawal hai?"
-
-        else:
-            # Default: English
-            if intent == "lead_inquiry" or route_dept == "Sales":
-                final_reply = "A solutions specialist is reviewing your inquiry and will follow up with tailored details and pricing."
-            elif intent in ("critical_incident", "security_threat") or route_dept in ("Priority Support", "Security Operations"):
-                final_reply = "Your critical incident report has been registered with highest priority and routed to our engineering team."
-            elif intent in ("support_request", "incident_ticket") or route_dept == "Support":
-                final_reply = "A technical support specialist has been assigned to your request and will assist you shortly."
-            else:
-                final_reply = "Hello! OpsFlow Cloud provides automated WhatsApp routing, alert monitoring, and business workflow integrations. How can I assist you with our services or packages today?" 
+        final_reply = cls.generate_smart_conversational_fallback(
+            message_body=message_body,
+            lang_fmt=lang_fmt,
+            org_name=org_name,
+            sender_name=sender_name,
+            is_voice=False,
+            intent=intent
+        ) 
 
         return {
             "reply_body": final_reply,
@@ -6559,7 +6635,8 @@ class WhatsAppService:
         error_message: Optional[str] = None,
         raw_payload: Optional[Dict[str, Any]] = None,
         created_at: Optional[datetime.datetime] = None,
-        parent_message_id: Optional[str] = None
+        parent_message_id: Optional[str] = None,
+        **kwargs
     ) -> WhatsAppMessage:
         """Persists a WhatsApp message record in the tenant workspace with real-world Pakistan local time."""
         if not created_at:
@@ -6574,6 +6651,19 @@ class WhatsAppService:
                 or raw_payload.get("quoted_message_id")
             )
 
+        m_url = kwargs.get("media_url")
+        if not m_url and isinstance(raw_payload, dict):
+            m_url = (
+                raw_payload.get("media_url")
+                or raw_payload.get("mediaUrl")
+                or raw_payload.get("audio_url")
+                or raw_payload.get("audioUrl")
+            )
+            if not m_url and (raw_payload.get("audio_base64") or raw_payload.get("audioBase64")):
+                b64_val = raw_payload.get("audio_base64") or raw_payload.get("audioBase64")
+                clean_b64 = str(b64_val).split(",")[-1].strip()
+                m_url = f"data:audio/ogg;base64,{clean_b64}"
+
         msg = WhatsAppMessage(
             id=generate_uuid("wam"),
             organization_id=organization_id or "org-enterprise-default",
@@ -6584,6 +6674,7 @@ class WhatsAppService:
             recipient=recipient,
             message_type=message_type,
             body=body,
+            media_url=m_url,
             status=status,
             execution_id=execution_id,
             error_message=error_message,

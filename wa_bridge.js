@@ -590,15 +590,27 @@ async function startWhatsAppBridge() {
                   }
                 );
               } catch (_) {
-                buffer = await downloadMediaMessage(
-                  { key: msg.key, message: unwrappedMsg },
-                  'buffer',
-                  {},
-                  {
-                    logger: pino({ level: 'silent' }),
-                    reuploadRequest: sock?.updateMediaMessage
-                  }
-                );
+                try {
+                  buffer = await downloadMediaMessage(
+                    { key: msg.key, message: unwrappedMsg },
+                    'buffer',
+                    {},
+                    {
+                      logger: pino({ level: 'silent' }),
+                      reuploadRequest: sock?.updateMediaMessage
+                    }
+                  );
+                } catch (_2) {
+                  buffer = await downloadMediaMessage(
+                    { key: msg.key, message: { audioMessage: audioMsg } },
+                    'buffer',
+                    {},
+                    {
+                      logger: pino({ level: 'silent' }),
+                      reuploadRequest: sock?.updateMediaMessage
+                    }
+                  );
+                }
               }
               if (buffer && buffer.length > 0) {
                 audioBase64 = buffer.toString('base64');
