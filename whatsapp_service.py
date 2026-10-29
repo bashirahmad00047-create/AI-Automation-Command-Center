@@ -2969,11 +2969,13 @@ class WhatsAppService:
         roman_urdu_words = {
             "kya", "kia", "aap", "ap", "tum", "mujhe", "mujy", "humein", "humain",
             "hai", "hain", "hoon", "hun", "chahiye", "chahye", "chahia", "kaise",
-            "kese", "kesy", "kaisa", "kaisi", "shukriya", "shukria", "batao", "batayein",
-            "bataen", "bataiye", "kitna", "kitne", "kitni", "theek", "thik", "acha",
+            "kese", "kesy", "kaisa", "kaisi", "shukriya", "shukria", "batao", "batawo", "batado", "batayein",
+            "bataen", "bataiye", "batana", "kitna", "kitne", "kitni", "theek", "thik", "acha",
             "achha", "sahi", "karein", "karna", "karo", "karta", "karti", "mera",
-            "meri", "mere", "apka", "aapka", "apki", "aapki", "kahan", "kyun", "kyon",
-            "kab", "kaun", "kon", "kis", "zaroor", "bilkul", "wali", "waise",
+            "meri", "mere", "apka", "aapka", "apki", "aapki", "apna", "apne", "apni",
+            "kahan", "kyun", "kyon", "kab", "kaun", "kon", "kis", "zaroor", "bilkul", "wali", "waise",
+            "k", "ke", "ka", "ki", "ko", "se", "me", "mein", "par", "pe", "yeh", "ye", "woh", "wo",
+            "bare", "baare", "bat", "kuch", "ji", "jee", "bhai", "janab",
             "assalam", "assalamualaikum", "salam", "walaikum", "apkeseho", "kaiseho", "keseho", "apkesyho"
         }
 
@@ -3667,12 +3669,17 @@ class WhatsAppService:
         if sender_phone:
             history = cls.get_conversation_history(sender_phone, organization_id=organization_id, limit=6)
 
+        # 0. Intelligent handling of media / non-text messages
+        lower_body = (message_body or "").strip().lower()
+
         # Language Detection for Customer Message (with conversation history context)
         detected_lang = cls.detect_language(message_body, conversation_history=history)
         lang_fmt = detected_lang.get("format", "english")
-
-        # 0. Intelligent handling of media / non-text messages
-        lower_body = (message_body or "").strip().lower()
+        clean_p = str(sender_phone or "").replace("+", "").strip()
+        if (lower_body.startswith("[voice") or lower_body.startswith("[audio") or lower_body == "[voicemessage]") and clean_p.startswith("92") and lang_fmt == "english":
+            lang_fmt = "roman_urdu"
+            detected_lang["format"] = "roman_urdu"
+            detected_lang["language"] = "urdu"
         if lower_body.startswith("[image") or lower_body == "[image message]":
             if lang_fmt == "pashto_arabic":
                 media_reply = "مننه! ستاسو انځور ترلاسه شو، زموږ تخنیکي ډله به یې ژر وڅېړي. که کومه مشخصه پوښتنه لرئ لطفاً دلته یې ولیکئ."
