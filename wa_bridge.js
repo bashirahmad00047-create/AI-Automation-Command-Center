@@ -676,6 +676,13 @@ if (!text) text = '[Voice note]';
               extendedTextMessageData: extendedData,
               quotedMessage: quotedMessage,
               stanzaId: quotedStanzaId,
+              fileData: (isAudio || isVoice || isImage) ? {
+                downloadUrl: audioDataUrl,
+                mediaUrl: audioDataUrl,
+                audioUrl: audioDataUrl,
+                mimeType: isAudio ? 'audio/ogg' : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg'),
+                caption: text
+              } : undefined,
               fileMessageData: (isAudio || isVoice || isImage) ? {
                 caption: text,
                 mimeType: isAudio ? 'audio/ogg' : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg'),
@@ -700,6 +707,14 @@ if (!text) text = '[Voice note]';
             audioUrl: audioDataUrl,
             media_url: audioDataUrl,
             audio_url: audioDataUrl,
+            downloadUrl: audioDataUrl,
+            download_url: audioDataUrl,
+            fileData: (isAudio || isVoice || isImage) ? {
+              downloadUrl: audioDataUrl,
+              mediaUrl: audioDataUrl,
+              audioUrl: audioDataUrl,
+              mimeType: isAudio ? 'audio/ogg' : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg')
+            } : undefined,
             audio_base64: audioBase64,
             audioBase64: audioBase64,
             parent_msg_id: quotedStanzaId,
@@ -910,7 +925,7 @@ app.get('/qr.svg', async (req, res) => {
  * POST /send-message
  * Body: { "chatId": "923001234567", "message": "Hello from Bridge!" }
  */
-app.post('/send-message', async (req, res, next) => {
+app.post(['/send-message', '/send'], async (req, res, next) => {
   try {
     let chatId = null;
     let message = null;
@@ -925,8 +940,8 @@ app.post('/send-message', async (req, res, next) => {
       });
     }
 
-    const audioRaw = req.body?.audioBase64 || req.body?.audio_base64 || req.body?.audio || req.body?.fileBase64 || req.body?.file_base64 || req.body?.dataUri;
-    const audioUrl = req.body?.audioUrl || req.body?.audio_url || req.body?.urlFile || req.body?.url;
+    const audioRaw = req.body?.audioBase64 || req.body?.audio_base64 || req.body?.audio || req.body?.fileBase64 || req.body?.file_base64 || req.body?.dataUri || (typeof req.body?.mediaUrl === 'string' && req.body.mediaUrl.startsWith('data:audio') ? req.body.mediaUrl : null) || (typeof req.body?.media_url === 'string' && req.body.media_url.startsWith('data:audio') ? req.body.media_url : null) || (typeof req.body?.audioUrl === 'string' && req.body.audioUrl.startsWith('data:audio') ? req.body.audioUrl : null);
+    const audioUrl = req.body?.audioUrl || req.body?.audio_url || req.body?.mediaUrl || req.body?.media_url || req.body?.urlFile || req.body?.url;
     const hasAudio = Boolean(audioRaw || audioUrl);
     const hasImage = Boolean(req.body?.imageBase64 || req.body?.image || req.body?.imageUrl);
     const hasText = message !== undefined && message !== null && String(message).trim().length > 0;
@@ -1011,17 +1026,19 @@ app.post('/send-message', async (req, res, next) => {
       if (hasAudio) {
         let cleanBase64 = audioRaw ? String(audioRaw).replace(/^data:[^;]+;base64,/, '').trim() : '';
         // Auto-detect MP3 vs OGG/MP4 from base64 header so mobile WhatsApp plays it properly
-        let detectedMime = 'audio/mpeg';
+        let detectedMime = 'audio/ogg; codecs=opus';
         if (cleanBase64.startsWith('T2dn')) {
           detectedMime = 'audio/ogg; codecs=opus';
-        } else if (cleanBase64.startsWith('AAAA')) {
+        } else if (cleanBase64.startsWith('AAAA') || cleanBase64.startsWith('GkXf')) {
+          detectedMime = 'audio/mp4';
+        } else if (cleanBase64.startsWith('SUQz') || cleanBase64.startsWith('/+NI') || cleanBase64.startsWith('/+MY')) {
           detectedMime = 'audio/mp4';
         }
         let mimetype = req.body?.mimetype || req.body?.mime_type || detectedMime;
-        if (mimetype === 'audio/mp3') mimetype = 'audio/mpeg';
+        if (mimetype === 'audio/mp3') mimetype = 'audio/mp4';
         const isVoiceReq = req.body?.ptt !== undefined ? Boolean(req.body.ptt) : (req.body?.is_voice !== undefined ? Boolean(req.body.is_voice) : true);
-        const ptt = isVoiceReq && (mimetype.includes('ogg') || mimetype.includes('opus'));
-        const audioFileName = ptt ? 'voice_message.oga' : 'audio.mp3';
+        const ptt = isVoiceReq;
+        const audioFileName = ptt ? (mimetype.includes('mp4') ? 'voice_message.m4a' : 'voice_message.oga') : 'audio.mp3';
         if (audioRaw) {
           const audioBuffer = Buffer.from(cleanBase64, 'base64');
           sent = await sock.sendMessage(jid, {
