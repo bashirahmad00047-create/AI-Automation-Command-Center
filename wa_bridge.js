@@ -152,6 +152,7 @@ function unwrapMessage(msgContent) {
  * incorrect foreign prefixes like +91.
  */
 const phoneToLidMap = new Map();
+const lastSendTimeMap = new Map();
 const lidToPhoneMap = new Map(); // Keep persisted in memory/DB
 
 function cleanPhoneNumber(jid) {
@@ -558,6 +559,16 @@ async function startWhatsAppBridge() {
           const pushName = msg.pushName || displayName || 'WhatsApp User';
           const messageId = msg.key?.id || `msg_${Date.now()}`;
           const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
+
+          // Anti-ban & Human feel: Blue tick (read receipt) and typing status upon receiving message
+          if (!msg.key?.fromMe && remoteJid && remoteJid !== 'status@broadcast') {
+            try {
+              await sock.readMessages([msg.key]);
+              await sock.sendPresenceUpdate('composing', remoteJid);
+            } catch (presErr) {
+              console.debug('[Presence Setup Notice]', presErr.message);
+            }
+          }
           
           // 1. Unwrap ephemeral/viewOnce wrappers first:
           const unwrappedMsg = msg.message?.ephemeralMessage?.message || msg.message?.viewOnceMessage?.message || unwrapMessage(msg.message) || msg.message;
@@ -614,7 +625,7 @@ async function startWhatsAppBridge() {
               }
               if (buffer && buffer.length > 0) {
                 audioBase64 = buffer.toString('base64');
-                audioDataUrl = `data:audio/ogg;base64,${buffer.toString('base64')}`;
+                audioDataUrl = `data:audio/ogg; codecs=opus;base64,${buffer.toString('base64')}`;
                 console.log(`[Media Download] Downloaded voice note (${buffer.length} bytes) for ${senderPhone}`);
               }
             } catch (dlErr) {
@@ -1034,8 +1045,22 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
       };
     }
 
+    // Rate-limiting / Anti-spam guard: Ensure minimum 1.5s spacing between messages to the same JID
+    const lastSent = lastSendTimeMap.get(jid) || 0;
+    const timeSinceLast = Date.now() - lastSent;
+    if (timeSinceLast < 1500) {
+      await new Promise(r => setTimeout(r, 1500 - timeSinceLast));
+    }
+    lastSendTimeMap.set(jid, Date.now());
+
     try {
       if (hasAudio) {
+        // Show 'recording' presence for 2.5s before voice note dispatch
+        try {
+          await sock.sendPresenceUpdate('recording', jid);
+          console.log(`[Anti-Ban Security] Showing 'recording' presence to ${jid} for 2.5s...`);
+          await new Promise(r => setTimeout(r, 2500));
+        } catch (_) {}
         let cleanBase64 = audioRaw ? String(audioRaw).replace(/^data:[^;]+;base64,/, '').trim() : '';
         // Auto-detect MP3 vs OGG/MP4 from base64 header so mobile WhatsApp plays it properly
         let detectedMime = 'audio/ogg; codecs=opus';
@@ -1085,9 +1110,18 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
             caption
           }, sendOptions);
         }
+        try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {}
       } else {
+        // Show 'composing' presence for 3.0s before sending text message
+        try {
+          await sock.sendPresenceUpdate('composing', jid);
+          console.log(`[Anti-Ban Security] Showing 'composing' presence to ${jid} for 3.0s...`);
+          await new Promise(r => setTimeout(r, 3000));
+        } catch (_) {}
+
         const textToSend = String(message || '');
         sent = await sock.sendMessage(jid, { text: textToSend }, sendOptions);
+        try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {}
       }
     } catch (sendErr) {
       console.error(`[Outbound Message Send Error to ${jid}]:`, sendErr);

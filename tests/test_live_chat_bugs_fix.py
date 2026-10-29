@@ -30,11 +30,24 @@ class TestLiveChatBugsFix(unittest.TestCase):
             sender_phone="923456789012"
         )
         reply = res.get("reply_body", "")
-        # Must not contain obsolete static canned fallback
         self.assertNotIn("A solutions specialist is reviewing", reply)
         self.assertNotIn("We received your voice note", reply)
-        # Must explain BashFlow Cloud features
         self.assertTrue(any(word in reply for word in ("BashFlow Cloud", "Enterprise AI", "WhatsApp AI", "Auto-Responder", "Voice Note", "CRM")))
+
+    def test_specific_starter_plan_inquiry(self):
+        """Verifies asking about Starter plan specifically answers only about Starter plan."""
+        res = WhatsAppService.generate_ai_auto_response(
+            organization_id=self.org.id,
+            message_body="Starter ka bar main batwo",
+            sender_name="Bashir khan",
+            sender_phone="923456789012"
+        )
+        reply = res.get("reply_body", "")
+        self.assertIn("Starter Plan", reply)
+        self.assertIn("$29", reply)
+        # Should not dump other plans
+        self.assertNotIn("Professional Plan: $99", reply)
+        self.assertNotIn("Enterprise: $499", reply)
 
     def test_dynamic_fallback_for_voice_notes(self):
         """Verifies voice note acknowledgement introduces BashFlow Cloud instead of generic static fallback."""
@@ -50,10 +63,10 @@ class TestLiveChatBugsFix(unittest.TestCase):
 
     def test_models_media_url_db_text_and_to_dict(self):
         """Verifies WhatsAppMessage.media_url is db.Text and correctly returned in to_dict()."""
-        large_base64 = "data:audio/ogg;base64," + ("A" * 1500)
+        large_base64 = "data:audio/ogg; codecs=opus;base64," + ("A" * 1500)
         msg = WhatsAppMessage(
             organization_id=self.org.id,
-            whatsapp_message_id="wamid.test_media_url_001",
+            whatsapp_message_id="wamid.test_media_url_002",
             sender="923001234567",
             recipient="system",
             message_type="audio",
@@ -63,7 +76,7 @@ class TestLiveChatBugsFix(unittest.TestCase):
         db.session.add(msg)
         db.session.commit()
 
-        fetched = WhatsAppMessage.query.filter_by(whatsapp_message_id="wamid.test_media_url_001").first()
+        fetched = WhatsAppMessage.query.filter_by(whatsapp_message_id="wamid.test_media_url_002").first()
         self.assertIsNotNone(fetched)
         self.assertEqual(fetched.media_url, large_base64)
         m_dict = fetched.to_dict()
