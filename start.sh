@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-PORT="${PORT:-5000}"
+PORT="${PORT:-10000}"
 export PORT
 export WA_BRIDGE_PORT="${WA_BRIDGE_PORT:-3001}"
 export BRIDGE_PORT="${BRIDGE_PORT:-3001}"

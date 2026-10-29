@@ -1306,7 +1306,8 @@ app.use((err, req, res, next) => {
 });
 
 // Start Express server & WhatsApp bridge
-const server = app.listen(PORT, '0.0.0.0', () => {
+const BIND_HOST = process.env.WA_BRIDGE_HOST || '127.0.0.1';
+const server = app.listen(PORT, BIND_HOST, () => {
   console.log(`[Bridge Server] HTTP API server listening on http://localhost:${PORT}`);
   console.log(`[Bridge Server] Endpoint available: POST http://localhost:${PORT}/send-message`);
   console.log(`[Bridge Server] Initializing Baileys WhatsApp connection...`);

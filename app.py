@@ -197,97 +197,113 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Initialize persistence and automation engine inside app context
     with application.app_context():
         is_cli_migration = "db" in sys.argv or os.environ.get("SKIP_DB_INIT") == "1"
-        if not is_cli_migration and not application.config.get("TESTING"):
-            try:
-                from migrations_manager import run_database_migrations
-                run_database_migrations(application)
-            except Exception as _mig_err:
-                application.logger.warning(f"Auto-migration notice: {_mig_err}; falling back to db.create_all()")
+        is_testing = bool(application.config.get("TESTING"))
 
-            # Ensure schema integrity and create any tables from newly registered models
-            try:
-                db.session.rollback()
-            except Exception:
-                pass
-            try:
-                db.create_all()
-            except Exception as _create_err:
-                application.logger.warning(f"db.create_all() notice: {_create_err}")
+        def _run_db_initialization(app_ref):
+            with app_ref.app_context():
+                try:
+                    from migrations_manager import run_database_migrations
+                    run_database_migrations(app_ref)
+                except Exception as _mig_err:
+                    app_ref.logger.warning(f"Auto-migration notice: {_mig_err}; falling back to db.create_all()")
 
-            # Ensure newly introduced model columns exist on existing production tables
-            try:
-                from sqlalchemy import inspect as _sa_inspect, text as _sa_text
-                _insp = _sa_inspect(db.engine)
-                if "users" in _insp.get_table_names():
-                    _user_cols = {c["name"] for c in _insp.get_columns("users")}
-                    with db.engine.connect() as _c_conn:
-                        if "phone" not in _user_cols:
-                            _c_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN phone VARCHAR(64);"))
-                        if "department" not in _user_cols:
-                            _c_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN department VARCHAR(64) DEFAULT 'General';"))
-                        if "products" in _insp.get_table_names():
-                            _prd_cols = {c["name"] for c in _insp.get_columns("products")}
-                            if "image_url" not in _prd_cols:
-                                _c_conn.execute(_sa_text("ALTER TABLE products ADD COLUMN image_url VARCHAR(512);"))
-                        if "whatsapp_messages" in _insp.get_table_names():
-                            _wam_cols = {c["name"] for c in _insp.get_columns("whatsapp_messages")}
-                            if "parent_message_id" not in _wam_cols:
-                                _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN parent_message_id VARCHAR(128);"))
-                            if "media_url" not in _wam_cols:
-                                _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN media_url TEXT;"))
-                        _c_conn.commit()
-            except Exception as _col_err:
-                application.logger.warning(f"Runtime column sync notice: {_col_err}")
-
-            # Seed initial database if empty on fresh cloud deployment
-            try:
-                db.session.rollback()
-                from models import Organization
-                if not Organization.query.first():
-                    from init_db import init_and_seed_database
-                    init_and_seed_database()
-            except Exception as _seed_err:
                 try:
                     db.session.rollback()
                 except Exception:
                     pass
-                application.logger.warning(f"Database auto-seed check: {_seed_err}")
+                try:
+                    db.create_all()
+                except Exception as _create_err:
+                    app_ref.logger.warning(f"db.create_all() notice: {_create_err}")
 
-            # Auto-seed sample audit logs on startup if empty
-            try:
-                db.session.rollback()
-                seed_initial_logs()
-            except Exception as _seed_log_err:
+                try:
+                    from sqlalchemy import inspect as _sa_inspect, text as _sa_text
+                    _insp = _sa_inspect(db.engine)
+                    if "users" in _insp.get_table_names():
+                        _user_cols = {c["name"] for c in _insp.get_columns("users")}
+                        with db.engine.connect() as _c_conn:
+                            if "phone" not in _user_cols:
+                                _c_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN phone VARCHAR(64);"))
+                            if "department" not in _user_cols:
+                                _c_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN department VARCHAR(64) DEFAULT 'General';"))
+                            if "products" in _insp.get_table_names():
+                                _prd_cols = {c["name"] for c in _insp.get_columns("products")}
+                                if "image_url" not in _prd_cols:
+                                    _c_conn.execute(_sa_text("ALTER TABLE products ADD COLUMN image_url VARCHAR(512);"))
+                            if "whatsapp_messages" in _insp.get_table_names():
+                                _wam_cols = {c["name"] for c in _insp.get_columns("whatsapp_messages")}
+                                if "parent_message_id" not in _wam_cols:
+                                    _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN parent_message_id VARCHAR(128);"))
+                                if "media_url" not in _wam_cols:
+                                    _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN media_url TEXT;"))
+                            _c_conn.commit()
+                except Exception as _col_err:
+                    app_ref.logger.warning(f"Runtime column sync notice: {_col_err}")
+
                 try:
                     db.session.rollback()
-                except Exception:
-                    pass
-                application.logger.warning(f"Audit log auto-seed check: {_seed_log_err}")
+                    from models import Organization
+                    if not Organization.query.first():
+                        from init_db import init_and_seed_database
+                        init_and_seed_database()
+                except Exception as _seed_err:
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+                    app_ref.logger.warning(f"Database auto-seed check: {_seed_err}")
 
-            # Purge legacy fake +91/+98 conversations from WhatsAppMessage table (14-digit LIDs)
-            try:
-                from models import WhatsAppMessage
-                purged_count = WhatsAppMessage.purge_fake_lid_records()
-                if purged_count:
-                    application.logger.info(f"Purged {purged_count} fake +91/+98 LID records from WhatsAppMessage table.")
-            except Exception as _purge_err:
-                application.logger.warning(f"Purge fake LID notice: {_purge_err}")
-
-            # Auto-sync admin user from environment variables on startup
-            try:
-                db.session.rollback()
-                sync_admin_user()
-            except Exception as _sync_admin_err:
                 try:
                     db.session.rollback()
-                except Exception:
-                    pass
-                application.logger.warning(f"Admin sync check: {_sync_admin_err}")
+                    seed_initial_logs()
+                except Exception as _seed_log_err:
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+                    app_ref.logger.warning(f"Audit log auto-seed check: {_seed_log_err}")
 
-        storage_instance = Storage(init_db=not is_cli_migration)
+                try:
+                    from models import WhatsAppMessage
+                    purged_count = WhatsAppMessage.purge_fake_lid_records()
+                    if purged_count:
+                        app_ref.logger.info(f"Purged {purged_count} fake +91/+98 LID records from WhatsAppMessage table.")
+                except Exception as _purge_err:
+                    app_ref.logger.warning(f"Purge fake LID notice: {_purge_err}")
+
+                try:
+                    db.session.rollback()
+                    sync_admin_user()
+                except Exception as _sync_admin_err:
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+                    app_ref.logger.warning(f"Admin sync check: {_sync_admin_err}")
+
+                try:
+                    st = app_ref.config.get("STORAGE_ENGINE")
+                    if st:
+                        st._init_db()
+                except Exception as _st_err:
+                    app_ref.logger.warning(f"Storage init_db check: {_st_err}")
+
+        storage_instance = Storage(init_db=is_testing and not is_cli_migration)
         engine_instance = AutomationEngine(storage=storage_instance)
         application.config["STORAGE_ENGINE"] = storage_instance
         application.config["AUTOMATION_ENGINE"] = engine_instance
+
+        if not is_cli_migration:
+            if is_testing:
+                _run_db_initialization(application)
+            else:
+                threading.Thread(
+                    target=_run_db_initialization,
+                    args=(application,),
+                    daemon=True,
+                    name="AsyncDbBootstrap"
+                ).start()
+
 
     # Register API v1 Blueprint
     application.register_blueprint(api_v1)
