@@ -2224,6 +2224,7 @@ def system_migration_status():
 
 
 @api_v1.route("/system/telemetry", methods=["GET"])
+@require_auth
 def system_telemetry():
     engine = get_engine()
     storage = get_storage()
@@ -2638,6 +2639,7 @@ def stripe_webhook():
 # ==========================================
 
 @api_v1.route("/whatsapp/bridge-qr", methods=["GET"])
+@require_auth
 def api_whatsapp_bridge_qr():
     """Returns the Baileys bridge QR code and pairing status for web dashboard scanning.
     Guarded: If bridge is already connected, returns connected status immediately without touching bridge.
@@ -2683,6 +2685,7 @@ def api_whatsapp_bridge_qr():
 
 
 @api_v1.route("/whatsapp/bridge-disconnect", methods=["POST", "DELETE"])
+@require_auth
 def api_whatsapp_bridge_disconnect():
     """Explicitly unlinks the WhatsApp device, clears DB session backup and local auth folder."""
     import requests
@@ -2709,6 +2712,7 @@ def api_whatsapp_bridge_disconnect():
 
 
 @api_v1.route("/whatsapp/bridge-qr.png", methods=["GET"])
+@require_auth
 def api_whatsapp_bridge_qr_png():
     """Returns the raw PNG image of the WhatsApp Baileys bridge QR code."""
     import requests
@@ -2730,6 +2734,7 @@ def api_whatsapp_bridge_qr_png():
 
 
 @api_v1.route("/whatsapp/bridge-qr.svg", methods=["GET"])
+@require_auth
 def api_whatsapp_bridge_qr_svg():
     """Returns the SVG vector of the WhatsApp Baileys bridge QR code."""
     import requests
@@ -2751,6 +2756,7 @@ def api_whatsapp_bridge_qr_svg():
 
 
 @api_v1.route("/whatsapp/bridge-status", methods=["GET"])
+@require_auth
 def api_whatsapp_bridge_status():
     """Returns the Baileys bridge live connection status."""
     import requests
@@ -2774,6 +2780,7 @@ def api_whatsapp_bridge_status():
 
 
 @api_v1.route("/whatsapp/session-state", methods=["GET"])
+@require_auth
 def api_whatsapp_session_state():
     """Returns database-backed session state information."""
     try:
@@ -2794,6 +2801,7 @@ def api_whatsapp_session_state():
 
 
 @api_v1.route("/whatsapp/session-backup", methods=["POST", "GET"])
+@require_auth
 def api_whatsapp_session_backup():
     """Triggers an immediate database backup of Baileys auth files."""
     try:
@@ -2805,6 +2813,7 @@ def api_whatsapp_session_backup():
 
 
 @api_v1.route("/whatsapp/session-restore", methods=["POST", "GET"])
+@require_auth
 def api_whatsapp_session_restore():
     """Restores Baileys session files from DB into the auth folder."""
     try:
@@ -2816,6 +2825,7 @@ def api_whatsapp_session_restore():
 
 
 @api_v1.route("/whatsapp/session-clear", methods=["POST", "DELETE"])
+@require_auth
 def api_whatsapp_session_clear():
     """Clears the session from the DB when device is explicitly logged out."""
     try:
@@ -3698,6 +3708,7 @@ def green_api_webhook_ingress():
 
 
 @api_v1.route("/whatsapp/poll", methods=["GET", "POST"])
+@require_auth
 def whatsapp_poll_messages():
     """Fetches inbound messages from Green-API receive queue and message journal."""
     org = get_current_org()
@@ -3713,6 +3724,7 @@ def whatsapp_poll_messages():
 
 
 @api_v1.route("/whatsapp/sync-messages", methods=["GET", "POST"])
+@require_auth
 def whatsapp_sync_recent_messages():
     """Synchronizes recent incoming WhatsApp messages from lastIncomingMessages journal."""
     org = get_current_org()

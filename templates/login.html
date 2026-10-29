@@ -456,24 +456,6 @@
                     <span>Sign In to Command Center</span>
                     <span>&rarr;</span>
                 </button>
-
-                <!-- Quick-Fill Persona Shortcuts for Testing & Demo -->
-                <div class="demo-helpers">
-                    <div class="demo-helpers-title">
-                        <span>⚡ One-Click Instant Sign-In</span>
-                        <span style="font-size: 10px; color: #64748b;">DEMO ACCESS</span>
-                    </div>
-                    <div class="demo-pills">
-                        <div class="demo-pill" onclick="quickFill('admin@opsflow.io', 'AdminSecure2026!')">
-                            <div class="demo-pill-name">👤 Sarah Lin</div>
-                            <div class="demo-pill-role">VP OPS • ADMIN</div>
-                        </div>
-                        <div class="demo-pill" onclick="quickFill('Bashirahmad00047@gmail.com', 'bashir@12.')">
-                            <div class="demo-pill-name">👑 Master Admin</div>
-                            <div class="demo-pill-role">ENTERPRISE BYPASS</div>
-                        </div>
-                    </div>
-                </div>
             </form>
 
             <!-- SIGN UP FORM -->
@@ -553,15 +535,6 @@
             el.className = 'alert-box ' + (isSuccess ? 'alert-success' : 'alert-error');
             el.innerHTML = (isSuccess ? '✓ ' : '⚠️ ') + msg;
             el.style.display = 'block';
-        }
-
-        function quickFill(email, password) {
-            document.getElementById('loginEmail').value = email;
-            document.getElementById('loginPassword').value = password;
-            showAlert('Credentials filled. Signing in automatically...', true);
-            setTimeout(() => {
-                document.getElementById('signInForm').dispatchEvent(new Event('submit', { cancelable: true }));
-            }, 300);
         }
 
         function handleForgotPasswordNotice() {

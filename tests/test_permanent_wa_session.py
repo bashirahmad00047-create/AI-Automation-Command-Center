@@ -41,6 +41,13 @@ class TestPermanentWASession(unittest.TestCase):
             with open(creds_file, "w", encoding="utf-8") as f:
                 json.dump({"me": {"id": "923209350858:1@s.whatsapp.net", "name": "BashFlow"}, "account": {}}, f)
 
+        # Set up authenticated session for client
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = "usr-admin-primary"
+            sess["is_super_admin"] = True
+            sess["user_email"] = "admin@opsflow.io"
+            sess["active_org_id"] = "org-enterprise-default"
+
     def tearDown(self):
         self.app_context.pop()
 
