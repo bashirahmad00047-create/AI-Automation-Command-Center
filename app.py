@@ -371,15 +371,32 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/")
     @application.route("/dashboard", endpoint="dashboard")
     def index():
-        from auth import get_current_user
-        user = get_current_user()
-        if not user and not session.get("user_id") and not session.get("is_super_admin"):
-            return redirect(url_for("top_level_login"))
-        jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
-        return render_template("index.html", jazzcash_number=jc_num)
+        try:
+            user_id = session.get("user_id")
+            is_super = session.get("is_super_admin")
+            if not user_id and not is_super:
+                return redirect(url_for("top_level_login"))
 
-    def dashboard():
-        return index()
+            user = None
+            try:
+                from auth import get_current_user
+                user = get_current_user()
+            except Exception as _auth_err:
+                application.logger.warning(f"Auth check notice on /: {_auth_err}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+
+            if not user and not is_super:
+                session.clear()
+                return redirect(url_for("top_level_login"))
+
+            jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
+            return render_template("index.html", jazzcash_number=jc_num)
+        except Exception as e:
+            application.logger.error(f"Error serving dashboard /: {e}", exc_info=True)
+            return redirect(url_for("top_level_login"))
 
     @application.route("/favicon.ico")
     def favicon():
