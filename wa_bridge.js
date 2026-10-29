@@ -135,7 +135,9 @@ function unwrapMessage(msgContent) {
       unwrapped?.viewOnceMessageV2?.message ||
       unwrapped?.viewOnceMessageV2Extension?.message ||
       unwrapped?.documentWithCaptionMessage?.message ||
+      unwrapped?.protocolMessage?.editedMessage ||
       unwrapped?.editedMessage?.message?.protocolMessage?.editedMessage ||
+      unwrapped?.editedMessage?.message ||
       unwrapped?.associatedChildMessage?.message;
     if (!next) break;
     unwrapped = next;

@@ -5299,6 +5299,8 @@ class WhatsAppService:
             return messages
 
         body = cls.extract_message_body_and_quote(message_data, type_message)
+        if not body:
+            body = str(data.get("body") or data.get("message") or data.get("text") or "").strip()
 
         # Extract quoted/parent message context (parent_msg_id)
         parent_msg_id = None
@@ -5328,6 +5330,8 @@ class WhatsAppService:
         )
         if isinstance(file_data, dict):
             download_url = file_data.get("downloadUrl", "") or file_data.get("urlFile", "")
+            if not body and file_data.get("caption"):
+                body = str(file_data.get("caption")).strip()
         if not download_url:
             download_url = data.get("downloadUrl", "") or data.get("urlFile", "") or (message_data.get("downloadUrl", "") if isinstance(message_data, dict) else "")
 
