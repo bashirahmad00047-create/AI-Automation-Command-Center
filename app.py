@@ -186,9 +186,14 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     env_name = config_name or os.environ.get("FLASK_ENV") or ("production" if os.environ.get("RENDER") else "development")
     cfg = config_by_name.get(env_name, config_by_name["default"])
     application.config.from_object(cfg)
-    application.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "opsflow-permanent-enterprise-secret-key-2026-bashir")
+    application.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "bashflow-enterprise-permanent-secret-key-2026-prod")
+    application.secret_key = application.config["SECRET_KEY"]
+    application.config["SESSION_PERMANENT"] = True
+    application.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(days=365)
+    application.config["SESSION_COOKIE_NAME"] = "opsflow_session"
     application.config["SESSION_COOKIE_HTTPONLY"] = True
-    application.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(days=30)
+    application.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    application.config["SESSION_REFRESH_EACH_REQUEST"] = True
 
     # Initialize SQLAlchemy & Database Migrations
     db.init_app(application)
@@ -311,6 +316,10 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Master Admin Enterprise Bypass Logic
     @application.before_request
     def check_master_admin_entitlements():
+        session.permanent = True
+        # If user has an active session, ensure modified flag is set so lifetime rolls over
+        if session.get("user_id") or session.get("is_super_admin"):
+            session.modified = True
         user_email = session.get("user_email") or session.get("email")
         if not user_email and session.get("user_id"):
             try:
@@ -562,6 +571,116 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     def legacy_billing_upgrade():
         from api_v1 import upgrade_subscription
         return upgrade_subscription()
+
+    # Dedicated Streaming Audio Endpoint (Fixes Chromium 0:00 / 0:00 duration bug)
+    @application.route("/api/whatsapp/media/<message_id>", methods=["GET"])
+    @application.route("/api/whatsapp/media/<int:message_id>", methods=["GET"])
+    @application.route("/api/v1/whatsapp/media/<message_id>", methods=["GET"])
+    @application.route("/api/v1/whatsapp/media/<int:message_id>", methods=["GET"])
+    def route_whatsapp_streaming_media(message_id):
+        try:
+            from models import WhatsAppMessage
+            target = str(message_id).strip()
+            msg = WhatsAppMessage.query.filter(
+                (WhatsAppMessage.id == target) | (WhatsAppMessage.whatsapp_message_id == target)
+            ).first()
+
+            if not msg and target.isdigit():
+                try:
+                    num_id = int(target)
+                    msg = WhatsAppMessage.query.offset(num_id - 1).first() if num_id > 0 else None
+                except Exception:
+                    pass
+
+            if not msg:
+                return jsonify({"error": "Media message not found"}), 404
+
+            raw_media = getattr(msg, "media_url", None)
+            if not raw_media and msg.raw_payload_json:
+                try:
+                    payload = json.loads(msg.raw_payload_json)
+                    if isinstance(payload, dict):
+                        raw_media = (
+                            payload.get("media_url")
+                            or payload.get("mediaUrl")
+                            or payload.get("audio_url")
+                            or payload.get("audioUrl")
+                            or payload.get("audio_base64")
+                            or payload.get("audioBase64")
+                        )
+                except Exception:
+                    pass
+
+            if not raw_media:
+                return jsonify({"error": "No media content associated with message"}), 404
+
+            raw_media_str = str(raw_media).strip()
+            if raw_media_str.startswith("http://") or raw_media_str.startswith("https://"):
+                return redirect(raw_media_str)
+
+            import base64
+            clean_b64 = raw_media_str
+            mime_type = "audio/ogg"
+            if "," in clean_b64:
+                header, clean_b64 = clean_b64.split(",", 1)
+                if ";" in header and ":" in header:
+                    mime_type = header.split(";")[0].split(":")[1].strip()
+                elif ":" in header:
+                    mime_type = header.split(":")[1].strip()
+
+            try:
+                audio_bytes = base64.b64decode(clean_b64)
+            except Exception as e:
+                application.logger.error(f"Failed to decode base64 audio for msg {message_id}: {e}")
+                return jsonify({"error": "Failed to decode media"}), 500
+
+            total_length = len(audio_bytes)
+            if total_length == 0:
+                return jsonify({"error": "Empty media buffer"}), 404
+
+            # Magic bytes MIME type detection
+            if audio_bytes.startswith(b"ID3") or audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+                mime_type = "audio/mpeg"
+            elif audio_bytes.startswith(b"OggS"):
+                mime_type = "audio/ogg"
+            elif b"ftyp" in audio_bytes[:16] or audio_bytes.startswith(b"\x00\x00\x00"):
+                mime_type = "audio/mp4"
+            elif audio_bytes.startswith(b"RIFF") and b"WAVE" in audio_bytes[:12]:
+                mime_type = "audio/wav"
+
+            # HTTP 206 Partial Content range support for Chromium
+            range_header = request.headers.get("Range")
+            if range_header and range_header.startswith("bytes="):
+                try:
+                    ranges = range_header.replace("bytes=", "").split("-")
+                    start = int(ranges[0]) if ranges[0] else 0
+                    end = int(ranges[1]) if len(ranges) > 1 and ranges[1] else total_length - 1
+                    if start >= total_length:
+                        return Response(
+                            status=416,
+                            headers={"Content-Range": f"bytes */{total_length}"}
+                        )
+                    end = min(end, total_length - 1)
+                    chunk_length = end - start + 1
+                    data_chunk = audio_bytes[start:end + 1]
+
+                    resp = Response(data_chunk, status=206, mimetype=mime_type)
+                    resp.headers["Content-Range"] = f"bytes {start}-{end}/{total_length}"
+                    resp.headers["Accept-Ranges"] = "bytes"
+                    resp.headers["Content-Length"] = str(chunk_length)
+                    resp.headers["Cache-Control"] = "public, max-age=86400"
+                    return resp
+                except Exception as _range_err:
+                    application.logger.debug(f"Range parsing notice: {_range_err}")
+
+            resp = Response(audio_bytes, status=200, mimetype=mime_type)
+            resp.headers["Accept-Ranges"] = "bytes"
+            resp.headers["Content-Length"] = str(total_length)
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+        except Exception as media_err:
+            application.logger.error(f"Error serving audio media {message_id}: {media_err}")
+            return jsonify({"error": "Internal media streaming error"}), 500
 
     @application.route("/api/whatsapp/send", methods=["POST"])
     @application.route("/api/whatsapp/test-message", methods=["POST"])
