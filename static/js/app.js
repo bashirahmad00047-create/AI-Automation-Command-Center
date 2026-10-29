@@ -10364,3 +10364,70 @@ async function fetchBridgeQrCode(force) {
 window.openLinkWhatsAppQrModal = openLinkWhatsAppQrModal;
 window.closeLinkWhatsAppQrModal = closeLinkWhatsAppQrModal;
 window.fetchBridgeQrCode = fetchBridgeQrCode;
+
+// ==========================================================================
+// PROGRESSIVE WEB APP (PWA) REGISTRATION & INSTALLATION HANDLER
+// ==========================================================================
+let pwaDeferredInstallPrompt = null;
+
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+            .then((registration) => {
+                console.log('[PWA] Service Worker registered with scope:', registration.scope);
+            })
+            .catch((error) => {
+                console.warn('[PWA] Service Worker registration failed:', error);
+            });
+    });
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+        // Prevent default browser mini-infobar
+        e.preventDefault();
+        pwaDeferredInstallPrompt = e;
+        console.log('[PWA] Capture beforeinstallprompt event');
+
+        // Unhide install buttons in topbar and sidebar
+        const topbarBtn = document.getElementById('pwaInstallBtn');
+        if (topbarBtn) topbarBtn.style.display = 'inline-flex';
+
+        const sidebarTab = document.getElementById('sidebarPwaInstallTab');
+        if (sidebarTab) sidebarTab.style.display = 'flex';
+    });
+
+    window.addEventListener('appinstalled', () => {
+        console.log('[PWA] BashFlow Cloud installed successfully');
+        pwaDeferredInstallPrompt = null;
+
+        const topbarBtn = document.getElementById('pwaInstallBtn');
+        if (topbarBtn) topbarBtn.style.display = 'none';
+
+        const sidebarTab = document.getElementById('sidebarPwaInstallTab');
+        if (sidebarTab) sidebarTab.style.display = 'none';
+    });
+}
+
+function promptPWAInstall() {
+    if (pwaDeferredInstallPrompt) {
+        pwaDeferredInstallPrompt.prompt();
+        pwaDeferredInstallPrompt.userChoice.then((choiceResult) => {
+            if (choiceResult.outcome === 'accepted') {
+                console.log('[PWA] User accepted the installation');
+            } else {
+                console.log('[PWA] User dismissed the installation');
+            }
+            pwaDeferredInstallPrompt = null;
+            const topbarBtn = document.getElementById('pwaInstallBtn');
+            if (topbarBtn) topbarBtn.style.display = 'none';
+        });
+    } else {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        if (isIOS) {
+            alert('To install BashFlow Cloud on iPhone/iPad:\n1. Tap the Share button in Safari (square with up arrow)\n2. Scroll down and tap "Add to Home Screen"\n3. Tap "Add" to finish.');
+        } else {
+            alert('BashFlow Cloud is PWA-ready!\nTo install, open your browser menu (⋮) and select "Install App" or "Add to Home screen".');
+        }
+    }
+}
+
+window.promptPWAInstall = promptPWAInstall;

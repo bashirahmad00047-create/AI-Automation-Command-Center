@@ -4,6 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BashFlow Cloud - Enterprise Intelligent Automation</title>
+
+    <!-- Progressive Web App (PWA) Manifest & Mobile Meta Tags -->
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="BashFlow">
+    <meta name="application-name" content="BashFlow Cloud">
+    <meta name="msapplication-TileColor" content="#0f172a">
+    <link rel="icon" type="image/svg+xml" href="/static/img/opsflow-icon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/img/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/static/img/icon-512.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/img/icon-180.png">
+
     <link rel="stylesheet" href="/static/css/style.css?v=2.8.5">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -167,6 +183,10 @@
                 <span class="tab-icon">⚙️</span>
                 <span class="tab-label">Settings</span>
             </button>
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" id="sidebarPwaInstallTab" onclick="promptPWAInstall()" title="Install BashFlow Cloud Mobile App" style="display: none;">
+                <span class="tab-icon">📲</span>
+                <span class="tab-label">Install App</span>
+            </button>
         </nav>
 
         <!-- Sidebar Collapse / Expand Footer -->
@@ -213,6 +233,11 @@
                     <button type="button" id="toggleEngineBtn" onclick="toggleEngineState()" style="display:none;"><span id="toggleEngineLabel">Pause</span></button>
                     <div id="hudClock" style="display:none;">00:00:00</div>
                 </div>
+
+                <!-- PWA Install Button (Mobile & Desktop) -->
+                <button type="button" class="hud-btn small outline topbar-pwa-btn" id="pwaInstallBtn" onclick="promptPWAInstall()" title="Install BashFlow Cloud Mobile App" style="display: none; border-color: #22d3ee; color: #22d3ee; font-weight: 600; border-radius: 6px; padding: 5px 11px; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s ease;">
+                    <span>📲</span> Install App
+                </button>
 
                 <!-- Live WhatsApp QR Topbar Quick Action -->
                 <button type="button" class="hud-btn small primary topbar-qr-btn" onclick="openLinkWhatsAppQrModal()" title="Link WhatsApp QR Code directly on Render" style="background: #10b981; color: #fff; font-weight: 700; border: none; border-radius: 6px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);">

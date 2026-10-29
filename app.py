@@ -373,6 +373,28 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             mimetype="image/vnd.microsoft.icon"
         )
 
+    # Progressive Web App (PWA) Manifest & Service Worker Routes
+    @application.route("/manifest.json")
+    @application.route("/manifest.webmanifest")
+    def pwa_manifest():
+        return send_from_directory(
+            os.path.join(application.root_path, "static"),
+            "manifest.json",
+            mimetype="application/manifest+json"
+        )
+
+    @application.route("/service-worker.js")
+    @application.route("/sw.js")
+    def pwa_service_worker():
+        response = send_from_directory(
+            os.path.join(application.root_path, "static"),
+            "sw.js" if os.path.exists(os.path.join(application.root_path, "static", "sw.js")) else os.path.join("js", "service-worker.js"),
+            mimetype="application/javascript"
+        )
+        response.headers["Service-Worker-Allowed"] = "/"
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
     # Top-Level Authentication Endpoints
     @application.route("/login", methods=["GET", "POST"])
     def top_level_login():

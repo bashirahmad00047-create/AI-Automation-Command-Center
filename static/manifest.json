@@ -1,17 +1,89 @@
 {
-  "name": "OpsFlow Cloud",
-  "short_name": "OpsFlow",
-  "description": "Enterprise AI Automation Command Center",
+  "name": "BashFlow Cloud - AI Automation Command Center",
+  "short_name": "BashFlow",
+  "description": "Enterprise AI Automation Command Center - Real-time AI agent orchestration, WhatsApp automation, and workflow intelligence.",
   "start_url": "/",
+  "scope": "/",
+  "id": "/?source=pwa",
   "display": "standalone",
-  "background_color": "#060b14",
-  "theme_color": "#060b14",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "business",
+    "productivity",
+    "utilities"
+  ],
   "icons": [
+    {
+      "src": "/static/img/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/img/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/static/img/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/img/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
     {
       "src": "/static/img/opsflow-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "WhatsApp Console",
+      "short_name": "WhatsApp",
+      "description": "Open real-time WhatsApp Web & AI Auto-Responder",
+      "url": "/#whatsapp",
+      "icons": [
+        {
+          "src": "/static/img/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "CRM Leads",
+      "short_name": "Leads",
+      "description": "View CRM Leads and Pipeline",
+      "url": "/#leads",
+      "icons": [
+        {
+          "src": "/static/img/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Workflow Automations",
+      "short_name": "Workflows",
+      "description": "Manage Automations & Triggers",
+      "url": "/#workflows",
+      "icons": [
+        {
+          "src": "/static/img/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
     }
   ]
 }
