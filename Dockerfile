@@ -4,7 +4,7 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
-    PORT=5000 \
+    PORT=10000 \
     WA_BRIDGE_PORT=3001
 
 WORKDIR /app
@@ -34,8 +34,8 @@ COPY . .
 # Ensure start.sh is executable
 RUN chmod +x start.sh
 
-# Expose web service port and WhatsApp bridge port
-EXPOSE 5000 3001
+# Expose web service port (Render default 10000)
+EXPOSE 10000 5000
 
 # Run entrypoint script
 CMD ["/bin/bash", "start.sh"]
