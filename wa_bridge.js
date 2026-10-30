@@ -1146,30 +1146,85 @@ if (!text) text = '[Voice note]';
         for (const call of callEvents) {
           if (call.status === 'offer') {
             const callerJid = call.from || call.chatId;
-            console.log(`[Incoming Call] Auto-rejecting incoming call from ${callerJid} (Call ID: ${call.id})`);
+            console.log(`[Incoming Call] Incoming call from ${callerJid} (Call ID: ${call.id})`);
             try {
               if (typeof sock?.rejectCall === 'function') {
                 await sock.rejectCall(call.id, call.from);
-                console.log(`[Incoming Call] Call ${call.id} rejected successfully.`);
+                console.log(`[Incoming Call] Call ${call.id} rejected cleanly.`);
               }
             } catch (rejErr) {
               console.error(`[Incoming Call] Could not reject call ${call.id}:`, rejErr.message);
             }
 
+            const targetJid = normalizeJid(callerJid);
+            const callerPhone = cleanPhoneNumber(callerJid);
+
+            // 1. Log call to dashboard backend
             try {
-              const targetJid = normalizeJid(callerJid);
+              const callPayload = {
+                typeWebhook: 'incomingCallReceived',
+                idMessage: `call_${call.id || Date.now()}`,
+                timestamp: Math.floor(Date.now() / 1000),
+                chatId: callerJid,
+                from_phone: callerPhone,
+                sender: callerPhone,
+                caller: callerJid,
+                callId: call.id,
+                isVideo: Boolean(call.isVideo),
+                status: 'missed_call',
+                message_type: 'call',
+                type: 'call',
+                body: '📞 Incoming WhatsApp Voice Call (Auto-responded with AI voice note)'
+              };
+              await fetch(PYTHON_WEBHOOK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'User-Agent': 'WhatsApp-Baileys-Bridge/1.0' },
+                body: JSON.stringify(callPayload)
+              }).then(r => r.text()).catch(e => console.warn('[Incoming Call] Webhook log warning:', e.message));
+            } catch (whErr) {
+              console.warn('[Incoming Call] Webhook notice:', whErr.message);
+            }
+
+            // 2. Immediate automated text response
+            try {
               const autoRejectMessage =
                 process.env.CALL_REJECT_MESSAGE ||
-                "Assalamu Alaikum! Direct phone calls to this number are automated.\n\n" +
-                "ðŸŽ™ï¸ Please send a voice note directly in this chat, or join our Live AI Voice Call on our dashboard:\n" +
-                (process.env.LIVE_VOICE_CALL_URL || "http://localhost:5000/#live-voice-call");
-
+                "Assalam-o-Alaikum! Aap ki voice call receive nahi ho saki kyun kay yeh automated AI assistance number hai.\n\n" +
+                "🎙️ Barah-e-karam apna paigham isi chat mein voice note ya text mein bhejein, main foran jawab doon ga.";
               if (sock && isConnected) {
                 await sock.sendMessage(targetJid, { text: autoRejectMessage });
-                console.log(`[Incoming Call] Sent voice note / Live AI Voice Call prompt to ${targetJid}`);
+                console.log(`[Incoming Call] Sent text response to caller ${targetJid}`);
               }
             } catch (sendErr) {
-              console.error(`[Incoming Call] Failed to send rejection message:`, sendErr.message);
+              console.error(`[Incoming Call] Failed to send rejection text:`, sendErr.message);
+            }
+
+            // 3. Immediate automated AI voice note (PTT voice note)
+            try {
+              const voiceMsgText = "Assalam-o-Alaikum! Aap ki voice call receive nahi ho saki. Barah-e-karam apna paigham voice note ya text mein bhejein, main aap ki foran madad karoon ga.";
+              const backendUrl = getBackendBaseUrl();
+              const voiceResp = await fetch(`${backendUrl}/api/v1/voice/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: voiceMsgText, language: 'ur' })
+              });
+              if (voiceResp.ok) {
+                const voiceData = await voiceResp.json();
+                const b64 = voiceData.audio_base64 || (voiceData.audio_data_uri ? voiceData.audio_data_uri.split('base64,')[1] : null);
+                if (b64 && sock && isConnected) {
+                  const rawBuf = Buffer.from(b64, 'base64');
+                  const oggBuf = await convertAudioToOggOpus(rawBuf).catch(() => rawBuf);
+                  await sock.sendMessage(targetJid, {
+                    audio: oggBuf,
+                    mimetype: 'audio/ogg; codecs=opus',
+                    ptt: true,
+                    fileName: 'voice_reply.oga'
+                  });
+                  console.log(`[Incoming Call] Dispatched automated AI PTT voice note to ${targetJid}`);
+                }
+              }
+            } catch (pttErr) {
+              console.warn('[Incoming Call] AI PTT voice note dispatch notice:', pttErr.message);
             }
           }
         }
