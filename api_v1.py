@@ -6660,7 +6660,7 @@ if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
 
 # --- BASHFLOW CLOUD: CATALOG & LOCATION AI HOOK ---
-@api_v1.route("/webhooks/whatsapp", methods=["POST"])
+@api_v1.route("/webhooks/whatsapp/catalog", methods=["POST"])
 def whatsapp_inbound_catalog_hook():
     try:
         data = request.get_json(silent=True) or {}

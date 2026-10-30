@@ -313,10 +313,11 @@ class WhatsAppService:
         cust_label = f"Customer '{customer_name.strip()}'" if customer_name and customer_name.strip() else "The customer"
         user_prompt = prompt.strip() if prompt and len(prompt.strip()) > 3 else "Please examine this image carefully. Provide a polite, helpful analysis addressing any mobile phone, screen damage, repair token, warranty card, receipt, or payment screenshot visible in the image."
 
+        user_prompt = prompt.strip() if prompt and len(prompt.strip()) > 3 else "Please examine this image carefully and provide a polite, helpful analysis."
         full_prompt = (
-            f"You are a friendly, helpful local mobile phone shop & repair assistant for {b_name} (Bashir Mobile & Telecom).\n"
+            f"You are a friendly, helpful conversational AI assistant for {b_name}.\n"
             f"{cust_label} has shared an image with the inquiry: '{user_prompt}'.\n"
-            "Analyze the contents of this image accurately (e.g. mobile model, screen damage, repair ticket, or payment receipt) and respond politely in 2-3 concise sentences in the customer's language (Roman Urdu or English). Do NOT send corporate introductory speeches. Do NOT use markdown symbols (*, #)."
+            "Analyze the contents of this image accurately and respond politely in 2-3 concise sentences in the customer's language (Roman Urdu, Urdu, or English). Do NOT send corporate introductory speeches. Do NOT use markdown symbols (*, #)."
         )
 
         # 1. Try google.generativeai SDK
@@ -1460,7 +1461,7 @@ class WhatsAppService:
             if configured_voice:
                 active_voice = configured_voice.strip()
             elif "urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str:
-                active_voice = "ur-PK-UzmaNeural" if is_arabic_script else "hi-IN-MadhurNeural"
+                active_voice = "ur-PK-UzmaNeural" if is_arabic_script else "ur-PK-AsadNeural"
             elif "pashto" in lang_str or lang_str == "ps":
                 active_voice = "ps-AF-LatifaNeural"
             elif "arabic" in lang_str or lang_str == "ar":
@@ -2781,26 +2782,16 @@ class WhatsAppService:
             trial_days = int(TRIAL_DURATION_HOURS // 24) if TRIAL_DURATION_HOURS else 2
 
             jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "03209350858"
-            jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "03209350858"
             jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "Bashir Uddin"
             kb = (
-                "Business Name: Bashir Mobile & Telecom (Local Mobile Phone Shop & Repair Lab)\n\n"
-                "CORE MOBILE SHOP OFFERINGS & SERVICES:\n"
-                "- Mobile Phone Sales: New & used PTA-approved phones (iPhone, Samsung, Vivo, Oppo, Infinix, Xiaomi/Redmi, Tecno, Realme).\n"
-                "- Mobile Repairing Services: Touch screen/display replacement, original battery replacement, panel repair, charging port fix, camera repair, water damage fix, unlocking, and software flashing.\n"
-                "- Repair Token Tracking: Every customer phone received for repair is given a token (e.g. #REP-101) so they can check status anytime on WhatsApp.\n"
-                "- 15-Digit IMEI Saving & Warranty: Every phone sold or repaired has its 15-digit IMEI recorded in the shop database for warranty verification.\n"
-                "- Mobile Accessories: Fast chargers, original cables, AirDots/AirPods, covers, and glass screen protectors.\n"
-                "- Shop Automation Bot: ONLY mention software/bot pricing if customer explicitly asks: Free ($0 trial), Starter ($29/mo or PKR 7,500), Pro ($99/mo or PKR 25,000).\n\n"
-                "PAYMENT DETAILS:\n"
-                f"- JazzCash Account: {jc_acc} (Account Title: {jc_title})\n"
-                "- Shop Counter Cash / Cash on Delivery accepted.\n\n"
-                "LOCAL SHOP ASSISTANT GUIDELINES:\n"
-                "1. Act strictly as a friendly Pakistani local mobile shop assistant.\n"
-                "2. ALWAYS start conversations naturally with 'Assalam-o-Alaikum' (e.g., 'Assalam-o-Alaikum! Bashir Mobile & Telecom mein khush amdeed. Bataiye kis mobile ya repair ke baray mein maloomat chahiye?').\n"
-                "3. NEVER send corporate introductory speeches, software pitches, or IT jargon.\n"
-                "4. ONLY mention software/bot pricing if customer explicitly asks about software prices or plans.\n"
-                "5. For mobile shop questions (repair rates, accessories, stock, IMEI tracking, JazzCash), answer directly without canned intros in 1 to 3 friendly sentences.\n"
+                f"Business Name: {b_name or 'BashFlow AI'}\n\n"
+                "ASSISTANT IDENTITY & CONVERSATIONAL GUIDELINES:\n"
+                "1. Act as a friendly, intelligent, helpful conversational AI assistant on WhatsApp.\n"
+                "2. Speak naturally and warmly in conversational Roman Urdu, natural Urdu, or English.\n"
+                "3. If the customer greets you or says 'Kaise ho ap', 'Salam', or similar, answer warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
+                "4. Answer questions on any general topic directly, naturally, and politely in 1 to 3 friendly sentences without markdown formatting (*, #).\n"
+                "5. Only mention pricing if the customer explicitly asks about software or bot subscription plans (Starter PKR 7,500/mo, Pro PKR 25,000/mo, 2-day free trial; JazzCash: 03209350858 Bashir Uddin).\n"
+                "6. NEVER output robotic corporate introductory speeches.\n"
             )
             return kb
 
@@ -3037,39 +3028,37 @@ class WhatsAppService:
             return (
                 "LANGUAGE REQUIREMENT (CRITICAL - NATURAL CONVERSATIONAL ROMAN URDU / URDU):\n"
                 f"- The customer messaged in Pashto script: '{clean_text}'.\n"
-                "- Reply in simple, warm, conversational Roman Urdu (or natural Urdu) sounding like a polite local Pakistani mobile shop assistant.\n"
-                "- Speak like a friendly shop owner: e.g. 'Walaikum Assalam bhai! Bashir Mobile par khush-amdeed, batayein kis phone ya repair ke hawale se madad chahiye?'.\n"
+                "- Reply in simple, warm, conversational Roman Urdu (or natural Urdu) sounding like a polite, friendly assistant.\n"
                 "- Keep sentences simple, smooth, and conversational."
             )
         elif fmt == "roman_pashto":
             return (
                 "LANGUAGE REQUIREMENT (CRITICAL - CONVERSATIONAL ROMAN URDU / ROMAN PASHTO):\n"
                 f"- The customer messaged in Roman Pashto: '{clean_text}'.\n"
-                "- Reply in simple, warm, conversational Roman Urdu sounding like a helpful Pakistani mobile shopkeeper.\n"
-                "- E.g. 'Assalam-o-Alaikum bhai! Main aapki madad ke liye hazir hoon, batayein kis mobile ya repair ka masla hai?'.\n"
+                "- Reply in simple, warm, conversational Roman Urdu sounding like a helpful, friendly assistant.\n"
                 "- Avoid complex corporate vocabulary."
             )
         elif fmt == "urdu_arabic":
             return (
                 "LANGUAGE REQUIREMENT (CRITICAL - CONVERSATIONAL URDU SCRIPT):\n"
                 f"- The customer messaged in Urdu script (اردو): '{clean_text}'.\n"
-                "- Formulate your entire reply in natural, polite Urdu as a local mobile phone shop assistant.\n"
-                "- Use warm phrasing: e.g. 'السلام علیکم بھائی! بشیر موبائل اینڈ ٹیلی کام پر خوش آمدید، بتائیے کس موبائل ماڈل، سامان یا مرمت کے بارے میں جاننا چاہتے ہیں؟'.\n"
+                "- Formulate your entire reply in natural, polite Urdu as a friendly assistant.\n"
+                "- Use warm phrasing: e.g. 'السلام علیکم! بتائیے میں آپ کی کیا مدد کر سکتا ہوں؟'.\n"
                 "- Avoid robotic corporate phrases."
             )
         elif fmt == "roman_urdu":
             return (
                 "LANGUAGE REQUIREMENT (CRITICAL - CONVERSATIONAL ROMAN URDU):\n"
                 f"- The customer messaged in Roman Urdu (Latin alphabet): '{clean_text}'.\n"
-                "- Formulate your entire reply in natural, friendly, colloquial Roman Urdu sounding 100% like a polite Pakistani mobile shop owner on WhatsApp.\n"
-                "- Use natural phrasing: e.g. 'Alhamdulillah main theek hoon bhai! Bataiye, dukan ke liye kis cheez ki maloomat chahiye ya koi mobile repair/stock ka masla hai?'.\n"
+                "- Formulate your entire reply in natural, friendly, colloquial Roman Urdu sounding 100% natural and polite on WhatsApp.\n"
+                "- Use natural phrasing: e.g. 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
                 "- Avoid robotic corporate clichés, disclaimers, or IT jargon."
             )
         elif fmt == "english":
             return (
                 "LANGUAGE REQUIREMENT (CRITICAL - ENGLISH):\n"
                 f"- The customer messaged in English: '{clean_text}'.\n"
-                "- You MUST formulate your entire reply in clear, friendly English as a local mobile phone shop and repair assistant."
+                "- You MUST formulate your entire reply in clear, friendly English as a helpful assistant."
             )
         else:
             return (
@@ -3077,7 +3066,7 @@ class WhatsAppService:
                 f"- The customer messaged in an unspecified language (defaulting to Roman Urdu): '{clean_text}'.\n"
                 "- You MUST formulate your entire reply in natural, conversational Roman Urdu (Latin script Urdu).\n"
                 "- Do NOT answer in English by default.\n"
-                "- Use natural Roman Urdu phrasing: e.g. 'Salam bhai! Bashir Mobile par khush-amdeed, main aapki kya madad kar sakta hoon?'."
+                "- Use natural Roman Urdu phrasing: e.g. 'Salam! Khush-amdeed, main aapki kya madad kar sakta hoon?'."
             )
     @classmethod
     def call_gemini_ai(
@@ -3123,16 +3112,16 @@ class WhatsAppService:
         lang_directive = cls.get_language_prompt_directive(lang_info, clean_text)
         pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
         prompt = (
-            f"You are a friendly, highly intelligent, local mobile phone shop & repair assistant for {b_name} (Bashir Mobile & Telecom).\n"
+            f"You are a friendly, highly intelligent conversational AI assistant for {b_name}.\n"
             f"Current Real-World Time: {pkt_time_str}.\n"
             f"{sys_instruct}{history_section}\n\n"
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"LOCAL MOBILE SHOP ASSISTANT PROTOCOL:\n"
-            f"0. NATURAL HUMAN GREETING - ALWAYS START WITH 'ASSALAM-O-ALAIKUM': Always start conversations naturally with 'Assalam-o-Alaikum' (e.g. 'Assalam-o-Alaikum! Bashir Mobile & Telecom mein khush amdeed. Bataiye kis mobile ya repair ke baray mein maloomat chahiye?'). If customer says 'Kaisa ho aap' or 'Salam', reply: 'Assalam-o-Alaikum! Alhamdulillah main theek hoon, bataiye dukan ke liye kis cheez ki maloomat chahiye?'.\n"
-            f"1. STRICT RULE - NO CORPORATE INTRO OR SOFTWARE PITCH: NEVER introduce yourself with corporate slogans like 'BashFlow Cloud is an enterprise AI automation command center...' and NEVER mention software packages ($0, $29, $99, Starter, Pro) unless the customer EXPLICITLY asks about software prices or bot subscription plans.\n"
-            f"2. DYNAMIC MOBILE SHOP ASSISTANT: Chat dynamically like a friendly, helpful local Pakistani mobile shopkeeper. Answer what the customer asked directly in 1 to 3 concise, friendly sentences in conversational Roman Urdu (phone models, prices, display/battery repairs, token status, accessories, 15-digit IMEI tracking, or JazzCash 03209350858 Bashir Uddin).\n"
-            f"3. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences in conversational Roman Urdu. No asterisks, hashtags, or bullet symbols."
+            f"CONVERSATIONAL AI ASSISTANT PROTOCOL:\n"
+            f"0. NATURAL HUMAN GREETING: If customer says 'Kaise ho ap', 'Kaisa ho aap', or greets you, reply naturally: 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
+            f"1. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, smart, general-purpose conversational partner. Answer what the customer asked directly and intelligently in 1 to 3 concise, friendly sentences in conversational Roman Urdu (or English/Urdu matching the user's language). Do NOT impose any mobile shop restrictions.\n"
+            f"2. NO ROBOTIC CORPORATE PITCHES: Answer the customer's actual question naturally without unsolicited software pitches.\n"
+            f"3. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences. No asterisks, hashtags, or bullet symbols."
         )
 
         configured_model = cls.get_gemini_model_name(organization_id=organization_id)
@@ -3340,16 +3329,16 @@ class WhatsAppService:
         b_name = cls.get_tenant_business_name(organization_id=organization_id)
         pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
         user_prompt = (
-            f"You are a friendly, highly intelligent, local mobile phone shop & repair assistant for {b_name} (Bashir Mobile & Telecom).\n"
+            f"You are a friendly, highly intelligent conversational AI assistant for {b_name}.\n"
             f"Current Real-World Time: {pkt_time_str}.\n\n"
             f"{sys_instruct}{history_section}\n\n"
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"LOCAL MOBILE SHOP ASSISTANT PROTOCOL:\n"
-            f"0. NATURAL HUMAN GREETING - ALWAYS START WITH 'ASSALAM-O-ALAIKUM': Always start conversations naturally with 'Assalam-o-Alaikum' (e.g. 'Assalam-o-Alaikum! Bashir Mobile & Telecom mein khush amdeed. Bataiye kis mobile ya repair ke baray mein maloomat chahiye?'). If customer says 'Kaisa ho aap' or 'Salam', reply: 'Assalam-o-Alaikum! Alhamdulillah main theek hoon, bataiye dukan ke liye kis cheez ki maloomat chahiye?'.\n"
-            f"1. STRICT RULE - NO CORPORATE INTRO OR SOFTWARE PITCH: NEVER introduce yourself with corporate slogans like 'BashFlow Cloud is an enterprise AI automation command center...' and NEVER mention software packages ($0, $29, $99, Starter, Pro) unless the customer EXPLICITLY asks about software prices or bot subscription plans.\n"
-            f"2. DYNAMIC MOBILE SHOP ASSISTANT: Chat dynamically like a friendly, helpful local Pakistani mobile shopkeeper. Answer what the customer asked directly in 1 to 3 concise, friendly sentences in conversational Roman Urdu (phone models, prices, display/battery repairs, token status, accessories, 15-digit IMEI tracking, or JazzCash 03209350858 Bashir Uddin).\n"
-            f"3. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences in conversational Roman Urdu. No asterisks, hashtags, or bullet symbols."
+            f"CONVERSATIONAL AI ASSISTANT PROTOCOL:\n"
+            f"0. NATURAL HUMAN GREETING: If customer says 'Kaise ho ap', 'Kaisa ho aap', or greets you, reply naturally: 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
+            f"1. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, smart, general-purpose conversational partner. Answer what the customer asked directly and intelligently in 1 to 3 concise, friendly sentences in conversational Roman Urdu (or English/Urdu matching the user's language). Do NOT impose any mobile shop restrictions.\n"
+            f"2. NO ROBOTIC CORPORATE PITCHES: Answer the customer's actual question naturally without unsolicited software pitches.\n"
+            f"3. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences. No asterisks, hashtags, or bullet symbols."
         )
 
         configured_groq_model = (
@@ -3481,11 +3470,11 @@ class WhatsAppService:
         import urllib.parse
 
         sys_content = (
-            "You are a friendly, smart, local mobile phone shop & repair assistant for Bashir Mobile & Telecom.\n"
+            "You are a friendly, smart, general-purpose conversational AI assistant.\n"
             "STRICT RULES:\n"
-            "1. NATURAL HUMAN GREETING: ALWAYS start conversations naturally with 'Assalam-o-Alaikum' (e.g. 'Assalam-o-Alaikum! Bashir Mobile & Telecom mein khush amdeed. Bataiye kis mobile ya repair ke baray mein maloomat chahiye?').\n"
-            "2. NO CORPORATE INTRO OR SOFTWARE PITCH: NEVER introduce yourself with corporate slogans like 'BashFlow Cloud is an enterprise AI automation command center...' and NEVER mention software packages ($0, $29, $99, Starter, Pro) unless the customer EXPLICITLY asks about software prices or bot subscription plans.\n"
-            "3. DYNAMIC MOBILE SHOP ASSISTANT: Chat dynamically like a friendly, helpful local Pakistani mobile shopkeeper answering what the customer asked directly in 1 to 3 friendly sentences in conversational Roman Urdu.\n"
+            "1. NATURAL HUMAN GREETING: If customer greets or asks 'Kaise ho ap', reply naturally: 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
+            "2. GENERAL-PURPOSE & DIRECT: Answer any general topic or question directly, naturally, and politely in 1 to 3 friendly sentences in conversational Roman Urdu.\n"
+            "3. NO ROBOTIC CORPORATE PITCHES: Never give unsolicited corporate speeches or software pitches.\n"
             "4. Pure clean text: No asterisks, hashtags, or bullet points."
         )
         if system_prompt:
@@ -3541,14 +3530,13 @@ class WhatsAppService:
         cls,
         message_body: str,
         lang_fmt: str,
-        org_name: str = "Bashir Mobile & Telecom",
+        org_name: str = "BashFlow AI",
         sender_name: Optional[str] = None,
         is_voice: bool = False,
         intent: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> str:
-        """Dynamically generates an authentic, helpful conversational response strictly as a local mobile phone shop
-        and repair assistant for Bashir Mobile & Telecom.
+        """Dynamically generates an authentic, helpful conversational response as a smart general-purpose AI assistant.
         Never returns corporate introductory speeches or unsolicited software subscription pricing.
         """
         clean_text = str(message_body or "").strip().lower()
@@ -3561,69 +3549,16 @@ class WhatsAppService:
             else:
                 cust_greeting = f" {s_name} bhai"
         else:
-            cust_greeting = " bhai"
+            cust_greeting = ""
 
-        # Gather previous assistant replies from conversation history to prevent repetition
-        prev_replies = []
-        if conversation_history:
-            for item in conversation_history:
-                if isinstance(item, dict) and item.get("role") in ("Assistant", "model", "system"):
-                    c = item.get("content", "").strip().lower()
-                    if c:
-                        prev_replies.append(c)
-
-        def has_already_sent(*keywords) -> bool:
-            for kw in keywords:
-                kw_low = kw.lower()
-                for pr in prev_replies:
-                    if kw_low in pr or pr in kw_low:
-                        return True
-            return False
-
-        # Domain 1: Casual Greetings ("Kaisa ho AP sir", "Salam", etc.)
+        # Domain 1: Casual Greetings ("Kaise ho ap", "Salam", "Kia haal", etc.)
         is_greeting = any(w in clean_text for w in (
-            "kaisa ho", "kaise ho", "kese ho", "kaisa he", "kaisay ho", "kaise hain", "kese hain",
+            "kaisa ho", "kaise ho", "kese ho", "kaisa he", "kaisay ho", "kaise hain", "kese hain", "kai's ho", "kais ho",
             "kya haal", "kia hal", "kya hal", "kia haal", "hal chaal", "haal chal",
             "salam", "assalam", "aoa", "slam", "hello", "hi", "hey"
-        )) and not any(w in clean_text for w in ("repair", "screen", "battery", "imei", "03209350858", "starter", "plan", "package", "rate", "price", "stock"))
+        )) and not any(w in clean_text for w in ("starter", "plan", "package", "price", "rate", "software", "bot"))
 
-        # Domain 2: Mobile Shop Usage ("Mara mobile shop k Liya Kaisa Kam karaga ya")
-        is_mobile_shop_query = any(w in clean_text for w in (
-            "mobile shop", "mobile dukan", "shop k liya", "shop ke liye", "phone shop",
-            "mara mobile", "mera mobile", "meri shop", "mera shop", "mobile ka kaam", "mobile store",
-            "mobile business", "dukan k liya", "dukan ke liye", "kaisa kam karaga", "kaisa kaam karega"
-        ))
-
-        # Domain 3: 15-Digit IMEI Number Saving & Tracking
-        is_imei_query = any(w in clean_text for w in (
-            "imei", "imei number", "imei saving", "imei tracking", "imei record"
-        ))
-
-        # Domain 4: Mobile Repairing & Token Status
-        is_repair_query = any(w in clean_text for w in (
-            "repair", "repairing", "fault", "display", "panel", "battery", "touch", "charging",
-            "sahi karna", "theek karna", "kharaab", "kharab", "token", "repair status", "#rep"
-        ))
-
-        # Domain 5: Mobile Accessories
-        is_accessories_query = any(w in clean_text for w in (
-            "accessories", "charger", "fast charger", "cable", "data cable", "airpod", "airpods",
-            "airdot", "airdots", "handsfree", "earphone", "cover", "protector", "glass"
-        ))
-
-        # Domain 6: Phone Stock & Live Rates
-        is_stock_query = any(w in clean_text for w in (
-            "stock", "rate list", "mobile rate", "phone price", "iphone", "samsung",
-            "vivo", "oppo", "infinix", "redmi", "xiaomi", "tecno", "dastiyab", "available"
-        ))
-
-        # Domain 7: JazzCash & Payment Details
-        is_jazzcash_query = any(w in clean_text for w in (
-            "jazzcash", "jazz cash", "account", "03209350858", "bashir uddin",
-            "paise", "bhejna", "bhejoon", "payment method", "pay kaise"
-        ))
-
-        # Domain 8: Explicit Software Pricing / Plans (ONLY if explicitly asking about software / bot / app subscription)
+        # Domain 2: Explicit Software Pricing / Plans (ONLY if explicitly asking about software / bot subscription)
         is_software_pricing = any(w in clean_text for w in (
             "software price", "software rate", "software package", "software plan", "software kitne",
             "bot price", "bot package", "bot rate", "bot plan", "bot kitne",
@@ -3632,148 +3567,60 @@ class WhatsAppService:
             "software kaisa milega", "software lena hai", "bot lena hai"
         )) or (("plan" in clean_text or "package" in clean_text) and any(w in clean_text for w in ("software", "bot", "system", "app", "subscription")))
 
-        # Domain 9: Shop Support / Masla
-        is_support_query = any(w in clean_text for w in (
-            "masla", "madad", "help", "problem", "ticket", "error", "bug", "support"
-        )) and not (is_repair_query or is_imei_query)
+        # Domain 3: Payment Details
+        is_payment_query = any(w in clean_text for w in (
+            "jazzcash", "jazz cash", "account number", "03209350858", "bashir uddin",
+            "paise", "bhejna", "bhejoon", "payment method", "pay kaise", "kahan bhejo"
+        ))
 
         if lang_fmt == "roman_urdu":
             if is_greeting:
-                if not has_already_sent("alhamdulillah main theek hoon"):
-                    return f"Assalam-o-Alaikum! Alhamdulillah main theek hoon{cust_greeting}! Bataiye, dukan ke liye kis cheez ki maloomat chahiye ya koi mobile repair/stock ka masla hai?"
-                elif not has_already_sent("main bilkul theek hoon"):
-                    return f"Assalam-o-Alaikum{cust_greeting}! Main bilkul theek hoon. Batayein aaj dukan ke liye kis mobile model, accessories ya repair ke bare mein maloomat chahiye?"
-                else:
-                    return f"Assalam-o-Alaikum{cust_greeting}! Main aapki madad ke liye hazir hoon."
-
+                return f"Walaikum Assalam{cust_greeting}! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?"
             elif is_software_pricing:
                 return (
-                    f"Assalam-o-Alaikum{cust_greeting}! Agar aap mobile shop ke liye WhatsApp automation bot lena chahte hain to verified packages yeh hain:\n"
+                    f"Assalam-o-Alaikum{cust_greeting}! WhatsApp automation bot ke verified packages yeh hain:\n"
                     "- Starter Plan: PKR 7,500/month ($29) (WhatsApp bot, customer auto-reply, webhooks)\n"
-                    "- Professional Plan: PKR 25,000/month ($99) (Full AI auto-responder, voice notes, repair tokens, IMEI tracking)\n"
-                    "Har package ke sath 2-Day Free Trial bilkul muft hai. Payment aap JazzCash (03209350858, Title: Bashir Uddin) par kar sakte hain."
+                    "- Professional Plan: PKR 25,000/month ($99) (Full AI auto-responder, voice notes, multi-tenant)\n"
+                    "2-Day Free Trial bilkul muft hai. Payment aap JazzCash (03209350858, Title: Bashir Uddin) par kar sakte hain."
                 )
-
-            elif is_mobile_shop_query:
-                if not has_already_sent("3 baray kaam asaan", "daily phone stock"):
-                    return (
-                        f"Assalam-o-Alaikum{cust_greeting}! Mobile shop ke liye yeh system 3 baray kaam asaan karta hai: "
-                        "(1) Customer Auto-Reply: Customers ko WhatsApp par 24/7 live mobile stock aur rate list foran milti hai. "
-                        "(2) Repair Status Tracking: Repair ke liye aye phones ka unique token number (#REP-101) generate hota hai taake customer khud status check kar sakay. "
-                        "(3) IMEI Saving: Khareeday ya bechay gaye phones ka 15-digit IMEI number customer ke phone number ke sath save rehta hai taake warranty clear rahe. "
-                        "Aapka shop kis city mein hai aur aap daily kitne customers handle karte hain?"
-                    )
-                else:
-                    return (
-                        f"Assalam-o-Alaikum{cust_greeting}! Mobile shop par rozana rates batane, repair status check karne aur 15-digit IMEI record rakhne ka kaam yeh 100% automate kar deta hai."
-                    )
-
-            elif is_imei_query:
-                if not has_already_sent("15-digit imei number"):
-                    return (
-                        f"Assalam-o-Alaikum{cust_greeting}! Dukan par sale ya repair hone wale har mobile ka 15-digit IMEI number customer ke phone number ke sath system mein save ho jata hai. "
-                        "Customer jab bhi apna IMEI ya phone number WhatsApp par bhejega, warranty, purchase date aur repair record foran saamne aa jata hai taake fraud se mukammal hifazat rahe."
-                    )
-                else:
-                    return (
-                        f"Assalam-o-Alaikum! 15-digit IMEI tracking se aapke shop ka record 100% digital aur fraud-proof rehta hai. Chori ya warranty verification ke waqt aik click par poora phone record check ho jata hai."
-                    )
-
-            elif is_repair_query:
-                if not has_already_sent("display screen, panel aur battery"):
-                    return (
-                        f"Assalam-o-Alaikum{cust_greeting}! Hamare paas tamam models (iPhone, Samsung, Vivo, Oppo, Infinix, Xiaomi) ki original display screen, panel aur battery replacement ki suhoolat dastiyab hai. "
-                        "Har repair hone wale phone ko unique token number (maslan #REP-101) milta hai taake customer WhatsApp par live repair status jaan sake. "
-                        "Agar aapka mobile shop par jama hai to token number batayein, ya model batayein main repair cost aur time bata deta hoon."
-                    )
-                else:
-                    return (
-                        f"Assalam-o-Alaikum! Repair status janne ke liye apna repair token number (maslan #REP-101) yahan likh kar bhejein, system foran update bata dega."
-                    )
-
-            elif is_accessories_query:
+            elif is_payment_query:
                 return (
-                    f"Assalam-o-Alaikum{cust_greeting}! Hamare paas original fast chargers, Type-C cables, AirPods/AirDots, silicon covers aur 9D glass protectors wholesale rates par dastiyab hain. "
-                    "Aapko kis accessory ki zaroorat hai?"
-                )
-
-            elif is_stock_query:
-                return (
-                    f"Assalam-o-Alaikum{cust_greeting}! Hamare paas iPhone, Samsung, Vivo, Oppo, Infinix aur Redmi ke new aur clean used PTA-approved stock dastiyab hai. "
-                    "Aapko kis model ka live rate ya condition janni hai, model name batayein main foran stock aur rate bata deta hoon."
-                )
-
-            elif is_jazzcash_query:
-                return (
-                    f"Assalam-o-Alaikum{cust_greeting}! JazzCash payment ke verified details yeh hain:\n"
+                    f"Assalam-o-Alaikum{cust_greeting}! JazzCash payment details yeh hain:\n"
                     "- JazzCash Account: 03209350858\n"
                     "- Account Title: Bashir Uddin\n"
-                    "Raqam transfer karne ke baad screenshot ya TID (Transaction ID) yahan share kar dein."
+                    "Raqam transfer karne ke baad screenshot ya TID yahan share kar dein."
                 )
-
-            elif is_support_query:
-                return (
-                    f"Assalam-o-Alaikum{cust_greeting}! Agar aapko shop management ya phone repair ke hawale se koi issue pesh aa raha hai to tafseel share karein, hum foran hal kar dete hain."
-                )
-
             else:
-                # Progressive Fallbacks - Strictly Local Mobile Shop Assistant Starting with Assalam-o-Alaikum
-                if not has_already_sent("bashir mobile & telecom mein khush amdeed"):
-                    return (
-                        f"Assalam-o-Alaikum{cust_greeting}! Bashir Mobile & Telecom mein khush amdeed. "
-                        "Bataiye kis mobile ya repair ke baray mein maloomat chahiye?"
-                    )
-                elif not has_already_sent("token number ya imei"):
-                    return (
-                        f"Assalam-o-Alaikum{cust_greeting}! Agar aapka mobile hamare paas repair ke liye jama hai to aap token number bata dein, ya agar naya mobile lena hai to model name batayein, main foran check kar ke bata deta hoon."
-                    )
-                else:
-                    return (
-                        f"Assalam-o-Alaikum{cust_greeting}! Main aapki madad ke liye hazir hoon. Kaunsa mobile model ya repair status check karna hai?"
-                    )
+                return f"Assalam-o-Alaikum{cust_greeting}! Main aap ki baat samajh raha hoon. Batayein main aap ki kya madad kar sakta hoon?"
 
         elif lang_fmt == "urdu_arabic":
             if is_greeting:
-                return f"الحمدللہ میں بالکل ٹھیک ہوں! بتائیے، دکان کے لیے کس موبائل ماڈل، سامان یا مرمت (ریپئرنگ) کے حوالے سے معلومات درکار ہیں؟"
-            elif is_mobile_shop_query or is_imei_query:
-                return "جی بالکل! ہماری دکان پر موبائل فونز (نئے اور استعمال شدہ)، اسکرین اور بیٹری ریپئرنگ، اور 15 ہندسی IMEI وارنٹی ریکارڈ کی مکمل سہولت موجود ہے۔"
-            elif is_repair_query:
-                return "ہمارے پاس تمام موبائل ماڈلز کی اوریجنل اسکرین، پینل اور بیٹری کی تبدیلی دستیاب ہے۔ اگر فون دکان پر جمع ہے تو ٹوکن نمبر بتائیں، ہم فوری اسٹیٹس بتا دیتے ہیں۔"
-            elif is_jazzcash_query:
+                return "وعلیکم السلام! الحمدللہ میں بالکل ٹھیک ہوں۔ آپ سنائیں آپ کیسے ہیں؟ میں آپ کی کیا مدد کر سکتا ہوں؟"
+            elif is_payment_query:
                 return "جاز کیش اکاؤنٹ کی تفصیلات:\n- اکاؤنٹ نمبر: 03209350858\n- اکاؤنٹ ٹائٹل: بشیر الدین (Bashir Uddin)\nرقم بھیج کر اسکرین شاٹ واٹس ایپ پر شیئر کریں۔"
             elif is_software_pricing:
                 return "واٹس ایپ آٹومیشن بوٹ کے پیکجز:\n- اسٹارٹر پلان: PKR 7,500 ($29) ماہانہ\n- پروفیشنل پلان: PKR 25,000 ($99) ماہانہ\nادائیگی: JazzCash (03209350858 - بشیر الدین)۔"
             else:
-                return "بشیر موبائل اینڈ ٹیلی کام پر خوش آمدید! ہمارے پاس نئے اور استعمال شدہ موبائلز، اسکرین و بیٹری ریپئرنگ، اور سامان دستیاب ہے۔ فرمائیے آپ کی کیا خدمت کر سکتے ہیں؟"
+                return "وعلیکم السلام! میں آپ کی مدد کے لیے حاضر ہوں۔ فرمائیے آپ کیا جاننا چاہتے ہیں؟"
 
         elif lang_fmt in ("pashto_arabic", "roman_pashto"):
             if is_greeting:
-                return "Alhamdulillah za theek yam! Dukan da para sa maloomat ghwarai ya da mobile repair/stock masla da?"
-            elif is_jazzcash_query:
+                return "Walaikum Assalam! Alhamdulillah za theek yam, taso kheryat sara yai? Za staso sa marasta kawale sham?"
+            elif is_payment_query:
                 return "JazzCash Account: 03209350858, Title: Bashir Uddin. Paise transfer k aw screenshot share kra."
             else:
-                return "Bashir Mobile & Telecom ta khush amdeed! Zamung sara new au used PTA mobiles, display/battery repair au accessories shata. Taso ta sa maloomat pakaar de?"
+                return "Walaikum Assalam! Za staso pa khabara pohegam. Taso ta sa maloomat pakaar de?"
 
         else:
             # Default: English
             if is_greeting:
-                return f"Hello! Doing great, thank you! How can I assist you with mobile phones, repair services, or accessories today?"
-            elif is_mobile_shop_query:
-                return (
-                    "At Bashir Mobile & Telecom, we provide: (1) Instant WhatsApp phone stock and price inquiries, "
-                    "(2) Repair token tracking (#REP-101) for live phone status, and (3) 15-digit IMEI logging for customer warranty and fraud protection. "
-                    "How can we help your shop today?"
-                )
-            elif is_repair_query:
-                return "We offer original display screen, battery, and panel replacements for iPhone, Samsung, Vivo, Oppo, Infinix, and Xiaomi. Please share your phone model or repair token number for instant status."
-            elif is_imei_query:
-                return "Every phone sold or repaired has its 15-digit IMEI saved with the customer phone number for instant warranty verification and anti-theft protection."
-            elif is_jazzcash_query:
-                return "JazzCash Payment Details:\n- Account: 03209350858\n- Title: Bashir Uddin\nPlease share the transaction screenshot after payment."
+                return f"Hello{cust_greeting}! I am doing great, thank you! How are you doing today, and how can I assist you?"
             elif is_software_pricing:
-                return "Our mobile shop WhatsApp automation plans: Starter Plan $29/mo (PKR 7,500) and Professional Plan $99/mo (PKR 25,000) with a 2-day free trial. JazzCash: 03209350858 (Bashir Uddin)."
+                return "Our WhatsApp automation plans: Starter Plan $29/mo (PKR 7,500) and Professional Plan $99/mo (PKR 25,000) with a 2-day free trial. JazzCash: 03209350858 (Bashir Uddin)."
+            elif is_payment_query:
+                return "Payment details: JazzCash Account 03209350858, Title: Bashir Uddin. Please share transaction screenshot once sent."
             else:
-                return "Welcome to Bashir Mobile & Telecom! We provide new & used PTA-approved phones, original accessories, expert display/battery repair, and IMEI tracking. How can we help you today?"
+                return f"Hello{cust_greeting}! I am here to help. How can I assist you today?"
 
 
     @classmethod
@@ -3828,7 +3675,7 @@ class WhatsAppService:
             route_dept = "Support"
 
         # Resolve organization brand name
-        org_name = "Bashir Mobile & Telecom"
+        org_name = cls.get_tenant_business_name(organization_id=organization_id)
         if organization_id and has_app_context():
             org = db.session.get(Organization, organization_id)
             if org and org.name:
@@ -3864,10 +3711,7 @@ class WhatsAppService:
             elif lang_fmt == "urdu_arabic":
                 media_reply = "شکریہ! آپ کی تصویر موصول ہو گئی ہے۔ OpsFlow Cloud کی ٹیکنیکل ٹیم جلد اس کا جائزہ لے گی۔ اگر کوئی سوال ہے تو بتائیں۔"
             elif lang_fmt == "roman_urdu":
-                media_reply = (
-                    "Shukriya! Aapki image receive ho gayi hai. Hamari mobile shop team isay dekh kar foran guide karegi. "
-                    "Is dauran agar kisi phone model, repair token ya saman ke bare mein poochna ho to batayein!"
-                )
+                media_reply = "Shukriya! Aapki image receive ho gayi hai. Hamari team isay dekh kar foran guide karegi. Agar koi specific sawal ho to batayein!"
             else:
                 media_reply = (
                     "Thank you! We have received your screenshot/image (image receive confirmed). Our technical team is reviewing it. "
@@ -3979,7 +3823,7 @@ class WhatsAppService:
             elif lang_fmt == "urdu_arabic":
                 media_reply = "خوش آمدید! OpsFlow Cloud میں آپ کا خیر مقدم ہے۔ میں آپ کی کیا مدد کر سکتا ہوں؟"
             elif lang_fmt == "roman_urdu":
-                media_reply = "Ji bilkul! Bashir Mobile & Telecom par khush-amdeed! Bataiye dukan ke liye kis mobile model, accessories ya repair ke bare mein janna chahte hain?"
+                media_reply = "Ji bilkul! Main aap ki madad ke liye hazir hoon. Batayein aap kya janna chahte hain?"
             else:
                 media_reply = "Welcome to OpsFlow Cloud! How can I assist you with automation, alerts, or pricing today?"
             return {
@@ -5561,6 +5405,23 @@ class WhatsAppService:
             status = data.get("status") or type_webhook
             if msg_id and status:
                 cls.update_message_status(msg_id, status)
+            return messages
+
+        if type_webhook in ("incomingCall", "incomingCallReceived", "call"):
+            caller_phone = cls.format_phone_number(data.get("from_phone") or data.get("from") or data.get("caller") or "")
+            call_id = data.get("idMessage") or data.get("callId") or f"call_{int(time.time())}"
+            messages.append({
+                "message_id": call_id,
+                "from_phone": caller_phone,
+                "chat_id": f"{caller_phone}@s.whatsapp.net" if caller_phone else "",
+                "sender_name": data.get("senderName") or caller_phone or "Incoming WhatsApp Caller",
+                "recipient_phone_id": "system",
+                "display_phone_number": "System Line",
+                "timestamp": data.get("timestamp") or int(time.time()),
+                "message_type": "call",
+                "body": data.get("body") or "📞 Incoming WhatsApp Voice Call (Auto-responded with AI voice note)",
+                "raw": data
+            })
             return messages
 
         if type_webhook != "incomingMessageReceived":

@@ -75,10 +75,9 @@ class FourProductionArchitectVerificationsTestCase(unittest.TestCase):
         )
         auto_reply = auto_resp.get("reply_body", "")
 
-        # Must contain mobile shop domain intelligence
-        self.assertIn("mobile shop", fallback_reply.lower())
-        self.assertTrue("repair" in fallback_reply.lower() or "imei" in fallback_reply.lower())
-        self.assertTrue("mobile shop" in auto_reply.lower() or "repair" in auto_reply.lower())
+        # Must NOT contain old forced shop templates or generic paragraphs
+        self.assertNotIn("bashir mobile & telecom mein khush amdeed", fallback_reply.lower())
+        self.assertNotIn("bashir mobile & telecom mein khush amdeed", auto_reply.lower())
 
         # Must NOT be the old generic canned paragraph
         old_generic_snippet = "bashflow cloud ek powerful enterprise ai automation command center hai. hum provide karte hain: (1) 24/7 whatsapp ai auto-responder"
@@ -129,7 +128,7 @@ class FourProductionArchitectVerificationsTestCase(unittest.TestCase):
             # Verify outbound audio message was dispatched
             self.assertTrue(mock_send_file.called)
             call_kwargs = mock_send_file.call_args[1]
-            self.assertIn("data:audio/mpeg;base64,", call_kwargs.get("media_url", ""))
+            self.assertTrue(call_kwargs.get("media_url", "").startswith("data:audio/"))
             self.assertTrue(call_kwargs.get("ptt"))
 
             # Verify saved record in DB has media_url populated
