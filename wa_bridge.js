@@ -25,6 +25,7 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
   downloadMediaMessage,
+  downloadContentFromMessage,
   normalizeMessageContent,
   extractMessageContent,
   Browsers
@@ -929,20 +930,23 @@ async function startWhatsAppBridge() {
             // 3. Download media and convert directly to a Base64 Data URL
             try {
               let buffer = null;
+              // 1. Direct stream decrypt via downloadContentFromMessage (Official Baileys method)
               try {
-                buffer = await downloadMediaMessage(
-                  msg,
-                  'buffer',
-                  {},
-                  {
-                    logger: pino({ level: 'silent' }),
-                    reuploadRequest: sock?.updateMediaMessage
-                  }
-                );
-              } catch (_) {
+                const stream = await downloadContentFromMessage(audioMsg, 'audio');
+                const chunks = [];
+                for await (const chunk of stream) {
+                  chunks.push(chunk);
+                }
+                buffer = Buffer.concat(chunks);
+              } catch (directDlErr) {
+                console.warn('[Direct Media Stream Notice]:', directDlErr.message);
+              }
+
+              // 2. Fallback to downloadMediaMessage
+              if (!buffer || buffer.length === 0) {
                 try {
                   buffer = await downloadMediaMessage(
-                    { key: msg.key, message: unwrappedMsg },
+                    msg,
                     'buffer',
                     {},
                     {
@@ -950,10 +954,10 @@ async function startWhatsAppBridge() {
                       reuploadRequest: sock?.updateMediaMessage
                     }
                   );
-                } catch (_2) {
+                } catch (_) {
                   try {
                     buffer = await downloadMediaMessage(
-                      { key: msg.key, message: { audioMessage: audioMsg } },
+                      { key: msg.key, message: unwrappedMsg },
                       'buffer',
                       {},
                       {
@@ -961,24 +965,36 @@ async function startWhatsAppBridge() {
                         reuploadRequest: sock?.updateMediaMessage
                       }
                     );
-                  } catch (_3) {}
+                  } catch (_2) {
+                    try {
+                      buffer = await downloadMediaMessage(
+                        { key: msg.key, message: { audioMessage: audioMsg } },
+                        'buffer',
+                        {},
+                        {
+                          logger: pino({ level: 'silent' }),
+                          reuploadRequest: sock?.updateMediaMessage
+                        }
+                      );
+                    } catch (_3) {}
+                  }
                 }
               }
 
-              // Before encryption keys expire, if download failed once, call sock.updateMediaMessage(msg) and retry immediately
+              // 3. Before encryption keys expire, if download failed once, call sock.updateMediaMessage(msg) and retry immediately
               if (!buffer && sock && typeof sock.updateMediaMessage === 'function') {
                 try {
                   console.log(`[Media Download] Retrying audio download via sock.updateMediaMessage for ${senderPhone}...`);
                   const refreshedMsg = await sock.updateMediaMessage(msg);
-                  buffer = await downloadMediaMessage(
-                    refreshedMsg || msg,
-                    'buffer',
-                    {},
-                    {
-                      logger: pino({ level: 'silent' }),
-                      reuploadRequest: sock?.updateMediaMessage
+                  const refAudioMsg = (unwrapMessage(refreshedMsg?.message) || refreshedMsg?.message)?.audioMessage;
+                  if (refAudioMsg) {
+                    const stream = await downloadContentFromMessage(refAudioMsg, 'audio');
+                    const chunks = [];
+                    for await (const chunk of stream) {
+                      chunks.push(chunk);
                     }
-                  );
+                    buffer = Buffer.concat(chunks);
+                  }
                 } catch (retryErr) {
                   console.warn('[Media Download] updateMediaMessage retry notice:', retryErr.message);
                 }
@@ -987,7 +1003,9 @@ async function startWhatsAppBridge() {
               if (buffer && buffer.length > 0) {
                 audioBase64 = buffer.toString('base64');
                 audioDataUrl = `data:audio/ogg; codecs=opus;base64,${buffer.toString('base64')}`;
-                console.log(`[Media Download] Downloaded voice note (${buffer.length} bytes) for ${senderPhone}`);
+                console.log(`[Media Download Success] Downloaded voice note (${buffer.length} bytes) for ${senderPhone}`);
+              } else {
+                console.warn(`[Media Download Warning] Voice buffer could not be obtained for ${senderPhone}`);
               }
             } catch (dlErr) {
               console.warn('[Media Download Error] Could not download voice buffer:', dlErr.message);
@@ -1473,7 +1491,8 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
       });
     }
 
-    if (!sock || !isConnected) {
+    const isReady = Boolean(isConnected || (sock && sock.user && !currentQr));
+    if (!sock || !isReady) {
       return res.status(400).json({
         success: false,
         connected: false,
@@ -1604,14 +1623,38 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
             fileName: audioFileName
           }, sendOptions);
         } catch (firstAudioErr) {
-          console.warn('[Audio Send Warning] First attempt failed, retrying with fallback audio/mp4 (ptt: false):', firstAudioErr.message);
-          sent = await sock.sendMessage(jid, {
-            audio: finalAudioPayload,
-            mimetype: 'audio/mp4',
-            ptt: false,
-            seconds: dur > 0 ? dur : undefined,
-            fileName: 'audio.mp4'
-          }, sendOptions);
+          console.warn('[Audio Send Warning] First attempt with quoted failed, retrying without quoted:', firstAudioErr.message);
+          try {
+            sent = await sock.sendMessage(jid, {
+              audio: finalAudioPayload,
+              mimetype: mimetype,
+              ptt: ptt,
+              seconds: dur > 0 ? dur : undefined,
+              fileName: audioFileName
+            });
+          } catch (secondAudioErr) {
+            console.warn('[Audio Send Warning] Second attempt failed, retrying audio/mp4 without PTT:', secondAudioErr.message);
+            try {
+              sent = await sock.sendMessage(jid, {
+                audio: finalAudioPayload,
+                mimetype: 'audio/mp4',
+                ptt: false,
+                seconds: dur > 0 ? dur : undefined,
+                fileName: 'audio.mp4'
+              });
+            } catch (thirdAudioErr) {
+              console.warn('[Audio Send Warning] Third attempt failed:', thirdAudioErr.message);
+            }
+          }
+        }
+
+        if (!sent && hasText) {
+          console.log('[Audio Send Fallback] Delivering text reply to WhatsApp since audio buffer dispatch failed...');
+          try {
+            sent = await sock.sendMessage(jid, { text: String(message) });
+          } catch (textFallbackErr) {
+            console.error('[Audio Send Fallback Error] Failed to send fallback text:', textFallbackErr.message);
+          }
         }
       } else if (hasImage) {
         const imageRaw = req.body?.imageBase64 || req.body?.image;

@@ -4034,10 +4034,10 @@ class WhatsAppService:
                     intent = "support_request"
                     route_dept = "Support"
             else:
-                # Untranscribed voice note: ask Gemini to provide a warm, helpful conversational response
+                # Untranscribed voice note: answer naturally as a helpful partner without robotic acknowledgments
                 voice_instruct = (
-                    "A customer has sent an audio voice message. Reply warmly and naturally in Roman Urdu "
-                    "acknowledging their voice note and asking how you can help them directly."
+                    "A customer has sent a message. Respond warmly and politely in conversational Roman Urdu "
+                    "in 1-2 friendly sentences asking how you can assist them today."
                 )
                 media_reply = cls.call_gemini_ai(
                     user_message=voice_instruct,
@@ -4045,7 +4045,7 @@ class WhatsAppService:
                     organization_id=organization_id,
                     customer_name=sender_name,
                     conversation_history=history
-                ) or f"Walaikum Assalam{cust_greeting}! Main aap ka voice message samajh raha hoon. Barah-e-karam batayein main aap ki kya madad kar sakta hoon?"
+                ) or f"Walaikum Assalam{cust_greeting}! Main aap ki kya madad kar sakta hoon? Barah-e-karam batayein."
                 return {
                     "reply_body": media_reply,
                     "intent": "general_inquiry",
@@ -4543,9 +4543,17 @@ class WhatsAppService:
                 if audio_bytes:
                     clean_trans = None
                     mm_reply = None
+                    in_mime = "audio/ogg"
+                    if audio_bytes.startswith(b"OggS"):
+                        in_mime = "audio/ogg"
+                    elif audio_bytes.startswith(b"\xff\xfb") or audio_bytes.startswith(b"ID3"):
+                        in_mime = "audio/mp3"
+                    elif audio_bytes.startswith(b"RIFF"):
+                        in_mime = "audio/wav"
+
                     mm_res = cls.call_gemini_multimodal_audio(
                         audio_bytes=audio_bytes,
-                        mime_type="audio/ogg",
+                        mime_type=in_mime,
                         organization_id=org_id,
                         customer_name=sender_name,
                         conversation_history=conversation_history
@@ -4554,10 +4562,10 @@ class WhatsAppService:
                         clean_trans, mm_reply = mm_res
                     if not clean_trans:
                         clean_trans = cls._transcribe_audio(audio_bytes, organization_id=org_id, timeout=12.0)
+                    if mm_reply and mm_reply.strip():
+                        kwargs["precomputed_ai_reply"] = mm_reply.strip()
                     if clean_trans and clean_trans.strip():
                         clean_trans = clean_trans.strip()
-                        if mm_reply and mm_reply.strip():
-                            kwargs["precomputed_ai_reply"] = mm_reply.strip()
                         logger.info(f"Directly transcribed voice note for {clean_phone} ({message_id}): '{clean_trans}'")
                         message_body = clean_trans
                         body_clean_str = message_body.lower()
@@ -4924,8 +4932,9 @@ class WhatsAppService:
                 except Exception as emerg_err:
                     logger.error(f"[Emergency Voice Dispatch Error] {emerg_err}")
 
-            # If voice dispatch was not executed or failed, dispatch text message ONLY IF NOT A VOICE INBOUND
-            if not dispatch_res and not is_voice_inbound:
+            # If voice dispatch was not executed or failed, deliver text message so customer is NEVER ignored
+            if not dispatch_res:
+                logger.info(f"[Delivery Fallback] Audio delivery was not completed for {real_chat_id}; delivering as text reply to WhatsApp...")
                 green_dispatch_res = cls.send_green_api_message(
                     organization_id=org_id,
                     to_phone=clean_phone,
@@ -4938,8 +4947,8 @@ class WhatsAppService:
                 dispatch_res = green_dispatch_res
                 logger.info(f"[Force Dispatch] send_green_api_message execution result for {real_chat_id}: {green_dispatch_res}")
 
-            # Outbound text dispatch fallback if not dispatched STRICTLY IF NOT VOICE INBOUND
-            if not dispatch_res and not is_voice_inbound:
+            # Outbound text dispatch fallback if not dispatched
+            if not dispatch_res:
                 try:
                     dispatch_res = cls.send_message(
                         organization_id=org_id,
@@ -4949,8 +4958,8 @@ class WhatsAppService:
                         quoted_message_id=message_id,
                         is_ai_response=True
                     )
-                except Exception:
-                    pass
+                except Exception as send_err:
+                    logger.error(f"[Delivery Fallback Exception] {send_err}")
 
             if not dispatch_res:
                 dispatch_res = text_dispatch_res or audio_dispatch_res or {}
@@ -7394,6 +7403,26 @@ class WhatsAppService:
                         headers={"Content-Type": "application/json"},
                         timeout=bridge_timeout
                     )
+                if bridge_resp.status_code != 200 and f_bytes and bridge_message:
+                    logger.warning(f"[Baileys Bridge Audio Fallback] Audio payload rejected ({bridge_resp.status_code}). Retrying with text...")
+                    text_bridge_payload = {
+                        "chatId": real_chat_id,
+                        "to": clean_to,
+                        "recipient": real_chat_id,
+                        "message": bridge_message
+                    }
+                    if quoted_message_id:
+                        text_bridge_payload["quotedMessageId"] = str(quoted_message_id).strip()
+                    try:
+                        bridge_resp = session.post(
+                            bridge_url,
+                            json=text_bridge_payload,
+                            headers={"Content-Type": "application/json"},
+                            timeout=bridge_timeout
+                        )
+                    except Exception as retry_err:
+                        logger.warning(f"[Baileys Bridge Text Retry Notice]: {retry_err}")
+
                 if bridge_resp.status_code == 200:
                     bridge_data = bridge_resp.json() if bridge_resp.text and bridge_resp.text.strip() else {}
                     msg_id = bridge_data.get("messageId") or bridge_data.get("idMessage") or f"baileys_{int(time.time() * 1000)}"
