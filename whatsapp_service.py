@@ -3121,11 +3121,10 @@ class WhatsAppService:
             f"Business Knowledge:\n{verified_kb}\n\n"
             f"{cust_label} has sent an audio voice note.\n"
             "INSTRUCTIONS:\n"
-            "1. Listen to the user's spoken voice note and transcribe their exact words accurately.\n"
-            "2. Provide a natural, friendly, direct response in conversational Roman Urdu (or matching language) in 1 to 3 sentences. Answer their exact question or inquiry directly without corporate speeches.\n"
-            "3. Format your response exactly as follows:\n"
-            "TRANSCRIPT: <transcribed customer words>\n"
-            "REPLY: <your natural conversational response in Roman Urdu>"
+            "Listen to this voice note carefully. Reply directly and naturally to what the person said in the same language (Roman Urdu/Urdu/English).\n"
+            "Format your response exactly as follows:\n"
+            "TRANSCRIPT: <exact transcribed customer words>\n"
+            "REPLY: <direct natural reply to what the person asked>"
         )
 
         b64_audio = base64.b64encode(audio_bytes).decode("ascii")
@@ -3842,15 +3841,24 @@ class WhatsAppService:
                 )
                 if direct_ai and direct_ai.strip():
                     return direct_ai.strip()
-                return f"Main aap ki baat samajh raha hoon{cust_greeting}. Barah-e-karam batayein main is hawalay se aap ki kya behtar madad kar sakta hoon?"
+                # Secondary fallback to Groq AI
+                groq_ai = cls.call_groq_ai(
+                    user_message=clean_text or "Hello",
+                    organization_id=None,
+                    customer_name=sender_name,
+                    conversation_history=conversation_history
+                )
+                if groq_ai and groq_ai.strip():
+                    return groq_ai.strip()
+                return f"Salam{cust_greeting}! Aap ke is sawal ke hawalay se mazeed batayein taake main aap ki behtareen rehnumai kar sakoon."
 
         elif lang_fmt == "urdu_arabic":
             if is_greeting:
-                return "وعلیکم السلام! الحمدللہ میں بالکل ٹھیک ہوں۔ آپ سنائیں آپ کیسے ہیں؟ میں آپ کی کیا مدد کر سکتا ہوں؟"
+                return "وعلیکم السلام! الحمدللہ میں بالکل ٹھیک ہوں۔ OpsFlow Cloud میں آپ کا خیر مقدم ہے۔ آپ سنائیں آپ کیسے ہیں؟ میں آپ کی کیا مدد کر سکتا ہوں؟"
             elif is_thanks:
                 return "آپ کا خیر مقدم ہے! میں ہر وقت آپ کی مدد کے لیے حاضر ہوں۔"
             else:
-                return "وعلیکم السلام! میں آپ کی مدد کے لیے حاضر ہوں۔ فرمائیے آپ کیا جاننا چاہتے ہیں؟"
+                return "وعلیکم السلام! OpsFlow Cloud میں آپ کا خیر مقدم ہے۔ فرمائیے آپ کیا جاننا چاہتے ہیں؟"
 
         elif lang_fmt in ("pashto_arabic", "roman_pashto"):
             if is_greeting:
@@ -4070,7 +4078,7 @@ class WhatsAppService:
             elif lang_fmt == "urdu_arabic":
                 media_reply = "خوش آمدید! OpsFlow Cloud میں آپ کا خیر مقدم ہے۔ میں آپ کی کیا مدد کر سکتا ہوں؟"
             elif lang_fmt == "roman_urdu":
-                media_reply = "Ji bilkul! Main aap ki madad ke liye hazir hoon. Batayein aap kya janna chahte hain?"
+                media_reply = "Salam! Batayein main aap ki kya madad kar sakta hoon?"
             else:
                 media_reply = "Welcome to OpsFlow Cloud! How can I assist you with automation, alerts, or pricing today?"
             return {
@@ -4864,6 +4872,8 @@ class WhatsAppService:
             # Outbound Voice Note Reply vs Text Reply:
             # When customer sends a voice note (or when voice reply is enabled), convert AI text response into speech audio
             audio_dispatch_res = None
+            outbound_audio_b64 = None
+            send_as_voice = False
             if is_voice_inbound or kwargs.get("reply_as_voice"):
                 try:
                     synth_lang = "ur"
@@ -4878,6 +4888,8 @@ class WhatsAppService:
                         import base64
                         clean_synth_b64 = base64.b64encode(audio_b).decode("ascii")
                         synth_data_url = f"data:audio/ogg;base64,{clean_synth_b64}"
+                        outbound_audio_b64 = clean_synth_b64
+                        send_as_voice = True
                         logger.info(f"[Voice Pipeline] Synthesized {len(audio_b)} bytes of voice reply for {real_chat_id}.")
                         audio_dispatch_res = cls.send_green_api_file(
                             organization_id=org_id,
@@ -4913,6 +4925,8 @@ class WhatsAppService:
                     tts.write_to_fp(buf)
                     emerg_bytes = buf.getvalue()
                     if emerg_bytes and len(emerg_bytes) > 100:
+                        outbound_audio_b64 = base64.b64encode(emerg_bytes).decode("ascii")
+                        send_as_voice = True
                         dispatch_res = cls.send_green_api_file(
                             organization_id=org_id,
                             to_phone=clean_phone,
@@ -5059,6 +5073,7 @@ class WhatsAppService:
             return {
                 "success": True,
                 "reply_body": clean_reply_text,
+                "reply": clean_reply_text,
                 "intent": intent,
                 "lead_score": lead_score,
                 "mode": generated.get("mode"),
@@ -5066,6 +5081,9 @@ class WhatsAppService:
                 "is_groq": is_groq,
                 "is_ai_generated": is_real_ai,
                 "response_source": source,
+                "audio_base64": outbound_audio_b64,
+                "is_voice": bool(is_voice_inbound or outbound_audio_b64),
+                "send_as_voice": bool(send_as_voice and outbound_audio_b64),
                 "dispatch": dispatch_res
             }
         except Exception as dispatch_err:

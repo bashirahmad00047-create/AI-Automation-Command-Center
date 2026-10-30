@@ -165,10 +165,11 @@ class TestInboundDispatchExactResponse(unittest.TestCase):
         test_phone = "923005554433"
         msg_id = "wamid.fallback_test_003"
 
-        with patch.object(WhatsAppService, "get_gemini_api_key", return_value=None):
-            with patch.object(WhatsAppService, "get_groq_api_key", return_value=None):
-                with patch.object(WhatsAppService, "get_openai_api_key", return_value=None):
-                    with patch.object(WhatsAppService, "send_green_api_message") as mock_dispatch:
+        with patch.object(WhatsAppService, "get_gemini_api_key", return_value=None), \
+             patch.object(WhatsAppService, "get_groq_api_key", return_value=None), \
+             patch.object(WhatsAppService, "get_openai_api_key", return_value=None), \
+             patch.object(WhatsAppService, "call_pollinations_ai", return_value=None), \
+             patch.object(WhatsAppService, "send_green_api_message") as mock_dispatch:
                         mock_dispatch.return_value = {
                             "success": True,
                             "status": "sent",
