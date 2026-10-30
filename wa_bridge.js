@@ -927,26 +927,28 @@ async function startWhatsAppBridge() {
             typeMessage = isVoice ? 'voiceMessage' : 'audioMessage';
             audioDuration = audioMsg.seconds || audioMsg.duration || null;
 
-            // 3. Download media and convert directly to a Base64 Data URL
+            // 3. Download media buffer for speech recognition & multimodal analysis
             try {
               let buffer = null;
-              // 1. Direct stream decrypt via downloadContentFromMessage (Official Baileys method)
-              try {
-                const stream = await downloadContentFromMessage(audioMsg, 'audio');
-                const chunks = [];
-                for await (const chunk of stream) {
-                  chunks.push(chunk);
-                }
-                buffer = Buffer.concat(chunks);
-              } catch (directDlErr) {
-                console.warn('[Direct Media Stream Notice]:', directDlErr.message);
-              }
 
-              // 2. Fallback to downloadMediaMessage
+              // Priority 1: downloadMediaMessage with original message (handles media keys)
+              try {
+                buffer = await downloadMediaMessage(
+                  msg,
+                  'buffer',
+                  {},
+                  {
+                    logger: pino({ level: 'silent' }),
+                    reuploadRequest: sock?.updateMediaMessage
+                  }
+                );
+              } catch (_) {}
+
+              // Priority 2: downloadMediaMessage with unwrapped inner message
               if (!buffer || buffer.length === 0) {
                 try {
                   buffer = await downloadMediaMessage(
-                    msg,
+                    { key: msg.key, message: unwrappedMsg },
                     'buffer',
                     {},
                     {
@@ -954,35 +956,40 @@ async function startWhatsAppBridge() {
                       reuploadRequest: sock?.updateMediaMessage
                     }
                   );
-                } catch (_) {
-                  try {
-                    buffer = await downloadMediaMessage(
-                      { key: msg.key, message: unwrappedMsg },
-                      'buffer',
-                      {},
-                      {
-                        logger: pino({ level: 'silent' }),
-                        reuploadRequest: sock?.updateMediaMessage
-                      }
-                    );
-                  } catch (_2) {
-                    try {
-                      buffer = await downloadMediaMessage(
-                        { key: msg.key, message: { audioMessage: audioMsg } },
-                        'buffer',
-                        {},
-                        {
-                          logger: pino({ level: 'silent' }),
-                          reuploadRequest: sock?.updateMediaMessage
-                        }
-                      );
-                    } catch (_3) {}
+                } catch (_) {}
+              }
+
+              // Priority 3: downloadMediaMessage with explicit { audioMessage } structure
+              if (!buffer || buffer.length === 0) {
+                try {
+                  buffer = await downloadMediaMessage(
+                    { key: msg.key, message: { audioMessage: audioMsg } },
+                    'buffer',
+                    {},
+                    {
+                      logger: pino({ level: 'silent' }),
+                      reuploadRequest: sock?.updateMediaMessage
+                    }
+                  );
+                } catch (_) {}
+              }
+
+              // Priority 4: direct downloadContentFromMessage stream decryption
+              if (!buffer || buffer.length === 0) {
+                try {
+                  const stream = await downloadContentFromMessage(audioMsg, 'audio');
+                  const chunks = [];
+                  for await (const chunk of stream) {
+                    chunks.push(chunk);
                   }
+                  buffer = Buffer.concat(chunks);
+                } catch (directDlErr) {
+                  console.warn('[Direct Media Stream Notice]:', directDlErr.message);
                 }
               }
 
-              // 3. Before encryption keys expire, if download failed once, call sock.updateMediaMessage(msg) and retry immediately
-              if (!buffer && sock && typeof sock.updateMediaMessage === 'function') {
+              // Priority 5: reuploadRequest via sock.updateMediaMessage if encryption keys expired
+              if ((!buffer || buffer.length === 0) && sock && typeof sock.updateMediaMessage === 'function') {
                 try {
                   console.log(`[Media Download] Retrying audio download via sock.updateMediaMessage for ${senderPhone}...`);
                   const refreshedMsg = await sock.updateMediaMessage(msg);
@@ -1002,7 +1009,7 @@ async function startWhatsAppBridge() {
 
               if (buffer && buffer.length > 0) {
                 audioBase64 = buffer.toString('base64');
-                audioDataUrl = `data:audio/ogg; codecs=opus;base64,${buffer.toString('base64')}`;
+                audioDataUrl = `data:audio/ogg;base64,${audioBase64}`;
                 console.log(`[Media Download Success] Downloaded voice note (${buffer.length} bytes) for ${senderPhone}`);
               } else {
                 console.warn(`[Media Download Warning] Voice buffer could not be obtained for ${senderPhone}`);
