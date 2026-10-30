@@ -2,6 +2,7 @@ import unittest
 import json
 import base64
 import time
+import datetime
 from app import app
 from models import db, WhatsAppMessage, LoginAttempt, User, Organization
 from limiter import login_limiter
@@ -44,6 +45,8 @@ class TestE2EConversationsAIAndSecurity(unittest.TestCase):
             )
             db.session.add(self.org)
             db.session.commit()
+        WhatsAppMessage.query.filter(WhatsAppMessage.whatsapp_message_id.like("wam_e2e_%")).delete()
+        db.session.commit()
 
     def tearDown(self):
         login_limiter.reset()
@@ -53,6 +56,7 @@ class TestE2EConversationsAIAndSecurity(unittest.TestCase):
         """E2E Test: Ingest messages and verify /api/v1/whatsapp/messages returns conversations with real names and audio flags."""
         fake_ogg = b"OggS\x00\x02" + b"\x00" * 4000
         b64_ogg = base64.b64encode(fake_ogg).decode("ascii")
+        now = datetime.datetime.utcnow()
 
         # 1. Direct 1-to-1 contact message
         msg1 = WhatsAppMessage(
@@ -63,6 +67,7 @@ class TestE2EConversationsAIAndSecurity(unittest.TestCase):
             recipient="system",
             message_type="text",
             body="Salam bhai, battery replacement kitne ki hai?",
+            created_at=now + datetime.timedelta(seconds=1),
             raw_payload_json=json.dumps({
                 "senderData": {"senderName": "Tariq Mahmood", "chatName": "Tariq Mahmood"},
                 "senderName": "Tariq Mahmood"
@@ -78,6 +83,7 @@ class TestE2EConversationsAIAndSecurity(unittest.TestCase):
             message_type="audio",
             body="🎤 Voice Note",
             media_url=f"data:audio/ogg;base64,{b64_ogg}",
+            created_at=now + datetime.timedelta(seconds=2),
             raw_payload_json=json.dumps({
                 "senderData": {"chatId": "120363025544332211@g.us", "chatName": "Mobile Wholesalers Karachi", "senderName": "Hamza Ali"},
                 "chatName": "Mobile Wholesalers Karachi",
@@ -97,7 +103,7 @@ class TestE2EConversationsAIAndSecurity(unittest.TestCase):
             sess["org_id"] = self.org.id
             sess["active_org_id"] = self.org.id
 
-        res = self.client.get("/api/v1/whatsapp/messages")
+        res = self.client.get("/api/v1/whatsapp/messages?limit=200")
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
         messages = data.get("messages", [])
