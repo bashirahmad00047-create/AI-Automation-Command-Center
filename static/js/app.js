@@ -47,6 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startWhatsAppAutoPoll(3000);
     initWhatsAppChatBarListeners();
     initNavigationListeners();
+    syncWhatsAppHeaderAiBadge();
 
     // Telemetry and status poll with exponential backoff
     scheduleNextTelemetry(500);
@@ -8030,16 +8031,34 @@ function updateWhatsAppHeaderAiBadge(enabled) {
     }
 }
 
+async function syncWhatsAppHeaderAiBadge() {
+    try {
+        const authHeaders = typeof getAuthHeaders === 'function' ? getAuthHeaders() : {};
+        const confRes = await fetch('/api/v1/whatsapp/auto-responder', { headers: authHeaders });
+        if (confRes.ok) {
+            const conf = await confRes.json();
+            updateWhatsAppHeaderAiBadge(Boolean(conf.enabled));
+        }
+    } catch (_) {}
+}
+
 async function toggleWhatsAppAiAutoResponder() {
     try {
-        const confRes = await fetch('/api/v1/whatsapp/auto-responder');
-        if (!confRes.ok) return;
-        const conf = await confRes.json();
-        const nextState = !conf.enabled;
+        const authHeaders = typeof getAuthHeaders === 'function' ? getAuthHeaders() : {};
+        const confRes = await fetch('/api/v1/whatsapp/auto-responder', { headers: authHeaders });
+        let nextState = true;
+        if (confRes.ok) {
+            const conf = await confRes.json();
+            nextState = !Boolean(conf.enabled);
+        } else {
+            const currentBadge = document.getElementById('waHeaderAiToggle');
+            nextState = currentBadge ? currentBadge.classList.contains('disabled') : true;
+        }
 
+        const headers = Object.assign({ 'Content-Type': 'application/json' }, authHeaders);
         const saveRes = await fetch('/api/v1/whatsapp/auto-responder', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify({ enabled: nextState })
         });
         if (saveRes.ok) {
