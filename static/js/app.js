@@ -5057,18 +5057,77 @@ async function fetchWhatsAppQrCode() {
     }
 }
 
-function startWhatsAppAutoPoll(intervalMs = 20000) {
+// ==========================================
+// REAL-TIME WEBSOCKET / SOCKET.IO SYNC
+// ==========================================
+let waSocket = null;
+function initWhatsAppSocket() {
+    if (typeof io !== 'undefined' && !waSocket) {
+        try {
+            waSocket = io({
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 15,
+                reconnectionDelay: 1000
+            });
+            waSocket.on('connect', () => {
+                console.log('[Socket.IO] Real-time messaging connection established.');
+            });
+            waSocket.on('new_whatsapp_message', (msg) => {
+                handleRealtimeWhatsAppMessage(msg);
+            });
+            waSocket.on('whatsapp_message', (msg) => {
+                handleRealtimeWhatsAppMessage(msg);
+            });
+            waSocket.on('whatsapp_message_status', (data) => {
+                if (data && data.message_id && Array.isArray(waAllMessagesCache)) {
+                    const found = waAllMessagesCache.find(m => m.id === data.message_id || m.whatsapp_message_id === data.message_id);
+                    if (found) {
+                        found.status = data.status;
+                        const activeTab = document.getElementById('tab-whatsapp');
+                        if (activeTab && activeTab.classList.contains('active')) {
+                            renderWhatsAppWebUI(waAllMessagesCache, false);
+                        }
+                    }
+                }
+            });
+        } catch (e) {
+            console.debug('[Socket.IO notice]', e);
+        }
+    }
+}
+
+function handleRealtimeWhatsAppMessage(msg) {
+    if (!msg || !msg.id) return;
+    if (!Array.isArray(waAllMessagesCache)) waAllMessagesCache = [];
+
+    // Deduplicate
+    const idx = waAllMessagesCache.findIndex(m => m.id === msg.id || (msg.whatsapp_message_id && m.whatsapp_message_id === msg.whatsapp_message_id));
+    if (idx >= 0) {
+        waAllMessagesCache[idx] = Object.assign({}, waAllMessagesCache[idx], msg);
+    } else {
+        waAllMessagesCache.push(msg);
+    }
+
+    // Refresh WhatsApp Web UI smoothly
+    const activeTab = document.getElementById('tab-whatsapp');
+    if (activeTab && activeTab.classList.contains('active')) {
+        renderWhatsAppWebUI(waAllMessagesCache, true);
+    }
+}
+
+function startWhatsAppAutoPoll(intervalMs = 3000) {
     stopWhatsAppAutoPoll();
+    initWhatsAppSocket();
     waPollTimer = setInterval(async () => {
         const activeTab = document.getElementById('tab-whatsapp');
         if (!activeTab || !activeTab.classList.contains('active')) {
-            stopWhatsAppAutoPoll();
             return;
         }
         if (typeof document !== 'undefined' && document.hidden) {
             return;
         }
-        await syncWhatsAppMessagesNow(true);
+        await loadWhatsAppMessagesOnly();
     }, intervalMs);
 }
 
@@ -6032,10 +6091,9 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
             const isActive = isSameWaPhone(c.normalizedPhone || c.phone, waActiveChatPartner);
             const avatarColor = getWaAvatarColor(c.phone);
             const initials = (c.name || c.phone || '?').substring(0, 2).toUpperCase();
+            let previewText = c.lastMessage || '';
             const previewIcon = (c.is_audio && !previewText.startsWith('🎙️') && !previewText.startsWith('🎤')) ? '🎙️ ' : '';
             const unreadCount = (c.messages || []).filter(m => m.direction === 'inbound' && m.status !== 'read').length;
-
-            let previewText = c.lastMessage || '';
             if (previewText.includes('> Quoted:')) {
                 const parts = previewText.split('> Quoted:');
                 const replyPart = (parts[0] || '').replace(/\[quotedMessage\]/gi, '').trim();
@@ -6171,9 +6229,26 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                         audioSrc = fallbackBlob;
                     }
                     const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage' && safeBody !== '🎤 Voice message' && safeBody !== '🎙️ Voice note' && safeBody !== '(no text)');
+                    const durSeconds = Number(m.audio_duration || m.duration || 0);
+                    const durDisplay = durSeconds > 0 ? formatAudioSeconds(durSeconds) : '0:05';
                     bodyHtml = `
                         <div class="wa-voice-bubble" style="padding: 4px 0;">
-                            ${(audioSrc || fallbackBlob) ? `<audio controls preload="auto" src="${audioSrc || fallbackBlob}" data-duration="${m.audio_duration || m.duration || ''}" onloadedmetadata="if(!isFinite(this.duration)||this.duration<=0){const d=Number(this.dataset.duration);if(d>0){this.duration=d;}else{try{this.currentTime=1e101;this.ontimeupdate=function(){this.ontimeupdate=null;this.currentTime=0;};}catch(_){}}}" onerror="if(this.dataset.fallback && this.src !== this.dataset.fallback){this.src=this.dataset.fallback;}" data-fallback="${escapeHtml(fallbackBlob)}" style="max-width: 250px; width: 100%; height: 38px; outline: none; border-radius: 20px;"></audio>` : `
+                            ${(audioSrc || fallbackBlob) ? `
+                            <div class="wa-custom-audio-player" style="display:flex; align-items:center; gap:10px; background:rgba(0,0,0,0.22); padding:8px 12px; border-radius:24px; min-width:240px; max-width:280px;">
+                                <button type="button" class="wa-play-btn" id="waPlayBtn_${escapeHtml(m.id)}" onclick="togglePlayVoiceMessage('${escapeHtml(m.id)}', '${escapeHtml(audioSrc || fallbackBlob)}')" style="width:36px; height:36px; border-radius:50%; background:#00a884; border:none; color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:14px; flex-shrink:0;">
+                                    ▶
+                                </button>
+                                <div style="flex:1; display:flex; flex-direction:column; gap:4px;">
+                                    <div style="height:4px; background:rgba(255,255,255,0.2); border-radius:2px; overflow:hidden; position:relative; cursor:pointer;">
+                                        <div id="waAudioProg_${escapeHtml(m.id)}" style="width:0%; height:100%; background:#00a884; transition:width 0.1s linear;"></div>
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between; font-size:11px; color:#8696a0;">
+                                        <span id="waAudioTime_${escapeHtml(m.id)}">0:00</span>
+                                        <span>${durDisplay}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            ` : `
                             <div style="display:inline-flex; align-items:center; gap:6px; color:#aebac1; font-size:0.88em; padding:4px 0;">
                                 <span>🎤</span> <em>Voice message (Audio unavailable)</em>
                             </div>
@@ -6348,6 +6423,7 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
 }
 
 async function loadWhatsAppDashboard() {
+    initWhatsAppSocket();
     try {
         // 1. Load config
         let isConfigured = false;

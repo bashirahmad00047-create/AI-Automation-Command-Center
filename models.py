@@ -858,6 +858,7 @@ class WhatsAppMessage(db.Model):
     def to_dict(self) -> Dict[str, Any]:
         media_url = getattr(self, "media_url", None)
         sender_name = None
+        chat_name = None
         duration = None
         is_ai_response = False
         is_ai_generated = False

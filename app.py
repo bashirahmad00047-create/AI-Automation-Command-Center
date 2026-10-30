@@ -181,6 +181,12 @@ def get_gemini_ai_response(user_message, organization_id: Optional[str] = None, 
 def create_app(config_name: Optional[str] = None) -> Flask:
     """Application factory for OpsFlow SaaS."""
     application = Flask(__name__)
+    try:
+        from flask_socketio import SocketIO
+        socketio = SocketIO(application, cors_allowed_origins="*", async_mode="threading")
+        application.config["SOCKETIO"] = socketio
+    except Exception as _sock_init_err:
+        application.config["SOCKETIO"] = None
 
     # Load environment configuration
     env_name = config_name or os.environ.get("FLASK_ENV") or ("production" if os.environ.get("RENDER") else "development")
@@ -342,12 +348,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
         csp = (
-            "default-src 'self' 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
+            "default-src 'self' 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net https://cdn.socket.io; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.socket.io; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data:; "
-            "connect-src 'self';"
+            "media-src 'self' data: blob:; "
+            "connect-src 'self' ws: wss: https://cdn.socket.io;"
         )
         response.headers["Content-Security-Policy"] = csp
         if application.config.get("SESSION_COOKIE_SECURE"):
@@ -638,16 +645,25 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             if total_length == 0:
                 return jsonify({"error": "Empty media buffer"}), 404
 
-            # Magic bytes MIME type detection
-            if audio_bytes.startswith(b"ID3") or audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
-                mime_type = "audio/mpeg"
+            # Magic bytes & MIME type detection (audio/ogg, audio/mp3, audio/wav, audio/mp4)
+            file_ext = "ogg"
+            if audio_bytes.startswith(b"ID3") or audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2") or audio_bytes.startswith(b"\xff\xe0"):
+                mime_type = "audio/mp3"
+                file_ext = "mp3"
             elif audio_bytes.startswith(b"OggS"):
                 mime_type = "audio/ogg"
-            elif b"ftyp" in audio_bytes[:16] or audio_bytes.startswith(b"\x00\x00\x00"):
+                file_ext = "ogg"
+            elif b"ftyp" in audio_bytes[:16]:
                 mime_type = "audio/mp4"
+                file_ext = "m4a"
             elif audio_bytes.startswith(b"RIFF") and b"WAVE" in audio_bytes[:12]:
                 mime_type = "audio/wav"
+                file_ext = "wav"
+            else:
+                mime_type = "audio/ogg"
+                file_ext = "ogg"
 
+            # Always ensure duration is valid and non-zero
             duration = None
             if msg.raw_payload_json:
                 try:
@@ -663,7 +679,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     pass
 
             if not duration:
-                if audio_bytes.startswith(b"OggS"):
+                if mime_type == "audio/ogg":
                     last_ogg = audio_bytes.rfind(b"OggS")
                     if last_ogg >= 0 and last_ogg + 14 <= total_length:
                         import struct
@@ -673,8 +689,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                                 duration = round(granule / 48000.0, 2)
                         except Exception:
                             pass
-                elif mime_type == "audio/mpeg" or audio_bytes.startswith(b"ID3") or audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
-                    duration = max(1, round(total_length / 16000.0, 2))
+                elif mime_type in ("audio/mp3", "audio/mpeg"):
+                    duration = max(1.0, round(total_length / 16000.0, 2))
+
+            if not duration or float(duration) <= 0:
+                duration = max(1.0, round(total_length / 16000.0, 2))
+
+            duration_str = str(round(float(duration), 2))
 
             # HTTP 206 Partial Content range support for Chromium
             range_header = request.headers.get("Range")
@@ -693,24 +714,26 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     data_chunk = audio_bytes[start:end + 1]
 
                     resp = Response(data_chunk, status=206, mimetype=mime_type)
+                    resp.headers["Content-Type"] = mime_type
                     resp.headers["Content-Range"] = f"bytes {start}-{end}/{total_length}"
                     resp.headers["Accept-Ranges"] = "bytes"
                     resp.headers["Content-Length"] = str(chunk_length)
+                    resp.headers["Content-Disposition"] = f'inline; filename="voice_note.{file_ext}"'
+                    resp.headers["X-Content-Duration"] = duration_str
+                    resp.headers["Content-Duration"] = duration_str
                     resp.headers["Cache-Control"] = "public, max-age=86400"
-                    if duration and float(duration) > 0:
-                        resp.headers["X-Content-Duration"] = str(duration)
-                        resp.headers["Content-Duration"] = str(duration)
                     return resp
                 except Exception as _range_err:
                     application.logger.debug(f"Range parsing notice: {_range_err}")
 
             resp = Response(audio_bytes, status=200, mimetype=mime_type)
+            resp.headers["Content-Type"] = mime_type
             resp.headers["Accept-Ranges"] = "bytes"
             resp.headers["Content-Length"] = str(total_length)
+            resp.headers["Content-Disposition"] = f'inline; filename="voice_note.{file_ext}"'
+            resp.headers["X-Content-Duration"] = duration_str
+            resp.headers["Content-Duration"] = duration_str
             resp.headers["Cache-Control"] = "public, max-age=86400"
-            if duration and float(duration) > 0:
-                resp.headers["X-Content-Duration"] = str(duration)
-                resp.headers["Content-Duration"] = str(duration)
             return resp
         except Exception as media_err:
             application.logger.error(f"Error serving audio media {message_id}: {media_err}")
@@ -1409,6 +1432,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
 # Global WSGI application instance for Gunicorn (`gunicorn app:app`)
 app = create_app()
+socketio = getattr(app, "socketio", None) or app.config.get("SOCKETIO")
+if not socketio:
+    try:
+        from flask_socketio import SocketIO
+        socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+    except Exception:
+        pass
 
 # Expose global storage and engine for backwards compatibility with test fixtures
 storage = app.config.get("STORAGE_ENGINE")
