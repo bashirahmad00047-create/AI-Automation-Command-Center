@@ -4766,15 +4766,15 @@ class WhatsAppService:
                         audio_b, audio_fn, audio_mt = audio_res
                         import base64
                         clean_synth_b64 = base64.b64encode(audio_b).decode("ascii")
-                        synth_data_url = f"data:audio/mpeg;base64,{clean_synth_b64}"
+                        synth_data_url = f"data:audio/ogg;base64,{clean_synth_b64}"
                         logger.info(f"[Voice Pipeline] Synthesized {len(audio_b)} bytes of voice reply for {real_chat_id}.")
                         audio_dispatch_res = cls.send_green_api_file(
                             organization_id=org_id,
                             to_phone=clean_phone,
                             chat_id=real_chat_id,
                             file_bytes=audio_b,
-                            filename="voice_reply.mp3",
-                            mime_type="audio/mp4",
+                            filename="voice_reply.oga",
+                            mime_type="audio/ogg; codecs=opus",
                             caption="",
                             quoted_message_id=message_id,
                             transcript=clean_reply_text,
@@ -4787,7 +4787,7 @@ class WhatsAppService:
                             ptt=True
                         )
                         dispatch_res = audio_dispatch_res
-                        logger.info(f"[Voice Dispatch Guarantee] Dispatched companion MP3 voice note to {real_chat_id}: result={audio_dispatch_res}")
+                        logger.info(f"[Voice Dispatch Guarantee] Dispatched OGG Opus PTT voice note to {real_chat_id}: result={audio_dispatch_res}")
                 except Exception as tts_err:
                     logger.warning(f"[Voice Fallback Notice] Voice synthesis/dispatch failed for {real_chat_id}: {tts_err}. Falling back to text.")
 
