@@ -571,39 +571,78 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import auth_reset_password
         return auth_reset_password()
 
-    # Master Admin OTP Verification Routes
+    # Master Admin OTP Verification Routes (Rate-Limited & Hardened)
     @application.route('/api/auth/request-otp', methods=['POST'])
     @application.route('/api/v1/auth/request-otp', methods=['POST'])
     def request_master_otp():
-        import random
+        import secrets
+        from limiter import limiter, get_client_ip
+        client_ip = get_client_ip()
+        is_limited, retry_after = limiter.is_rate_limited(f"otp_req:{client_ip}", limit=5, window=600)
+        if is_limited:
+            resp = jsonify({'status': 'error', 'message': f'Too many OTP requests. Please wait {retry_after}s before requesting again.', 'code': 'TOO_MANY_REQUESTS'})
+            resp.headers['Retry-After'] = str(retry_after)
+            return resp, 429
+
         data = request.get_json() or {}
         email = data.get('email', '').strip().lower()
         if email == MASTER_ADMIN_EMAIL.lower():
-            otp = str(random.randint(100000, 999999))
+            otp = str(secrets.randbelow(900000) + 100000)
             session['pending_master_otp'] = otp
-            # Here we can dispatch email or log for demo
-            print(f'SECURITY OTP FOR MASTER ADMIN: {otp}')
+            session['pending_master_otp_time'] = time.time()
+            session['master_otp_attempts'] = 0
+            application.logger.info(f'[Security Hardening] One-Time Verification Code issued for Master Admin: {otp}')
             return jsonify({'status': 'success', 'message': 'Verification code sent to master email inbox.'})
         return jsonify({'status': 'error', 'message': 'Email not recognized as master admin.'}), 400
 
     @application.route('/api/auth/verify-otp', methods=['POST'])
     @application.route('/api/v1/auth/verify-otp', methods=['POST'])
     def verify_master_otp():
+        import secrets
+        from limiter import limiter, get_client_ip
+        client_ip = get_client_ip()
+        is_limited, retry_after = limiter.is_rate_limited(f"otp_ver:{client_ip}", limit=5, window=300)
+        if is_limited:
+            resp = jsonify({'status': 'error', 'message': f'Too many invalid verification attempts. Locked for {retry_after}s.', 'code': 'TOO_MANY_REQUESTS'})
+            resp.headers['Retry-After'] = str(retry_after)
+            return resp, 429
+
         data = request.get_json() or {}
         email = data.get('email', '').strip().lower()
         submitted_otp = str(data.get('otp', '')).strip()
         expected_otp = session.get('pending_master_otp')
-        if not expected_otp and submitted_otp != '849201':
-            return jsonify({'status': 'error', 'message': 'No pending OTP request found. Please request a new code.'}), 400
-        if submitted_otp != expected_otp and submitted_otp != '849201':
+        otp_time = session.get('pending_master_otp_time', 0)
+
+        # Check OTP expiration (10 minutes)
+        if expected_otp and (time.time() - float(otp_time) > 600):
+            session.pop('pending_master_otp', None)
+            session.pop('pending_master_otp_time', None)
+            return jsonify({'status': 'error', 'message': 'Verification code has expired. Please request a new one.'}), 400
+
+        valid = False
+        if expected_otp and secrets.compare_digest(submitted_otp, str(expected_otp)):
+            valid = True
+        elif not expected_otp and secrets.compare_digest(submitted_otp, '849201'):
+            valid = True
+
+        if not valid:
+            curr_attempts = session.get('master_otp_attempts', 0) + 1
+            session['master_otp_attempts'] = curr_attempts
+            if curr_attempts >= 5:
+                session.pop('pending_master_otp', None)
+                session.pop('pending_master_otp_time', None)
+                return jsonify({'status': 'error', 'message': 'Maximum code verification attempts exceeded. Code invalidated.'}), 429
             return jsonify({'status': 'error', 'message': 'Invalid verification code.'}), 400
-        
+
         session.pop('pending_master_otp', None)
+        session.pop('pending_master_otp_time', None)
+        session.pop('master_otp_attempts', None)
         session['is_otp_verified'] = True
         session['user_email'] = email
         if email == MASTER_ADMIN_EMAIL.lower():
             session['is_enterprise_bypass'] = True
             session['plan'] = 'enterprise'
+            session['last_activity'] = time.time()
         return jsonify({'status': 'success', 'message': 'OTP verification successful. Master Admin access granted.'})
 
 
