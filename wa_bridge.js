@@ -1154,6 +1154,57 @@ if (!text) text = '[Voice note]';
             clearTimeout(timeoutId);
 
             console.log(`[Webhook Forward] Dispatched to ${PYTHON_WEBHOOK_URL} -> HTTP ${response.status}`);
+
+            // Direct Bridge Delivery: Deliver AI auto-reply directly via active socket to the recipient
+            if (response.ok) {
+              const resData = await response.json().catch(() => null);
+              if (resData && (resData.reply || resData.audio_base64)) {
+                const senderDigits = cleanPhoneNumber(senderPhone) || cleanPhoneNumber(remoteJid);
+                const targetJid = remoteJid?.endsWith('@g.us') ? remoteJid : (senderDigits ? `${senderDigits}@s.whatsapp.net` : (remoteJid?.endsWith('@s.whatsapp.net') ? remoteJid : replyJid));
+
+                let sentMsg = null;
+                if (resData.audio_base64 && resData.send_as_voice) {
+                  let audioBuf = Buffer.from(resData.audio_base64, 'base64');
+                  let outMime = 'audio/mp4';
+                  let outPtt = true;
+
+                  const isAlreadyOgg = audioBuf.slice(0, 4).toString() === 'OggS';
+                  if (isAlreadyOgg) {
+                    outMime = 'audio/ogg; codecs=opus';
+                  } else {
+                    try {
+                      const oggBuf = await convertAudioToOggOpus(audioBuf);
+                      if (oggBuf && oggBuf.length > 0) {
+                        audioBuf = oggBuf;
+                        outMime = 'audio/ogg; codecs=opus';
+                      }
+                    } catch (_) {
+                      outMime = 'audio/mp4';
+                    }
+                  }
+
+                  try {
+                    sentMsg = await sock.sendMessage(targetJid, {
+                      audio: audioBuf,
+                      mimetype: outMime,
+                      ptt: outPtt,
+                      fileName: outMime.includes('ogg') ? 'voice_reply.oga' : 'voice_reply.mp4'
+                    });
+                    console.log(`[Direct Bridge Dispatch Success] Outbound PTT voice note delivered to ${targetJid}: ID=${sentMsg?.key?.id}`);
+                  } catch (aErr) {
+                    console.warn('[Direct Bridge Audio Error]:', aErr.message);
+                  }
+                }
+                if (!sentMsg && resData.reply) {
+                  try {
+                    sentMsg = await sock.sendMessage(targetJid, { text: String(resData.reply) });
+                    console.log(`[Direct Bridge Dispatch Success] Outbound text delivered to ${targetJid}: ID=${sentMsg?.key?.id}`);
+                  } catch (tErr) {
+                    console.warn('[Direct Bridge Text Error]:', tErr.message);
+                  }
+                }
+              }
+            }
           } catch (err) {
             console.error(`[Webhook Forward Error] Could not forward message to ${PYTHON_WEBHOOK_URL}:`, err.message);
           }
@@ -1598,10 +1649,10 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
               ptt = true;
               console.log('[WhatsApp Bridge] Successfully converted audio (' + audioBuffer.length + 'b -> ' + oggBuffer.length + 'b OGG Opus).');
             } catch (convErr) {
-              console.warn('[WhatsApp Bridge] ffmpeg conversion failed or unavailable, falling back to ptt: false with audio/mp4:', convErr.message);
+              console.warn('[WhatsApp Bridge] ffmpeg conversion failed or unavailable, delivering native MP3 with ptt: true (audio/mp4):', convErr.message);
               finalAudioPayload = audioBuffer;
               mimetype = 'audio/mp4';
-              ptt = false;
+              ptt = true;
             }
           } else {
             mimetype = 'audio/ogg; codecs=opus';
