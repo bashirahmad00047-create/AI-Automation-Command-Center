@@ -5,13 +5,18 @@ import unittest
 class TestUIBlinkingAndWebSocketLoop(unittest.TestCase):
     """Verifies that static/js/app.js contains robust safeguards against UI blinking
 
-    and WebSocket reconnection churn in Socket.IO.
+    and WebSocket reconnection churn in Socket.IO, with smooth exponential backoff
+    and subtle status indicators.
     """
 
     def setUp(self):
         js_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "js", "app.js")
         with open(js_path, "r", encoding="utf-8") as f:
             self.app_js = f.read()
+
+        css_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "css", "style.css")
+        with open(css_path, "r", encoding="utf-8") as f:
+            self.style_css = f.read()
 
     def test_websocket_transports_and_reconnection_loop_safeguards(self):
         """Ensure Socket.IO uses polling first, graceful WS upgrade, and pins to polling on error."""
@@ -24,7 +29,7 @@ class TestUIBlinkingAndWebSocketLoop(unittest.TestCase):
     def test_auto_poll_throttling_when_socket_connected(self):
         """Ensure background HTTP polling is relaxed when Socket.IO is actively receiving real-time events."""
         self.assertIn("waSocket && waSocket.connected", self.app_js)
-        self.assertIn("waLastBackgroundPollTime", self.app_js)
+        self.assertIn("scheduleNextWhatsAppPoll", self.app_js)
 
     def test_render_whatsapp_web_ui_smart_diffing(self):
         """Ensure renderWhatsAppWebUI implements signature caching to prevent DOM blinking."""
@@ -39,6 +44,21 @@ class TestUIBlinkingAndWebSocketLoop(unittest.TestCase):
         self.assertIn("waPlayBtn_${playingId}", self.app_js)
         self.assertIn("waAudioProg_${playingId}", self.app_js)
         self.assertIn("waAudioTime_${playingId}", self.app_js)
+
+    def test_exponential_backoff_and_subtle_status_indicator(self):
+        """Ensure smooth exponential backoff is implemented for polling and retries with subtle status indicators."""
+        self.assertIn("setGlobalConnectionStatus", self.app_js, "Must have setGlobalConnectionStatus function")
+        self.assertIn("updateWhatsAppConnectionUI", self.app_js, "Must have updateWhatsAppConnectionUI function")
+        self.assertIn("scheduleNextTelemetry", self.app_js, "Must schedule telemetry with exponential backoff")
+        self.assertIn("scheduleNextNotifications", self.app_js, "Must schedule notifications with exponential backoff")
+        self.assertIn("Math.pow(1.5, telemetryFailures)", self.app_js, "Must calculate telemetry exponential backoff")
+        self.assertIn("Math.pow(1.5, notificationsFailures)", self.app_js, "Must calculate notifications exponential backoff")
+        self.assertIn(".status-dot.yellow", self.style_css, "Must support yellow reconnecting dot in CSS")
+
+    def test_no_infinite_login_reload_loop_on_network_drop(self):
+        """Ensure initAuthAndTenancy does not redirect to /login on network drops or non-auth errors."""
+        self.assertIn("res.status === 401 || res.status === 403", self.app_js, "Only 401/403 should redirect to login")
+        self.assertNotIn("catch (e) {\n        console.error('Failed to load user/org state:', e);\n        state.currentUser = null;\n        state.currentOrg = null;\n        state.userRole = 'guest';\n        updateUserBadgeUI();\n        updateAuthHeaderUI(false);\n        window.location.href = '/login';", self.app_js)
 
 
 if __name__ == "__main__":

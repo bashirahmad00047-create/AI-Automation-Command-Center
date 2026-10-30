@@ -1168,6 +1168,11 @@ body.command-center-body {
     box-shadow: 0 0 8px var(--emerald-glow);
 }
 
+.status-dot.yellow, .status-dot.amber {
+    background: #eab308;
+    box-shadow: 0 0 8px rgba(234, 179, 8, 0.6);
+}
+
 .status-dot.red {
     background: var(--red-glow);
     box-shadow: 0 0 8px var(--red-glow);
