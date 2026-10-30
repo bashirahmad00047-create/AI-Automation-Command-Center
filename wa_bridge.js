@@ -43,8 +43,15 @@ try {
 } catch (_) {}
 if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
   try {
-    ffmpegBinaryPath = execSync('where.exe ffmpeg').toString().trim().split(/\r?\n/)[0];
+    const cmd = process.platform === 'win32' ? 'where.exe ffmpeg' : 'which ffmpeg';
+    ffmpegBinaryPath = execSync(cmd).toString().trim().split(/\r?\n/)[0];
   } catch (_) {}
+}
+if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
+  const commonLinuxPaths = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
+  for (const p of commonLinuxPaths) {
+    if (fs.existsSync(p)) { ffmpegBinaryPath = p; break; }
+  }
 }
 
 /**

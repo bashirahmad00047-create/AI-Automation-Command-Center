@@ -2545,7 +2545,7 @@ class WhatsAppService:
                 model = getattr(gemini_prov, "model", None)
             except Exception:
                 pass
-        return (model or "gemini-3.8-flash").strip()
+        return (model or "gemini-1.5-flash").strip()
 
     @classmethod
     def get_conversation_history(
@@ -3069,6 +3069,116 @@ class WhatsAppService:
                 "- Use natural Roman Urdu phrasing: e.g. 'Salam! Khush-amdeed, main aapki kya madad kar sakta hoon?'."
             )
     @classmethod
+    def _parse_multimodal_audio_response(cls, text: str) -> Tuple[str, str]:
+        """Parses TRANSCRIPT: and REPLY: from multimodal model output."""
+        if not text:
+            return ("", "")
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
+        transcript = ""
+        reply = ""
+        for line in lines:
+            if line.upper().startswith("TRANSCRIPT:"):
+                transcript = line[len("TRANSCRIPT:"):].strip()
+            elif line.upper().startswith("REPLY:"):
+                reply = line[len("REPLY:"):].strip()
+        if not reply and lines:
+            reply = lines[-1].strip()
+        if not transcript and len(lines) > 1:
+            transcript = lines[0].strip()
+        return (transcript or "Voice note", reply or text)
+
+    @classmethod
+    def call_gemini_multimodal_audio(
+        cls,
+        audio_bytes: bytes,
+        mime_type: str = "audio/ogg",
+        organization_id: Optional[str] = None,
+        customer_name: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> Optional[Tuple[str, str]]:
+        """Processes audio voice note directly with Gemini Multimodal perception.
+        Returns Tuple[transcript, conversational_reply] in Roman Urdu.
+        """
+        api_key = cls.get_gemini_api_key(organization_id=organization_id)
+        if not api_key or not audio_bytes:
+            return None
+
+        import base64
+        import requests
+        b_name = cls.get_tenant_business_name(organization_id=organization_id)
+        cust_label = f"Customer '{customer_name.strip()}'" if customer_name and customer_name.strip() else "The customer"
+        verified_kb = cls.get_verified_business_knowledge_base(organization_id=organization_id)
+
+        prompt = (
+            f"You are a friendly, highly intelligent conversational AI assistant for {b_name}.\n"
+            f"Business Knowledge:\n{verified_kb}\n\n"
+            f"{cust_label} has sent an audio voice note.\n"
+            "INSTRUCTIONS:\n"
+            "1. Listen to the user's spoken voice note and transcribe their exact words accurately.\n"
+            "2. Provide a natural, friendly, direct response in conversational Roman Urdu (or matching language) in 1 to 3 sentences. Answer their exact question or inquiry directly without corporate speeches.\n"
+            "3. Format your response exactly as follows:\n"
+            "TRANSCRIPT: <transcribed customer words>\n"
+            "REPLY: <your natural conversational response in Roman Urdu>"
+        )
+
+        b64_audio = base64.b64encode(audio_bytes).decode("ascii")
+        clean_mime = "audio/ogg" if "ogg" in mime_type.lower() else ("audio/mp3" if "mp3" in mime_type.lower() else "audio/wav")
+
+        candidate_models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"]
+        for m in candidate_models:
+            # 1. Try google.generativeai SDK
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel(m)
+                response = model.generate_content([
+                    {"mime_type": clean_mime, "data": audio_bytes},
+                    prompt
+                ], request_options={"timeout": 15.0})
+                if response and hasattr(response, "text") and response.text:
+                    res_text = response.text.strip()
+                    transcript, reply = cls._parse_multimodal_audio_response(res_text)
+                    if reply:
+                        logger.info(f"[Multimodal Voice] Gemini SDK '{m}' transcribed & answered: transcript='{transcript[:40]}...', reply='{reply[:40]}...'")
+                        return (transcript, reply)
+            except Exception as e:
+                logger.debug(f"Gemini SDK multimodal audio notice ({m}): {e}")
+
+            # 2. Try REST API with inline_data
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+                payload = {
+                    "contents": [{
+                        "parts": [
+                            {"inline_data": {"mime_type": clean_mime, "data": b64_audio}},
+                            {"text": prompt}
+                        ]
+                    }]
+                }
+                resp = requests.post(
+                    url,
+                    params={"key": api_key},
+                    json=payload,
+                    headers={"Content-Type": "application/json", "User-Agent": "OpsFlow-Cloud/2.4 (Multimodal-Voice)"},
+                    timeout=15.0
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts and "text" in parts[0]:
+                            res_text = parts[0]["text"].strip()
+                            transcript, reply = cls._parse_multimodal_audio_response(res_text)
+                            if reply:
+                                logger.info(f"[Multimodal Voice] Gemini REST '{m}' transcribed & answered: transcript='{transcript[:40]}...', reply='{reply[:40]}...'")
+                                return (transcript, reply)
+            except Exception as e:
+                logger.debug(f"Gemini REST multimodal audio notice ({m}): {e}")
+
+        return None
+
+    @classmethod
     def call_gemini_ai(
         cls,
         user_message: Union[str, Dict[str, Any]],
@@ -3135,7 +3245,7 @@ class WhatsAppService:
         ]
         models_to_try = []
         for m in primary_candidates:
-            if m and m not in models_to_try and m not in ("gemini-3.8-flash",):
+            if m and m not in models_to_try:
                 models_to_try.append(m.replace("models/", ""))
 
         diagnostics: List[str] = []
@@ -3179,40 +3289,42 @@ class WhatsAppService:
             diagnostics.append(f"sdk_setup: {genai_err}")
             logger.debug(f"[WhatsApp AI Auto-Responder] google.generativeai setup notice: {genai_err}")
 
-        # 2. Fast single HTTP REST fallback (3.0s fast timeout)
-        target_m = models_to_try[0] if models_to_try else "gemini-1.5-flash"
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_m}:generateContent"
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}]
-            }
-            headers = {
-                "Content-Type": "application/json",
-                "x-goog-api-key": api_key,
-                "User-Agent": "OpsFlow-Cloud/2.4 (WhatsApp-Auto-Responder)"
-            }
-            resp = requests.post(
-                url,
-                params={"key": api_key},
-                json=payload,
-                headers=headers,
-                timeout=3.0
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                candidates = data.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts and "text" in parts[0]:
-                        text = parts[0]["text"].strip()
-                        if text:
-                            cls._last_gemini_error = None
-                            cls._last_gemini_diagnostics = []
-                            logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via fast HTTP REST Gemini '{target_m}'")
-                            return text
-        except Exception as rest_err:
-            diagnostics.append(f"http/{target_m}: {rest_err}")
-            logger.debug(f"[WhatsApp AI Auto-Responder] Fast REST Gemini notice: {rest_err}")
+        # 2. Robust multi-model HTTP REST cascade (15.0s timeout)
+        for target_m in models_to_try:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_m}:generateContent"
+                payload = {
+                    "contents": [{"parts": [{"text": prompt}]}]
+                }
+                headers = {
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": api_key,
+                    "User-Agent": "OpsFlow-Cloud/2.4 (WhatsApp-Auto-Responder)"
+                }
+                resp = requests.post(
+                    url,
+                    params={"key": api_key},
+                    json=payload,
+                    headers=headers,
+                    timeout=15.0
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts and "text" in parts[0]:
+                            text = parts[0]["text"].strip()
+                            if text:
+                                cls._last_gemini_error = None
+                                cls._last_gemini_diagnostics = []
+                                logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via HTTP REST Gemini '{target_m}'")
+                                return text
+                else:
+                    diagnostics.append(f"http/{target_m}: HTTP {resp.status_code} - {resp.text[:120]}")
+            except Exception as rest_err:
+                diagnostics.append(f"http/{target_m}: {rest_err}")
+                logger.error(f"[WhatsApp AI Auto-Responder] REST Gemini model '{target_m}' error: {rest_err}", exc_info=True)
 
         cls._last_gemini_diagnostics = diagnostics
         cls._last_gemini_error = " | ".join(diagnostics[-3:]) if diagnostics else "Unknown error"
@@ -3654,10 +3766,12 @@ class WhatsAppService:
                 return f"Koi baat nahi{cust_greeting}! Yeh to mera farz hai. Agar koi aur sawal ya kaam ho to bila-jhijhak batayein."
             elif is_weather:
                 return f"Mausam ke hawalay se maloomat ke liye aap apnay shehar ka naam share karein. Mazeed batayein main aap ki kya madad kar sakta hoon?"
+            elif any(w in lower_text for w in ("service", "services", "kaam", "offer", "features", "solutions")):
+                return f"Hamari services mein smart WhatsApp automation, AI customer support, real-time messaging, aur automated workflow orchestration shamil hain. Batayein aap ko kis specific service ke baray mein maloomat chahiye?"
             elif is_ai_topic:
                 return f"AI aur smart automation se mukhtalif workflows aur rozmarrah ke kaam bohot asaani se mukammal kiye ja sakte hain. Batayein aap is hawalay se kya janna chahte hain?"
             else:
-                return f"Ji{cust_greeting}! Main aap ki baat samajh raha hoon. Main aap ki is baray mein poori madad karne ke liye hazir hoon. Barah-e-karam batayein aap ko kya maloomat darkaar hain?"
+                return f"Aap ke sawal ke hawalay se main aap ki poori madad karne ke liye hazir hoon. Barah-e-karam batayein aap ko mazeed kya maloomat darkaar hain?"
 
         elif lang_fmt == "urdu_arabic":
             if is_greeting:
@@ -4353,9 +4467,23 @@ class WhatsAppService:
                         organization_id=org_id
                     )
                 if audio_bytes:
-                    transcript = cls._transcribe_audio(audio_bytes, organization_id=org_id, timeout=12.0)
-                    if transcript and transcript.strip():
-                        clean_trans = transcript.strip()
+                    clean_trans = None
+                    mm_reply = None
+                    mm_res = cls.call_gemini_multimodal_audio(
+                        audio_bytes=audio_bytes,
+                        mime_type="audio/ogg",
+                        organization_id=org_id,
+                        customer_name=sender_name,
+                        conversation_history=conversation_history
+                    )
+                    if mm_res:
+                        clean_trans, mm_reply = mm_res
+                    if not clean_trans:
+                        clean_trans = cls._transcribe_audio(audio_bytes, organization_id=org_id, timeout=12.0)
+                    if clean_trans and clean_trans.strip():
+                        clean_trans = clean_trans.strip()
+                        if mm_reply and mm_reply.strip():
+                            kwargs["precomputed_ai_reply"] = mm_reply.strip()
                         logger.info(f"Directly transcribed voice note for {clean_phone} ({message_id}): '{clean_trans}'")
                         message_body = clean_trans
                         body_clean_str = message_body.lower()
@@ -4566,15 +4694,28 @@ class WhatsAppService:
                 pass
 
         # Generate response
-        generated = cls.generate_ai_auto_response(
-            organization_id=org_id,
-            message_body=f"{message_body}\n\n{quoted_context_directive}".strip() if quoted_context_directive else message_body,
-            sender_name=sender_name,
-            sender_phone=clean_phone
-        )
-        reply_body = (generated.get("reply_body") or "").strip()
-        intent = generated.get("intent") or "general_chat"
-        lead_score = generated.get("lead_score", 0)
+        precomputed_ai = kwargs.get("precomputed_ai_reply")
+        if precomputed_ai and str(precomputed_ai).strip():
+            reply_body = str(precomputed_ai).strip()
+            intent = "general_chat"
+            lead_score = 10
+            generated = {
+                "reply_body": reply_body,
+                "intent": intent,
+                "lead_score": lead_score,
+                "mode": "gemini_multimodal",
+                "is_gemini": True
+            }
+        else:
+            generated = cls.generate_ai_auto_response(
+                organization_id=org_id,
+                message_body=f"{message_body}\n\n{quoted_context_directive}".strip() if quoted_context_directive else message_body,
+                sender_name=sender_name,
+                sender_phone=clean_phone
+            )
+            reply_body = (generated.get("reply_body") or "").strip()
+            intent = generated.get("intent") or "general_chat"
+            lead_score = generated.get("lead_score", 0)
 
         # If auto_lead_capture is True and intent is lead_inquiry or score >= 50, ensure Lead exists in CRM
         if auto_conf.get("auto_lead_capture") and has_app_context() and (intent == "lead_inquiry" or lead_score >= 50):
