@@ -1163,9 +1163,11 @@ if (!text) text = '[Voice note]';
                 const targetJid = remoteJid?.endsWith('@g.us') ? remoteJid : (senderDigits ? `${senderDigits}@s.whatsapp.net` : (remoteJid?.endsWith('@s.whatsapp.net') ? remoteJid : replyJid));
 
                 let sentMsg = null;
-                if (resData.audio_base64 && resData.send_as_voice) {
+                const shouldSendVoice = Boolean(resData.audio_base64 && (resData.send_as_voice || resData.is_voice));
+
+                if (shouldSendVoice) {
                   let audioBuf = Buffer.from(resData.audio_base64, 'base64');
-                  let outMime = 'audio/mp4';
+                  let outMime = 'audio/ogg; codecs=opus';
                   let outPtt = true;
 
                   const isAlreadyOgg = audioBuf.slice(0, 4).toString() === 'OggS';
@@ -1194,8 +1196,7 @@ if (!text) text = '[Voice note]';
                   } catch (aErr) {
                     console.warn('[Direct Bridge Audio Error]:', aErr.message);
                   }
-                }
-                if (!sentMsg && resData.reply) {
+                } else if (!shouldSendVoice && resData.reply) {
                   try {
                     sentMsg = await sock.sendMessage(targetJid, { text: String(resData.reply) });
                     console.log(`[Direct Bridge Dispatch Success] Outbound text delivered to ${targetJid}: ID=${sentMsg?.key?.id}`);
