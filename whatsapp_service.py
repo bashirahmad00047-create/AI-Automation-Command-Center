@@ -6946,6 +6946,16 @@ class WhatsAppService:
                     with cls._processed_ids_lock:
                         cls._processed_message_ids[str(whatsapp_message_id).strip()] = time.time()
 
+                # Real-time WebSocket / Socket.IO broadcast to frontend dashboard
+                try:
+                    from app import socketio
+                    if socketio:
+                        msg_dict = msg.to_dict()
+                        socketio.emit("new_whatsapp_message", msg_dict)
+                        socketio.emit("whatsapp_message", msg_dict)
+                except Exception:
+                    pass
+
                 # Automatically ingest a new record into CRM Leads if phone number is not already present
                 if direction == "inbound" and sender and sender != "system":
                     try:

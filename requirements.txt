@@ -16,3 +16,5 @@ gTTS>=2.5.0
 edge-tts>=7.0.0
 nodeenv>=1.9.0
 
+
+flask-socketio>=5.3.0
