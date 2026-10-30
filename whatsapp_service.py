@@ -3450,6 +3450,90 @@ class WhatsAppService:
         return getattr(cls, "_last_groq_diagnostics", [])
 
     @classmethod
+    def call_openai_ai(
+        cls,
+        user_message: Union[str, Dict[str, Any]],
+        system_prompt: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        customer_name: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> Optional[str]:
+        """Calls OpenAI Chat Completions API as high-capability tertiary AI fallback."""
+        api_key = cls.get_openai_api_key(organization_id=organization_id)
+        if not api_key:
+            return None
+
+        user_msg_text = user_message.get('text', '') if isinstance(user_message, dict) else str(user_message)
+        clean_text = user_msg_text.strip()
+        if not clean_text:
+            return None
+
+        verified_kb = cls.get_verified_business_knowledge_base(organization_id=organization_id)
+        sys_instruct = f"\nBusiness Knowledge Base & Grounding Rules:\n{verified_kb}"
+        if system_prompt and len(system_prompt.strip()) > 3:
+            sys_instruct += f"\n\nOrganization-Specific Context / Instructions:\n{system_prompt.strip()}"
+
+        cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
+        lang_info = cls.detect_language(clean_text, conversation_history=conversation_history)
+        lang_directive = cls.get_language_prompt_directive(lang_info, clean_text)
+        b_name = cls.get_tenant_business_name(organization_id=organization_id)
+        pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
+
+        sys_content = (
+            f"You are a friendly, highly intelligent conversational AI assistant for {b_name}.\n"
+            f"Current Real-World Time: {pkt_time_str}.\n\n"
+            f"{sys_instruct}\n\n"
+            f"{lang_directive}\n\n"
+            f"CONVERSATIONAL AI ASSISTANT PROTOCOL:\n"
+            f"0. NATURAL HUMAN GREETING: If customer says 'Kaise ho ap', 'Kaisa ho aap', or greets you, reply naturally: 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
+            f"1. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, smart, general-purpose conversational partner. Answer what the customer asked directly and intelligently in 1 to 3 concise, friendly sentences in conversational Roman Urdu (or English/Urdu matching the user's language). Do NOT impose any mobile shop restrictions.\n"
+            f"2. NO ROBOTIC CORPORATE PITCHES: Answer the customer's actual question naturally without unsolicited software pitches.\n"
+            f"3. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences. No asterisks, hashtags, or bullet symbols."
+        )
+
+        messages = [{"role": "system", "content": sys_content}]
+        if conversation_history:
+            for item in conversation_history[-5:]:
+                r = "assistant" if item.get("role") in ("Assistant", "model") else "user"
+                c = (item.get("formatted_content") or item.get("content", "")).strip()
+                if c:
+                    messages.append({"role": r, "content": c})
+
+        messages.append({"role": "user", "content": f"{cust_label}: {clean_text}"})
+
+        models = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "OpsFlow-Cloud/2.4 (WhatsApp-Auto-Responder-OpenAI)"
+        }
+        for m in models:
+            try:
+                resp = requests.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers=headers,
+                    json={
+                        "model": m,
+                        "messages": messages,
+                        "temperature": 0.7,
+                        "max_tokens": 250
+                    },
+                    timeout=5.0
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    choices = data.get("choices", [])
+                    if choices:
+                        content = choices[0].get("message", {}).get("content", "").strip()
+                        if content:
+                            logger.info(f"[WhatsApp AI Auto-Responder] Generated dynamic response via OpenAI '{m}'")
+                            return content
+            except Exception as e:
+                logger.debug(f"[OpenAI Model Error] '{m}': {e}")
+
+        return None
+
+    @classmethod
     def call_pollinations_ai(
         cls,
         user_message: Union[str, Dict[str, Any]],
@@ -3536,10 +3620,11 @@ class WhatsAppService:
         intent: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> str:
-        """Dynamically generates an authentic, helpful conversational response as a smart general-purpose AI assistant.
-        Never returns corporate introductory speeches or unsolicited software subscription pricing.
+        """Dynamically generates an authentic, context-aware conversational response as a smart general-purpose AI partner.
+        Strict architectural rule: NEVER returns hardcoded pricing packages, mobile shop templates, or robotic corporate pitches.
         """
-        clean_text = str(message_body or "").strip().lower()
+        clean_text = str(message_body or "").strip()
+        lower_text = clean_text.lower()
 
         # Build natural Pakistani conversational name suffix (e.g., ' Bashir bhai' or ' bhai')
         if sender_name and sender_name.strip() and "@" not in sender_name and len(sender_name.strip()) < 25:
@@ -3551,77 +3636,51 @@ class WhatsAppService:
         else:
             cust_greeting = ""
 
-        # Domain 1: Casual Greetings ("Kaise ho ap", "Salam", "Kia haal", etc.)
-        is_greeting = any(w in clean_text for w in (
+        is_greeting = any(w in lower_text for w in (
             "kaisa ho", "kaise ho", "kese ho", "kaisa he", "kaisay ho", "kaise hain", "kese hain", "kai's ho", "kais ho",
             "kya haal", "kia hal", "kya hal", "kia haal", "hal chaal", "haal chal",
             "salam", "assalam", "aoa", "slam", "hello", "hi", "hey"
-        )) and not any(w in clean_text for w in ("starter", "plan", "package", "price", "rate", "software", "bot"))
-
-        # Domain 2: Explicit Software Pricing / Plans (ONLY if explicitly asking about software / bot subscription)
-        is_software_pricing = any(w in clean_text for w in (
-            "software price", "software rate", "software package", "software plan", "software kitne",
-            "bot price", "bot package", "bot rate", "bot plan", "bot kitne",
-            "starter plan", "pro plan", "professional plan", "enterprise plan", "free trial",
-            "subscription plan", "monthly plan", "monthly fee", "system plan", "app price", "app package",
-            "software kaisa milega", "software lena hai", "bot lena hai"
-        )) or (("plan" in clean_text or "package" in clean_text) and any(w in clean_text for w in ("software", "bot", "system", "app", "subscription")))
-
-        # Domain 3: Payment Details
-        is_payment_query = any(w in clean_text for w in (
-            "jazzcash", "jazz cash", "account number", "03209350858", "bashir uddin",
-            "paise", "bhejna", "bhejoon", "payment method", "pay kaise", "kahan bhejo"
         ))
+
+        # Dynamic topic extraction for genuine contextual assistance without hardcoded packages
+        is_weather = any(w in lower_text for w in ("weather", "mausam", "barish", "dhoop", "sardi", "garmi", "temperature"))
+        is_ai_topic = any(w in lower_text for w in ("ai", "artificial intelligence", "machine learning", "bot", "automation", "software"))
+        is_thanks = any(w in lower_text for w in ("shukriya", "thanks", "thank you", "jazakallah", "meherbani"))
 
         if lang_fmt == "roman_urdu":
             if is_greeting:
                 return f"Walaikum Assalam{cust_greeting}! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?"
-            elif is_software_pricing:
-                return (
-                    f"Assalam-o-Alaikum{cust_greeting}! WhatsApp automation bot ke verified packages yeh hain:\n"
-                    "- Starter Plan: PKR 7,500/month ($29) (WhatsApp bot, customer auto-reply, webhooks)\n"
-                    "- Professional Plan: PKR 25,000/month ($99) (Full AI auto-responder, voice notes, multi-tenant)\n"
-                    "2-Day Free Trial bilkul muft hai. Payment aap JazzCash (03209350858, Title: Bashir Uddin) par kar sakte hain."
-                )
-            elif is_payment_query:
-                return (
-                    f"Assalam-o-Alaikum{cust_greeting}! JazzCash payment details yeh hain:\n"
-                    "- JazzCash Account: 03209350858\n"
-                    "- Account Title: Bashir Uddin\n"
-                    "Raqam transfer karne ke baad screenshot ya TID yahan share kar dein."
-                )
+            elif is_thanks:
+                return f"Koi baat nahi{cust_greeting}! Yeh to mera farz hai. Agar koi aur sawal ya kaam ho to bila-jhijhak batayein."
+            elif is_weather:
+                return f"Mausam ke hawalay se maloomat ke liye aap apnay shehar ka naam share karein. Mazeed batayein main aap ki kya madad kar sakta hoon?"
+            elif is_ai_topic:
+                return f"AI aur smart automation se mukhtalif workflows aur rozmarrah ke kaam bohot asaani se mukammal kiye ja sakte hain. Batayein aap is hawalay se kya janna chahte hain?"
             else:
-                return f"Assalam-o-Alaikum{cust_greeting}! Main aap ki baat samajh raha hoon. Batayein main aap ki kya madad kar sakta hoon?"
+                return f"Ji{cust_greeting}! Main aap ki baat samajh raha hoon. Main aap ki is baray mein poori madad karne ke liye hazir hoon. Barah-e-karam batayein aap ko kya maloomat darkaar hain?"
 
         elif lang_fmt == "urdu_arabic":
             if is_greeting:
                 return "وعلیکم السلام! الحمدللہ میں بالکل ٹھیک ہوں۔ آپ سنائیں آپ کیسے ہیں؟ میں آپ کی کیا مدد کر سکتا ہوں؟"
-            elif is_payment_query:
-                return "جاز کیش اکاؤنٹ کی تفصیلات:\n- اکاؤنٹ نمبر: 03209350858\n- اکاؤنٹ ٹائٹل: بشیر الدین (Bashir Uddin)\nرقم بھیج کر اسکرین شاٹ واٹس ایپ پر شیئر کریں۔"
-            elif is_software_pricing:
-                return "واٹس ایپ آٹومیشن بوٹ کے پیکجز:\n- اسٹارٹر پلان: PKR 7,500 ($29) ماہانہ\n- پروفیشنل پلان: PKR 25,000 ($99) ماہانہ\nادائیگی: JazzCash (03209350858 - بشیر الدین)۔"
+            elif is_thanks:
+                return "آپ کا خیر مقدم ہے! میں ہر وقت آپ کی مدد کے لیے حاضر ہوں۔"
             else:
                 return "وعلیکم السلام! میں آپ کی مدد کے لیے حاضر ہوں۔ فرمائیے آپ کیا جاننا چاہتے ہیں؟"
 
         elif lang_fmt in ("pashto_arabic", "roman_pashto"):
             if is_greeting:
                 return "Walaikum Assalam! Alhamdulillah za theek yam, taso kheryat sara yai? Za staso sa marasta kawale sham?"
-            elif is_payment_query:
-                return "JazzCash Account: 03209350858, Title: Bashir Uddin. Paise transfer k aw screenshot share kra."
             else:
                 return "Walaikum Assalam! Za staso pa khabara pohegam. Taso ta sa maloomat pakaar de?"
 
         else:
-            # Default: English
+            # English
             if is_greeting:
                 return f"Hello{cust_greeting}! I am doing great, thank you! How are you doing today, and how can I assist you?"
-            elif is_software_pricing:
-                return "Our WhatsApp automation plans: Starter Plan $29/mo (PKR 7,500) and Professional Plan $99/mo (PKR 25,000) with a 2-day free trial. JazzCash: 03209350858 (Bashir Uddin)."
-            elif is_payment_query:
-                return "Payment details: JazzCash Account 03209350858, Title: Bashir Uddin. Please share transaction screenshot once sent."
+            elif is_thanks:
+                return f"You're very welcome{cust_greeting}! Feel free to let me know if you need any further assistance."
             else:
-                return f"Hello{cust_greeting}! I am here to help. How can I assist you today?"
-
+                return f"Hello{cust_greeting}! I am here to assist you with your inquiry. Please let me know what information you need."
 
     @classmethod
     def generate_ai_auto_response(
@@ -3911,7 +3970,33 @@ class WhatsAppService:
                 "confidence": 96
             }
 
-        # 3. Tertiary Pollinations AI Generation (Free no-key dynamic LLM fallback)
+        # 3. Tertiary OpenAI Generation
+        openai_reply = cls.call_openai_ai(
+            message_body,
+            system_prompt=custom_prompt,
+            organization_id=organization_id,
+            customer_name=sender_name,
+            conversation_history=history
+        )
+        if openai_reply:
+            return {
+                "reply_body": openai_reply.strip(),
+                "intent": intent,
+                "urgency": urgency,
+                "lead_score": lead_score,
+                "route_department": route_dept,
+                "entities": entities,
+                "mode": "openai_ai",
+                "detected_language": detected_lang["language"],
+                "detected_script": detected_lang["script"],
+                "language_format": lang_fmt,
+                "is_gemini": False,
+                "is_groq": False,
+                "is_ai_generated": True,
+                "confidence": 95
+            }
+
+        # 4. Quaternary Pollinations AI Generation (Free no-key dynamic LLM fallback)
         pollinations_reply = cls.call_pollinations_ai(
             message_body,
             system_prompt=custom_prompt,
@@ -4221,17 +4306,6 @@ class WhatsAppService:
                             quoted_message_id=message_id,
                             allow_fallback=False
                         )
-                        if hasattr(cls.send_message, "assert_called") or getattr(cls.send_message, "_is_mock", False) or hasattr(cls.send_message, "mock"):
-                            try:
-                                cls.send_message(
-                                    organization_id=org_id,
-                                    to_phone=clean_phone,
-                                    chat_id=real_chat_id,
-                                    message_text=vision_reply_text,
-                                    quoted_message_id=message_id
-                                )
-                            except Exception:
-                                pass
                         return {
                             "success": True,
                             "action": "image_analyzed",
@@ -4382,16 +4456,6 @@ class WhatsAppService:
                 message_text=order_action["message"],
                 allow_fallback=False
             )
-            if hasattr(cls.send_message, "assert_called") or getattr(cls.send_message, "_is_mock", False) or hasattr(cls.send_message, "mock"):
-                try:
-                    cls.send_message(
-                        organization_id=org_id,
-                        to_phone=clean_phone,
-                        chat_id=real_chat_id,
-                        message_text=order_action["message"]
-                    )
-                except Exception:
-                    pass
             return {
                 "success": True,
                 "action": "order_created",
@@ -4417,16 +4481,6 @@ class WhatsAppService:
                 message_text=tracking_action["message"],
                 allow_fallback=False
             )
-            if hasattr(cls.send_message, "assert_called") or getattr(cls.send_message, "_is_mock", False) or hasattr(cls.send_message, "mock"):
-                try:
-                    cls.send_message(
-                        organization_id=org_id,
-                        to_phone=clean_phone,
-                        chat_id=real_chat_id,
-                        message_text=tracking_action["message"]
-                    )
-                except Exception:
-                    pass
             return {
                 "success": True,
                 "action": "order_tracked",
@@ -4481,16 +4535,6 @@ class WhatsAppService:
                 message_text=payment_action["message"],
                 allow_fallback=False
             )
-            if hasattr(cls.send_message, "assert_called") or getattr(cls.send_message, "_is_mock", False) or hasattr(cls.send_message, "mock"):
-                try:
-                    cls.send_message(
-                        organization_id=org_id,
-                        to_phone=clean_phone,
-                        chat_id=real_chat_id,
-                        message_text=payment_action["message"]
-                    )
-                except Exception:
-                    pass
             return {
                 "success": True,
                 "action": "payment_instructions_dispatched",

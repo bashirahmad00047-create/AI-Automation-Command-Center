@@ -1185,34 +1185,62 @@ if (!text) text = '[Voice note]';
               console.warn('[Incoming Call] Webhook notice:', whErr.message);
             }
 
-            // 2. Immediate automated text response
+            // Dynamically generate AI response for incoming voice call
+            let autoReplyText = "Assalam-o-Alaikum! Aap ki call receive nahi ho saki kyun kay yeh automated AI assistance number hai. Barah-e-karam apna paigham voice note ya text mein bhejein, main foran jawab doon ga.";
+            let voiceAudioBase64 = null;
+
             try {
-              const autoRejectMessage =
-                process.env.CALL_REJECT_MESSAGE ||
-                "Assalam-o-Alaikum! Aap ki voice call receive nahi ho saki kyun kay yeh automated AI assistance number hai.\n\n" +
-                "🎙️ Barah-e-karam apna paigham isi chat mein voice note ya text mein bhejein, main foran jawab doon ga.";
-              if (sock && isConnected) {
-                await sock.sendMessage(targetJid, { text: autoRejectMessage });
-                console.log(`[Incoming Call] Sent text response to caller ${targetJid}`);
+              const backendUrl = getBackendBaseUrl();
+              const voiceResp = await fetch(`${backendUrl}/api/v1/voice/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  message: `[Incoming WhatsApp Voice Call from ${callerPhone}]: The user placed a WhatsApp voice call. Generate a polite, natural 1-2 sentence Roman Urdu response explaining this is an automated AI assistance system and asking them to send a voice note or text message so we can assist immediately.`,
+                  language: 'ur'
+                })
+              });
+              if (voiceResp.ok) {
+                const voiceData = await voiceResp.json();
+                if (voiceData.reply_text && voiceData.reply_text.trim()) {
+                  autoReplyText = voiceData.reply_text.trim();
+                }
+                voiceAudioBase64 = voiceData.audio_base64 || (voiceData.audio_data_uri ? voiceData.audio_data_uri.split('base64,')[1] : null);
+              }
+            } catch (callAiErr) {
+              console.warn('[Incoming Call] AI dynamic response query notice:', callAiErr.message);
+            }
+
+            // 2. Dispatch dynamically generated AI text response
+            try {
+              if (sock && isConnected && autoReplyText) {
+                await sock.sendMessage(targetJid, { text: autoReplyText });
+                console.log(`[Incoming Call] Sent dynamic AI text response to caller ${targetJid}`);
               }
             } catch (sendErr) {
               console.error(`[Incoming Call] Failed to send rejection text:`, sendErr.message);
             }
 
-            // 3. Immediate automated AI voice note (PTT voice note)
+            // 3. Dispatch dynamically generated AI voice note (PTT voice note)
             try {
-              const voiceMsgText = "Assalam-o-Alaikum! Aap ki voice call receive nahi ho saki. Barah-e-karam apna paigham voice note ya text mein bhejein, main aap ki foran madad karoon ga.";
-              const backendUrl = getBackendBaseUrl();
-              const voiceResp = await fetch(`${backendUrl}/api/v1/voice/chat`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: voiceMsgText, language: 'ur' })
-              });
-              if (voiceResp.ok) {
-                const voiceData = await voiceResp.json();
-                const b64 = voiceData.audio_base64 || (voiceData.audio_data_uri ? voiceData.audio_data_uri.split('base64,')[1] : null);
-                if (b64 && sock && isConnected) {
-                  const rawBuf = Buffer.from(b64, 'base64');
+              if (sock && isConnected) {
+                let rawBuf = null;
+                if (voiceAudioBase64) {
+                  rawBuf = Buffer.from(voiceAudioBase64, 'base64');
+                } else {
+                  const backendUrl = getBackendBaseUrl();
+                  const ttsResp = await fetch(`${backendUrl}/api/v1/voice/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: autoReplyText, language: 'ur' })
+                  });
+                  if (ttsResp.ok) {
+                    const ttsData = await ttsResp.json();
+                    const b64 = ttsData.audio_base64 || (ttsData.audio_data_uri ? ttsData.audio_data_uri.split('base64,')[1] : null);
+                    if (b64) rawBuf = Buffer.from(b64, 'base64');
+                  }
+                }
+
+                if (rawBuf) {
                   const oggBuf = await convertAudioToOggOpus(rawBuf).catch(() => rawBuf);
                   await sock.sendMessage(targetJid, {
                     audio: oggBuf,
@@ -1220,7 +1248,7 @@ if (!text) text = '[Voice note]';
                     ptt: true,
                     fileName: 'voice_reply.oga'
                   });
-                  console.log(`[Incoming Call] Dispatched automated AI PTT voice note to ${targetJid}`);
+                  console.log(`[Incoming Call] Dispatched dynamic AI PTT voice note to ${targetJid}`);
                 }
               }
             } catch (pttErr) {

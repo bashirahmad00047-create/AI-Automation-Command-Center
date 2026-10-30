@@ -159,22 +159,28 @@ import os
 def get_gemini_ai_response(user_message, organization_id: Optional[str] = None, system_prompt: Optional[str] = None):
     try:
         from whatsapp_service import WhatsAppService
+        # Tier 1: Gemini AI
         reply = WhatsAppService.call_gemini_ai(user_message, system_prompt=system_prompt, organization_id=organization_id)
         if reply:
             return reply
-        # Secondary Groq AI fallback
+        # Tier 2: Groq AI
         groq_reply = WhatsAppService.call_groq_ai(user_message, system_prompt=system_prompt, organization_id=organization_id)
         if groq_reply:
             return groq_reply
-        last_err = WhatsAppService.get_last_gemini_error()
-        last_groq_err = WhatsAppService.get_last_groq_error()
-        if last_groq_err and last_err:
-            return f'AI Auto-Responder note: Gemini & Groq generation failed. (Gemini: {last_err} | Groq: {last_groq_err})'
-        if last_err:
-            return f'AI Auto-Responder note: Gemini model generation failed. (Reason: {last_err})'
-        if last_groq_err:
-            return f'AI Auto-Responder note: Groq model generation failed. (Reason: {last_groq_err})'
-        return 'AI Auto-Responder note: Gemini/Groq API Key is missing or model generation failed.'
+        # Tier 3: OpenAI AI
+        openai_reply = WhatsAppService.call_openai_ai(user_message, system_prompt=system_prompt, organization_id=organization_id)
+        if openai_reply:
+            return openai_reply
+        # Tier 4: Pollinations AI (free, no-key, dynamic LLM)
+        poll_reply = WhatsAppService.call_pollinations_ai(user_message, system_prompt=system_prompt, organization_id=organization_id)
+        if poll_reply:
+            return poll_reply
+        # Tier 5: Dynamic Context-Aware Fallback
+        detected = WhatsAppService.detect_language(user_message)
+        return WhatsAppService.generate_smart_conversational_fallback(
+            message_body=user_message,
+            lang_fmt=detected.get("format", "roman_urdu")
+        )
     except Exception as e:
         return f'AI Error: {str(e)}'
 
