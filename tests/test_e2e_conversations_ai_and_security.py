@@ -185,5 +185,37 @@ class TestE2EConversationsAIAndSecurity(unittest.TestCase):
         self.assertEqual(res6.status_code, 429)
         self.assertEqual(res6.get_json().get("code"), "TOO_MANY_REQUESTS")
 
+    def test_e2e_otp_security_and_rate_limiting(self):
+        """E2E Test: OTP verification invalidates on max attempts and enforces rate limiting."""
+        from limiter import limiter
+        limiter.reset()
+        ip = "192.0.2.77"
+
+        # 1. Request OTP for master admin
+        req_res = self.client.post(
+            "/api/v1/auth/request-otp",
+            json={"email": "bashirahmad00047@gmail.com"},
+            headers={"X-Forwarded-For": ip}
+        )
+        self.assertEqual(req_res.status_code, 200)
+        self.assertEqual(req_res.get_json().get("status"), "success")
+
+        # 2. Try invalid OTPs until lockout
+        for attempt in range(1, 5):
+            ver_res = self.client.post(
+                "/api/v1/auth/verify-otp",
+                json={"email": "bashirahmad00047@gmail.com", "otp": f"99999{attempt}"},
+                headers={"X-Forwarded-For": ip}
+            )
+            self.assertEqual(ver_res.status_code, 400)
+
+        # 5th failed attempt should trigger lockout (429)
+        ver_res5 = self.client.post(
+            "/api/v1/auth/verify-otp",
+            json={"email": "bashirahmad00047@gmail.com", "otp": "999995"},
+            headers={"X-Forwarded-For": ip}
+        )
+        self.assertEqual(ver_res5.status_code, 429)
+
 if __name__ == "__main__":
     unittest.main()
