@@ -1430,17 +1430,31 @@ class WhatsAppService:
         organization_id: Optional[str] = None,
         voice: Optional[str] = None,
         rate: Optional[str] = None,
-        pitch: Optional[str] = None
+        pitch: Optional[str] = None,
+        volume: Optional[str] = None
     ) -> Optional[bytes]:
         """Synthesizes text into ultra-realistic HD neural human speech using Microsoft Edge Neural TTS.
-        Supports natural Pakistani Urdu (ur-PK-UzmaNeural, ur-PK-AsadNeural, hi-IN-MadhurNeural), English, Arabic, and regional languages.
+        Supports natural Pakistani Urdu (ur-PK-UzmaNeural, ur-PK-AsadNeural), English (en-US-AvaNeural, en-US-AndrewNeural), and regional languages.
         """
         try:
             import edge_tts
             import asyncio
-            lang_str = str(language or "").lower()
+            import re
 
-            is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in (text or ""))
+            if not text or not str(text).strip():
+                return None
+
+            raw_txt = str(text).strip()
+            # Strip emojis, markdown asterisks, hashes, backticks, bullets, etc.
+            clean_speech = re.sub(r'[*_~`#>•\-\[\]\(\)]', ' ', raw_txt)
+            clean_speech = re.sub(r'[\U00010000-\U0010ffff]', '', clean_speech)
+            clean_speech = re.sub(r'\s+', ' ', clean_speech).strip()
+            if not clean_speech:
+                clean_speech = raw_txt
+
+            lang_str = str(language or "").lower()
+            is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in clean_speech)
+            is_urdu = ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script)
 
             configured_voice = (
                 voice
@@ -1457,11 +1471,17 @@ class WhatsAppService:
                 or cls._get_tenant_or_global_setting("EDGE_TTS_PITCH", organization_id=organization_id)
                 or os.environ.get("EDGE_TTS_PITCH")
             )
+            configured_volume = (
+                volume
+                or cls._get_tenant_or_global_setting("EDGE_TTS_VOLUME", organization_id=organization_id)
+                or os.environ.get("EDGE_TTS_VOLUME")
+            )
 
             if configured_voice:
                 active_voice = configured_voice.strip()
-            elif "urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str:
-                active_voice = "ur-PK-UzmaNeural" if is_arabic_script else "ur-PK-AsadNeural"
+            elif is_urdu:
+                # Microsoft Neural voice ur-PK-UzmaNeural (warm, polite female customer-care tone)
+                active_voice = "ur-PK-UzmaNeural"
             elif "pashto" in lang_str or lang_str == "ps":
                 active_voice = "ps-AF-LatifaNeural"
             elif "arabic" in lang_str or lang_str == "ar":
@@ -1473,13 +1493,25 @@ class WhatsAppService:
             elif "french" in lang_str or lang_str == "fr":
                 active_voice = "fr-FR-DeniseNeural"
             else:
-                active_voice = "en-US-JennyNeural"
+                active_voice = "en-US-AvaNeural"
 
-            active_rate = configured_rate or ("-10%" if active_voice == "hi-IN-MadhurNeural" else "+0%")
-            active_pitch = configured_pitch or ("-2Hz" if active_voice == "hi-IN-MadhurNeural" else "+0Hz")
+            if configured_rate:
+                active_rate = configured_rate.strip()
+            else:
+                active_rate = "+4%" if is_urdu else "+3%"
+
+            if configured_pitch:
+                active_pitch = configured_pitch.strip()
+            else:
+                active_pitch = "+2Hz" if is_urdu else "+1Hz"
+
+            if configured_volume:
+                active_volume = configured_volume.strip()
+            else:
+                active_volume = "+10%" if is_urdu else "+0%"
 
             async def _run():
-                comm = edge_tts.Communicate(text, active_voice, rate=active_rate, pitch=active_pitch)
+                comm = edge_tts.Communicate(clean_speech, active_voice, rate=active_rate, pitch=active_pitch, volume=active_volume)
                 chunks = []
                 async for chunk in comm.stream():
                     if chunk.get("type") == "audio":
@@ -1491,7 +1523,7 @@ class WhatsAppService:
                 if loop.is_running():
                     import concurrent.futures
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                        return pool.submit(asyncio.run, _run()).result(timeout=8.0)
+                        return pool.submit(asyncio.run, _run()).result(timeout=10.0)
                 else:
                     return loop.run_until_complete(_run())
             except RuntimeError:
@@ -1574,8 +1606,8 @@ class WhatsAppService:
         """Synthesizes text into ultra-realistic HD human spoken audio bytes.
 
         Supported providers in order of precedence:
-        1. ElevenLabs Multilingual Neural TTS (voice_id='QwMurwQUOf6t7fnABXar', model_id='eleven_multilingual_v2') - ALWAYS primary for all voice notes (Urdu, Roman Urdu, English)
-        2. Microsoft Edge Neural HD Voice (hi-IN-MadhurNeural / ur-PK-UzmaNeural / en-US-JennyNeural) fallback ONLY if ElevenLabs fails completely
+        1. Microsoft Edge Neural HD Voice (ur-PK-UzmaNeural / en-US-AvaNeural) - Primary for all Urdu/English voice notes
+        2. ElevenLabs Multilingual Neural TTS fallback
         3. OpenAI Audio Speech API (tts-1-hd) fallback
         4. Local gTTS (Google Text-to-Speech) fallback
 
@@ -1595,13 +1627,22 @@ class WhatsAppService:
         audio_fn = "voice_reply.oga" if is_oga else "voice_reply.mp3"
         audio_mt = "audio/ogg; codecs=opus" if is_oga else "audio/mpeg"
 
-        # 1. Primary: ElevenLabs Multilingual Neural TTS (voice_id='QwMurwQUOf6t7fnABXar', model_id='eleven_multilingual_v2')
-        # ALWAYS attempted first for every voice note, including Urdu / Roman Urdu / English text responses.
+        # 1. Primary: Microsoft Edge Neural HD Voice (ur-PK-UzmaNeural / en-US-AvaNeural)
+        # Always tried first: instant, completely free, ultra-natural human tone without robotic sound.
+        try:
+            edge_bytes = cls._synthesize_edge_tts(clean_text[:1200], language=language, organization_id=organization_id)
+            if edge_bytes and len(edge_bytes) > 100:
+                logger.info(f"[TTS Pipeline] Edge-TTS successfully synthesized {len(edge_bytes)} bytes (lang={language}).")
+                return (edge_bytes, audio_fn, audio_mt)
+        except Exception as e_err:
+            logger.debug(f"[TTS Pipeline] Edge-TTS notice: {e_err}")
+
+        # 2. Secondary fallback: ElevenLabs Multilingual Neural TTS
         eleven_bytes = cls._synthesize_elevenlabs_tts(clean_text[:1000], organization_id=organization_id)
         if eleven_bytes and len(eleven_bytes) > 100:
             return (eleven_bytes, audio_fn, audio_mt)
 
-        # 2. Secondary fallback: OpenAI HD Audio Speech API (model 'tts-1-hd')
+        # 3. Tertiary fallback: OpenAI HD Audio Speech API (model 'tts-1-hd')
         openai_key = cls.get_openai_api_key(organization_id=organization_id)
         if openai_key and str(openai_key).strip():
             try:
@@ -1659,15 +1700,7 @@ class WhatsAppService:
             except Exception as e:
                 logger.debug(f"OpenAI TTS-1-HD synthesis failed: {e}")
 
-        # 3. Microsoft Edge Neural HD Voice (ur-PK-UzmaNeural / en-US-JennyNeural)
-        # Enabled in production or when explicitly enabled in tests
-        is_testing = has_app_context() and current_app.config.get("TESTING")
-        if not is_testing or getattr(cls, "_force_test_edge_tts", False):
-            edge_bytes = cls._synthesize_edge_tts(clean_text[:1000], language=language, organization_id=organization_id)
-            if edge_bytes and len(edge_bytes) > 100:
-                return (edge_bytes, audio_fn, audio_mt)
-
-        # 4. Local gTTS synthesis (reliable fallback)
+        # 4. Local gTTS synthesis (last-resort emergency fallback)
         try:
             from gtts import gTTS
             import io
@@ -3075,24 +3108,87 @@ class WhatsAppService:
                 "- Do NOT answer in English by default.\n"
                 "- Use natural Roman Urdu phrasing: e.g. 'Salam! Khush-amdeed, main aapki kya madad kar sakta hoon?'."
             )
+
+    class MultimodalAudioResult(tuple):
+        """Container for multimodal audio transcription, display reply, TTS script, and detected language.
+        Inherits from tuple so `transcript, reply = mm_res` unpacks seamlessly.
+        """
+        def __new__(cls, transcript: str, reply: str, tts_script: str = "", lang: str = "ur"):
+            return super().__new__(cls, (transcript, reply))
+
+        def __init__(self, transcript: str, reply: str, tts_script: str = "", lang: str = "ur"):
+            self.transcript = transcript
+            self.reply = reply
+            self.tts_script = tts_script or reply
+            self.lang = lang
+
     @classmethod
-    def _parse_multimodal_audio_response(cls, text: str) -> Tuple[str, str]:
-        """Parses TRANSCRIPT: and REPLY: from multimodal model output."""
+    def _parse_multimodal_audio_response(cls, text: str) -> "WhatsAppService.MultimodalAudioResult":
+        """Parses transcript, display_text, tts_script, and lang from multimodal model output."""
         if not text:
-            return ("", "")
-        lines = [line.strip() for line in text.split("\n") if line.strip()]
+            return cls.MultimodalAudioResult("", "", "", "ur")
+
+        clean = str(text).strip()
+        # 1. Try parsing JSON codeblock or raw JSON object
+        candidate_json = clean
+        if "```json" in clean:
+            candidate_json = clean.split("```json", 1)[1].split("```", 1)[0].strip()
+        elif "```" in clean:
+            candidate_json = clean.split("```", 1)[1].split("```", 1)[0].strip()
+
+        try:
+            import json as _json_mod
+            parsed = _json_mod.loads(candidate_json)
+            if isinstance(parsed, dict):
+                transcript = str(parsed.get("transcript") or "").strip()
+                display_text = str(parsed.get("display_text") or parsed.get("reply") or "").strip()
+                tts_script = str(parsed.get("tts_script") or parsed.get("script") or display_text).strip()
+                lang_raw = str(parsed.get("lang") or "ur").strip().lower()
+                lang = "en" if "en" in lang_raw else "ur"
+                if display_text or transcript:
+                    return cls.MultimodalAudioResult(
+                        transcript=transcript or "Voice note",
+                        reply=display_text or tts_script,
+                        tts_script=tts_script or display_text,
+                        lang=lang
+                    )
+        except Exception:
+            pass
+
+        # 2. Key-value fallback
+        lines = [line.strip() for line in clean.split("\n") if line.strip()]
         transcript = ""
         reply = ""
+        tts_script = ""
+        lang = "ur"
+
         for line in lines:
-            if line.upper().startswith("TRANSCRIPT:"):
+            upper = line.upper()
+            if upper.startswith("TRANSCRIPT:"):
                 transcript = line[len("TRANSCRIPT:"):].strip()
-            elif line.upper().startswith("REPLY:"):
-                reply = line[len("REPLY:"):].strip()
+            elif upper.startswith("REPLY:") or upper.startswith("DISPLAY_TEXT:"):
+                reply = line.split(":", 1)[1].strip()
+            elif upper.startswith("TTS_SCRIPT:") or upper.startswith("TTS:"):
+                tts_script = line.split(":", 1)[1].strip()
+            elif upper.startswith("LANG:"):
+                l_val = line.split(":", 1)[1].strip().lower()
+                lang = "en" if "en" in l_val else "ur"
+
         if not reply and lines:
             reply = lines[-1].strip()
         if not transcript and len(lines) > 1:
             transcript = lines[0].strip()
-        return (transcript or "Voice note", reply or text)
+
+        is_ur = any('\u0600' <= ch <= '\u06FF' for ch in (tts_script or reply or ""))
+        if is_ur:
+            lang = "ur"
+
+        return cls.MultimodalAudioResult(
+            transcript=transcript or "Voice note",
+            reply=reply or clean,
+            tts_script=tts_script or reply or clean,
+            lang=lang
+        )
 
     @classmethod
     def call_gemini_multimodal_audio(
@@ -3102,9 +3198,9 @@ class WhatsAppService:
         organization_id: Optional[str] = None,
         customer_name: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None
-    ) -> Optional[Tuple[str, str]]:
+    ) -> Optional["WhatsAppService.MultimodalAudioResult"]:
         """Processes audio voice note directly with Gemini Multimodal perception.
-        Returns Tuple[transcript, conversational_reply] in Roman Urdu.
+        Returns MultimodalAudioResult(transcript, reply, tts_script, lang).
         """
         api_key = cls.get_gemini_api_key(organization_id=organization_id)
         if not api_key or not audio_bytes:
@@ -3119,12 +3215,26 @@ class WhatsAppService:
         prompt = (
             f"You are a friendly, highly intelligent conversational AI assistant for {b_name}.\n"
             f"Business Knowledge:\n{verified_kb}\n\n"
-            f"{cust_label} has sent an audio voice note.\n"
-            "INSTRUCTIONS:\n"
-            "Listen to this voice note carefully. Reply directly and naturally to what the person said in the same language (Roman Urdu/Urdu/English).\n"
-            "Format your response exactly as follows:\n"
-            "TRANSCRIPT: <exact transcribed customer words>\n"
-            "REPLY: <direct natural reply to what the person asked>"
+            f"{cust_label} has sent an audio voice note.\n\n"
+            "CRITICAL INSTRUCTIONS:\n"
+            "1. Listen to this voice note carefully and detect the EXACT language spoken by the customer.\n"
+            "2. LANGUAGE MATCHING RULE (MANDATORY):\n"
+            "   - If the customer speaks in Urdu, Hindi, Punjabi, or Roman Urdu:\n"
+            "     * 'lang': 'ur'\n"
+            "     * 'tts_script': You MUST write the spoken reply in pure Urdu script (اردو). E.g. 'السلام علیکم! میں آپ کی کیا مدد کر سکتی ہوں؟'\n"
+            "     * 'display_text': Write the reply in friendly, conversational Roman Urdu for display. E.g. 'Assalam-o-Alaikum! Main aap ki kya madad kar sakti hoon?'\n"
+            "     * NEVER reply in English if the customer spoke Urdu or Hindi!\n"
+            "   - If the customer speaks in English:\n"
+            "     * 'lang': 'en'\n"
+            "     * 'tts_script': Conversational, natural English reply.\n"
+            "     * 'display_text': Same natural conversational English reply.\n"
+            "3. Format your response STRICTLY as valid JSON with no extraneous text:\n"
+            "{\n"
+            '  "transcript": "<exact words spoken by the customer>",\n'
+            '  "display_text": "<friendly conversational reply in Roman Urdu or English>",\n'
+            '  "tts_script": "<Pure Urdu script (اردو) for Urdu replies, or English for English replies>",\n'
+            '  "lang": "ur" or "en"\n'
+            "}"
         )
 
         b64_audio = base64.b64encode(audio_bytes).decode("ascii")
@@ -3152,10 +3262,10 @@ class WhatsAppService:
                     )
                     if response and response.text:
                         res_text = response.text.strip()
-                        transcript, reply = cls._parse_multimodal_audio_response(res_text)
-                        if reply:
-                            logger.info(f"[Multimodal Voice] google-genai SDK '{m}' transcribed & answered: transcript='{transcript[:40]}...', reply='{reply[:40]}...'")
-                            return (transcript, reply)
+                        mm_res = cls._parse_multimodal_audio_response(res_text)
+                        if mm_res and (mm_res.reply or mm_res.transcript):
+                            logger.info(f"[Multimodal Voice] google-genai SDK '{m}' transcribed & answered: transcript='{mm_res.transcript[:40]}...', reply='{mm_res.reply[:40]}...', lang='{mm_res.lang}'")
+                            return mm_res
                 except Exception as sdk_err:
                     logger.debug(f"google-genai SDK audio notice ({m}): {sdk_err}")
         except Exception as genai_init_err:
@@ -3173,14 +3283,14 @@ class WhatsAppService:
                 ], request_options={"timeout": 15.0})
                 if response and hasattr(response, "text") and response.text:
                     res_text = response.text.strip()
-                    transcript, reply = cls._parse_multimodal_audio_response(res_text)
-                    if reply:
-                        logger.info(f"[Multimodal Voice] Gemini SDK '{m}' transcribed & answered: transcript='{transcript[:40]}...', reply='{reply[:40]}...'")
-                        return (transcript, reply)
+                    mm_res = cls._parse_multimodal_audio_response(res_text)
+                    if mm_res and (mm_res.reply or mm_res.transcript):
+                        logger.info(f"[Multimodal Voice] Gemini SDK '{m}' transcribed & answered: transcript='{mm_res.transcript[:40]}...', reply='{mm_res.reply[:40]}...', lang='{mm_res.lang}'")
+                        return mm_res
             except Exception as e:
                 logger.debug(f"Gemini SDK multimodal audio notice ({m}): {e}")
 
-            # 2. Try REST API with inline_data
+            # 3. Try REST API with inline_data
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
                 payload = {
@@ -3205,10 +3315,10 @@ class WhatsAppService:
                         parts = candidates[0].get("content", {}).get("parts", [])
                         if parts and "text" in parts[0]:
                             res_text = parts[0]["text"].strip()
-                            transcript, reply = cls._parse_multimodal_audio_response(res_text)
-                            if reply:
-                                logger.info(f"[Multimodal Voice] Gemini REST '{m}' transcribed & answered: transcript='{transcript[:40]}...', reply='{reply[:40]}...'")
-                                return (transcript, reply)
+                            mm_res = cls._parse_multimodal_audio_response(res_text)
+                            if mm_res and (mm_res.reply or mm_res.transcript):
+                                logger.info(f"[Multimodal Voice] Gemini REST '{m}' transcribed & answered: transcript='{mm_res.transcript[:40]}...', reply='{mm_res.reply[:40]}...', lang='{mm_res.lang}'")
+                                return mm_res
             except Exception as e:
                 logger.debug(f"Gemini REST multimodal audio notice ({m}): {e}")
 
@@ -4568,6 +4678,10 @@ class WhatsAppService:
                     )
                     if mm_res:
                         clean_trans, mm_reply = mm_res
+                        if getattr(mm_res, "tts_script", None):
+                            kwargs["tts_script"] = mm_res.tts_script
+                        if getattr(mm_res, "lang", None):
+                            kwargs["detected_lang"] = mm_res.lang
                     if not clean_trans:
                         clean_trans = cls._transcribe_audio(audio_bytes, organization_id=org_id, timeout=12.0)
                     if mm_reply and mm_reply.strip():
@@ -4874,14 +4988,25 @@ class WhatsAppService:
             audio_dispatch_res = None
             outbound_audio_b64 = None
             send_as_voice = False
+            direct_bridge = bool(kwargs.get("direct_bridge") or kwargs.get("from_bridge"))
+
             if is_voice_inbound or kwargs.get("reply_as_voice"):
                 try:
-                    synth_lang = "ur"
+                    speech_text = kwargs.get("tts_script") or clean_reply_text
+                    detected_lang_str = str(kwargs.get("detected_lang") or "").lower()
+                    has_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in (speech_text or clean_reply_text or ""))
+                    is_urdu_context = (
+                        "ur" in detected_lang_str
+                        or "urdu" in detected_lang_str
+                        or has_arabic_script
+                        or any(word in (clean_reply_text or "").lower() for word in ["salam", "aap", "madad", "shukriya", "jee", "hain", "kya", "kar"])
+                    )
+                    synth_lang = kwargs.get("detected_lang") or ("ur" if is_urdu_context else "en")
                     audio_res = cls.generate_spoken_audio(
-                        text=clean_reply_text,
+                        text=speech_text,
                         language=synth_lang,
                         organization_id=org_id,
-                        output_format="mp3"
+                        output_format="oga"
                     )
                     if audio_res:
                         audio_b, audio_fn, audio_mt = audio_res
@@ -4890,32 +5015,34 @@ class WhatsAppService:
                         synth_data_url = f"data:audio/ogg;base64,{clean_synth_b64}"
                         outbound_audio_b64 = clean_synth_b64
                         send_as_voice = True
-                        logger.info(f"[Voice Pipeline] Synthesized {len(audio_b)} bytes of voice reply for {real_chat_id}.")
-                        audio_dispatch_res = cls.send_green_api_file(
-                            organization_id=org_id,
-                            to_phone=clean_phone,
-                            chat_id=real_chat_id,
-                            file_bytes=audio_b,
-                            filename="voice_reply.oga",
-                            mime_type="audio/ogg; codecs=opus",
-                            caption="",
-                            quoted_message_id=message_id,
-                            transcript=clean_reply_text,
-                            media_url=synth_data_url,
-                            allow_fallback=False,
-                            is_ai_response=True,
-                            is_ai_generated=is_real_ai,
-                            ai_intent=intent,
-                            response_source=source,
-                            ptt=True
-                        )
-                        dispatch_res = audio_dispatch_res
-                        logger.info(f"[Voice Dispatch Guarantee] Dispatched OGG Opus PTT voice note to {real_chat_id}: result={audio_dispatch_res}")
+                        logger.info(f"[Voice Pipeline] Synthesized {len(audio_b)} bytes of voice reply for {real_chat_id} (direct_bridge={direct_bridge}, lang={synth_lang}).")
+
+                        if not direct_bridge:
+                            audio_dispatch_res = cls.send_green_api_file(
+                                organization_id=org_id,
+                                to_phone=clean_phone,
+                                chat_id=real_chat_id,
+                                file_bytes=audio_b,
+                                filename="voice_reply.oga",
+                                mime_type="audio/ogg; codecs=opus",
+                                caption="",
+                                quoted_message_id=message_id,
+                                transcript=clean_reply_text,
+                                media_url=synth_data_url,
+                                allow_fallback=False,
+                                is_ai_response=True,
+                                is_ai_generated=is_real_ai,
+                                ai_intent=intent,
+                                response_source=source,
+                                ptt=True
+                            )
+                            dispatch_res = audio_dispatch_res
+                            logger.info(f"[Voice Dispatch Guarantee] Dispatched OGG Opus PTT voice note to {real_chat_id}: result={audio_dispatch_res}")
                 except Exception as tts_err:
                     logger.warning(f"[Voice Fallback Notice] Voice synthesis/dispatch failed for {real_chat_id}: {tts_err}. Falling back to text.")
 
-            # Emergency voice synthesis: If voice dispatch failed on inbound voice, synthesize via gTTS/EdgeTTS
-            if is_voice_inbound and not dispatch_res:
+            # Emergency voice synthesis: If voice dispatch failed on inbound voice and not direct_bridge
+            if is_voice_inbound and not direct_bridge and not dispatch_res:
                 try:
                     logger.info(f"[Emergency Voice Dispatch] Generating emergency audio for {real_chat_id}...")
                     from gtts import gTTS
@@ -4946,8 +5073,8 @@ class WhatsAppService:
                 except Exception as emerg_err:
                     logger.error(f"[Emergency Voice Dispatch Error] {emerg_err}")
 
-            # If voice dispatch was not executed or failed, deliver text message so customer is NEVER ignored
-            if not dispatch_res:
+            # If voice dispatch was not executed or failed, and not direct bridge, deliver text message
+            if not direct_bridge and not dispatch_res:
                 logger.info(f"[Delivery Fallback] Audio delivery was not completed for {real_chat_id}; delivering as text reply to WhatsApp...")
                 green_dispatch_res = cls.send_green_api_message(
                     organization_id=org_id,
@@ -4961,8 +5088,8 @@ class WhatsAppService:
                 dispatch_res = green_dispatch_res
                 logger.info(f"[Force Dispatch] send_green_api_message execution result for {real_chat_id}: {green_dispatch_res}")
 
-            # Outbound text dispatch fallback if not dispatched
-            if not dispatch_res:
+            # Outbound text dispatch fallback if not dispatched and not direct bridge
+            if not direct_bridge and not dispatch_res:
                 try:
                     dispatch_res = cls.send_message(
                         organization_id=org_id,
@@ -4977,7 +5104,8 @@ class WhatsAppService:
 
             if not dispatch_res:
                 dispatch_res = text_dispatch_res or audio_dispatch_res or {}
-            # Tag the newly recorded outbound message with AI metadata
+
+            # Outbound Message & History Persistence: Ensure outbound AI auto-reply is committed to DB
             outbound_record_id = (dispatch_res.get("record_id") or dispatch_res.get("message_record_id")) if isinstance(dispatch_res, dict) else None
             msg_rec = None
             if outbound_record_id and has_app_context():
@@ -4985,20 +5113,35 @@ class WhatsAppService:
             if not msg_rec and isinstance(dispatch_res, dict) and dispatch_res.get("whatsapp_message_id") and has_app_context():
                 msg_rec = WhatsAppMessage.query.filter_by(whatsapp_message_id=dispatch_res["whatsapp_message_id"]).first()
 
-            # Outbound Message & History Persistence: Ensure outbound AI auto-reply is committed to DB
             if not msg_rec and has_app_context() and clean_reply_text:
                 try:
-                    msg_status = "sent" if (isinstance(dispatch_res, dict) and dispatch_res.get("success") and not dispatch_res.get("simulated")) else (dispatch_res.get("status", "sent") if isinstance(dispatch_res, dict) else "sent")
+                    msg_type = "audio" if (is_voice or is_voice_inbound or send_as_voice) else "text"
+                    outbound_body = f"🎤 {clean_reply_text}" if (is_voice or is_voice_inbound or send_as_voice) else clean_reply_text
+                    synth_url = f"data:audio/ogg;base64,{outbound_audio_b64}" if outbound_audio_b64 else None
+                    raw_payload_data = {
+                        "triggered_by_message_id": message_id,
+                        "chat_id": real_chat_id,
+                        "chatId": real_chat_id,
+                        "is_audio": bool(is_voice or is_voice_inbound or send_as_voice),
+                        "message_type": msg_type
+                    }
+                    if outbound_audio_b64:
+                        raw_payload_data["audio_base64"] = outbound_audio_b64
+                        raw_payload_data["media_url"] = synth_url
+                        raw_payload_data["mediaUrl"] = synth_url
+
+                    msg_status = "sent" if (isinstance(dispatch_res, dict) and dispatch_res.get("success") and not dispatch_res.get("simulated")) else "sent"
                     msg_rec = cls.record_message(
                         organization_id=org_id,
                         sender=f"GreenAPI Instance {conf.get('green_api_id_instance', 'System')}",
                         recipient=real_chat_id,
                         direction="outbound",
-                        body=clean_reply_text,
+                        body=outbound_body,
                         status=msg_status,
+                        media_url=synth_url,
                         whatsapp_message_id=(dispatch_res.get("whatsapp_message_id") if isinstance(dispatch_res, dict) else None),
-                        message_type="audioMessage" if (is_voice or is_voice_inbound) else "text",
-                        raw_payload={"triggered_by_message_id": message_id, "chat_id": real_chat_id, "chatId": real_chat_id}
+                        message_type=msg_type,
+                        raw_payload=raw_payload_data
                     )
                 except Exception as rec_err:
                     logger.debug(f"Outbound message persistence notice: {rec_err}")

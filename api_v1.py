@@ -3383,7 +3383,8 @@ def whatsapp_webhook_ingress():
                     is_voice=is_v,
                     download_url=msg.get("download_url"),
                     audio_base64=msg.get("audio_base64"),
-                    media_url=msg.get("media_url") or msg.get("download_url")
+                    media_url=msg.get("media_url") or msg.get("download_url"),
+                    direct_bridge=True
                 )
             except Exception as auto_err:
                 logger.error(f"AI Auto-Responder error in webhook: {auto_err}")

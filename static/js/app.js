@@ -6540,18 +6540,28 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                     }
                 }
                 const hasPlayableAudio = Boolean(rawMedia && typeof rawMedia === 'string' && (rawMedia.startsWith('data:audio') || rawMedia.startsWith('http') || rawMedia.startsWith('/api/')));
-                const isVoice = Boolean(hasPlayableAudio || m.is_audio || m.type === 'audio' || m.message_type === 'audio' || m.message_type === 'voiceMessage' || (m.body && (m.body.startsWith('🎤') || m.body.startsWith('🎙️'))));
+                const isVoice = Boolean(
+                    hasPlayableAudio ||
+                    m.is_audio ||
+                    m.is_voice ||
+                    m.type === 'audio' ||
+                    m.message_type === 'audio' ||
+                    m.message_type === 'audioMessage' ||
+                    m.message_type === 'voiceMessage' ||
+                    m.message_type === 'voice' ||
+                    (m.body && (m.body.startsWith('🎤') || m.body.startsWith('🎙️')))
+                );
                 const safeMediaUrl = rawMedia || '';
-                const safeBody = (m.body || m.message || '').replace(/\[.*?\]/g, '').trim();
+                const safeBody = (m.body || m.message || '').replace(/^🎤\s*/, '').replace(/^🎙️\s*/, '').replace(/\[.*?\]/g, '').trim();
 
                 let bodyHtml = '';
                 if (isVoice) {
                     const fallbackBlob = hasPlayableAudio ? getAudioBlobUrl(safeMediaUrl) : '';
                     let audioSrc = '';
-                    if (m.id) {
-                        audioSrc = `/api/whatsapp/media/${encodeURIComponent(m.id)}`;
-                    } else if (hasPlayableAudio) {
+                    if (hasPlayableAudio) {
                         audioSrc = fallbackBlob;
+                    } else if (m.id) {
+                        audioSrc = `/api/whatsapp/media/${encodeURIComponent(m.id)}`;
                     }
                     const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage' && safeBody !== '🎤 Voice message' && safeBody !== '🎙️ Voice note' && safeBody !== '(no text)');
                     const durSeconds = Number(m.audio_duration || m.duration || 0);
