@@ -9169,6 +9169,9 @@ async function loadCompanyChannelMessages(channelId, isBackground = false) {
         }
 
         const wasAtBottom = (stream.scrollHeight - stream.scrollTop - stream.clientHeight) < 60;
+        const msgSig = channelId + '::' + messages.map(m => `${m.id}_${m.updated_at || m.created_at || ''}_${(m.body || m.content || '').length}`).join('|');
+        if (stream._lastSig === msgSig) return;
+        stream._lastSig = msgSig;
         stream.innerHTML = messages.map(msg => renderMessageItem(msg)).join('');
 
         if (!isBackground || wasAtBottom) {
@@ -9421,6 +9424,9 @@ function filterCompanyChannels(query) {
 function startCompanyMessagingAutoPoll() {
     stopCompanyMessagingAutoPoll();
     cmAutoPollTimer = setInterval(() => {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        const cmTab = document.getElementById('tab-company-messaging');
+        if (cmTab && !cmTab.classList.contains('active')) return;
         if (cmActiveChannelId) {
             loadCompanyChannelMessages(cmActiveChannelId, true);
         }

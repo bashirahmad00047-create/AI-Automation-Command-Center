@@ -60,6 +60,11 @@ class TestUIBlinkingAndWebSocketLoop(unittest.TestCase):
         self.assertIn("res.status === 401 || res.status === 403", self.app_js, "Only 401/403 should redirect to login")
         self.assertNotIn("catch (e) {\n        console.error('Failed to load user/org state:', e);\n        state.currentUser = null;\n        state.currentOrg = null;\n        state.userRole = 'guest';\n        updateUserBadgeUI();\n        updateAuthHeaderUI(false);\n        window.location.href = '/login';", self.app_js)
 
+    def test_company_messaging_signature_and_background_throttling(self):
+        """Ensure company messaging avoids UI blinking and halts background polling when tab inactive."""
+        self.assertIn("stream._lastSig = msgSig", self.app_js)
+        self.assertIn("if (cmTab && !cmTab.classList.contains('active')) return", self.app_js)
+
 
 if __name__ == "__main__":
     unittest.main()
