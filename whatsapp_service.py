@@ -16,6 +16,7 @@ Architecture:
 
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import datetime
 import hashlib
@@ -842,6 +843,92 @@ class WhatsAppService:
         return None
 
     @classmethod
+    def get_ffmpeg_binary_path(cls) -> str:
+        """Finds valid ffmpeg executable path across system PATH, node_modules, and standard Linux paths."""
+        import shutil
+        cmd = shutil.which("ffmpeg")
+        if cmd:
+            return cmd
+        local_cand = os.path.join(os.getcwd(), "node_modules", "ffmpeg-static", "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        if os.path.exists(local_cand):
+            return local_cand
+        for p in ("/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/bin/ffmpeg"):
+            if os.path.exists(p):
+                return p
+        return "ffmpeg"
+
+    @classmethod
+    def convert_to_wav_16k(cls, audio_bytes: bytes) -> Optional[bytes]:
+        """Converts raw audio bytes (OGG Opus, MP3, etc.) to 16kHz 16-bit mono WAV using ffmpeg."""
+        if not audio_bytes:
+            return None
+        if audio_bytes.startswith(b"RIFF") and b"WAVE" in audio_bytes[:16]:
+            return audio_bytes
+        import subprocess, tempfile
+        ffmpeg_bin = cls.get_ffmpeg_binary_path()
+        in_p = None
+        out_p = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as in_f, \
+                 tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as out_f:
+                in_p = in_f.name
+                out_p = out_f.name
+                in_f.write(audio_bytes)
+                in_f.flush()
+
+            cmd = [ffmpeg_bin, "-y", "-i", in_p, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", out_p]
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8)
+            if proc.returncode == 0 and os.path.exists(out_p) and os.path.getsize(out_p) > 100:
+                with open(out_p, "rb") as f:
+                    return f.read()
+        except Exception as e:
+            logger.debug(f"ffmpeg conversion notice: {e}")
+        finally:
+            for p in (in_p, out_p):
+                if p and os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+        return None
+
+    @classmethod
+    def transcribe_with_speech_recognition(cls, audio_bytes: bytes) -> Optional[str]:
+        """Transcribes audio using Google SpeechRecognition (ur-PK primary, en-US secondary).
+        Zero external API key dependencies, instant, ultra-reliable.
+        """
+        wav_bytes = cls.convert_to_wav_16k(audio_bytes)
+        if not wav_bytes:
+            return None
+        try:
+            import speech_recognition as sr
+            import io
+            r = sr.Recognizer()
+            with sr.AudioFile(io.BytesIO(wav_bytes)) as source:
+                audio_data = r.record(source)
+
+            # 1. Primary: Urdu (Pakistan)
+            try:
+                text_ur = r.recognize_google(audio_data, language="ur-PK")
+                if text_ur and text_ur.strip() and not cls._is_european_gibberish(text_ur):
+                    logger.info(f"[SpeechRecognition ur-PK] Transcribed: '{text_ur}'")
+                    return text_ur.strip()
+            except Exception as e:
+                logger.debug(f"[SpeechRecognition ur-PK notice]: {e}")
+
+            # 2. Secondary: English (United States)
+            try:
+                text_en = r.recognize_google(audio_data, language="en-US")
+                if text_en and text_en.strip():
+                    logger.info(f"[SpeechRecognition en-US] Transcribed: '{text_en}'")
+                    return text_en.strip()
+            except Exception as e:
+                logger.debug(f"[SpeechRecognition en-US notice]: {e}")
+        except Exception as sr_err:
+            logger.debug(f"[SpeechRecognition Engine notice]: {sr_err}")
+        return None
+
+    @classmethod
     def _contextual_voice_intent_handler(cls, organization_id: Optional[str] = None, phone: Optional[str] = None) -> Optional[str]:
         """Contextual voice intent handler when AI transcription keys are unavailable or audio is unintelligible.
         Returns None to avoid canned fallback loops and allow dynamic shopkeeper assistant processing."""
@@ -865,6 +952,14 @@ class WhatsAppService:
                 cached = cls._transcription_cache.get(message_id)
                 if cached and not cls._is_prompt_echo_or_refusal(cached[1]):
                     return cached[1]
+
+        # 0. Primary Zero-Latency SpeechRecognition (Google ur-PK / en-US via ffmpeg 16k PCM)
+        sr_text = cls.transcribe_with_speech_recognition(audio_bytes)
+        if sr_text and sr_text.strip() and not cls._is_prompt_echo_or_refusal(sr_text):
+            if message_id:
+                with cls._media_cache_lock:
+                    cls._transcription_cache[message_id] = (time.time(), sr_text.strip())
+            return sr_text.strip()
 
         transcription_prompt = (
             "Provide an accurate transcription of this WhatsApp voice message. "
@@ -3146,8 +3241,9 @@ class WhatsAppService:
                 lang_raw = str(parsed.get("lang") or "ur").strip().lower()
                 lang = "en" if "en" in lang_raw else "ur"
                 if display_text or transcript:
+                    clean_tr = "" if transcript.strip().lower() in ("voice note", "voice message", "[voice note]", "[voice message]", "audio") else transcript
                     return cls.MultimodalAudioResult(
-                        transcript=transcript or "Voice note",
+                        transcript=clean_tr,
                         reply=display_text or tts_script,
                         tts_script=tts_script or display_text,
                         lang=lang
@@ -3183,8 +3279,9 @@ class WhatsAppService:
         if is_ur:
             lang = "ur"
 
+        clean_fallback_tr = "" if transcript.strip().lower() in ("voice note", "voice message", "[voice note]", "[voice message]", "audio") else transcript
         return cls.MultimodalAudioResult(
-            transcript=transcript or "Voice note",
+            transcript=clean_fallback_tr,
             reply=reply or clean,
             tts_script=tts_script or reply or clean,
             lang=lang
@@ -4152,18 +4249,15 @@ class WhatsAppService:
                     intent = "support_request"
                     route_dept = "Support"
             else:
-                # Untranscribed voice note: answer naturally as a helpful partner without robotic acknowledgments
-                voice_instruct = (
-                    "A customer has sent a message. Respond warmly and politely in conversational Roman Urdu "
-                    "in 1-2 friendly sentences asking how you can assist them today."
-                )
+                # Untranscribed voice note: answer naturally as a helpful partner in Roman Urdu
+                voice_instruct = "Customer ne audio voice note bheja hai. Aap unhein conversational Roman Urdu mein natural aur warm tareeqe se salam karein aur poochein ke unhein hamari services ya packages ke hawale se kya maloomat darkaar hain."
                 media_reply = cls.call_gemini_ai(
                     user_message=voice_instruct,
-                    system_prompt=custom_prompt,
+                    system_prompt="STRICT REQUIREMENT: Answer purely in conversational Roman Urdu. Never answer in English unless the customer explicitly asked in English.",
                     organization_id=organization_id,
                     customer_name=sender_name,
                     conversation_history=history
-                ) or f"Walaikum Assalam{cust_greeting}! Main aap ki kya madad kar sakta hoon? Barah-e-karam batayein."
+                )
                 return {
                     "reply_body": media_reply,
                     "intent": "general_inquiry",
@@ -4669,12 +4763,13 @@ class WhatsAppService:
                     elif audio_bytes.startswith(b"RIFF"):
                         in_mime = "audio/wav"
 
+                    history = cls.get_conversation_history(clean_phone, organization_id=org_id, limit=6)
                     mm_res = cls.call_gemini_multimodal_audio(
                         audio_bytes=audio_bytes,
                         mime_type=in_mime,
                         organization_id=org_id,
                         customer_name=sender_name,
-                        conversation_history=conversation_history
+                        conversation_history=history
                     )
                     if mm_res:
                         clean_trans, mm_reply = mm_res
@@ -4682,8 +4777,26 @@ class WhatsAppService:
                             kwargs["tts_script"] = mm_res.tts_script
                         if getattr(mm_res, "lang", None):
                             kwargs["detected_lang"] = mm_res.lang
-                    if not clean_trans:
+
+                    # Guarantee real spoken words - never accept generic placeholder as transcript!
+                    is_generic = (not clean_trans or clean_trans.strip().lower() in ["voice message", "[voice message]", "audio", "[voice note]", "voice note", "voice", "(no text)", "🎤 voice message", "🎤 voice note"])
+                    if is_generic:
+                        sr_trans = cls.transcribe_with_speech_recognition(audio_bytes)
+                        if sr_trans and sr_trans.strip():
+                            clean_trans = sr_trans.strip()
+                    if is_generic and not clean_trans:
                         clean_trans = cls._transcribe_audio(audio_bytes, organization_id=org_id, timeout=12.0)
+
+                    if clean_trans and clean_trans.strip() and not mm_reply:
+                        ai_ans = cls.call_gemini_ai(
+                            user_message=clean_trans,
+                            organization_id=org_id,
+                            customer_name=sender_name,
+                            conversation_history=history
+                        )
+                        if ai_ans and ai_ans.strip():
+                            mm_reply = ai_ans.strip()
+
                     if mm_reply and mm_reply.strip():
                         kwargs["precomputed_ai_reply"] = mm_reply.strip()
                     if clean_trans and clean_trans.strip():
@@ -4694,36 +4807,43 @@ class WhatsAppService:
                         clean_body = message_body
                         if has_app_context() and message_id:
                             try:
-                                rec_obj = WhatsAppMessage.query.filter_by(
-                                    organization_id=org_id,
-                                    whatsapp_message_id=message_id
+                                rec_obj = WhatsAppMessage.query.filter(
+                                    (WhatsAppMessage.whatsapp_message_id == str(message_id).strip()) |
+                                    (WhatsAppMessage.id == str(message_id).strip())
                                 ).first()
+                                if not rec_obj:
+                                    rec_obj = WhatsAppMessage.query.filter_by(
+                                        organization_id=org_id,
+                                        whatsapp_message_id=str(message_id).strip()
+                                    ).first()
                                 if rec_obj:
                                     rec_obj.body = f"🎤 {clean_trans}"
                                     rec_obj.message_type = "audio"
                                     # Ensure raw_payload_json has audio media_url
                                     b64_to_store = audio_b64 or (base64.b64encode(audio_bytes).decode("ascii") if audio_bytes else "")
+                                    payload_dict = {}
+                                    if rec_obj.raw_payload_json:
+                                        try:
+                                            payload_dict = json.loads(rec_obj.raw_payload_json)
+                                        except Exception:
+                                            pass
                                     if b64_to_store:
-                                        payload_dict = {}
-                                        if rec_obj.raw_payload_json:
-                                            try:
-                                                payload_dict = json.loads(rec_obj.raw_payload_json)
-                                            except Exception:
-                                                pass
                                         payload_dict["media_url"] = f"data:audio/ogg;base64,{b64_to_store}"
                                         payload_dict["mediaUrl"] = f"data:audio/ogg;base64,{b64_to_store}"
                                         payload_dict["audio_base64"] = b64_to_store
-                                        payload_dict["is_audio"] = True
-                                        payload_dict["message_type"] = "audio"
-                                        rec_obj.raw_payload_json = json.dumps(payload_dict)
-                                        if not rec_obj.media_url and b64_to_store:
+                                        if not rec_obj.media_url:
                                             rec_obj.media_url = f"data:audio/ogg;base64,{b64_to_store}"
+                                    payload_dict["is_audio"] = True
+                                    payload_dict["message_type"] = "audio"
+                                    payload_dict["transcript"] = clean_trans
+                                    rec_obj.raw_payload_json = json.dumps(payload_dict)
                                     db.session.commit()
+                                    logger.info(f"Successfully updated WhatsAppMessage {rec_obj.id} with speech transcript: '{clean_trans}'")
                             except Exception as up_err:
-                                logger.debug(f"Could not update voice note DB record: {up_err}")
+                                logger.warning(f"Could not update voice note DB record: {up_err}")
                         cls.update_crm_lead_with_transcript(org_id, clean_phone, message_body, message_id)
             except Exception as v_err:
-                logger.debug(f"Voice note download/transcription notice: {v_err}")
+                logger.error(f"[Voice note download/transcription error]: {v_err}", exc_info=True)
 
         # Handle message body or default to conversational trigger without returning early
         stripped_body = str(message_body or "").strip().lower()
