@@ -35,6 +35,59 @@ const qrcode = require('qrcode');
 const pino = require('pino');
 const path = require('path');
 const fs = require('fs');
+const { spawn, execSync } = require('child_process');
+
+let ffmpegBinaryPath = null;
+try {
+  ffmpegBinaryPath = require('ffmpeg-static');
+} catch (_) {}
+if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
+  try {
+    ffmpegBinaryPath = execSync('where.exe ffmpeg').toString().trim().split(/\r?\n/)[0];
+  } catch (_) {}
+}
+
+/**
+ * Converts audio buffer (MP3/WAV/etc.) to OGG Opus suitable for WhatsApp PTT voice notes.
+ * Command: ffmpeg -i pipe:0 -c:a libopus -b:a 32k -vbr on -compression_level 10 -frame_duration 60 -application voip -f ogg pipe:1
+ */
+function convertAudioToOggOpus(buffer) {
+  return new Promise((resolve, reject) => {
+    if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
+      return reject(new Error('ffmpeg binary unavailable'));
+    }
+    const args = [
+      '-i', 'pipe:0',
+      '-c:a', 'libopus',
+      '-b:a', '32k',
+      '-vbr', 'on',
+      '-compression_level', '10',
+      '-frame_duration', '60',
+      '-application', 'voip',
+      '-f', 'ogg',
+      'pipe:1'
+    ];
+    const proc = spawn(ffmpegBinaryPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const chunks = [];
+    let err = '';
+    proc.stdout.on('data', chunk => chunks.push(chunk));
+    proc.stderr.on('data', d => { err += d.toString(); });
+    proc.on('close', code => {
+      if (code === 0 && chunks.length > 0) {
+        resolve(Buffer.concat(chunks));
+      } else {
+        reject(new Error('ffmpeg conversion failed (code ' + code + '): ' + err));
+      }
+    });
+    proc.on('error', reject);
+    try {
+      proc.stdin.write(buffer);
+      proc.stdin.end();
+    } catch (writeErr) {
+      reject(writeErr);
+    }
+  });
+}
 // Configuration
 const PORT = process.env.WA_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001;
 const PYTHON_PORT = process.env.PORT || 5000;
@@ -1368,39 +1421,60 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
           sock.sendPresenceUpdate('recording', jid).catch(() => {});
         } catch (_) {}
         let cleanBase64 = audioRaw ? String(audioRaw).replace(/^data:[^;]+;base64,/, '').trim() : '';
-        // Auto-detect MP3 vs OGG/MP4 from base64 header so mobile WhatsApp plays it properly
-        let detectedMime = 'audio/ogg; codecs=opus';
-        if (cleanBase64.startsWith('T2dn')) {
-          detectedMime = 'audio/ogg; codecs=opus';
-        } else if (cleanBase64.startsWith('AAAA') || cleanBase64.startsWith('GkXf')) {
-          detectedMime = 'audio/mp4';
-        } else if (cleanBase64.startsWith('SUQz') || cleanBase64.startsWith('/+NI') || cleanBase64.startsWith('/+MY')) {
-          detectedMime = 'audio/mp4';
+        let audioBuffer = cleanBase64 ? Buffer.from(cleanBase64, 'base64') : null;
+        if (!audioBuffer && audioUrl && typeof audioUrl === 'string' && audioUrl.startsWith('data:audio')) {
+          const rawB64 = audioUrl.replace(/^data:[^;]+;base64,/, '').trim();
+          audioBuffer = Buffer.from(rawB64, 'base64');
         }
-        let mimetype = req.body?.mimetype || req.body?.mime_type || detectedMime;
-        if (mimetype === 'audio/mp3') mimetype = 'audio/mp4';
+
         const isVoiceReq = req.body?.ptt !== undefined ? Boolean(req.body.ptt) : (req.body?.is_voice !== undefined ? Boolean(req.body.is_voice) : true);
-        const ptt = isVoiceReq;
-        const audioFileName = ptt ? (mimetype.includes('mp4') ? 'voice_message.m4a' : 'voice_message.oga') : 'audio.mp3';
-        const audioPayload = audioRaw ? Buffer.from(cleanBase64, 'base64') : { url: audioUrl };
-        const dur = Number(req.body?.seconds || req.body?.duration || 0) || (Buffer.isBuffer(audioPayload) ? estimateAudioDuration(audioPayload) : 0);
+        let ptt = isVoiceReq;
+        let mimetype = 'audio/ogg; codecs=opus';
+        let finalAudioPayload = audioBuffer || { url: audioUrl };
+
+        if (ptt && audioBuffer && Buffer.isBuffer(audioBuffer)) {
+          const isAlreadyOgg = audioBuffer.slice(0, 4).toString() === 'OggS';
+          if (!isAlreadyOgg) {
+            try {
+              console.log('[WhatsApp Bridge] Converting MP3/WAV buffer to OGG Opus via ffmpeg for WhatsApp PTT voice delivery...');
+              const oggBuffer = await convertAudioToOggOpus(audioBuffer);
+              finalAudioPayload = oggBuffer;
+              mimetype = 'audio/ogg; codecs=opus';
+              ptt = true;
+              console.log('[WhatsApp Bridge] Successfully converted audio (' + audioBuffer.length + 'b -> ' + oggBuffer.length + 'b OGG Opus).');
+            } catch (convErr) {
+              console.warn('[WhatsApp Bridge] ffmpeg conversion failed or unavailable, falling back to ptt: false with audio/mp4:', convErr.message);
+              finalAudioPayload = audioBuffer;
+              mimetype = 'audio/mp4';
+              ptt = false;
+            }
+          } else {
+            mimetype = 'audio/ogg; codecs=opus';
+            ptt = true;
+          }
+        } else if (!ptt) {
+          mimetype = req.body?.mimetype || (cleanBase64.startsWith('T2dn') ? 'audio/ogg; codecs=opus' : 'audio/mp4');
+        }
+
+        const dur = Number(req.body?.seconds || req.body?.duration || 0) || (Buffer.isBuffer(finalAudioPayload) ? estimateAudioDuration(finalAudioPayload) : 0);
+        const audioFileName = ptt ? 'voice_message.oga' : 'audio.mp4';
+
         try {
-          // Send audio with detected or audio/mp4 mimetype (which WhatsApp Android/iOS plays natively without requiring ffmpeg)
           sent = await sock.sendMessage(jid, {
-            audio: audioPayload,
+            audio: finalAudioPayload,
             mimetype: mimetype,
             ptt: ptt,
             seconds: dur > 0 ? dur : undefined,
             fileName: audioFileName
           }, sendOptions);
         } catch (firstAudioErr) {
-          console.warn('[Audio Send Warning] First attempt failed (possibly ffmpeg missing), retrying with direct audio/mp4:', firstAudioErr.message);
+          console.warn('[Audio Send Warning] First attempt failed, retrying with fallback audio/mp4 (ptt: false):', firstAudioErr.message);
           sent = await sock.sendMessage(jid, {
-            audio: audioPayload,
+            audio: finalAudioPayload,
             mimetype: 'audio/mp4',
-            ptt: true,
+            ptt: false,
             seconds: dur > 0 ? dur : undefined,
-            fileName: 'voice_message.m4a'
+            fileName: 'audio.mp4'
           }, sendOptions);
         }
       } else if (hasImage) {

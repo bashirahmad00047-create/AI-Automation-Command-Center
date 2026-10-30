@@ -674,6 +674,29 @@ class AuditLog(db.Model):
         }
 
 
+
+
+class LoginAttempt(db.Model):
+    """Tracks login attempts per IP and username for security rate limiting and audit."""
+    __tablename__ = "login_attempts"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    ip_address = db.Column(db.String(64), nullable=False, index=True)
+    username = db.Column(db.String(128), nullable=True, index=True)
+    attempt_time = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    success = db.Column(db.Boolean, default=False)
+    user_agent = db.Column(db.String(256), nullable=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "ip_address": self.ip_address,
+            "username": self.username,
+            "attempt_time": self.attempt_time.isoformat() if self.attempt_time else None,
+            "success": self.success,
+            "user_agent": self.user_agent,
+        }
+
 class SystemEvent(db.Model):
     """Ingested System Event Stream Record."""
     __tablename__ = "system_events"
@@ -849,6 +872,7 @@ class WhatsAppMessage(db.Model):
     message_type = db.Column(db.String(32), nullable=False, default="text")  # text, template, interactive
     body = db.Column(db.Text, nullable=True)
     media_url = db.Column(db.Text, nullable=True)  # db.Text prevents truncation of base64 audio
+    audio_data = db.Column(db.LargeBinary, nullable=True)  # Unlimited binary storage for audio payload
     status = db.Column(db.String(32), nullable=False, default="received")  # received, sent, mock_sent, failed
     execution_id = db.Column(db.Integer, db.ForeignKey("workflow_executions.id", ondelete="SET NULL"), nullable=True, index=True)
     raw_payload_json = db.Column(db.Text, nullable=True)
@@ -857,6 +881,8 @@ class WhatsAppMessage(db.Model):
 
     def to_dict(self) -> Dict[str, Any]:
         media_url = getattr(self, "media_url", None)
+        if not media_url and getattr(self, "audio_data", None):
+            media_url = f"/api/whatsapp/media/{self.id}"
         sender_name = None
         chat_name = None
         duration = None

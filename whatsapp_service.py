@@ -841,9 +841,10 @@ class WhatsAppService:
         return None
 
     @classmethod
-    def _contextual_voice_intent_handler(cls, organization_id: Optional[str] = None, phone: Optional[str] = None) -> str:
-        """Smart contextual fallback voice intent handler when AI transcription keys are unavailable or audio is unintelligible."""
-        return "Assalam-o-Alaikum! Maine aapka voice note sun liya hai. Bataiye dukan ke liye kis mobile model, accessories ya repair ke bare mein janna chahte hain?"
+    def _contextual_voice_intent_handler(cls, organization_id: Optional[str] = None, phone: Optional[str] = None) -> Optional[str]:
+        """Contextual voice intent handler when AI transcription keys are unavailable or audio is unintelligible.
+        Returns None to avoid canned fallback loops and allow dynamic shopkeeper assistant processing."""
+        return None
 
     @classmethod
     def _transcribe_audio(cls, audio_bytes: bytes, organization_id: Optional[str] = None, message_id: Optional[str] = None, timeout: float = 8.0) -> Optional[str]:
@@ -1088,14 +1089,7 @@ class WhatsAppService:
             except Exception as e:
                 logger.debug(f"Gemini audio transcription notice: {e}")
 
-        # 4. Smart contextual fallback if keys are missing or speech cannot be parsed
-        if cls.is_valid_audio_buffer(audio_bytes):
-            fallback_intent = cls._contextual_voice_intent_handler(organization_id=organization_id)
-            if message_id:
-                with cls._media_cache_lock:
-                    cls._transcription_cache[message_id] = (time.time(), fallback_intent)
-            return fallback_intent
-
+        # 4. If all STT services fail or are unconfigured, return None (no canned fallback strings)
         return None
 
     @classmethod
