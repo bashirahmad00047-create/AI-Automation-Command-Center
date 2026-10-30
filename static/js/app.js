@@ -45,6 +45,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize real-time WebSocket connection and auto-sync
     initWhatsAppSocket();
     startWhatsAppAutoPoll(3000);
+    initWhatsAppChatBarListeners();
+    initNavigationListeners();
 
     // Telemetry and status poll with exponential backoff
     scheduleNextTelemetry(500);
@@ -286,6 +288,7 @@ function switchTab(tabId) {
     if (tabId === 'whatsapp') {
         loadWhatsAppDashboard();
         startWhatsAppAutoPoll();
+        initWhatsAppChatBarListeners();
     } else {
         stopWhatsAppAutoPoll();
     }
@@ -5293,7 +5296,6 @@ function handleRealtimeWhatsAppMessage(msg) {
     renderWhatsAppWebUI(waAllMessagesCache, true);
 }
 
-let waPollTimer = null;
 let waPollFailures = 0;
 
 function scheduleNextWhatsAppPoll(customDelay = null) {
@@ -6060,6 +6062,88 @@ function insertTemplateReply(text) {
     toggleTemplatesTray();
 }
 
+function initNavigationListeners() {
+    if (typeof document === 'undefined') return;
+    document.querySelectorAll('.hud-tab').forEach(tab => {
+        const onclickAttr = tab.getAttribute('onclick');
+        if (onclickAttr && onclickAttr.includes('switchTab')) {
+            const match = onclickAttr.match(/switchTab\(['"]([^'"]+)['"]\)/);
+            if (match && match[1]) {
+                const tabId = match[1];
+                tab.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    switchTab(tabId);
+                });
+            }
+        }
+    });
+}
+
+function initWhatsAppChatBarListeners() {
+    if (typeof document === 'undefined') return;
+
+    const sendBtn = document.getElementById('waReplySendBtn');
+    if (sendBtn) {
+        sendBtn.onclick = (e) => {
+            if (e && e.preventDefault) e.preventDefault();
+            sendWhatsAppReply();
+        };
+    }
+
+    const input = document.getElementById('waReplyInput');
+    if (input) {
+        input.onkeydown = (e) => handleWaReplyKeydown(e);
+    }
+
+    const voiceBtn = document.getElementById('waVoiceNoteBtn');
+    if (voiceBtn) {
+        voiceBtn.onclick = (e) => {
+            if (e && e.preventDefault) e.preventDefault();
+            toggleVoiceRecording();
+        };
+    }
+
+    const callBtn = document.getElementById('waAiVoiceCallBtn');
+    if (callBtn) {
+        callBtn.onclick = (e) => {
+            if (e && e.preventDefault) e.preventDefault();
+            openLiveVoiceCallModal();
+        };
+    }
+
+    const topCallBtn = document.getElementById('liveAiVoiceCallBtn');
+    if (topCallBtn) {
+        topCallBtn.onclick = (e) => {
+            if (e && e.preventDefault) e.preventDefault();
+            openLiveVoiceCallModal();
+        };
+    }
+
+    const emojiBtn = document.getElementById('waEmojiToggleBtn');
+    if (emojiBtn) {
+        emojiBtn.onclick = (e) => {
+            if (e && e.preventDefault) e.preventDefault();
+            toggleEmojiTray();
+        };
+    }
+
+    const templateBtn = document.getElementById('waTemplateToggleBtn');
+    if (templateBtn) {
+        templateBtn.onclick = (e) => {
+            if (e && e.preventDefault) e.preventDefault();
+            toggleTemplatesTray();
+        };
+    }
+
+    const aiToggle = document.getElementById('waHeaderAiToggle');
+    if (aiToggle) {
+        aiToggle.onclick = (e) => {
+            if (e && e.preventDefault) e.preventDefault();
+            toggleWhatsAppAiAutoResponder();
+        };
+    }
+}
+
 let mediaRecorderInstance = null;
 let recordedAudioChunks = [];
 let voiceRecordingInterval = null;
@@ -6572,6 +6656,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
             if (msgStream) msgStream.scrollTop = msgStream.scrollHeight;
         }, 50);
     }
+    initWhatsAppChatBarListeners();
 }
 
 async function loadWhatsAppMessagesOnly(isConfigured) {
@@ -10858,3 +10943,20 @@ function promptPWAInstall() {
 }
 
 window.promptPWAInstall = promptPWAInstall;
+
+// Global window exposure for Core Dashboard Navigation & WhatsApp Chat Controls
+window.switchTab = switchTab;
+window.initNavigationListeners = initNavigationListeners;
+window.initWhatsAppChatBarListeners = initWhatsAppChatBarListeners;
+window.sendWhatsAppReply = sendWhatsAppReply;
+window.handleWaReplyKeydown = handleWaReplyKeydown;
+window.toggleVoiceRecording = toggleVoiceRecording;
+window.cancelVoiceRecording = cancelVoiceRecording;
+window.openLiveVoiceCallModal = openLiveVoiceCallModal;
+window.closeLiveVoiceCallModal = closeLiveVoiceCallModal;
+window.toggleEmojiTray = toggleEmojiTray;
+window.toggleTemplatesTray = toggleTemplatesTray;
+window.insertEmojiIntoReply = insertEmojiIntoReply;
+window.insertTemplateReply = insertTemplateReply;
+window.toggleWhatsAppAiAutoResponder = toggleWhatsAppAiAutoResponder;
+window.toggleSidebarCollapse = toggleSidebarCollapse;
