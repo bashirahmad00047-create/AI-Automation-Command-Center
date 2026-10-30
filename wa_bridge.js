@@ -645,12 +645,9 @@ async function startWhatsAppBridge() {
             ? lastDisconnect.error.output?.statusCode
             : lastDisconnect?.error?.output?.statusCode;
 
-        // Only consider true logouts (e.g. user linked device removed) or 401 as logged out.
-        // Do NOT wipe auth directory on transient 403s or network dropouts!
         const isLoggedOut = (statusCode === DisconnectReason.loggedOut);
         console.warn(`[WhatsApp Bridge] Connection closed (code: ${statusCode}, isLoggedOut: ${isLoggedOut}).`);
 
-        // Only wipe credentials if the device was explicitly unlinked / logged out by the user (401)
         if (isLoggedOut) {
           console.warn('[WhatsApp Bridge] True user logout detected (code 401). Clearing auth directory & DB store...');
           try {
@@ -669,14 +666,30 @@ async function startWhatsAppBridge() {
 
         destroyOldSocket();
 
-        // Self-healing: automatically restart the socket so the bridge never stays dead
-        const restartDelay = isLoggedOut ? 2000 : 3000;
-        console.log(`[WhatsApp Bridge] Scheduling restart in ${restartDelay}ms...`);
+        // Intelligent Auto-Recovery with smart backoff based on disconnect reason
+        let restartDelay = 2000;
+        if (statusCode === DisconnectReason.restartRequired) {
+          restartDelay = 500;
+          console.log('[WhatsApp Bridge Auto-Recovery] Server requested restart (code 515). Re-syncing immediately in 500ms...');
+        } else if (statusCode === DisconnectReason.timedOut || statusCode === DisconnectReason.connectionLost) {
+          restartDelay = 1500;
+          console.log('[WhatsApp Bridge Auto-Recovery] Transient network loss/timeout (code 408). Re-syncing in 1.5s...');
+        } else if (statusCode === DisconnectReason.connectionClosed) {
+          restartDelay = 1500;
+          console.log('[WhatsApp Bridge Auto-Recovery] Socket closed normally (code 428). Auto-recovering in 1.5s...');
+        } else if (statusCode === DisconnectReason.connectionReplaced) {
+          restartDelay = 4000;
+          console.log('[WhatsApp Bridge Auto-Recovery] Socket connection replaced (code 440). Waiting 4s before re-sync...');
+        } else if (isLoggedOut) {
+          restartDelay = 2000;
+        }
+
+        console.log(`[WhatsApp Bridge Auto-Recovery] Scheduling socket re-sync in ${restartDelay}ms...`);
         clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(() => {
           startWhatsAppBridge().catch((retryErr) => {
-            console.error('[WhatsApp Bridge] Reconnect attempt failed:', retryErr.message);
-            // Reschedule retry so the bridge never halts on transient errors
+            console.error('[WhatsApp Bridge Auto-Recovery] Reconnect attempt failed:', retryErr.message);
+            // Continuous auto-recovery: never halts
             clearTimeout(reconnectTimer);
             reconnectTimer = setTimeout(() => {
               startWhatsAppBridge().catch(() => {});
@@ -691,11 +704,44 @@ async function startWhatsAppBridge() {
         currentQrSvg = null;
         const userPhone = sock?.user?.id ? sock.user.id.split(':')[0] : 'Linked Number';
         console.log('\n===============================================================');
-        console.log(` [WhatsApp Bridge] Connected successfully!`);
+        console.log(` [WhatsApp Bridge] Connected successfully! Auto-recovery active.`);
         console.log(` Active Phone: +${userPhone}`);
         console.log(` REST API listening on port ${PORT}`);
         console.log(` Python Webhook target: ${PYTHON_WEBHOOK_URL}`);
         console.log('===============================================================\n');
+      }
+    });
+
+    // 0. History synchronization on initial connect or reconnect (auto-syncs contacts and groups)
+    sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest }) => {
+      console.log(`[WhatsApp Bridge Auto-Sync] Synchronized history: ${chats?.length || 0} chats, ${contacts?.length || 0} contacts (isLatest: ${Boolean(isLatest)})`);
+      if (Array.isArray(contacts)) {
+        for (const c of contacts) {
+          const cName = c.name || c.notify || c.verifiedName;
+          if (c.id && cName) {
+            contactNamesMap.set(c.id, cName);
+            const ph = cleanPhoneNumber(c.id);
+            if (ph) {
+              contactNamesMap.set(ph, cName);
+              contactNamesMap.set(`+${ph}`, cName);
+            }
+          }
+          if (c.lid && c.id && c.id.endsWith('@s.whatsapp.net')) {
+            const ph = c.id.split('@')[0].split(':')[0];
+            lidToPhoneMap.set(c.lid, ph);
+            phoneToLidMap.set(ph, c.lid);
+            if (cName) contactNamesMap.set(c.lid, cName);
+          }
+        }
+      }
+      if (Array.isArray(chats)) {
+        for (const chat of chats) {
+          const chName = chat.name || chat.subject || chat.notify;
+          if (chat.id && chName) {
+            groupSubjectMap.set(chat.id, chName);
+            chatSubjectMap.set(chat.id, chName);
+          }
+        }
       }
     });
 
@@ -1568,3 +1614,20 @@ server.on('error', (err) => {
 
 
 
+
+// Automated Socket Heartbeat & Recovery Monitor (checks every 20 seconds)
+setInterval(() => {
+  if (isConnected && sock) {
+    const wsState = sock.ws?.readyState;
+    // WebSocket readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+    if (wsState !== undefined && wsState > 1) {
+      console.warn(`[WhatsApp Bridge Heartbeat] Dead socket detected (readyState=${wsState}). Auto-recovering...`);
+      isConnected = false;
+      destroyOldSocket();
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => {
+        startWhatsAppBridge().catch(() => {});
+      }, 1000);
+    }
+  }
+}, 20000);

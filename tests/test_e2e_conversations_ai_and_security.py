@@ -217,5 +217,81 @@ class TestE2EConversationsAIAndSecurity(unittest.TestCase):
         )
         self.assertEqual(ver_res5.status_code, 429)
 
+    def test_conditional_messaging_strictly_separates_voice_and_text(self):
+        """Verifies conditional messaging: Inbound voice -> OGG Opus PTT voice reply; Inbound text -> Text reply."""
+        fake_audio = b"OggS\x00\x02" + b"\x00" * 4000
+        sample_transcript = "Bhai screen repair kitne time mein hogi?"
+
+        # Case 1: Inbound VOICE -> Replies with OGG Opus PTT voice note (send_green_api_file), NOT text message
+        with patch.object(WhatsAppService, "_download_media", return_value=fake_audio), \
+             patch.object(WhatsAppService, "_transcribe_audio", return_value=sample_transcript), \
+             patch.object(WhatsAppService, "generate_spoken_audio", return_value=(fake_audio, "voice_reply.oga", "audio/ogg; codecs=opus")), \
+             patch.object(WhatsAppService, "send_green_api_file") as mock_voice_file, \
+             patch.object(WhatsAppService, "send_green_api_message") as mock_text_msg:
+
+            mock_voice_file.return_value = {"status": "sent", "idMessage": "wam_ptt_001"}
+
+            voice_payload = {
+                "typeWebhook": "incomingMessageReceived",
+                "senderData": {"chatId": "923001234567@s.whatsapp.net", "sender": "923001234567@s.whatsapp.net"},
+                "messageData": {
+                    "typeMessage": "audioMessage",
+                    "fileMessageData": {"downloadUrl": "http://example.com/audio.oga", "mimeType": "audio/ogg; codecs=opus"}
+                }
+            }
+            res = self.client.post("/api/v1/webhooks/whatsapp", json=voice_payload)
+            self.assertIn(res.status_code, (200, 202))
+            # Must call voice file dispatch with ptt=True and audio/ogg
+            self.assertTrue(mock_voice_file.called)
+            kwargs = mock_voice_file.call_args.kwargs
+            self.assertTrue(kwargs.get("ptt"))
+            self.assertEqual(kwargs.get("mime_type"), "audio/ogg; codecs=opus")
+            # Must NOT call text message dispatch
+            self.assertFalse(mock_text_msg.called)
+
+        # Case 2: Inbound TEXT -> Replies with TEXT (send_green_api_message), NOT voice note
+        with patch.object(WhatsAppService, "generate_spoken_audio") as mock_tts, \
+             patch.object(WhatsAppService, "send_green_api_file") as mock_voice_file2, \
+             patch.object(WhatsAppService, "send_green_api_message") as mock_text_msg2:
+
+            mock_text_msg2.return_value = {"status": "sent", "idMessage": "wam_txt_001"}
+
+            text_payload = {
+                "typeWebhook": "incomingMessageReceived",
+                "senderData": {"chatId": "923001234567@s.whatsapp.net", "sender": "923001234567@s.whatsapp.net"},
+                "messageData": {
+                    "typeMessage": "textMessage",
+                    "textMessageData": {"textMessage": "Salam, display repair rate batayein"}
+                }
+            }
+            res = self.client.post("/api/v1/webhooks/whatsapp", json=text_payload)
+            self.assertIn(res.status_code, (200, 202))
+            # Must call text message dispatch
+            self.assertTrue(mock_text_msg2.called)
+            # Must NOT call voice file dispatch or TTS synthesis
+            self.assertFalse(mock_voice_file2.called)
+            self.assertFalse(mock_tts.called)
+
+    def test_environment_variables_security_not_leaked(self):
+        """Verifies environment variables and secrets are never exposed in configuration APIs."""
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = "usr-master-admin"
+            sess["role"] = "admin"
+            sess["is_super_admin"] = True
+            sess["org_id"] = self.org.id
+
+        res = self.client.get("/api/v1/whatsapp/config")
+        self.assertEqual(res.status_code, 200)
+        config_data = res.get_json()
+
+        # Sensitive credentials must never be in responses
+        dumped_str = json.dumps(config_data)
+        # Verify actual credentials and secrets are never leaked
+        for secret_val in ("bashir@12.", "sk-", "gsk_", "AIzaSy", "bashflow-absolute"):
+            self.assertNotIn(secret_val, dumped_str)
+        # Verify no raw password or key fields exist in response
+        self.assertNotIn("admin_password", dumped_str.lower())
+        self.assertNotIn("secret_key", dumped_str.lower())
+
 if __name__ == "__main__":
     unittest.main()
