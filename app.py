@@ -648,6 +648,34 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             elif audio_bytes.startswith(b"RIFF") and b"WAVE" in audio_bytes[:12]:
                 mime_type = "audio/wav"
 
+            duration = None
+            if msg.raw_payload_json:
+                try:
+                    payload = json.loads(msg.raw_payload_json)
+                    if isinstance(payload, dict):
+                        duration = (
+                            payload.get("audio_duration")
+                            or payload.get("duration")
+                            or payload.get("seconds")
+                            or (payload.get("rawMessage", {}).get("message", {}).get("audioMessage", {}).get("seconds") if isinstance(payload.get("rawMessage"), dict) else None)
+                        )
+                except Exception:
+                    pass
+
+            if not duration:
+                if audio_bytes.startswith(b"OggS"):
+                    last_ogg = audio_bytes.rfind(b"OggS")
+                    if last_ogg >= 0 and last_ogg + 14 <= total_length:
+                        import struct
+                        try:
+                            granule = struct.unpack("<Q", audio_bytes[last_ogg + 6:last_ogg + 14])[0]
+                            if granule > 0:
+                                duration = round(granule / 48000.0, 2)
+                        except Exception:
+                            pass
+                elif mime_type == "audio/mpeg" or audio_bytes.startswith(b"ID3") or audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+                    duration = max(1, round(total_length / 16000.0, 2))
+
             # HTTP 206 Partial Content range support for Chromium
             range_header = request.headers.get("Range")
             if range_header and range_header.startswith("bytes="):
@@ -669,6 +697,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     resp.headers["Accept-Ranges"] = "bytes"
                     resp.headers["Content-Length"] = str(chunk_length)
                     resp.headers["Cache-Control"] = "public, max-age=86400"
+                    if duration and float(duration) > 0:
+                        resp.headers["X-Content-Duration"] = str(duration)
+                        resp.headers["Content-Duration"] = str(duration)
                     return resp
                 except Exception as _range_err:
                     application.logger.debug(f"Range parsing notice: {_range_err}")
@@ -677,6 +708,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             resp.headers["Accept-Ranges"] = "bytes"
             resp.headers["Content-Length"] = str(total_length)
             resp.headers["Cache-Control"] = "public, max-age=86400"
+            if duration and float(duration) > 0:
+                resp.headers["X-Content-Duration"] = str(duration)
+                resp.headers["Content-Duration"] = str(duration)
             return resp
         except Exception as media_err:
             application.logger.error(f"Error serving audio media {message_id}: {media_err}")
