@@ -5868,7 +5868,8 @@ html:not(.dark) .engine-spec-val {
     align-items: center;
     gap: 10px;
     border-top: 1px solid #222d34;
-    z-index: 2;
+    position: relative;
+    z-index: 10;
 }
 
 .wa-reply-input {
