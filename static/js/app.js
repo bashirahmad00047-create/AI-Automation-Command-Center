@@ -42,6 +42,10 @@ document.addEventListener('DOMContentLoaded', () => {
     checkSystemReadiness();
     refreshAllData();
 
+    // Initialize real-time WebSocket connection and auto-sync
+    initWhatsAppSocket();
+    startWhatsAppAutoPoll(3000);
+
     // Telemetry and status poll (every 2.5 seconds)
     setInterval(pollTelemetry, 2500);
 
@@ -5101,19 +5105,21 @@ function handleRealtimeWhatsAppMessage(msg) {
     if (!msg || !msg.id) return;
     if (!Array.isArray(waAllMessagesCache)) waAllMessagesCache = [];
 
-    // Deduplicate
-    const idx = waAllMessagesCache.findIndex(m => m.id === msg.id || (msg.whatsapp_message_id && m.whatsapp_message_id === msg.whatsapp_message_id));
+    // Deduplicate or update existing
+    const idx = waAllMessagesCache.findIndex(m => String(m.id) === String(msg.id) || (msg.whatsapp_message_id && String(m.whatsapp_message_id) === String(msg.whatsapp_message_id)));
     if (idx >= 0) {
         waAllMessagesCache[idx] = Object.assign({}, waAllMessagesCache[idx], msg);
     } else {
         waAllMessagesCache.push(msg);
     }
 
+    // Update message counters in header and badges
+    const countBadge = document.getElementById('waMessageCountBadge');
+    if (countBadge) countBadge.textContent = `${waAllMessagesCache.length} messages`;
+    updateNavBadge('tabWhatsAppCount', waAllMessagesCache.length);
+
     // Refresh WhatsApp Web UI smoothly
-    const activeTab = document.getElementById('tab-whatsapp');
-    if (activeTab && activeTab.classList.contains('active')) {
-        renderWhatsAppWebUI(waAllMessagesCache, true);
-    }
+    renderWhatsAppWebUI(waAllMessagesCache, true);
 }
 
 function startWhatsAppAutoPoll(intervalMs = 3000) {
