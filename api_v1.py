@@ -3133,21 +3133,42 @@ def api_baileys_incoming_webhook():
 @api_v1.route("/voice/chat", methods=["POST"])
 @rate_limit(limit=60, window=60, message="Too many voice chat requests.")
 def ai_voice_chat():
-    """Real-time AI Voice Chat endpoint.
-    Accepts speech transcript / text message, generates intelligent AI response,
-    and synthesizes human speech audio (ElevenLabs / Edge-TTS) returned as base64 Data URI.
+    """Real-time AI Voice Chat endpoint for Web Dashboard and Incoming WhatsApp Call handling.
+    Accepts speech transcript / text message or audio_base64, generates dynamic AI response via
+    Gemini / Groq / Pollinations AI, and synthesizes human speech via Edge-TTS (UzmaNeural for Urdu, AriaNeural for English).
     """
     data = request.get_json(silent=True) or {}
     user_msg = str(data.get("message") or data.get("text") or "").strip()
+    audio_b64 = data.get("audio_base64") or data.get("audio") or data.get("audioBase64")
+
+    # If raw audio was provided without pre-transcribed text, transcribe with SpeechRecognition
+    if not user_msg and audio_b64:
+        try:
+            import base64
+            clean_b64 = str(audio_b64).split("base64,")[-1].strip()
+            raw_audio = base64.b64decode(clean_b64)
+            trans = WhatsAppService.transcribe_with_speech_recognition(raw_audio)
+            if trans and trans.strip():
+                user_msg = trans.strip()
+        except Exception as e:
+            logger.debug(f"[Voice Chat] Audio transcription notice: {e}")
+
     if not user_msg:
-        return jsonify({"success": False, "error": "Message text is required"}), 400
+        return jsonify({"success": False, "error": "Message text or audio is required"}), 400
 
     org_id = request.args.get("org_id") or "org-enterprise-default"
-    lang = data.get("language") or "roman_urdu"
-    if any("\u0600" <= ch <= "\u06FF" for ch in user_msg):
-        lang = "ur"
 
-    # Generate conversational AI response
+    # Detect user language
+    has_arabic_script = any("\u0600" <= ch <= "\u06FF" for ch in user_msg)
+    is_urdu_text = has_arabic_script or any(
+        w in user_msg.lower() for w in ["salam", "aap", "kaise", "theek", "shukriya", "madad", "bhai", "kya", "hain", "jee", "sunayein"]
+    )
+    lang = "ur" if is_urdu_text else ("en" if data.get("language") == "en" else "ur")
+
+    # Generate genuine conversational AI response via Real Brain (Gemini -> Groq -> Pollinations)
+    reply_text = None
+    tts_text = None
+
     try:
         ai_res = WhatsAppService.generate_ai_auto_response(
             organization_id=org_id,
@@ -3155,19 +3176,40 @@ def ai_voice_chat():
             sender_name="Voice User",
             sender_phone="voice_session"
         )
-        reply_text = ai_res.get("reply_body") or "Salam! Aap ki baat samajh aa gayi hai, batayein main aap ki kya mazeed madad kar sakta hoon?"
+        if ai_res and isinstance(ai_res, dict):
+            reply_text = ai_res.get("reply_body") or ai_res.get("reply")
+            tts_text = ai_res.get("tts_text") or ai_res.get("tts_script")
+            if ai_res.get("detected_lang"):
+                lang = ai_res["detected_lang"]
     except Exception as ai_err:
-        logger.warning(f"[Voice Chat] AI response generation note: {ai_err}")
-        reply_text = "Salam! Main aap ki awaz sun raha hoon. Aap ka sawal sun lia hai."
+        logger.warning(f"[Voice Chat] AI generation error: {ai_err}")
+
+    # Fallback to zero-key Pollinations AI if Gemini/Groq unavailable
+    if not reply_text:
+        try:
+            poll_res = WhatsAppService.call_pollinations_ai(user_msg, organization_id=org_id)
+            if poll_res:
+                reply_text = poll_res.display_text if hasattr(poll_res, "display_text") else str(poll_res)
+                tts_text = poll_res.tts_text if hasattr(poll_res, "tts_text") else reply_text
+                if hasattr(poll_res, "lang"):
+                    lang = poll_res.lang
+        except Exception as p_err:
+            logger.warning(f"[Voice Chat] Pollinations AI notice: {p_err}")
+
+    if not reply_text:
+        return jsonify({"success": False, "error": "AI brain temporarily unavailable"}), 503
 
     clean_reply = re.sub(r"[*_~`#>]", "", reply_text).strip()
+    speech_to_synthesize = tts_text or clean_reply
 
-    # Synthesize natural human speech
+    # Synthesize natural human speech (Edge-TTS)
+    # lang == 'ur': ur-PK-UzmaNeural (+4% rate, +2Hz pitch) reading pure Urdu script
+    # lang == 'en': en-US-AriaNeural (+3% rate, +1Hz pitch) reading English
     audio_data_uri = None
     audio_base64 = None
     try:
         synth_res = WhatsAppService.generate_spoken_audio(
-            text=clean_reply,
+            text=speech_to_synthesize,
             language=lang,
             organization_id=org_id,
             output_format="mp3"
@@ -3184,6 +3226,8 @@ def ai_voice_chat():
         "success": True,
         "user_message": user_msg,
         "reply_text": clean_reply,
+        "tts_text": speech_to_synthesize,
+        "lang": lang,
         "audio_data_uri": audio_data_uri,
         "audio_base64": audio_base64
     }), 200

@@ -1588,7 +1588,7 @@ class WhatsAppService:
             elif "french" in lang_str or lang_str == "fr":
                 active_voice = "fr-FR-DeniseNeural"
             else:
-                active_voice = "en-US-AvaNeural"
+                active_voice = "en-US-AriaNeural"
 
             if configured_rate:
                 active_rate = configured_rate.strip()
@@ -3913,6 +3913,65 @@ class WhatsAppService:
 
         return None
 
+    class LLMResult(str):
+        """String subclass carrying display_text, tts_text, and lang metadata."""
+        def __new__(cls, display_text: str, tts_text: str = "", lang: str = "ur"):
+            obj = super().__new__(cls, display_text)
+            obj.display_text = display_text
+            obj.tts_text = tts_text or display_text
+            obj.tts_script = obj.tts_text
+            obj.lang = lang
+            return obj
+
+        def get(self, key, default=None):
+            if key in ("display_text", "reply", "reply_body"):
+                return self.display_text
+            if key in ("tts_text", "tts_script"):
+                return self.tts_text
+            if key == "lang":
+                return self.lang
+            return getattr(self, key, default)
+
+    @classmethod
+    def _parse_llm_json_or_text(cls, raw_content: str, user_message: str) -> Tuple[str, str, str]:
+        """Safely parses JSON or fallback text from LLM output into (display_text, tts_text, lang)."""
+        clean = str(raw_content or "").strip()
+        candidate = clean
+        if "```json" in clean:
+            candidate = clean.split("```json", 1)[1].split("```", 1)[0].strip()
+        elif "```" in clean:
+            candidate = clean.split("```", 1)[1].split("```", 1)[0].strip()
+        elif "{" in clean and "}" in clean:
+            start_i = clean.find("{")
+            end_i = clean.rfind("}")
+            candidate = clean[start_i:end_i+1].strip()
+
+        try:
+            import json as _j
+            data = _j.loads(candidate)
+            if isinstance(data, dict):
+                disp = str(data.get("display_text") or data.get("reply") or data.get("reply_body") or "").strip()
+                tts = str(data.get("tts_text") or data.get("tts_script") or data.get("script") or disp).strip()
+                l_code = str(data.get("lang") or "ur").strip().lower()
+                lang = "en" if "en" in l_code else "ur"
+                if disp:
+                    return (disp, tts, lang)
+        except Exception:
+            pass
+
+        # Text fallback: Clean thinking blocks or reasoning
+        if "<think>" in clean and "</think>" in clean:
+            clean = clean.split("</think>", 1)[1].strip()
+        clean = re.sub(r"[*_~`#>]", "", clean).strip()
+
+        # Detect language of user query and response
+        is_ur = (
+            any('\u0600' <= ch <= '\u06FF' for ch in (clean + " " + user_message))
+            or any(w in (user_message + " " + clean).lower() for w in ["salam", "aap", "kaise", "theek", "shukriya", "madad", "bhai", "kya", "hain", "jee"])
+        )
+        lang = "ur" if is_ur else "en"
+        return (clean, clean, lang)
+
     @classmethod
     def call_pollinations_ai(
         cls,
@@ -3921,9 +3980,9 @@ class WhatsAppService:
         organization_id: Optional[str] = None,
         customer_name: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None
-    ) -> Optional[str]:
-        """Free no-key dynamic LLM provider via Pollinations AI.
-        Guarantees generative AI responses to arbitrary customer inquiries without paid API keys.
+    ) -> Optional["WhatsAppService.LLMResult"]:
+        """Free no-key dynamic LLM provider via Pollinations AI (OpenAI-compatible endpoint).
+        Guarantees generative AI brain responses to customer inquiries when Gemini API keys are absent or exhausted.
         """
         user_msg_text = user_message.get("text", "") if isinstance(user_message, dict) else str(user_message)
         clean_text = user_msg_text.strip()
@@ -3934,12 +3993,23 @@ class WhatsAppService:
         import urllib.parse
 
         sys_content = (
-            "You are a friendly, smart, general-purpose conversational AI assistant.\n"
-            "STRICT RULES:\n"
-            "1. NATURAL HUMAN GREETING: If customer greets or asks 'Kaise ho ap', reply naturally: 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
-            "2. GENERAL-PURPOSE & DIRECT: Answer any general topic or question directly, naturally, and politely in 1 to 3 friendly sentences in conversational Roman Urdu.\n"
-            "3. NO ROBOTIC CORPORATE PITCHES: Never give unsolicited corporate speeches or software pitches.\n"
-            "4. Pure clean text: No asterisks, hashtags, or bullet points."
+            "You are a friendly, highly intelligent AI conversational assistant.\n"
+            "CRITICAL RULES:\n"
+            "1. LANGUAGE MATCHING RULE:\n"
+            "   - If the customer speaks or writes in Urdu, Roman Urdu, or Hindi (text or voice):\n"
+            "     * Reply warmly in natural Urdu.\n"
+            "     * 'display_text': Natural, friendly conversational Roman Urdu for reading on dashboard.\n"
+            "     * 'tts_text': Pure Urdu script in Urdu characters (اردو) for crystal-clear human speech pronunciation.\n"
+            "     * 'lang': 'ur'\n"
+            "   - If the customer speaks or writes in English:\n"
+            "     * Reply warmly in natural conversational English.\n"
+            "     * 'display_text': Natural conversational English.\n"
+            "     * 'tts_text': Same natural conversational English.\n"
+            "     * 'lang': 'en'\n"
+            "2. DIRECT & CONVERSATIONAL: Answer the customer's exact question or greeting directly in 1-3 natural, warm sentences.\n"
+            "3. NO ROBOTIC CORPORATE PITCHES: Never give unsolicited marketing or pricing packages.\n"
+            "4. Return STRICT JSON ONLY with format:\n"
+            '{"display_text": "<friendly Roman Urdu or English text>", "tts_text": "<Pure Urdu script or English for voice>", "lang": "ur" or "en"}'
         )
         if system_prompt:
             sys_content += f"\n{system_prompt}"
@@ -3955,35 +4025,55 @@ class WhatsAppService:
         cust_label = f"[Customer {customer_name.strip()}]: " if customer_name and customer_name.strip() else ""
         messages.append({"role": "user", "content": f"{cust_label}{clean_text}"})
 
-        # 1. Try OpenAI-compatible endpoint
-        try:
-            resp = requests.post(
-                "https://text.pollinations.ai/openai/chat/completions",
-                json={"model": "openai", "messages": messages, "temperature": 0.7, "max_tokens": 250},
-                headers={"Content-Type": "application/json", "User-Agent": "BashFlow-AI/1.0"},
-                timeout=6.0
-            )
-            if resp.status_code == 200:
-                data = resp.json() if resp.text else {}
-                choices = data.get("choices", [])
-                if choices:
-                    text = choices[0].get("message", {}).get("content", "").strip()
-                    if text and not text.lower().startswith("free limit") and "error" not in text.lower():
-                        logger.info(f"[Pollinations AI] Generated dynamic response: '{text[:60]}...'")
-                        return text
-        except Exception as e:
-            logger.debug(f"[Pollinations AI Chat] notice: {e}")
+        # 1. Primary: OpenAI-compatible endpoint with openai-fast model
+        for ep in ("https://text.pollinations.ai/openai", "https://text.pollinations.ai/openai/chat/completions"):
+            try:
+                resp = requests.post(
+                    ep,
+                    json={"model": "openai-fast", "messages": messages, "temperature": 0.7, "max_tokens": 300},
+                    headers={"Content-Type": "application/json", "User-Agent": "OpsFlow-AI/1.0"},
+                    timeout=12.0
+                )
+                if resp.status_code == 402 and "retry after" in resp.text.lower():
+                    # Transient 30s rate limit window on free tier: wait short delta if <= 3s
+                    import re as _re
+                    m_wait = _re.search(r"retry after (\d+)s", resp.text.lower())
+                    wait_s = int(m_wait.group(1)) if m_wait else 2
+                    if wait_s <= 3:
+                        time.sleep(wait_s + 0.5)
+                        resp = requests.post(
+                            ep,
+                            json={"model": "openai-fast", "messages": messages, "temperature": 0.7, "max_tokens": 300},
+                            headers={"Content-Type": "application/json", "User-Agent": "OpsFlow-AI/1.0"},
+                            timeout=12.0
+                        )
 
-        # 2. Try direct text endpoint
+                if resp.status_code == 200 and resp.text:
+                    data = resp.json() if resp.text.startswith("{") else {}
+                    choices = data.get("choices", [])
+                    raw_content = ""
+                    if choices:
+                        raw_content = choices[0].get("message", {}).get("content", "").strip()
+                    elif resp.text and not resp.text.startswith("{"):
+                        raw_content = resp.text.strip()
+                    if raw_content and not raw_content.lower().startswith("free limit") and "error" not in raw_content.lower():
+                        display_text, tts_text, lang = cls._parse_llm_json_or_text(raw_content, clean_text)
+                        logger.info(f"[Pollinations AI] Generated dynamic response: '{display_text[:60]}...' (lang={lang})")
+                        return cls.LLMResult(display_text, tts_text, lang)
+            except Exception as e:
+                logger.debug(f"[Pollinations AI] {ep} notice: {e}")
+
+        # 2. Secondary direct text endpoint fallback
         try:
             prompt_str = f"{sys_content}\nUser: {clean_text}\nAssistant:"
             get_url = f"https://text.pollinations.ai/{urllib.parse.quote(prompt_str[:1000])}"
-            resp = requests.get(get_url, headers={"User-Agent": "BashFlow-AI/1.0"}, timeout=6.0)
+            resp = requests.get(get_url, headers={"User-Agent": "OpsFlow-AI/1.0"}, timeout=10.0)
             if resp.status_code == 200 and resp.text:
                 text = resp.text.strip()
-                if text and not text.lower().startswith("free limit") and "error" not in text.lower() and not text.startswith("{"):
-                    logger.info(f"[Pollinations AI Direct] Generated dynamic response: '{text[:60]}...'")
-                    return text
+                if text and not text.lower().startswith("free limit") and "error" not in text.lower():
+                    display_text, tts_text, lang = cls._parse_llm_json_or_text(text, clean_text)
+                    logger.info(f"[Pollinations AI Direct] Generated dynamic response: '{display_text[:60]}...'")
+                    return cls.LLMResult(display_text, tts_text, lang)
         except Exception as e:
             logger.debug(f"[Pollinations AI Direct] notice: {e}")
 
@@ -4405,17 +4495,23 @@ class WhatsAppService:
             conversation_history=history
         )
         if pollinations_reply:
+            p_display = pollinations_reply.display_text if hasattr(pollinations_reply, "display_text") else str(pollinations_reply)
+            p_tts = pollinations_reply.tts_text if hasattr(pollinations_reply, "tts_text") else p_display
+            p_lang = getattr(pollinations_reply, "lang", "ur")
             return {
-                "reply_body": pollinations_reply.strip(),
+                "reply_body": p_display.strip(),
+                "tts_text": p_tts.strip(),
+                "tts_script": p_tts.strip(),
                 "intent": intent,
                 "urgency": urgency,
                 "lead_score": lead_score,
                 "route_department": route_dept,
                 "entities": entities,
                 "mode": "pollinations_ai",
-                "detected_language": detected_lang["language"],
-                "detected_script": detected_lang["script"],
-                "language_format": lang_fmt,
+                "detected_language": "urdu" if p_lang == "ur" else "english",
+                "detected_script": "arabic" if p_lang == "ur" else "latin",
+                "detected_lang": p_lang,
+                "language_format": "roman_urdu" if p_lang == "ur" else "english",
                 "is_gemini": False,
                 "is_groq": False,
                 "is_ai_generated": True,
