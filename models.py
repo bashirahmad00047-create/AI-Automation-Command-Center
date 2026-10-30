@@ -868,7 +868,8 @@ class WhatsAppMessage(db.Model):
             try:
                 raw = json.loads(self.raw_payload_json)
                 if isinstance(raw, dict):
-                    sender_name = raw.get("senderName") or raw.get("senderContactName")
+                    sender_name = raw.get("senderName") or raw.get("sender_name") or raw.get("senderContactName")
+                    chat_name = raw.get("chatName") or raw.get("chat_name") or raw.get("groupSubject")
                     # Robust media URL and audio base64 resolution
                     audio_b64 = (
                         raw.get("audio_base64") or
@@ -906,7 +907,10 @@ class WhatsAppMessage(db.Model):
                         media_url = re.sub(r";\s*codecs=[^;,]+", "", str(media_url))
                     duration = (
                         raw.get("audioMessageData", {}).get("duration") or
-                        raw.get("duration")
+                        raw.get("duration") or
+                        raw.get("seconds") or
+                        raw.get("audio_duration") or
+                        (raw.get("rawMessage", {}).get("message", {}).get("audioMessage", {}).get("seconds") if isinstance(raw.get("rawMessage"), dict) else None)
                     )
                     is_ai_response = bool(raw.get("is_ai_response") or raw.get("is_ai"))
                     is_ai_generated = bool(raw.get("is_ai_generated"))
@@ -978,6 +982,8 @@ class WhatsAppMessage(db.Model):
             "raw_sender": self.sender,
             "raw_recipient": self.recipient,
             "sender_name": sender_name,
+            "chat_name": chat_name or ("WhatsApp Group" if (clean_sender.endswith("@g.us") or clean_recipient.endswith("@g.us")) else None),
+            "duration": duration,
             "message_type": "audio" if is_audio else self.message_type,
             "type": "audio" if is_audio else self.message_type,
             "body": msg_body,

@@ -5237,16 +5237,14 @@ function groupWhatsAppConversations(messages) {
         // "32844168577254@s.whatsapp.net" and "32844168577254" map to the same key
         const rawPartner = isInbound ? m.sender : m.recipient;
 
-        // Skip entries where the partner is a group JID — groups are forwarded via
-        // the bridge but should not appear as individual direct-chat conversations
-        // unless explicitly supported. They're excluded here to prevent malformed
-        // outbound dispatch when the user clicks "Reply" on a group-sourced message.
-        if (rawPartner && (String(rawPartner).includes('@g.us') || String(rawPartner).includes('@broadcast'))) {
+        // Skip status broadcast stories but preserve group conversations (@g.us)
+        if (rawPartner && String(rawPartner).includes('@broadcast')) {
             return;
         }
 
-        const normKey = normalizeWaPhone(rawPartner) || 'Unknown';
-        const displayPhone = formatWaDisplayPhone(rawPartner) || normKey;
+        const isGroup = rawPartner && String(rawPartner).includes('@g.us');
+        const normKey = isGroup ? rawPartner : (normalizeWaPhone(rawPartner) || 'Unknown');
+        const displayPhone = isGroup ? (m.chat_name || 'WhatsApp Group') : (formatWaDisplayPhone(rawPartner) || normKey);
 
         if (!map[normKey]) {
             let initialMsg = (m.body && m.body !== '(no text)') ? m.body : (m.is_audio ? '🎙️ Voice note' : '(no text)');
@@ -5256,8 +5254,8 @@ function groupWhatsAppConversations(messages) {
             map[normKey] = {
                 phone: displayPhone,
                 normalizedPhone: normKey,
-                // Prefer contact name from inbound sender_name; fallback to display number
-                name: (isInbound ? m.sender_name : '') || displayPhone,
+                // Prefer group subject for groups; contact name for inbound 1-on-1 chats
+                name: (isGroup ? (m.chat_name || 'WhatsApp Group') : (isInbound ? m.sender_name : '')) || displayPhone,
                 lastMessage: initialMsg,
                 timestamp: m.created_at || '',
                 is_audio: Boolean(m.is_audio),
@@ -5497,10 +5495,14 @@ function togglePlayVoiceMessage(id, explicitMediaUrl, explicitText) {
             audio.ontimeupdate = () => {
                 const prog = document.getElementById(`waAudioProg_${id}`);
                 const timeEl = document.getElementById(`waAudioTime_${id}`);
-                if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-                    const pct = Math.min(100, (audio.currentTime / audio.duration) * 100);
+                const effectiveDuration = (audio.duration && !isNaN(audio.duration) && audio.duration > 0 && isFinite(audio.duration))
+                    ? audio.duration
+                    : Number(targetMsg?.audio_duration || targetMsg?.duration || 0);
+
+                if (effectiveDuration > 0) {
+                    const pct = Math.min(100, (audio.currentTime / effectiveDuration) * 100);
                     if (prog) prog.style.width = `${pct}%`;
-                    if (timeEl) timeEl.textContent = `${formatAudioSeconds(audio.currentTime)} / ${formatAudioSeconds(audio.duration)}`;
+                    if (timeEl) timeEl.textContent = `${formatAudioSeconds(audio.currentTime)} / ${formatAudioSeconds(effectiveDuration)}`;
                 } else if (audio.currentTime > 0 && timeEl) {
                     timeEl.textContent = formatAudioSeconds(audio.currentTime);
                 }
@@ -6171,7 +6173,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false) {
                     const hasTranscript = Boolean(safeBody && safeBody.toLowerCase() !== 'voice note' && safeBody.toLowerCase() !== 'audiomessage' && safeBody.toLowerCase() !== 'voicemessage' && safeBody !== '🎤 Voice message' && safeBody !== '🎙️ Voice note' && safeBody !== '(no text)');
                     bodyHtml = `
                         <div class="wa-voice-bubble" style="padding: 4px 0;">
-                            ${(audioSrc || fallbackBlob) ? `<audio controls preload="metadata" src="${audioSrc || fallbackBlob}" onerror="if(this.dataset.fallback && this.src !== this.dataset.fallback){this.src=this.dataset.fallback;}" data-fallback="${escapeHtml(fallbackBlob)}" style="max-width: 250px; width: 100%; height: 38px; outline: none; border-radius: 20px;"></audio>` : `
+                            ${(audioSrc || fallbackBlob) ? `<audio controls preload="auto" src="${audioSrc || fallbackBlob}" data-duration="${m.audio_duration || m.duration || ''}" onloadedmetadata="if(!isFinite(this.duration)||this.duration<=0){const d=Number(this.dataset.duration);if(d>0){this.duration=d;}else{try{this.currentTime=1e101;this.ontimeupdate=function(){this.ontimeupdate=null;this.currentTime=0;};}catch(_){}}}" onerror="if(this.dataset.fallback && this.src !== this.dataset.fallback){this.src=this.dataset.fallback;}" data-fallback="${escapeHtml(fallbackBlob)}" style="max-width: 250px; width: 100%; height: 38px; outline: none; border-radius: 20px;"></audio>` : `
                             <div style="display:inline-flex; align-items:center; gap:6px; color:#aebac1; font-size:0.88em; padding:4px 0;">
                                 <span>🎤</span> <em>Voice message (Audio unavailable)</em>
                             </div>

@@ -5598,6 +5598,19 @@ class WhatsAppService:
                 or ""
             )
             from_phone = cls.format_phone_number(raw_participant)
+            group_subject = (
+                data.get("groupSubject")
+                or sender_data.get("chatName")
+                or data.get("chatName")
+                or "WhatsApp Group"
+            )
+            chat_name = group_subject
+            sender_name = (
+                sender_data.get("senderName")
+                or data.get("senderName")
+                or from_phone
+                or "WhatsApp Group User"
+            )
         else:
             raw_phone = (
                 data.get("from_phone")
@@ -5610,15 +5623,15 @@ class WhatsAppService:
             )
             from_phone = cls.format_phone_number(raw_phone)
             chat_id = f"{from_phone}@s.whatsapp.net" if from_phone else (remote_jid or "")
-
-        sender_name = (
-            sender_data.get("senderName")
-            or sender_data.get("chatName")
-            or data.get("senderName")
-            or data.get("chatName")
-            or from_phone
-            or "WhatsApp Contact"
-        )
+            sender_name = (
+                sender_data.get("senderName")
+                or sender_data.get("chatName")
+                or data.get("senderName")
+                or data.get("chatName")
+                or from_phone
+                or "WhatsApp Contact"
+            )
+            chat_name = sender_name
 
         instance_data = data.get("instanceData", {})
         instance_id = str(instance_data.get("idInstance", "green_api"))
@@ -5743,6 +5756,16 @@ class WhatsAppService:
             or audio_base64
             or (clean_media_url and ("audio" in str(clean_media_url) or str(clean_media_url).endswith((".oga", ".ogg", ".opus", ".mp3", ".wav"))))
         )
+        duration = (
+            data.get("duration")
+            or data.get("seconds")
+            or data.get("audio_duration")
+            or file_data.get("duration")
+            or file_data.get("seconds")
+            or (message_data.get("audioMessageData", {}).get("duration") if isinstance(message_data, dict) else None)
+            or (data.get("rawMessage", {}).get("message", {}).get("audioMessage", {}).get("seconds") if isinstance(data.get("rawMessage"), dict) else None)
+        )
+
         if not body and is_audio_detected:
             body = "[Voice note]"
         final_msg_type = type_message if type_message in ("audioMessage", "voiceMessage", "ptt", "audio") else ("audio" if is_audio_detected else type_message)
@@ -5753,6 +5776,9 @@ class WhatsAppService:
             "chat_id": chat_id,
             "remoteJid": remote_jid,
             "sender_name": sender_name,
+            "chat_name": chat_name,
+            "duration": duration,
+            "audio_duration": duration,
             "recipient_phone_id": instance_id,
             "display_phone_number": instance_data.get("wid", instance_id),
             "timestamp": timestamp,

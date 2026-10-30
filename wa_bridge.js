@@ -230,9 +230,35 @@ function unwrapMessage(msgContent) {
  * Strictly preserves and formats Pakistani mobile numbers while eliminating
  * incorrect foreign prefixes like +91.
  */
+// Global mappings for contacts and groups
+const contactNamesMap = new Map();  // JID / phone / LID -> Contact Name
+const groupSubjectsMap = new Map(); // Group JID (@g.us) -> Group Subject/Name
 const phoneToLidMap = new Map();
 const lastSendTimeMap = new Map();
 const lidToPhoneMap = new Map(); // Keep persisted in memory/DB
+
+/**
+ * Estimates audio duration in seconds from buffer headers (OGG Opus granule position or MP3 frame sync).
+ */
+function estimateAudioDuration(buf) {
+  if (!buf || !Buffer.isBuffer(buf) || buf.length < 32) return 0;
+  // OGG Opus: find last 'OggS' page header to extract exact granule position
+  const oggHeader = Buffer.from('OggS');
+  const lastOgg = buf.lastIndexOf(oggHeader);
+  if (lastOgg >= 0 && lastOgg + 14 <= buf.length) {
+    try {
+      const granule = buf.readBigInt64LE(lastOgg + 6);
+      if (granule > 0n) {
+        return Math.max(1, Math.round(Number(granule) / 48000));
+      }
+    } catch (_) {}
+  }
+  // MP3: rough estimation (typical 64k-128kbps, average ~16KB/s)
+  if (buf.slice(0, 3).toString('utf8') === 'ID3' || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) {
+    return Math.max(1, Math.round(buf.length / 16000));
+  }
+  return 1;
+}
 
 function cleanPhoneNumber(jid) {
   if (!jid) return '';
@@ -275,22 +301,19 @@ async function resolveSender(msg, activeSock) {
     msg.participant ||
     (remoteJid.endsWith('@s.whatsapp.net') ? remoteJid : null);
 
+  let phone = null;
   if (candidateJid && candidateJid.includes('@s.whatsapp.net')) {
-    const phone = candidateJid.split('@')[0].split(':')[0];
+    phone = candidateJid.split('@')[0].split(':')[0];
     if (remoteJid.endsWith('@lid')) {
       lidToPhoneMap.set(remoteJid, phone);
       phoneToLidMap.set(phone, remoteJid);
     }
-    return { phone: `+${phone}`, displayName: msg.pushName || `+${phone}`, replyJid: remoteJid };
-  }
-  // Check cached mapping
-  if (remoteJid.endsWith('@lid') && lidToPhoneMap.has(remoteJid)) {
-    const phone = lidToPhoneMap.get(remoteJid);
-    return { phone: `+${phone}`, displayName: msg.pushName || `+${phone}`, replyJid: remoteJid };
+  } else if (remoteJid.endsWith('@lid') && lidToPhoneMap.has(remoteJid)) {
+    phone = lidToPhoneMap.get(remoteJid);
   }
 
   // Query Baileys onWhatsApp to resolve @lid to real phone number
-  if (activeSock && typeof activeSock.onWhatsApp === 'function' && remoteJid) {
+  if (!phone && activeSock && typeof activeSock.onWhatsApp === 'function' && remoteJid) {
     try {
       const results = await activeSock.onWhatsApp(remoteJid);
       const res = results?.[0];
@@ -302,14 +325,31 @@ async function resolveSender(msg, activeSock) {
           phoneToLidMap.set(ph, lid);
         }
         if (ph) {
-          return { phone: `+${ph}`, displayName: msg.pushName || `+${ph}`, replyJid: remoteJid };
+          phone = ph;
         }
       }
     } catch (_) {}
   }
 
-  // FALLBACK: NEVER use bot's own number or prepend '+' to non-numeric strings! Use msg.pushName || 'WhatsApp Contact'
-  const fallbackName = msg.pushName || 'WhatsApp Contact';
+  // Check cached contact names from Baileys events (contacts.upsert, chats.upsert)
+  const cachedContactName =
+    contactNamesMap.get(remoteJid) ||
+    (candidateJid ? contactNamesMap.get(candidateJid) : null) ||
+    (phone ? contactNamesMap.get(phone) : null) ||
+    (phone ? contactNamesMap.get(`+${phone}`) : null);
+
+  const bestName = msg.pushName || cachedContactName;
+
+  if (phone) {
+    return {
+      phone: `+${phone}`,
+      displayName: bestName || `+${phone}`,
+      replyJid: remoteJid
+    };
+  }
+
+  // FALLBACK: NEVER use bot's own number or prepend '+' to non-numeric strings!
+  const fallbackName = bestName || (remoteJid && !remoteJid.endsWith('@lid') ? remoteJid.split('@')[0] : 'WhatsApp Contact');
   return {
     phone: fallbackName,
     displayName: fallbackName,
@@ -609,24 +649,92 @@ async function startWhatsAppBridge() {
     // 1. Capture mappings from contacts events to map LIDs to real phone numbers
     sock.ev.on('contacts.upsert', (contacts) => {
       for (const c of contacts) {
-        if (c.lid && c.id?.endsWith('@s.whatsapp.net')) {
-          const ph = c.id.split('@')[0].split(':')[0];
-          lidToPhoneMap.set(c.lid, ph);
-          phoneToLidMap.set(ph, c.lid);
+        const cName = c.name || c.notify || c.verifiedName;
+        if (c.id) {
+          if (cName) {
+            contactNamesMap.set(c.id, cName);
+            const ph = cleanPhoneNumber(c.id);
+            if (ph) {
+              contactNamesMap.set(ph, cName);
+              contactNamesMap.set(`+${ph}`, cName);
+            }
+          }
+          if (c.lid && c.id.endsWith('@s.whatsapp.net')) {
+            const ph = c.id.split('@')[0].split(':')[0];
+            lidToPhoneMap.set(c.lid, ph);
+            phoneToLidMap.set(ph, c.lid);
+            if (cName) contactNamesMap.set(c.lid, cName);
+          }
         }
       }
     });
     sock.ev.on('contacts.update', (updates) => {
       for (const c of updates) {
-        if (c.lid && c.id?.endsWith('@s.whatsapp.net')) {
-          const ph = c.id.split('@')[0].split(':')[0];
-          lidToPhoneMap.set(c.lid, ph);
-          phoneToLidMap.set(ph, c.lid);
+        const cName = c.name || c.notify || c.verifiedName;
+        if (c.id) {
+          if (cName) {
+            contactNamesMap.set(c.id, cName);
+            const ph = cleanPhoneNumber(c.id);
+            if (ph) {
+              contactNamesMap.set(ph, cName);
+              contactNamesMap.set(`+${ph}`, cName);
+            }
+          }
+          if (c.lid && c.id.endsWith('@s.whatsapp.net')) {
+            const ph = c.id.split('@')[0].split(':')[0];
+            lidToPhoneMap.set(c.lid, ph);
+            phoneToLidMap.set(ph, c.lid);
+            if (cName) contactNamesMap.set(c.lid, cName);
+          }
         }
       }
     });
 
-    // Forward incoming messages to Python backend webhook
+    // Capture chat and group events to cache real group subjects and chat titles
+    sock.ev.on('chats.upsert', (chats) => {
+      for (const chat of chats) {
+        if (!chat.id) continue;
+        if (chat.id.endsWith('@g.us')) {
+          const subject = chat.name || chat.subject;
+          if (subject) groupSubjectsMap.set(chat.id, subject);
+        } else {
+          if (chat.name) {
+            contactNamesMap.set(chat.id, chat.name);
+            const ph = cleanPhoneNumber(chat.id);
+            if (ph) {
+              contactNamesMap.set(ph, chat.name);
+              contactNamesMap.set(`+${ph}`, chat.name);
+            }
+          }
+        }
+      }
+    });
+    sock.ev.on('chats.update', (updates) => {
+      for (const chat of updates) {
+        if (!chat.id) continue;
+        if (chat.id.endsWith('@g.us')) {
+          const subject = chat.name || chat.subject;
+          if (subject) groupSubjectsMap.set(chat.id, subject);
+        } else {
+          if (chat.name) {
+            contactNamesMap.set(chat.id, chat.name);
+            const ph = cleanPhoneNumber(chat.id);
+            if (ph) {
+              contactNamesMap.set(ph, chat.name);
+              contactNamesMap.set(`+${ph}`, chat.name);
+            }
+          }
+        }
+      }
+    });
+    sock.ev.on('groups.update', (groupUpdates) => {
+      for (const g of groupUpdates) {
+        if (g.id && (g.subject || g.name)) {
+          groupSubjectsMap.set(g.id, g.subject || g.name);
+        }
+      }
+    });
+
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       try {
         if (type !== 'notify' || !messages || !Array.isArray(messages)) return;
@@ -648,11 +756,29 @@ async function startWhatsAppBridge() {
           let senderPhone;
           let displayName;
           let replyJid = remoteJid;
+          let groupSubject = null;
 
           if (isGroupChat) {
             if (!participantJid) continue;
             senderPhone = cleanPhoneNumber(msg.key?.senderPn || msg.key?.participantPn || participantJid);
-            displayName = msg.pushName || (senderPhone ? `+${senderPhone}` : 'WhatsApp Group User');
+            // Look up cached contact name for group participant
+            const cachedParticipantName =
+              contactNamesMap.get(participantJid) ||
+              (senderPhone ? contactNamesMap.get(senderPhone) : null) ||
+              (senderPhone ? contactNamesMap.get(`+${phone}`) : null);
+            displayName = msg.pushName || cachedParticipantName || (senderPhone ? `+${senderPhone}` : 'WhatsApp Group User');
+
+            // Look up cached group subject or fetch via groupMetadata
+            groupSubject = groupSubjectsMap.get(remoteJid);
+            if (!groupSubject && sock && typeof sock.groupMetadata === 'function' && remoteJid.endsWith('@g.us')) {
+              try {
+                const meta = await sock.groupMetadata(remoteJid);
+                if (meta && meta.subject) {
+                  groupSubject = meta.subject;
+                  groupSubjectsMap.set(remoteJid, meta.subject);
+                }
+              } catch (_) {}
+            }
           } else {
             const senderRes = await resolveSender(msg, sock);
             senderPhone = senderRes.phone;
@@ -660,8 +786,9 @@ async function startWhatsAppBridge() {
             replyJid = senderRes.replyJid;
           }
 
-          const pushName = msg.pushName || displayName || 'WhatsApp User';
-          const messageId = msg.key?.id || `msg_${Date.now()}`;
+          const pushName = displayName || msg.pushName || (isGroupChat ? 'WhatsApp Group User' : 'WhatsApp User');
+          const chatTitle = isGroupChat ? (groupSubject || 'WhatsApp Group') : pushName;
+          const messageId = msg.key?.id || msg_;
           const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
 
           // Anti-ban & Human feel: Blue tick (read receipt) and typing status upon receiving message
@@ -685,11 +812,13 @@ async function startWhatsAppBridge() {
           let audioDataUrl = null;
 
           // 2. Detect audio:
+          let audioDuration = null;
           const audioMsg = unwrappedMsg?.audioMessage;
           if (audioMsg) {
             isAudio = true;
             isVoice = Boolean(audioMsg.ptt);
             typeMessage = isVoice ? 'voiceMessage' : 'audioMessage';
+            audioDuration = audioMsg.seconds || audioMsg.duration || null;
 
             // 3. Download media and convert directly to a Base64 Data URL
             try {
@@ -814,7 +943,7 @@ if (!text) text = '[Voice note]';
             senderData: {
               chatId: normalizedChatId,
               sender: senderPhone,
-              chatName: pushName,
+              chatName: chatTitle,
               senderName: pushName
             },
             messageData: {
@@ -830,7 +959,9 @@ if (!text) text = '[Voice note]';
                 mediaUrl: audioDataUrl,
                 audioUrl: audioDataUrl,
                 mimeType: isAudio ? 'audio/ogg' : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg'),
-                caption: text
+                caption: text,
+                duration: audioDuration || undefined,
+                seconds: audioDuration || undefined
               } : undefined,
               fileMessageData: (isAudio || isVoice || isImage) ? {
                 caption: text,
@@ -838,7 +969,9 @@ if (!text) text = '[Voice note]';
                 audioBase64: audioBase64,
                 mediaUrl: audioDataUrl,
                 audioUrl: audioDataUrl,
-                downloadUrl: audioDataUrl
+                downloadUrl: audioDataUrl,
+                duration: audioDuration || undefined,
+                seconds: audioDuration || undefined
               } : undefined
             },
             chatId: normalizedChatId,
@@ -847,7 +980,9 @@ if (!text) text = '[Voice note]';
             from_phone: senderPhone,
             sender: senderPhone,
             senderName: pushName,
-            chatName: pushName,
+            chatName: chatTitle,
+            groupSubject: isGroupChat ? chatTitle : undefined,
+            isGroup: isGroupChat,
             message: text,
             body: text,
             type: isAudio ? 'audio' : typeMessage,
@@ -858,11 +993,16 @@ if (!text) text = '[Voice note]';
             audio_url: audioDataUrl,
             downloadUrl: audioDataUrl,
             download_url: audioDataUrl,
+            duration: audioDuration || undefined,
+            seconds: audioDuration || undefined,
+            audio_duration: audioDuration || undefined,
             fileData: (isAudio || isVoice || isImage) ? {
               downloadUrl: audioDataUrl,
               mediaUrl: audioDataUrl,
               audioUrl: audioDataUrl,
-              mimeType: isAudio ? 'audio/ogg' : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg')
+              mimeType: isAudio ? 'audio/ogg' : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg'),
+              duration: audioDuration || undefined,
+              seconds: audioDuration || undefined
             } : undefined,
             audio_base64: audioBase64,
             audioBase64: audioBase64,
@@ -1243,12 +1383,14 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
         const ptt = isVoiceReq;
         const audioFileName = ptt ? (mimetype.includes('mp4') ? 'voice_message.m4a' : 'voice_message.oga') : 'audio.mp3';
         const audioPayload = audioRaw ? Buffer.from(cleanBase64, 'base64') : { url: audioUrl };
+        const dur = Number(req.body?.seconds || req.body?.duration || 0) || (Buffer.isBuffer(audioPayload) ? estimateAudioDuration(audioPayload) : 0);
         try {
           // Send audio with detected or audio/mp4 mimetype (which WhatsApp Android/iOS plays natively without requiring ffmpeg)
           sent = await sock.sendMessage(jid, {
             audio: audioPayload,
             mimetype: mimetype,
             ptt: ptt,
+            seconds: dur > 0 ? dur : undefined,
             fileName: audioFileName
           }, sendOptions);
         } catch (firstAudioErr) {
@@ -1257,6 +1399,7 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
             audio: audioPayload,
             mimetype: 'audio/mp4',
             ptt: true,
+            seconds: dur > 0 ? dur : undefined,
             fileName: 'voice_message.m4a'
           }, sendOptions);
         }
