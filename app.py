@@ -20,6 +20,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from typing import Any, Dict, Optional
 import requests
 from flask import Flask, Response, g, jsonify, redirect, render_template, request, send_from_directory, session, url_for
@@ -195,10 +196,11 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     application.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "bashflow-absolute-permanent-production-secret-key-2026")
     application.secret_key = application.config["SECRET_KEY"]
     application.config["SESSION_PERMANENT"] = True
-    application.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(days=365)
+    application.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(minutes=int(os.environ.get("SESSION_TIMEOUT_MINUTES", "60")))
     application.config["SESSION_COOKIE_NAME"] = "opsflow_session"
     application.config["SESSION_COOKIE_HTTPONLY"] = True
     application.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    application.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production" or os.environ.get("RENDER") == "true" or os.environ.get("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1")
     application.config["SESSION_REFRESH_EACH_REQUEST"] = True
 
     # Initialize SQLAlchemy & Database Migrations
@@ -247,6 +249,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                                     _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN parent_message_id VARCHAR(128);"))
                                 if "media_url" not in _wam_cols:
                                     _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN media_url TEXT;"))
+                                if "audio_data" not in _wam_cols:
+                                    _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN audio_data BLOB;"))
                             _c_conn.commit()
                 except Exception as _col_err:
                     app_ref.logger.warning(f"Runtime column sync notice: {_col_err}")
@@ -319,9 +323,23 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Register API v1 Blueprint
     application.register_blueprint(api_v1)
 
-    # Master Admin Enterprise Bypass Logic
+    # Session Inactivity & Master Admin Enterprise Bypass Logic
     @application.before_request
     def check_master_admin_entitlements():
+        now_ts = time.time()
+        timeout_seconds = int(os.environ.get("SESSION_INACTIVITY_TIMEOUT", "3600"))
+        last_active = session.get("last_activity")
+        if (session.get("user_id") or session.get("is_super_admin")) and last_active:
+            try:
+                if now_ts - float(last_active) > timeout_seconds:
+                    session.clear()
+                    if request.is_json or request.path.startswith("/api/"):
+                        return jsonify({"error": "Session expired due to inactivity. Please log in again.", "code": "SESSION_EXPIRED"}), 401
+                    return redirect(url_for("top_level_login"))
+            except Exception:
+                pass
+
+        session["last_activity"] = now_ts
         session.permanent = True
         # If user has an active session, ensure modified flag is set so lifetime rolls over
         if session.get("user_id") or session.get("is_super_admin"):
@@ -472,14 +490,31 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             return render_template("login.html")
 
         if request.method == "POST":
-            # Direct Master Admin Login Override
             import os
+            from limiter import login_limiter, get_client_ip
+            client_ip = get_client_ip()
+            user_agent = request.headers.get("User-Agent", "")[:250]
             data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
             email = (data.get("email") or "").strip()
             password = (data.get("password") or "").strip()
+
+            is_limited, retry_after, lock_msg = login_limiter.is_rate_limited(client_ip, email)
+            if is_limited:
+                if request.is_json:
+                    resp = jsonify({
+                        "error": lock_msg,
+                        "code": "TOO_MANY_REQUESTS",
+                        "retry_after": retry_after
+                    })
+                    resp.headers["Retry-After"] = str(retry_after)
+                    return resp, 429
+                return render_template("login.html", error=lock_msg), 429
+
             admin_email_env = os.environ.get('ADMIN_EMAIL', 'Bashirahmad00047@gmail.com')
             admin_pass_env = os.environ.get('ADMIN_PASSWORD', 'bashir@12.')
             if email.lower() == admin_email_env.lower() and password == admin_pass_env:
+                login_limiter.record_success(client_ip, email)
+                login_limiter.record_attempt(client_ip, email, success=True, user_agent=user_agent)
                 session.permanent = True
                 session.pop("logged_out", None)
                 session['user_id'] = 99999
@@ -488,6 +523,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 session['is_super_admin'] = True
                 session['is_enterprise_bypass'] = True
                 session['plan'] = 'enterprise'
+                session['last_activity'] = time.time()
                 if request.is_json:
                     return jsonify({'status': 'success', 'redirect': url_for('index')})
                 return redirect(url_for('index'))
@@ -602,7 +638,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             if not msg:
                 return jsonify({"error": "Media message not found"}), 404
 
-            raw_media = getattr(msg, "media_url", None)
+            audio_bytes = getattr(msg, "audio_data", None)
+            raw_media = getattr(msg, "media_url", None) if not audio_bytes else None
             if not raw_media and msg.raw_payload_json:
                 try:
                     payload = json.loads(msg.raw_payload_json)

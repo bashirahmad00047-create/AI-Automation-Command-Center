@@ -342,13 +342,27 @@ def auth_register():
 
 
 @api_v1.route("/auth/login", methods=["POST"])
-@rate_limit(limit=10, window=60, config_key="LOGIN_RATE_LIMIT", message="Too many login attempts. Please try again later.")
+@rate_limit(limit=5, window=60, config_key="LOGIN_RATE_LIMIT", message="Too many login attempts. Please wait 1 minute before trying again.")
 def auth_login():
+    from limiter import login_limiter, get_client_ip
+    client_ip = get_client_ip()
+    user_agent = request.headers.get("User-Agent", "")[:250]
     data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
     email = data.get("email", "").strip().lower()
     password = data.get("password", "").strip()
 
+    is_limited, retry_after, lock_msg = login_limiter.is_rate_limited(client_ip, email)
+    if is_limited:
+        resp = jsonify({
+            "error": lock_msg,
+            "code": "TOO_MANY_REQUESTS",
+            "retry_after": retry_after
+        })
+        resp.headers["Retry-After"] = str(retry_after)
+        return resp, 429
+
     if not email or not password:
+        login_limiter.record_attempt(client_ip, email, success=False, user_agent=user_agent)
         return jsonify({"error": "Email and password are required.", "code": "VALIDATION_ERROR"}), 400
 
     # Direct Master Admin Login Override
@@ -356,6 +370,8 @@ def auth_login():
     admin_email_env = os.environ.get('ADMIN_EMAIL', 'Bashirahmad00047@gmail.com')
     admin_pass_env = os.environ.get('ADMIN_PASSWORD', 'bashir@12.')
     if email == admin_email_env.lower() and password == admin_pass_env:
+        login_limiter.record_success(client_ip, email)
+        login_limiter.record_attempt(client_ip, email, success=True, user_agent=user_agent)
         session.permanent = True
         session.pop("logged_out", None)
         session['role'] = 'admin'
@@ -430,7 +446,11 @@ def auth_login():
 
     user = User.query.filter_by(email=email).first()
     if not user or not user.check_password(password):
+        login_limiter.record_attempt(client_ip, email, success=False, user_agent=user_agent)
         return jsonify({"error": "Invalid email or password credentials.", "code": "UNAUTHORIZED"}), 401
+
+    login_limiter.record_success(client_ip, email)
+    login_limiter.record_attempt(client_ip, email, success=True, user_agent=user_agent)
 
     if not user.is_active:
         return jsonify({"error": "This account is inactive. Please contact support.", "code": "ACCOUNT_DISABLED"}), 403
