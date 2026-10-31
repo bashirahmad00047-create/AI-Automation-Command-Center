@@ -4598,6 +4598,23 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
             </div>
             
             <div style="padding: 24px; text-align: center;">
+                <!-- DIRECT NUMBER AI CALLING (MODE 2) -->
+                <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 14px; margin-bottom: 18px; text-align: left;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px;">Direct Outbound WhatsApp AI Call</span>
+                        <span style="font-size: 11px; color: #94a3b8;">PTT Voice Note Session</span>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <div style="position: relative; flex: 1;">
+                            <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #64748b;">📱</span>
+                            <input type="tel" id="voiceCallPhoneNumber" value="+92" placeholder="+923001234567" style="width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid #475569; border-radius: 8px; padding: 9px 12px 9px 32px; color: #f8fafc; font-size: 13px; font-weight: 600; outline: none;" />
+                        </div>
+                        <button type="button" id="directCallNumberBtn" onclick="triggerDirectNumberCall()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #fff; border: none; border-radius: 8px; padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; white-space: nowrap; box-shadow: 0 2px 10px rgba(16, 185, 129, 0.35);">
+                            <span>📞</span> <span id="directCallBtnText">Call Number</span>
+                        </button>
+                    </div>
+                </div>
+
                 <div id="voiceCallPulseCircle" style="width: 90px; height: 90px; border-radius: 50%; background: radial-gradient(circle, rgba(16, 185, 129, 0.25) 0%, rgba(16, 185, 129, 0.05) 70%); border: 2px solid #10b981; margin: 0 auto 16px auto; display: flex; align-items: center; justify-content: center; font-size: 38px; box-shadow: 0 0 25px rgba(16, 185, 129, 0.4);">
                     🎙️
                 </div>

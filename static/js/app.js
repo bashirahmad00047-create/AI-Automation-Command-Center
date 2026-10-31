@@ -10547,9 +10547,143 @@ function submitTruckDispatch() {
 // ============================================================================
 let liveVoiceCallActive = false;
 let liveVoiceRecognition = null;
+let liveMediaStream = null;
+let liveMediaRecorder = null;
+let liveAudioChunks = [];
 
 let voiceSpeechDebounceTimer = null;
 let currentVoiceAudioPlayer = null;
+
+function applyLiveStats(stats) {
+    if (!stats) return;
+    const totalExecs = stats.total_executions || 0;
+    const successExecs = stats.successful_executions || 0;
+    const failedExecs = stats.failed_executions !== undefined ? stats.failed_executions : Math.max(0, totalExecs - successExecs);
+
+    const statTotalExecsEl = document.getElementById('statTotalExecutions');
+    if (statTotalExecsEl) statTotalExecsEl.textContent = totalExecs.toLocaleString();
+    const statSuccessExecsEl = document.getElementById('statSuccessExecutions');
+    if (statSuccessExecsEl) statSuccessExecsEl.textContent = `${successExecs.toLocaleString()} Successful Dispatches`;
+
+    const statFailedExecsEl = document.getElementById('statFailedExecutions');
+    if (statFailedExecsEl) statFailedExecsEl.textContent = failedExecs.toLocaleString();
+
+    const statSuccessRateEl = document.getElementById('statSuccessRate');
+    const statSuccessRateSubEl = document.getElementById('statSuccessRateSub');
+    if (statSuccessRateEl) {
+        if (totalExecs === 0) {
+            statSuccessRateEl.textContent = '—';
+            if (statSuccessRateSubEl) statSuccessRateSubEl.textContent = 'No executions yet';
+        } else {
+            const rate = stats.success_rate !== undefined ? stats.success_rate : Math.round((successExecs / totalExecs) * 100);
+            statSuccessRateEl.textContent = `${rate}%`;
+            if (statSuccessRateSubEl) statSuccessRateSubEl.textContent = `${successExecs} / ${totalExecs} succeeded`;
+        }
+    }
+
+    const highLeadsEl = document.getElementById('statHighPriorityLeads');
+    if (highLeadsEl) highLeadsEl.textContent = stats.high_priority_leads || 0;
+    const totalLeadsEl = document.getElementById('statTotalLeads');
+    if (totalLeadsEl) totalLeadsEl.textContent = `${stats.total_leads || 0} Total Inquiries`;
+
+    if (typeof updateNavBadge === 'function') {
+        updateNavBadge('tabLeadCount', stats.total_leads || 0);
+    }
+}
+
+async function triggerDirectNumberCall() {
+    const phoneInput = document.getElementById('voiceCallPhoneNumber');
+    const statusLabel = document.getElementById('voiceCallStatusLabel');
+    const subLabel = document.getElementById('voiceCallSubLabel');
+    const pulseCircle = document.getElementById('voiceCallPulseCircle');
+    const transcriptBox = document.getElementById('voiceTranscriptBox');
+    const directCallBtn = document.getElementById('directCallNumberBtn');
+    const directCallBtnText = document.getElementById('directCallBtnText');
+
+    const rawPhone = phoneInput ? phoneInput.value.trim() : '';
+    if (!rawPhone || rawPhone.replace(/\D/g, '').length < 7) {
+        showToast('Please enter a valid phone number with country code (e.g. +923001234567)', 'error');
+        if (phoneInput) phoneInput.focus();
+        return;
+    }
+
+    if (directCallBtn) directCallBtn.disabled = true;
+    if (directCallBtnText) directCallBtnText.textContent = 'Calling...';
+    if (statusLabel) statusLabel.textContent = `Connecting Outbound Call to ${rawPhone}...`;
+    if (subLabel) subLabel.textContent = 'Initiating WhatsApp Voice Note Session via Baileys Bridge';
+    if (pulseCircle) {
+        pulseCircle.style.borderColor = '#38bdf8';
+        pulseCircle.style.transform = 'scale(1.15)';
+    }
+    if (transcriptBox) {
+        transcriptBox.innerHTML = `
+            <div style="color: #38bdf8; margin-bottom: 6px;"><strong>[Session Init]</strong> Dialing <code>${escapeHtml(rawPhone)}</code>...</div>
+            <div style="color: #94a3b8; font-size: 12px;">Synthesizing natural AI audio greeting & initiating PTT voice note session...</div>
+        `;
+    }
+
+    try {
+        const res = await fetch('/api/v1/voice/outbound-call', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone_number: rawPhone })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            if (statusLabel) statusLabel.textContent = `Call Active: +${data.phone}`;
+            if (subLabel) subLabel.textContent = `Status: ${data.detail || 'Connected'}`;
+            if (pulseCircle) {
+                pulseCircle.style.borderColor = '#10b981';
+                pulseCircle.style.transform = 'scale(1.2)';
+            }
+            if (transcriptBox) {
+                transcriptBox.innerHTML = `
+                    <div style="color: #10b981; font-weight: 700; margin-bottom: 6px;">✓ Outbound Call Session Established (+${escapeHtml(data.phone)})</div>
+                    <div style="margin-bottom: 8px; color: #f8fafc;"><strong>AI Greeting:</strong> ${escapeHtml(data.greeting_text)}</div>
+                    <div style="color: #34d399; font-size: 11px;">● WhatsApp Voice Note (PTT OGG Opus) delivered | Lead auto-captured to CRM</div>
+                `;
+            }
+
+            if (data.audio_data_uri) {
+                if (currentVoiceAudioPlayer) {
+                    try { currentVoiceAudioPlayer.pause(); } catch (_) {}
+                }
+                currentVoiceAudioPlayer = new Audio(data.audio_data_uri);
+                currentVoiceAudioPlayer.onended = function() {
+                    if (pulseCircle) pulseCircle.style.transform = 'scale(1.0)';
+                };
+                currentVoiceAudioPlayer.play().catch(e => console.warn('[Audio Play Notice]', e));
+            }
+
+            if (data.stats) {
+                applyLiveStats(data.stats);
+            }
+            if (typeof pollTelemetry === 'function') {
+                pollTelemetry(true);
+            }
+            showToast(`Outbound call session active for +${data.phone}!`, 'success');
+        } else {
+            const errDetail = data.error || 'Failed to initiate outbound call';
+            if (statusLabel) statusLabel.textContent = 'Call Failed';
+            if (subLabel) subLabel.textContent = errDetail;
+            if (pulseCircle) pulseCircle.style.borderColor = '#ef4444';
+            if (transcriptBox) {
+                transcriptBox.innerHTML = `<div style="color: #ef4444;"><strong>Error:</strong> ${escapeHtml(errDetail)}</div>`;
+            }
+            showToast(errDetail, 'error');
+        }
+    } catch (err) {
+        console.error('[Direct Call Error]', err);
+        if (statusLabel) statusLabel.textContent = 'Connection Error';
+        if (subLabel) subLabel.textContent = err.message || 'Network error';
+        if (pulseCircle) pulseCircle.style.borderColor = '#ef4444';
+        showToast('Error connecting to outbound call service', 'error');
+    } finally {
+        if (directCallBtn) directCallBtn.disabled = false;
+        if (directCallBtnText) directCallBtnText.textContent = 'Call Number';
+    }
+}
 
 async function sendVoiceChatQuery(spokenText) {
     if (!spokenText || !spokenText.trim()) return;
@@ -10574,6 +10708,12 @@ async function sendVoiceChatQuery(spokenText) {
                     <div style="color: #34d399;"><strong>AI Voice Agent:</strong> ${escapeHtml(data.reply_text)}</div>
                 `;
                 transcriptBox.scrollTop = transcriptBox.scrollHeight;
+            }
+            if (data.stats) {
+                applyLiveStats(data.stats);
+            }
+            if (typeof pollTelemetry === 'function') {
+                pollTelemetry(true);
             }
 
             if (data.audio_data_uri) {
@@ -10643,10 +10783,25 @@ function toggleLiveVoiceCall() {
         liveVoiceCallActive = true;
         if (btnText) btnText.textContent = 'End Call';
         if (statusLabel) statusLabel.textContent = 'Listening... Speak now';
-        if (subLabel) subLabel.textContent = 'Voice agent is actively listening in real-time';
+        if (subLabel) subLabel.textContent = 'Voice agent is actively listening in real-time (Urdu & English)';
         if (pulseCircle) {
-            pulseCircle.style.transform = 'scale(1.1)';
+            pulseCircle.style.transform = 'scale(1.15)';
             pulseCircle.style.borderColor = '#10b981';
+        }
+
+        // Active browser microphone capture
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                liveMediaStream = stream;
+                try {
+                    liveMediaRecorder = new MediaRecorder(stream);
+                    liveAudioChunks = [];
+                    liveMediaRecorder.ondataavailable = e => {
+                        if (e.data && e.data.size > 0) liveAudioChunks.push(e.data);
+                    };
+                    liveMediaRecorder.start(1000);
+                } catch (_) {}
+            }).catch(mErr => console.warn('[Live Mic Permission Notice]', mErr));
         }
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -10721,6 +10876,14 @@ function toggleLiveVoiceCall() {
                 liveVoiceRecognition.stop();
             } catch (e) {}
             liveVoiceRecognition = null;
+        }
+        if (liveMediaRecorder) {
+            try { liveMediaRecorder.stop(); } catch (_) {}
+            liveMediaRecorder = null;
+        }
+        if (liveMediaStream) {
+            try { liveMediaStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+            liveMediaStream = null;
         }
     }
 }

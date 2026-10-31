@@ -220,6 +220,51 @@ let currentQrSvg = null;
 let isStarting = false;
 let reconnectTimer = null;
 
+// ============================================================================
+// ADVANCED WHATSAPP ANTI-BAN ENGINE (HUMAN SIMULATION SHIELD)
+// ============================================================================
+const ANTI_BAN_WINDOW_MS = 60000; // 1 minute rolling window
+const ANTI_BAN_MAX_MESSAGES_PER_MINUTE = 12; // Maximum 12 messages per minute
+const outboundDispatchTimestamps = [];
+
+/**
+ * Calculates a human-like dynamic jitter delay based on response message length.
+ * Range: 3500ms (3.5s) to 8500ms (8.5s) with authentic human variability.
+ */
+function calculateDynamicJitterDelay(messageContent) {
+  const charCount = messageContent ? String(messageContent).length : 30;
+  // Natural human typing/reading rate simulation: ~35ms per character
+  const lengthFactor = Math.min(3000, charCount * 35);
+  // Unpredictable human hesitation jitter: 500ms to 2500ms
+  const humanJitter = Math.floor(Math.random() * 2000) + 500;
+  const rawDelay = 3500 + lengthFactor + humanJitter;
+  const clampedDelay = Math.min(8500, Math.max(3500, Math.round(rawDelay)));
+  console.log(`[Anti-Ban Shield] Calculated dynamic jitter delay: ${clampedDelay}ms for message length (${charCount} chars).`);
+  return clampedDelay;
+}
+
+/**
+ * Anti-Spam Queue: Blocks until a dispatch slot is available in the 1-minute window
+ * ensuring no more than 12 messages are ever sent within 60 seconds.
+ */
+async function acquireAntiSpamDispatchSlot() {
+  while (true) {
+    const now = Date.now();
+    // Evict timestamps older than 60 seconds
+    while (outboundDispatchTimestamps.length > 0 && (now - outboundDispatchTimestamps[0]) > ANTI_BAN_WINDOW_MS) {
+      outboundDispatchTimestamps.shift();
+    }
+    if (outboundDispatchTimestamps.length < ANTI_BAN_MAX_MESSAGES_PER_MINUTE) {
+      outboundDispatchTimestamps.push(now);
+      return;
+    }
+    const oldestTimestamp = outboundDispatchTimestamps[0];
+    const waitTime = Math.max(600, (oldestTimestamp + ANTI_BAN_WINDOW_MS) - now + 300);
+    console.log(`[Anti-Spam Shield Rate Limiter] 12 msgs/min threshold reached (${outboundDispatchTimestamps.length}/${ANTI_BAN_MAX_MESSAGES_PER_MINUTE}). Waiting ${(waitTime/1000).toFixed(1)}s for safety...`);
+    await new Promise(r => setTimeout(r, waitTime));
+  }
+}
+
 // Process-wide guard against unhandled network crashes
 process.on('uncaughtException', (err) => {
   console.error('[WhatsApp Bridge] Uncaught Exception (guarded):', err);
@@ -898,14 +943,18 @@ async function startWhatsAppBridge() {
           const messageId = msg.key?.id || msg_;
           const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
 
-          // Anti-ban & Human feel: Blue tick (read receipt) and typing status upon receiving message
+          // Advanced Anti-Ban Human Shield: 1.5 second delay before blue tick (read receipt)
           if (!msg.key?.fromMe && remoteJid && remoteJid !== 'status@broadcast') {
-            try {
-              await sock.readMessages([msg.key]);
-              await sock.sendPresenceUpdate('composing', remoteJid);
-            } catch (presErr) {
-              console.debug('[Presence Setup Notice]', presErr.message);
-            }
+            setTimeout(async () => {
+              try {
+                if (sock && typeof sock.readMessages === 'function') {
+                  await sock.readMessages([msg.key]);
+                  console.log(`[Anti-Ban Shield] Dispatched read receipt (blue tick) after 1.5s human delay for message: ${msg.key?.id}`);
+                }
+              } catch (presErr) {
+                console.debug('[Anti-Ban Read Notice]', presErr.message);
+              }
+            }, 1500);
           }
           
           // 1. Unwrap ephemeral/viewOnce wrappers first:
@@ -1172,7 +1221,22 @@ if (!text) text = '[Voice note]';
                 let sentMsg = null;
                 const shouldSendVoice = Boolean(resData.audio_base64 && (resData.send_as_voice || resData.is_voice));
 
+                // 1. Anti-spam queue slot acquisition (enforces max 12 msgs/min)
+                await acquireAntiSpamDispatchSlot();
+
+                // 2. Dynamic Jitter Delay (3.5s to 8.5s) based on response length
+                const replyTextForDelay = resData.reply || resData.tts_text || resData.text || '';
+                const jitterMs = calculateDynamicJitterDelay(replyTextForDelay);
+
                 if (shouldSendVoice) {
+                  // Non-blocking recording presence during jitter delay
+                  try {
+                    await sock.sendPresenceUpdate('recording', targetJid);
+                    console.log(`[Anti-Ban Shield] Presence 'recording' active for ${targetJid} during ${jitterMs}ms jitter delay...`);
+                  } catch (_) {}
+
+                  await new Promise(r => setTimeout(r, jitterMs));
+
                   let audioBuf = Buffer.from(resData.audio_base64, 'base64');
                   let outMime = 'audio/ogg; codecs=opus';
                   let outPtt = true;
@@ -1202,13 +1266,25 @@ if (!text) text = '[Voice note]';
                     console.log(`[Direct Bridge Dispatch Success] Outbound PTT voice note delivered to ${targetJid}: ID=${sentMsg?.key?.id}`);
                   } catch (aErr) {
                     console.warn('[Direct Bridge Audio Error]:', aErr.message);
+                  } finally {
+                    try { await sock.sendPresenceUpdate('paused', targetJid); } catch (_) {}
                   }
                 } else if (!shouldSendVoice && resData.reply) {
+                  // Non-blocking composing presence during jitter delay
+                  try {
+                    await sock.sendPresenceUpdate('composing', targetJid);
+                    console.log(`[Anti-Ban Shield] Presence 'composing' active for ${targetJid} during ${jitterMs}ms jitter delay...`);
+                  } catch (_) {}
+
+                  await new Promise(r => setTimeout(r, jitterMs));
+
                   try {
                     sentMsg = await sock.sendMessage(targetJid, { text: String(resData.reply) });
                     console.log(`[Direct Bridge Dispatch Success] Outbound text delivered to ${targetJid}: ID=${sentMsg?.key?.id}`);
                   } catch (tErr) {
                     console.warn('[Direct Bridge Text Error]:', tErr.message);
+                  } finally {
+                    try { await sock.sendPresenceUpdate('paused', targetJid); } catch (_) {}
                   }
                 }
               }
@@ -1628,12 +1704,22 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
     }
     lastSendTimeMap.set(jid, Date.now());
 
+    // 1. Anti-spam queue slot acquisition (enforces max 12 msgs/min limit)
+    await acquireAntiSpamDispatchSlot();
+
+    // 2. Dynamic Jitter Delay (3.5s to 8.5s) based on message length
+    const outboundContent = message || req.body?.caption || req.body?.text || '';
+    const jitterDelayMs = calculateDynamicJitterDelay(outboundContent);
+
     try {
       if (hasAudio) {
-        // Non-blocking recording presence
+        // Human Simulation: Send recording presence update during jitter delay
         try {
-          sock.sendPresenceUpdate('recording', jid).catch(() => {});
+          await sock.sendPresenceUpdate('recording', jid);
+          console.log(`[Anti-Ban Shield] Outbound recording presence active for ${jid} during ${jitterDelayMs}ms jitter delay...`);
         } catch (_) {}
+
+        await new Promise(r => setTimeout(r, jitterDelayMs));
         let cleanBase64 = audioRaw ? String(audioRaw).replace(/^data:[^;]+;base64,/, '').trim() : '';
         let audioBuffer = cleanBase64 ? Buffer.from(cleanBase64, 'base64') : null;
         if (!audioBuffer && audioUrl && typeof audioUrl === 'string' && audioUrl.startsWith('data:audio')) {
@@ -1735,10 +1821,13 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
         }
         try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {}
       } else {
-        // Non-blocking composing presence
+        // Human Simulation: Composing presence active during jitter delay
         try {
-          sock.sendPresenceUpdate('composing', jid).catch(() => {});
+          await sock.sendPresenceUpdate('composing', jid);
+          console.log(`[Anti-Ban Shield] Outbound composing presence active for ${jid} during ${jitterDelayMs}ms jitter delay...`);
         } catch (_) {}
+
+        await new Promise(r => setTimeout(r, jitterDelayMs));
 
         const textToSend = String(message || '');
         sent = await sock.sendMessage(jid, { text: textToSend }, sendOptions);
