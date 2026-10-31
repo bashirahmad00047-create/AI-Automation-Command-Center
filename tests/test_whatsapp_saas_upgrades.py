@@ -1,0 +1,146 @@
+import os
+import sys
+
+# Ensure root directory is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import pytest
+import json
+from app import create_app
+from models import db, WhatsAppMessage, Product, Lead, SystemSetting
+from whatsapp_service import WhatsAppService
+
+@pytest.fixture(scope="module")
+def app():
+    app = create_app("testing")
+    with app.app_context():
+        db.create_all()
+        yield app
+
+@pytest.fixture(scope="module")
+def client(app):
+    return app.test_client()
+
+def test_pairing_code_requires_phone(client):
+    """Pairing code endpoint should return a friendly error message when phone is missing."""
+    res = client.post("/api/v1/whatsapp/pairing-code", json={})
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is False
+    assert "Phone number is required" in data["message"]
+
+def test_pairing_code_endpoint_active(client):
+    """Pairing code endpoint forwards to Baileys bridge and guarantees HTTP 200 JSON."""
+    res = client.post("/api/v1/whatsapp/pairing-code", json={"phone": "923001234567"})
+    assert res.status_code == 200
+    data = res.get_json()
+    assert "status" in data
+    assert "success" in data
+
+def test_group_ai_default_off(client):
+    """WhatsApp groups must have AI Auto-Responder disabled by default."""
+    group_jid = "120363000000000001@g.us"
+    res = client.get(f"/api/v1/whatsapp/groups/{group_jid}/ai-status")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert data["ai_enabled"] is False
+
+def test_group_ai_toggle(client):
+    """Admins can explicitly toggle AI Auto-Responder ON and OFF for groups."""
+    group_jid = "120363000000000002@g.us"
+    
+    # Toggle ON
+    res_on = client.post(f"/api/v1/whatsapp/groups/{group_jid}/ai-toggle", json={"enabled": True})
+    assert res_on.status_code == 200
+    assert res_on.get_json()["ai_enabled"] is True
+
+    # Verify status
+    res_status = client.get(f"/api/v1/whatsapp/groups/{group_jid}/ai-status")
+    assert res_status.get_json()["ai_enabled"] is True
+
+    # Toggle OFF
+    res_off = client.post(f"/api/v1/whatsapp/groups/{group_jid}/ai-toggle", json={"enabled": False})
+    assert res_off.status_code == 200
+    assert res_off.get_json()["ai_enabled"] is False
+
+def test_group_message_isolation(app):
+    """Group messages (@g.us) are classified separately from 1-on-1 chats."""
+    with app.app_context():
+        group_msg = WhatsAppMessage(
+            id="test-msg-grp-1",
+            organization_id="org-enterprise-default",
+            whatsapp_message_id="wamid-grp-1",
+            sender="923001112233@s.whatsapp.net",
+            recipient="12036399999999@g.us",
+            body="Salam to all group members",
+            message_type="text"
+        )
+        d_grp = group_msg.to_dict()
+        assert d_grp["is_group"] is True
+        assert d_grp["chat_type"] == "group"
+
+        individual_msg = WhatsAppMessage(
+            id="test-msg-ind-1",
+            organization_id="org-enterprise-default",
+            whatsapp_message_id="wamid-ind-1",
+            sender="923001112233@s.whatsapp.net",
+            recipient="923214445566@s.whatsapp.net",
+            body="Salam brother",
+            message_type="text"
+        )
+        d_ind = individual_msg.to_dict()
+        assert d_ind["is_group"] is False
+        assert d_ind["chat_type"] == "individual"
+
+def test_voice_chat_endpoint(client):
+    """Live AI Voice Chat endpoint handles text queries and returns stats."""
+    res = client.post("/api/v1/voice/chat", json={"message": "Salam, how can you help me?"})
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert "reply_text" in data
+    assert len(data["reply_text"]) > 0
+
+def test_outbound_call_endpoint(client):
+    """Direct Outbound Call endpoint initializes session and returns greeting."""
+    res = client.post("/api/v1/voice/outbound-call", json={"phone_number": "+923001234567"})
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert data["phone"] == "923001234567"
+    assert "greeting_text" in data
+
+def test_product_catalog_context(app):
+    """Product catalog grounding context provides real-time prices & stock to Gemini AI."""
+    with app.app_context():
+        # Ensure a test product exists
+        prod = Product.query.filter_by(sku="TEST-SKU-001").first()
+        if not prod:
+            prod = Product(
+                id="prod-test-001",
+                organization_id="org-enterprise-default",
+                sku="TEST-SKU-001",
+                name="BashFlow Premium Automation",
+                price=15000.0,
+                currency="PKR",
+                stock_quantity=50,
+                is_active=True
+            )
+            db.session.add(prod)
+            db.session.commit()
+
+        context_str = WhatsAppService.get_product_catalog_context(organization_id="org-enterprise-default")
+        assert "LIVE PRODUCT CATALOG & INVENTORY GROUNDING" in context_str
+        assert "BashFlow Premium Automation" in context_str
+        assert "PKR 15,000.00" in context_str
+
+def test_whatsapp_qr_and_status_guarantee(client):
+    """WhatsApp QR and status routes always return HTTP 200 without throwing 500."""
+    res_qr = client.get("/api/v1/whatsapp/bridge-qr")
+    assert res_qr.status_code == 200
+    assert "status" in res_qr.get_json()
+
+    res_status = client.get("/api/v1/whatsapp/status")
+    assert res_status.status_code == 200
+    assert "connected" in res_status.get_json() or "status" in res_status.get_json()
