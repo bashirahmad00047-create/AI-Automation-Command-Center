@@ -210,22 +210,17 @@ class WhatsAppService:
             t = re.sub(r"(?i)\bM&P\b", "ایم اینڈ پی", t)
             t = re.sub(r"(?i)\bLeopards\b", "لیپرڈز", t)
 
-            # Breath pause injection: Add natural human breathing pauses (commas/ellipses) every 5-7 words
-            words = t.split()
-            if len(words) > 7:
-                chunked = []
-                for w_idx, w in enumerate(words):
-                    chunked.append(w)
-                    if (w_idx + 1) % 6 == 0 and w_idx < len(words) - 2:
-                        last_w = chunked[-1]
-                        if not any(last_w.endswith(p) for p in ('،', ',', '.', '!', '؟', '…')):
-                            chunked[-1] = last_w + '،'
-                t = ' '.join(chunked)
+            # Natural clause breaks before major conjunctions (اور, لیکن, تاکہ) for smooth spoken delivery
+            t = re.sub(r"\s+اور\s+", "، اور ", t)
+            t = re.sub(r"\s+لیکن\s+", "، لیکن ", t)
+            t = re.sub(r"\s+تاکہ\s+", "، تاکہ ", t)
 
-            # Smooth out redundant commas or spaces
+            # Remove all artificial pauses (ellipses, multiple dashes, and redundant commas) for smooth single-breath Pakistani speech flow
+            t = re.sub(r"[\.]{2,}|\u2026|[-]{2,}", " ", t)
             t = re.sub(r"[,\،]{2,}", "،", t)
             t = re.sub(r"\s+([,\،\.\!\؟])", r"\1", t)
             t = re.sub(r"([,\،])\s*", r"\1 ", t)
+            t = re.sub(r"\s+", " ", t).strip()
         else:
             # Roman Urdu / Spoken Pakistani English Flow
             # Maintains pure Latin script so ElevenLabs Multilingual V2 does not glitch on script switching
@@ -1622,15 +1617,11 @@ class WhatsAppService:
                 out_tokens.append(tok)
 
         res = "".join(out_tokens)
-        words = res.split()
-        if len(words) > 7:
-            chunked = []
-            for i, w in enumerate(words):
-                chunked.append(w)
-                if (i + 1) % 6 == 0 and i < len(words) - 2:
-                    if not any(chunked[-1].endswith(p) for p in ('،', ',', '.', '!', '؟')):
-                        chunked[-1] = chunked[-1] + '،'
-            res = ' '.join(chunked)
+        # Remove artificial pauses and word chunking commas for fluent single-breath Pakistani Urdu flow
+        res = re.sub(r"[\.]{2,}|\u2026|[-]{2,}", " ", res)
+        res = re.sub(r"[,\،]{2,}", "،", res)
+        res = re.sub(r"\s+([,\،\.\!\؟])", r"\1", res)
+        res = re.sub(r"\s+", " ", res).strip()
         return res
 
     def _synthesize_edge_tts(
@@ -1658,6 +1649,8 @@ class WhatsAppService:
             # Strip emojis, markdown asterisks, hashes, backticks, bullets, etc.
             clean_speech = re.sub(r'[*_~`#>•\-\[\]\(\)]', ' ', raw_txt)
             clean_speech = re.sub(r'[\U00010000-\U0010ffff]', '', clean_speech)
+            clean_speech = re.sub(r'[\.]{2,}|\u2026|[-]{2,}', ' ', clean_speech)
+            clean_speech = re.sub(r'[,\،]{2,}', '،', clean_speech)
             clean_speech = re.sub(r'\s+', ' ', clean_speech).strip()
             if not clean_speech:
                 clean_speech = raw_txt
@@ -1708,7 +1701,7 @@ class WhatsAppService:
             if configured_rate:
                 active_rate = configured_rate.strip()
             else:
-                active_rate = "+0%" if is_urdu else "+0%"
+                active_rate = "+12%" if is_urdu else "+0%"
 
             if configured_pitch:
                 active_pitch = configured_pitch.strip()

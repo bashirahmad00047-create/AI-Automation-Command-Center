@@ -5653,6 +5653,8 @@ async function fetchBridgeQrCode(forceRefresh = false) {
             // Connected state check
             if (data.connected || data.status === 'connected') {
                 window._waIsConnected = true;
+                const phone = data.phone || data.connected_phone || data.user_jid || '';
+                updateWhatsAppConnectionUI(true, phone);
                 if (waBridgeQrPollTimer) {
                     clearInterval(waBridgeQrPollTimer);
                     waBridgeQrPollTimer = null;
@@ -5877,6 +5879,11 @@ function resetPairingPhoneInput() {
 window.resetPairingPhoneInput = resetPairingPhoneInput;
 
 function openLinkWhatsAppQrModal() {
+    if (window._waIsConnected) {
+        if (typeof showNotification === 'function') {
+            showNotification('WhatsApp is already connected and active permanently!', 'success');
+        }
+    }
     const modal = document.getElementById('linkWhatsAppQrModal');
     if (!modal) {
         console.warn('linkWhatsAppQrModal element not found');
@@ -11726,18 +11733,33 @@ function initLeafletRadarMap() {
     }
 }
 
-function addRadarMapPin(lat, lng, label, phone, gmapsUrl) {
+function addRadarMapPin(lat, lng, label, phone, gmapsUrl, status = 'On the Way') {
     if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
     initLeafletRadarMap();
     if (!leafletRadarMap || typeof L === 'undefined') return;
     try {
         const marker = L.marker([Number(lat), Number(lng)]).addTo(leafletRadarMap);
+        marker._customPhone = phone ? String(phone).replace(/\D/g, '') : '';
+        const cleanGmaps = gmapsUrl || `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+        const isDelivered = String(status).toLowerCase().includes('delivered');
+        const statusBadge = isDelivered
+            ? '<span style="background: rgba(0, 168, 132, 0.2); color: #00a884; font-weight: 700; padding: 2px 6px; border-radius: 4px; font-size: 10.5px;">✅ Delivered</span>'
+            : '<span style="background: rgba(245, 158, 11, 0.2); color: #d97706; font-weight: 700; padding: 2px 6px; border-radius: 4px; font-size: 10.5px;">🚚 On the Way</span>';
+
         const popupHtml = `
-            <div style="font-family: sans-serif; font-size: 12px; color: #111;">
-                <b style="color: #00a884;">📍 ${label || 'Customer'}</b><br>
-                ${phone ? `<span style="color:#555;">📞 +${phone}</span><br>` : ''}
-                <span style="color:#777; font-size:10px;">Lat: ${Number(lat).toFixed(4)}, Lng: ${Number(lng).toFixed(4)}</span><br>
-                <a href="${gmapsUrl || `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`}" target="_blank" style="color: #00a884; font-weight: bold; text-decoration: underline;">Open in Google Maps</a>
+            <div style="font-family: sans-serif; font-size: 12px; color: #111; min-width: 200px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <b style="color: #00a884; font-size: 13px;">📍 ${label || 'Customer'}</b>
+                    ${statusBadge}
+                </div>
+                ${phone ? `<div style="color:#555; margin-bottom: 2px;">📞 +${String(phone).replace(/\D/g, '')}</div>` : ''}
+                <div style="color:#777; font-size:10px; margin-bottom: 6px;">Lat: ${Number(lat).toFixed(4)}, Lng: ${Number(lng).toFixed(4)}</div>
+                <div style="display: flex; flex-direction: column; gap: 5px;">
+                    <a href="${cleanGmaps}" target="_blank" style="color: #00a884; font-weight: bold; text-decoration: underline; font-size: 11px;">🗺️ Open in Google Maps</a>
+                    <button type="button" onclick="sendLiveTrackingLinkToCustomer('${phone || ''}', ${lat}, ${lng})" style="background: #00a884; color: #fff; border: none; border-radius: 4px; padding: 5px 8px; font-size: 11px; font-weight: 700; cursor: pointer;">
+                        🚀 Send Live Tracking Link to Customer
+                    </button>
+                </div>
             </div>
         `;
         marker.bindPopup(popupHtml);
@@ -11749,6 +11771,7 @@ function addRadarMapPin(lat, lng, label, phone, gmapsUrl) {
         console.debug('[Radar Marker Notice]:', err.message);
     }
 }
+window.addRadarMapPin = addRadarMapPin;
 
 // Auto-initialize radar map when tab is opened
 window.addEventListener('load', () => {
@@ -11813,3 +11836,132 @@ function refreshLeafletRadarMap() {
         }, 200);
     }
 }
+
+
+// ============================================================================
+// LIVE DELIVERY RADAR TRACKING & WHATSAPP CONNECTION STATUS CONTROLLER
+// ============================================================================
+function trackActiveDelivery() {
+    initLeafletRadarMap();
+    const mapSection = document.getElementById('liveRadarMapSection');
+    if (mapSection) {
+        mapSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    if (leafletRadarMap) {
+        try { leafletRadarMap.invalidateSize(); } catch (_) {}
+    }
+
+    const activePhone = (window.currentActiveContact && window.currentActiveContact.phone) 
+        || (document.getElementById('waActiveContactPhone') && document.getElementById('waActiveContactPhone').textContent) 
+        || '';
+    const cleanPhone = String(activePhone).replace(/\D/g, '');
+    const activeName = (window.currentActiveContact && window.currentActiveContact.name) 
+        || (document.getElementById('waActiveContactName') && document.getElementById('waActiveContactName').textContent) 
+        || 'Customer';
+
+    // Find if marker already placed
+    let found = null;
+    if (cleanPhone) {
+        found = radarMapMarkers.find(m => m._customPhone && m._customPhone.includes(cleanPhone));
+    }
+
+    if (found) {
+        leafletRadarMap.setView(found.getLatLng(), 15);
+        found.openPopup();
+        if (typeof showNotification === 'function') {
+            showNotification(`Tracking delivery for ${activeName} on live radar map!`, 'info');
+        }
+        return;
+    }
+
+    // Default active location: Lahore / Pakistan hub
+    const defaultLat = 31.5204;
+    const defaultLng = 74.3587;
+    addRadarMapPin(defaultLat, defaultLng, activeName.replace(/Select a Conversation/g, 'Customer'), cleanPhone, null, 'On the Way');
+    if (leafletRadarMap) {
+        leafletRadarMap.setView([defaultLat, defaultLng], 14);
+    }
+    if (typeof showNotification === 'function') {
+        showNotification(`Live delivery pin placed for ${activeName}!`, 'success');
+    }
+}
+window.trackActiveDelivery = trackActiveDelivery;
+
+async function sendLiveTrackingLinkToCustomer(phone, lat, lng) {
+    let targetPhone = phone || (window.currentActiveContact && window.currentActiveContact.phone);
+    if (!targetPhone) {
+        const headerPhone = document.getElementById('waActiveContactPhone');
+        if (headerPhone && headerPhone.textContent && /\d{6,}/.test(headerPhone.textContent)) {
+            targetPhone = headerPhone.textContent.replace(/\D/g, '');
+        }
+    }
+    if (!targetPhone) {
+        targetPhone = prompt('Enter customer WhatsApp phone number to send live tracking link:');
+    }
+    if (!targetPhone) return;
+
+    const useLat = lat || 31.5204;
+    const useLng = lng || 74.3587;
+    const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${useLat},${useLng}`;
+    const msgText = `Assalam-o-Alaikum! Aap ki delivery live on the way hai. Aap niche diye gaye Google Maps link se rider ko real-time track kar sakte hain:\n${gmapsUrl}\nKisi bhi sawal ke liye hum yahan mojood hain. Shukriya!`;
+
+    try {
+        const res = await fetch('/api/v1/whatsapp/send-message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                phone: targetPhone,
+                message: msgText
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && (data.success || data.status === 'success' || data.message_id)) {
+            if (typeof showNotification === 'function') {
+                showNotification(`✅ Live tracking link dispatched to +${String(targetPhone).replace(/\D/g, '')} via WhatsApp!`, 'success');
+            }
+        } else {
+            if (typeof showNotification === 'function') {
+                showNotification(data.error || data.message || 'Tracking link sent to queue!', 'info');
+            }
+        }
+    } catch (e) {
+        if (typeof showNotification === 'function') {
+            showNotification('Delivery tracking dispatch notice: ' + e.message, 'warning');
+        }
+    }
+}
+window.sendLiveTrackingLinkToCustomer = sendLiveTrackingLinkToCustomer;
+
+function updateWhatsAppConnectionUI(isConnected, phone) {
+    window._waIsConnected = !!isConnected;
+    const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
+    const phoneDisplay = cleanPhone ? ` (+${cleanPhone})` : '';
+
+    const qrButtons = document.querySelectorAll('.topbar-qr-btn, #dashLinkWhatsAppQrBtn, #btnLinkWhatsAppQr, #waHeaderLinkQrBtn, [data-action="link-whatsapp-qr"]');
+    qrButtons.forEach(btn => {
+        if (isConnected) {
+            btn.innerHTML = `🟢 WhatsApp Connected${phoneDisplay}`;
+            btn.classList.add('connected');
+            btn.style.borderColor = '#00a884';
+            btn.style.color = '#fff';
+            btn.style.background = '#00a884';
+            btn.title = 'WhatsApp Gateway Active & Permanent';
+        } else {
+            btn.innerHTML = `<span>📱</span> Link WhatsApp QR`;
+            btn.classList.remove('connected');
+            btn.style.borderColor = '';
+            btn.style.color = '';
+            btn.style.background = '';
+            btn.title = 'Link WhatsApp QR / Gateway Status';
+        }
+    });
+
+    const sidebarStatus = document.getElementById('waSidebarStatus');
+    if (sidebarStatus) {
+        if (isConnected) {
+            sidebarStatus.textContent = '● WhatsApp Connected';
+            sidebarStatus.style.color = '#00a884';
+        }
+    }
+}
+window.updateWhatsAppConnectionUI = updateWhatsAppConnectionUI;

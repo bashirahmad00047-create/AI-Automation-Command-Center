@@ -900,6 +900,19 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_whatsapp_pairing_code
         return api_whatsapp_pairing_code()
 
+    
+    @application.route("/api/whatsapp/session-backup", methods=["POST", "GET"])
+    @application.route("/api/v1/whatsapp/session-backup", methods=["POST", "GET"])
+    def whatsapp_session_backup_root():
+        from api_v1 import api_whatsapp_session_backup
+        return api_whatsapp_session_backup()
+
+    @application.route("/api/whatsapp/session-restore", methods=["POST", "GET"])
+    @application.route("/api/v1/whatsapp/session-restore", methods=["POST", "GET"])
+    def whatsapp_session_restore_root():
+        from api_v1 import api_whatsapp_session_restore
+        return api_whatsapp_session_restore()
+
     @application.route("/api/whatsapp/bridge-status", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-status", methods=["GET"])
     @application.route("/api/whatsapp/status", methods=["GET"])
