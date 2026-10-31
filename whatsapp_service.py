@@ -4584,6 +4584,33 @@ class WhatsAppService:
         }
 
     @classmethod
+    def is_ai_allowed_in_group(cls, group_jid: str, organization_id: Optional[str] = None) -> bool:
+        """Returns True if AI Auto-Responder is explicitly permitted for this group JID."""
+        if not group_jid:
+            return False
+        clean_jid = str(group_jid).strip().lower()
+        if not clean_jid.endswith("@g.us"):
+            return True  # Individual 1-on-1 chats are allowed by default
+        try:
+            val = SystemSetting.get_val(f"WA_ALLOW_AI_{clean_jid}")
+            return bool(val and str(val).strip().lower() in ("true", "1", "yes", "on"))
+        except Exception:
+            return False
+
+    @classmethod
+    def set_ai_allowed_in_group(cls, group_jid: str, allowed: bool, organization_id: Optional[str] = None) -> bool:
+        """Sets whether AI Auto-Responder is permitted for this group JID."""
+        if not group_jid:
+            return False
+        clean_jid = str(group_jid).strip().lower()
+        try:
+            SystemSetting.set_val(f"WA_ALLOW_AI_{clean_jid}", "true" if allowed else "false")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting group AI permission: {e}")
+            return False
+
+    @classmethod
     def handle_inbound_auto_response(
         cls,
         organization_id: Optional[str],
@@ -4633,17 +4660,19 @@ class WhatsAppService:
                 body_clean_str = "salam"
                 clean_body = "Salam"
 
-        # Ignore group messages, broadcast channels, newsletters, and status stories
+        # Group Settings Control: Ignore newsletters, status broadcasts, and groups unless explicitly permitted
         sender_str = str(sender_phone or "").strip().lower()
-        if (
-            not sender_str
-            or "@g.us" in sender_str
-            or sender_str.startswith("120363")
-            or "status" in sender_str
-            or "broadcast" in sender_str
-            or "@newsletter" in sender_str
-        ):
+        chat_str = str(chat_id or "").strip().lower()
+        if not sender_str or "status" in sender_str or "broadcast" in sender_str or "@newsletter" in sender_str:
             return None
+
+        # Check if group conversation (@g.us)
+        is_grp = bool("@g.us" in sender_str or "@g.us" in chat_str or sender_str.startswith("120363") or kwargs.get("isGroup"))
+        if is_grp:
+            target_group_jid = chat_str if "@g.us" in chat_str else sender_str
+            if not cls.is_ai_allowed_in_group(target_group_jid, organization_id=organization_id):
+                logger.info(f"[Group AI Shield] AI is disabled for group '{target_group_jid}'. Group responses require explicit admin enablement.")
+                return None
 
         # Resolve real WhatsApp chat ID (e.g. 923209350858@c.us or group/lid)
         raw_chat = (

@@ -879,6 +879,18 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_whatsapp_bridge_qr_svg
         return api_whatsapp_bridge_qr_svg()
 
+    @application.route("/api/whatsapp/groups/<path:group_jid>/ai-status", methods=["GET"])
+    @application.route("/api/v1/whatsapp/groups/<path:group_jid>/ai-status", methods=["GET"])
+    def route_whatsapp_group_ai_status(group_jid):
+        from api_v1 import api_whatsapp_group_ai_status
+        return api_whatsapp_group_ai_status(group_jid)
+
+    @application.route("/api/whatsapp/groups/<path:group_jid>/ai-toggle", methods=["POST"])
+    @application.route("/api/v1/whatsapp/groups/<path:group_jid>/ai-toggle", methods=["POST"])
+    def route_whatsapp_group_ai_toggle(group_jid):
+        from api_v1 import api_whatsapp_group_ai_toggle
+        return api_whatsapp_group_ai_toggle(group_jid)
+
     @application.route("/api/whatsapp/pairing-code", methods=["POST", "GET"])
     @application.route("/api/v1/whatsapp/pairing-code", methods=["POST", "GET"])
     @application.route("/api/wa/pairing-code", methods=["POST", "GET"])
