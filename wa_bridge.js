@@ -533,6 +533,8 @@ function extractMessageText(message) {
     unwrapped.listResponseMessage?.singleSelectReply?.selectedRowId ||
     unwrapped.interactiveResponseMessage?.body?.text ||
     unwrapped.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+    (unwrapped.locationMessage ? `[Location: ${unwrapped.locationMessage.degreesLatitude}, ${unwrapped.locationMessage.degreesLongitude}${unwrapped.locationMessage.name ? ` - ${unwrapped.locationMessage.name}` : ''}]` : '') ||
+    (unwrapped.liveLocationMessage ? `[Live Location: ${unwrapped.liveLocationMessage.degreesLatitude}, ${unwrapped.liveLocationMessage.degreesLongitude}]` : '') ||
     ''
   ).trim();
 }

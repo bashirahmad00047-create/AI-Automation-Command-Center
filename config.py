@@ -46,15 +46,18 @@ class Config:
     """Base application configuration."""
     SECRET_KEY = os.environ.get("SECRET_KEY", "bashflow-absolute-permanent-production-secret-key-2026")
     
-    # SQLAlchemy configuration
+    # SQLAlchemy configuration (Native Supabase PostgreSQL Pooling with SQLite Fallback)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
+    raw_db_url = os.environ.get(
         "DATABASE_URL",
         f"sqlite:///{os.path.join(BASE_DIR, 'opsflow_saas.db')}"
-    )
-    # Fix for Heroku / Render postgres:// vs postgresql://
-    if SQLALCHEMY_DATABASE_URI.startswith("postgres://"):
-        SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_URI.replace("postgres://", "postgresql://", 1)
+    ).strip()
+
+    # Fix for Heroku / Render / Supabase postgres:// vs postgresql://
+    if raw_db_url.startswith("postgres://"):
+        raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
+
+    SQLALCHEMY_DATABASE_URI = raw_db_url
 
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
@@ -62,6 +65,18 @@ class Config:
     if "sqlite" in SQLALCHEMY_DATABASE_URI:
         from sqlalchemy.pool import NullPool
         SQLALCHEMY_ENGINE_OPTIONS["poolclass"] = NullPool
+    else:
+        # Supabase / PostgreSQL cloud connection pooling
+        SQLALCHEMY_ENGINE_OPTIONS["pool_recycle"] = 300
+        if ":6543" in SQLALCHEMY_DATABASE_URI or "pooler.supabase" in SQLALCHEMY_DATABASE_URI:
+            # PgBouncer transaction mode pooler optimization
+            from sqlalchemy.pool import NullPool
+            SQLALCHEMY_ENGINE_OPTIONS["poolclass"] = NullPool
+            SQLALCHEMY_ENGINE_OPTIONS["connect_args"] = {"sslmode": "require", "options": "-c statement_timeout=30000"}
+        else:
+            SQLALCHEMY_ENGINE_OPTIONS["pool_size"] = 10
+            SQLALCHEMY_ENGINE_OPTIONS["max_overflow"] = 20
+            SQLALCHEMY_ENGINE_OPTIONS["connect_args"] = {"sslmode": "require"}
 
     # Session security
     SESSION_PERMANENT = True
