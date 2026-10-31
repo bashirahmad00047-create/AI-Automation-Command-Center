@@ -2743,6 +2743,33 @@ def api_whatsapp_bridge_qr_refresh():
         }), 200
 
 
+@api_v1.route("/whatsapp/groups/<path:group_jid>/ai-status", methods=["GET"])
+def api_whatsapp_group_ai_status(group_jid):
+    """Returns whether AI auto-responder is allowed in the specified group JID."""
+    from whatsapp_service import WhatsAppService
+    is_allowed = WhatsAppService.is_ai_allowed_in_group(group_jid)
+    return jsonify({
+        "success": True,
+        "group_jid": group_jid,
+        "ai_enabled": is_allowed
+    }), 200
+
+
+@api_v1.route("/whatsapp/groups/<path:group_jid>/ai-toggle", methods=["POST"])
+def api_whatsapp_group_ai_toggle(group_jid):
+    """Enables or disables AI auto-responder for a specific WhatsApp group."""
+    from whatsapp_service import WhatsAppService
+    data = request.get_json(silent=True) or {}
+    enable = data.get("enabled", True) if "enabled" in data else True
+    success = WhatsAppService.set_ai_allowed_in_group(group_jid, enable)
+    return jsonify({
+        "success": success,
+        "group_jid": group_jid,
+        "ai_enabled": enable,
+        "message": f"AI Auto-Responder {'enabled' if enable else 'disabled'} for group."
+    }), 200
+
+
 @api_v1.route("/whatsapp/pairing-code", methods=["POST", "GET"])
 @api_v1.route("/wa/pairing-code", methods=["POST", "GET"])
 def api_whatsapp_pairing_code():

@@ -253,6 +253,12 @@
                                 <span>AI Auto-Responder</span>
                                 <span id="waHeaderAiStatusText" style="font-weight: 700; font-size: 10px; color: #34d399;">ON</span>
                             </div>
+                            <!-- Group Settings Control: Allow AI in Group (Default OFF) -->
+                            <div class="ai-auto-responder-pill" id="waGroupAiToggleContainer" onclick="toggleActiveGroupAi()" title="Allow AI to reply in this group (Default OFF)" style="display: none; background: #202c33; border: 1px solid #334155; cursor: pointer;">
+                                <span class="ai-pill-dot" id="waGroupAiDot" style="background: #94a3b8;"></span>
+                                <span>Allow AI in Group</span>
+                                <span id="waGroupAiStatusText" style="font-weight: 700; font-size: 10px; color: #94a3b8;">OFF</span>
+                            </div>
                             <button type="button" class="wa-icon-btn" title="Simulate Inbound Voice Note" onclick="simulateInboundVoiceNote()" aria-label="Simulate Inbound Voice Note">
                                 <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
                                     <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
@@ -476,61 +482,105 @@
     </main>
     <script src="/static/js/app.js"></script>
 
-    <!-- LIVE AI VOICE CALL MODAL -->
-    <div class="hud-modal-backdrop" id="liveVoiceCallModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(8px); z-index: 10050; align-items: center; justify-content: center;">
-        <div class="hud-modal-content" style="background: #0f172a; border: 1px solid #334155; border-radius: 16px; width: 92%; max-width: 520px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6); color: #f8fafc;">
-            <div style="padding: 18px 24px; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; background: #1e293b;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="width: 32px; height: 32px; border-radius: 50%; background: #10b981; display: flex; align-items: center; justify-content: center; font-size: 16px;">
-                        🎙️
-                    </div>
-                    <div>
-                        <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff;">Live AI Voice Call</h3>
-                        <span style="font-size: 11px; color: #34d399;">● Gemini &amp; ElevenLabs Voice Agent</span>
-                    </div>
-                </div>
-                <button type="button" onclick="closeLiveVoiceCallModal()" style="background: none; border: none; font-size: 20px; color: #94a3b8; cursor: pointer;">✕</button>
-            </div>
+        <!-- REAL-TIME DIRECT CALLING INTERFACE (WHATSAPP AUDIO CALL SCREEN) -->
+    <div class="hud-modal-backdrop" id="liveVoiceCallModal" style="display: none; position: fixed; inset: 0; background: rgba(5, 10, 14, 0.88); backdrop-filter: blur(14px); z-index: 10050; align-items: center; justify-content: center;">
+        <div class="hud-modal-content" style="background: radial-gradient(circle at 50% 25%, #182229 0%, #0c1317 75%, #080d10 100%); border: 1px solid #222e35; border-radius: 24px; width: 92%; max-width: 480px; overflow: hidden; box-shadow: 0 30px 70px -10px rgba(0, 0, 0, 0.9); color: #e9edef; position: relative;">
             
-            <div style="padding: 24px; text-align: center;">
-                <!-- DIRECT NUMBER AI CALLING (MODE 2) -->
-                <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 14px; margin-bottom: 18px; text-align: left;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <span style="font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px;">Direct Outbound WhatsApp AI Call</span>
-                        <span style="font-size: 11px; color: #94a3b8;">PTT Voice Note Session</span>
+            <!-- Call Header & Mode Switcher -->
+            <div style="padding: 16px 20px 10px 20px; display: flex; flex-direction: column; align-items: center; gap: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+                <div style="display: flex; width: 100%; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #00a884; font-weight: 600;">
+                        <span>🔒</span> <span>End-to-end encrypted</span>
                     </div>
+                    <button type="button" onclick="closeLiveVoiceCallModal()" style="background: none; border: none; font-size: 20px; color: #8696a0; cursor: pointer; padding: 2px;">✕</button>
+                </div>
+                
+                <!-- Call Mode Switcher Chips -->
+                <div style="display: flex; background: #202c33; padding: 3px; border-radius: 20px; gap: 4px;">
+                    <button type="button" id="btnModeBrowserCall" onclick="switchCallMode('browser')" style="background: #00a884; color: #111b21; border: none; border-radius: 16px; padding: 4px 14px; font-size: 11.5px; font-weight: 700; cursor: pointer; transition: all 0.2s;">
+                        🌐 Live Browser Call
+                    </button>
+                    <button type="button" id="btnModeWhatsAppCall" onclick="switchCallMode('whatsapp')" style="background: transparent; color: #8696a0; border: none; border-radius: 16px; padding: 4px 14px; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+                        📱 WhatsApp Call Session
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main Call Viewport -->
+            <div style="padding: 24px 20px; text-align: center;">
+                
+                <!-- Outbound WhatsApp Number Input (Visible in WhatsApp Call Mode) -->
+                <div id="waCallDirectNumberSection" style="display: none; background: #202c33; border: 1px solid #2a3942; border-radius: 12px; padding: 12px; margin-bottom: 20px; text-align: left;">
+                    <div style="font-size: 11px; color: #8696a0; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Enter WhatsApp Phone Number</div>
                     <div style="display: flex; gap: 8px;">
-                        <div style="position: relative; flex: 1;">
-                            <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #64748b;">📱</span>
-                            <input type="tel" id="voiceCallPhoneNumber" value="+92" placeholder="+923001234567" style="width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid #475569; border-radius: 8px; padding: 9px 12px 9px 32px; color: #f8fafc; font-size: 13px; font-weight: 600; outline: none;" />
-                        </div>
-                        <button type="button" id="directCallNumberBtn" onclick="triggerDirectNumberCall()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #fff; border: none; border-radius: 8px; padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; white-space: nowrap; box-shadow: 0 2px 10px rgba(16, 185, 129, 0.35);">
+                        <input type="tel" id="voiceCallPhoneNumber" value="+92" placeholder="+923001234567" style="flex: 1; background: #111b21; border: 1px solid #2a3942; border-radius: 8px; padding: 8px 12px; color: #e9edef; font-size: 13.5px; font-weight: 600; outline: none;">
+                        <button type="button" id="directCallNumberBtn" onclick="triggerDirectNumberCall()" style="background: #00a884; color: #111b21; font-weight: 700; font-size: 12.5px; padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; gap: 5px;">
                             <span>📞</span> <span id="directCallBtnText">Call Number</span>
                         </button>
                     </div>
                 </div>
 
-                <div id="voiceCallPulseCircle" style="width: 90px; height: 90px; border-radius: 50%; background: radial-gradient(circle, rgba(16, 185, 129, 0.25) 0%, rgba(16, 185, 129, 0.05) 70%); border: 2px solid #10b981; margin: 0 auto 16px auto; display: flex; align-items: center; justify-content: center; font-size: 38px; box-shadow: 0 0 25px rgba(16, 185, 129, 0.4); transition: transform 0.3s ease;">
-                    🎙️
-                </div>
-                
-                <h4 id="voiceCallStatusLabel" style="margin: 0 0 6px 0; font-size: 17px; font-weight: 600; color: #f8fafc;">Voice Agent Ready</h4>
-                <p id="voiceCallSubLabel" style="margin: 0 0 16px 0; font-size: 13px; color: #94a3b8;">Speak in Pakistani Urdu or English for real-time conversation.</p>
-                
-                <div id="voiceTranscriptBox" style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px 16px; min-height: 80px; max-height: 140px; overflow-y: auto; text-align: left; font-size: 13px; color: #cbd5e1; margin-bottom: 20px;">
-                    <em style="color: #64748b;">Transcript will appear here in real-time...</em>
+                <!-- Pulsing Avatar & Ripple Rings -->
+                <div class="wa-call-avatar-wrapper" style="position: relative; width: 110px; height: 110px; margin: 0 auto 16px auto; display: flex; align-items: center; justify-content: center;">
+                    <div class="wa-call-pulse-ring" id="callPulseRing"></div>
+                    <div class="wa-call-avatar" id="callAvatar" style="width: 96px; height: 96px; border-radius: 50%; background: linear-gradient(135deg, #00a884 0%, #056162 100%); display: flex; align-items: center; justify-content: center; font-size: 40px; box-shadow: 0 10px 30px rgba(0, 168, 132, 0.4); z-index: 2;">
+                        🎙️
+                    </div>
                 </div>
 
-                <div style="display: flex; gap: 12px; justify-content: center;">
-                    <button type="button" id="startVoiceCallBtn" onclick="toggleLiveVoiceCall()" style="background: #10b981; color: #fff; font-weight: 700; font-size: 14px; padding: 10px 24px; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
-                        <span>📞</span> <span id="startVoiceBtnText">Start Voice Call</span>
+                <!-- Caller Name & Timer -->
+                <h3 id="callContactName" style="margin: 0 0 4px 0; font-size: 19px; font-weight: 600; color: #e9edef;">BashFlow AI Voice Agent</h3>
+                <div id="callTimer" style="font-size: 13.5px; font-weight: 600; color: #00a884; font-family: ui-monospace, monospace; margin-bottom: 6px;">00:00</div>
+                <p id="voiceCallStatusLabel" style="margin: 0 0 16px 0; font-size: 12.5px; color: #8696a0;">Voice Agent Ready</p>
+
+                <!-- Audio Waveform Visualizer -->
+                <div id="callEqualizerBar" style="display: flex; justify-content: center; align-items: center; gap: 4px; height: 20px; margin-bottom: 14px;">
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                </div>
+
+                <!-- Live Conversational Transcript Bubble (VAD Streaming) -->
+                <div id="voiceTranscriptBox" style="background: rgba(32, 44, 51, 0.7); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px 16px; min-height: 80px; max-height: 120px; overflow-y: auto; text-align: left; font-size: 12.5px; color: #cbd5e1; margin-bottom: 22px;">
+                    <em style="color: #8696a0;">Listening continuously via VAD... Speak naturally in Pakistani Urdu or English.</em>
+                </div>
+
+                <!-- WhatsApp Sync Option -->
+                <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 20px; font-size: 11.5px; color: #8696a0;">
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                        <input type="checkbox" id="chkCallSyncWhatsApp" checked style="accent-color: #00a884; width: 14px; height: 14px; cursor: pointer;">
+                        <span>Auto-dispatch Voice Note &amp; Summary to WhatsApp</span>
+                    </label>
+                </div>
+
+                <!-- Floating Call Action Controls Bar (Mute, Speaker, Start/End Call) -->
+                <div style="display: flex; align-items: center; justify-content: center; gap: 16px;">
+                    <!-- Mute Mic Button -->
+                    <button type="button" id="btnCallMuteMic" onclick="toggleCallMute()" class="wa-call-btn" title="Mute Microphone" style="width: 48px; height: 48px; border-radius: 50%; background: #202c33; border: 1px solid #2a3942; color: #e9edef; font-size: 18px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+                        <span id="callMuteIcon">🎤</span>
                     </button>
-                    <button type="button" onclick="closeLiveVoiceCallModal()" style="background: #334155; color: #cbd5e1; font-weight: 600; font-size: 14px; padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer;">
-                        Close
+
+                    <!-- Main Call Toggle (Start / Red End Call Button) -->
+                    <button type="button" id="startVoiceCallBtn" onclick="toggleLiveVoiceCall()" style="width: 60px; height: 60px; border-radius: 50%; background: #00a884; border: none; color: #ffffff; font-size: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 4px 18px rgba(0, 168, 132, 0.45); transition: all 0.2s;">
+                        <span id="startVoiceBtnIcon">📞</span>
+                    </button>
+
+                    <!-- Speaker Toggle Button -->
+                    <button type="button" id="btnCallSpeakerToggle" onclick="toggleCallSpeaker()" class="wa-call-btn" title="Toggle Speaker Volume" style="width: 48px; height: 48px; border-radius: 50%; background: #202c33; border: 1px solid #2a3942; color: #e9edef; font-size: 18px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+                        <span id="callSpeakerIcon">🔊</span>
                     </button>
                 </div>
             </div>
+
+            <!-- Footer status -->
+            <div style="padding: 10px 20px; background: #080d10; border-top: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #8696a0;">
+                <span id="callVADStatus">● Continuous VAD active &amp; interruptible</span>
+                <span id="voiceCallSubLabel">Gemini &amp; ElevenLabs Natural Tone</span>
+            </div>
         </div>
+    </div>
     </div>
 
         <!-- LINK WHATSAPP QR & PHONE PAIRING MODAL (BAILEYS BRIDGE) -->

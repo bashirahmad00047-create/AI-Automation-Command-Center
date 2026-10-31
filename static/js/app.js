@@ -3988,6 +3988,7 @@ function renderLeads(leads) {
                     ${escapeHtml(l.created_at || 'Just now')}
                 </td>
                 <td style="white-space: nowrap;">
+                    <button class="action-btn green-btn" style="padding: 4px 8px; font-size: 0.75rem; background: #00a884; color: #111b21; font-weight: 700; border: none; border-radius: 4px; cursor: pointer; margin-right: 4px;" onclick="openWhatsAppChatForLead('${escapeHtml(l.phone || '')}')" title="Open in WhatsApp Cloud">💬 Chat</button>
                     <button class="action-btn cyan-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="viewLeadDetail('${l.id}')">Inspect</button>
                     <button class="action-btn red-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="deleteLead('${l.id}')">Delete</button>
                 </td>
@@ -6376,6 +6377,90 @@ function toggleHideGroupsFromAll(checked) {
 }
 window.toggleHideGroupsFromAll = toggleHideGroupsFromAll;
 
+
+function openWhatsAppChatForLead(phone) {
+    if (!phone) {
+        showToast('No phone number recorded for this lead', 'warning');
+        return;
+    }
+    const clean = normalizeWaPhone(phone) || phone;
+    switchTab('whatsapp');
+    setTimeout(() => {
+        selectWhatsAppChat(clean);
+        showToast(`Opened WhatsApp chat with +${clean.replace(/^\+/, '')}`, 'info');
+    }, 250);
+}
+window.openWhatsAppChatForLead = openWhatsAppChatForLead;
+
+// Group AI Auto-Responder Shield Controller (Default OFF)
+const waGroupAiCache = {};
+
+async function updateGroupAiPillUI(groupJid) {
+    const pill = document.getElementById('waGroupAiToggleContainer');
+    const dot = document.getElementById('waGroupAiDot');
+    const txt = document.getElementById('waGroupAiStatusText');
+    if (!pill || !dot || !txt || !groupJid) return;
+
+    if (waGroupAiCache[groupJid] === undefined) {
+        try {
+            const res = await fetch(`/api/v1/whatsapp/groups/${encodeURIComponent(groupJid)}/ai-status`);
+            if (res.ok) {
+                const data = await res.json();
+                waGroupAiCache[groupJid] = Boolean(data.ai_enabled);
+            } else {
+                waGroupAiCache[groupJid] = false;
+            }
+        } catch (_) {
+            waGroupAiCache[groupJid] = false;
+        }
+    }
+
+    const isEnabled = Boolean(waGroupAiCache[groupJid]);
+    dot.style.background = isEnabled ? '#34d399' : '#94a3b8';
+    txt.style.color = isEnabled ? '#34d399' : '#94a3b8';
+    txt.textContent = isEnabled ? 'ON' : 'OFF';
+    pill.title = isEnabled ? 'AI Auto-Responder is ACTIVE in this group' : 'AI Auto-Responder is MUTED in this group (Default)';
+}
+
+async function toggleActiveGroupAi() {
+    if (!waActiveChatPartner) return;
+    const isGrp = waActiveChatPartner.includes('@g.us');
+    if (!isGrp) return;
+
+    const groupJid = waActiveChatPartner;
+    const current = Boolean(waGroupAiCache[groupJid]);
+    const newState = !current;
+
+    const pill = document.getElementById('waGroupAiToggleContainer');
+    const dot = document.getElementById('waGroupAiDot');
+    const txt = document.getElementById('waGroupAiStatusText');
+    if (dot) dot.style.background = newState ? '#34d399' : '#94a3b8';
+    if (txt) {
+        txt.style.color = newState ? '#34d399' : '#94a3b8';
+        txt.textContent = newState ? 'ON' : 'OFF';
+    }
+
+    try {
+        const res = await fetch(`/api/v1/whatsapp/groups/${encodeURIComponent(groupJid)}/ai-toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: newState })
+        });
+        const data = await res.json();
+        waGroupAiCache[groupJid] = newState;
+        showToast(newState ? 'AI Auto-Responder enabled for this group.' : 'AI Auto-Responder disabled for this group (Shield Active).', newState ? 'success' : 'info');
+    } catch (err) {
+        waGroupAiCache[groupJid] = current;
+        if (dot) dot.style.background = current ? '#34d399' : '#94a3b8';
+        if (txt) {
+            txt.style.color = current ? '#34d399' : '#94a3b8';
+            txt.textContent = current ? 'ON' : 'OFF';
+        }
+        showToast('Failed to toggle group AI permission: ' + err.message, 'error');
+    }
+}
+window.toggleActiveGroupAi = toggleActiveGroupAi;
+
 function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender = false) {
     const convList = document.getElementById('waConversationList');
     const msgStream = document.getElementById('waMessagesStream');
@@ -6497,7 +6582,15 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
         const normPartner = normalizeWaPhone(waActiveChatPartner);
         const displayFormatted = formatWaDisplayPhone(normPartner || waActiveChatPartner);
         const contactName = activeConv ? activeConv.name : displayFormatted;
-        if (activeHeaderName && activeHeaderName.textContent !== contactName) activeHeaderName.textContent = contactName;
+                if (activeHeaderName && activeHeaderName.textContent !== contactName) activeHeaderName.textContent = contactName;
+        const grpPill = document.getElementById('waGroupAiToggleContainer');
+        if (grpPill) {
+            const isGroupChat = Boolean(activeConv && activeConv.isGroup);
+            grpPill.style.display = isGroupChat ? 'inline-flex' : 'none';
+            if (isGroupChat) {
+                updateGroupAiPillUI(activeConv.normalizedPhone || activeConv.phone);
+            }
+        }
         const targetPhoneText = `${displayFormatted} · Online`;
         if (activeHeaderPhone && activeHeaderPhone.textContent !== targetPhoneText) activeHeaderPhone.textContent = targetPhoneText;
         if (activeHeaderAvatar) {
@@ -10606,7 +10699,7 @@ function submitTruckDispatch() {
 }
 
 // ============================================================================
-// LIVE AI VOICE CALL CONTROLLER (BASHFLOW CLOUD)
+// LIVE AI VOICE CALL CONTROLLER (WHATSAPP AUDIO CALL SCREEN & CONTINUOUS VAD)
 // ============================================================================
 let liveVoiceCallActive = false;
 let liveVoiceRecognition = null;
@@ -10616,6 +10709,100 @@ let liveAudioChunks = [];
 
 let voiceSpeechDebounceTimer = null;
 let currentVoiceAudioPlayer = null;
+let liveCallTimerInterval = null;
+let liveCallSeconds = 0;
+let isMicMuted = false;
+let isSpeakerMuted = false;
+let currentCallMode = 'browser'; // 'browser' or 'whatsapp'
+
+function switchCallMode(mode) {
+    currentCallMode = mode;
+    const btnBrowser = document.getElementById('btnModeBrowserCall');
+    const btnWa = document.getElementById('btnModeWhatsAppCall');
+    const waSection = document.getElementById('waCallDirectNumberSection');
+
+    if (mode === 'whatsapp') {
+        if (btnWa) {
+            btnWa.style.background = '#00a884';
+            btnWa.style.color = '#111b21';
+            btnWa.style.fontWeight = '700';
+        }
+        if (btnBrowser) {
+            btnBrowser.style.background = 'transparent';
+            btnBrowser.style.color = '#8696a0';
+            btnBrowser.style.fontWeight = '600';
+        }
+        if (waSection) waSection.style.display = 'block';
+    } else {
+        if (btnBrowser) {
+            btnBrowser.style.background = '#00a884';
+            btnBrowser.style.color = '#111b21';
+            btnBrowser.style.fontWeight = '700';
+        }
+        if (btnWa) {
+            btnWa.style.background = 'transparent';
+            btnWa.style.color = '#8696a0';
+            btnWa.style.fontWeight = '600';
+        }
+        if (waSection) waSection.style.display = 'none';
+    }
+}
+window.switchCallMode = switchCallMode;
+
+function toggleCallMute() {
+    isMicMuted = !isMicMuted;
+    const btn = document.getElementById('btnCallMuteMic');
+    const icon = document.getElementById('callMuteIcon');
+    if (liveMediaStream) {
+        liveMediaStream.getAudioTracks().forEach(t => t.enabled = !isMicMuted);
+    }
+    if (btn) btn.classList.toggle('muted', isMicMuted);
+    if (icon) icon.textContent = isMicMuted ? '🔇' : '🎤';
+    showToast(isMicMuted ? 'Microphone Muted' : 'Microphone Active', 'info');
+}
+window.toggleCallMute = toggleCallMute;
+
+function toggleCallSpeaker() {
+    isSpeakerMuted = !isSpeakerMuted;
+    const btn = document.getElementById('btnCallSpeakerToggle');
+    const icon = document.getElementById('callSpeakerIcon');
+    if (currentVoiceAudioPlayer) {
+        currentVoiceAudioPlayer.muted = isSpeakerMuted;
+    }
+    if (btn) btn.classList.toggle('muted', isSpeakerMuted);
+    if (icon) icon.textContent = isSpeakerMuted ? '🔈' : '🔊';
+    showToast(isSpeakerMuted ? 'Speaker Muted' : 'Speaker Active', 'info');
+}
+window.toggleCallSpeaker = toggleCallSpeaker;
+
+function startLiveCallTimer() {
+    if (liveCallTimerInterval) clearInterval(liveCallTimerInterval);
+    liveCallSeconds = 0;
+    const timerEl = document.getElementById('callTimer');
+    if (timerEl) timerEl.textContent = '00:00';
+
+    liveCallTimerInterval = setInterval(() => {
+        liveCallSeconds++;
+        const mins = Math.floor(liveCallSeconds / 60);
+        const secs = liveCallSeconds % 60;
+        const formatted = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        if (timerEl) timerEl.textContent = formatted;
+    }, 1000);
+}
+
+function stopLiveCallTimer() {
+    if (liveCallTimerInterval) {
+        clearInterval(liveCallTimerInterval);
+        liveCallTimerInterval = null;
+    }
+    liveCallSeconds = 0;
+    const timerEl = document.getElementById('callTimer');
+    if (timerEl) timerEl.textContent = '00:00';
+}
+
+function setEqualizerActive(active) {
+    document.querySelectorAll('.eq-bar').forEach(b => b.classList.toggle('active', Boolean(active)));
+}
 
 function applyLiveStats(stats) {
     if (!stats) return;
@@ -10658,10 +10845,10 @@ async function triggerDirectNumberCall() {
     const phoneInput = document.getElementById('voiceCallPhoneNumber');
     const statusLabel = document.getElementById('voiceCallStatusLabel');
     const subLabel = document.getElementById('voiceCallSubLabel');
-    const pulseCircle = document.getElementById('voiceCallPulseCircle');
     const transcriptBox = document.getElementById('voiceTranscriptBox');
     const directCallBtn = document.getElementById('directCallNumberBtn');
     const directCallBtnText = document.getElementById('directCallBtnText');
+    const ring = document.getElementById('callPulseRing');
 
     const rawPhone = phoneInput ? phoneInput.value.trim() : '';
     if (!rawPhone || rawPhone.replace(/\D/g, '').length < 7) {
@@ -10672,15 +10859,13 @@ async function triggerDirectNumberCall() {
 
     if (directCallBtn) directCallBtn.disabled = true;
     if (directCallBtnText) directCallBtnText.textContent = 'Calling...';
-    if (statusLabel) statusLabel.textContent = `Connecting Outbound Call to ${rawPhone}...`;
-    if (subLabel) subLabel.textContent = 'Initiating WhatsApp Voice Note Session via Baileys Bridge';
-    if (pulseCircle) {
-        pulseCircle.style.borderColor = '#38bdf8';
-        pulseCircle.style.transform = 'scale(1.15)';
-    }
+    if (statusLabel) statusLabel.textContent = `Connecting WhatsApp Call Session to ${rawPhone}...`;
+    if (subLabel) subLabel.textContent = 'Initiating PTT Voice Note Call via Baileys Bridge';
+    if (ring) ring.classList.add('active');
+
     if (transcriptBox) {
         transcriptBox.innerHTML = `
-            <div style="color: #38bdf8; margin-bottom: 6px;"><strong>[Session Init]</strong> Dialing <code>${escapeHtml(rawPhone)}</code>...</div>
+            <div style="color: #38bdf8; margin-bottom: 6px;"><strong>[Call Init]</strong> Dialing <code>${escapeHtml(rawPhone)}</code>...</div>
             <div style="color: #94a3b8; font-size: 12px;">Synthesizing natural AI audio greeting & initiating PTT voice note session...</div>
         `;
     }
@@ -10694,12 +10879,9 @@ async function triggerDirectNumberCall() {
         const data = await res.json();
 
         if (res.ok && data.success) {
+            startLiveCallTimer();
             if (statusLabel) statusLabel.textContent = `Call Active: +${data.phone}`;
             if (subLabel) subLabel.textContent = `Status: ${data.detail || 'Connected'}`;
-            if (pulseCircle) {
-                pulseCircle.style.borderColor = '#10b981';
-                pulseCircle.style.transform = 'scale(1.2)';
-            }
             if (transcriptBox) {
                 transcriptBox.innerHTML = `
                     <div style="color: #10b981; font-weight: 700; margin-bottom: 6px;">✓ Outbound Call Session Established (+${escapeHtml(data.phone)})</div>
@@ -10713,24 +10895,21 @@ async function triggerDirectNumberCall() {
                     try { currentVoiceAudioPlayer.pause(); } catch (_) {}
                 }
                 currentVoiceAudioPlayer = new Audio(data.audio_data_uri);
+                currentVoiceAudioPlayer.muted = isSpeakerMuted;
+                setEqualizerActive(true);
                 currentVoiceAudioPlayer.onended = function() {
-                    if (pulseCircle) pulseCircle.style.transform = 'scale(1.0)';
+                    setEqualizerActive(false);
                 };
                 currentVoiceAudioPlayer.play().catch(e => console.warn('[Audio Play Notice]', e));
             }
 
-            if (data.stats) {
-                applyLiveStats(data.stats);
-            }
-            if (typeof pollTelemetry === 'function') {
-                pollTelemetry(true);
-            }
-            showToast(`Outbound call session active for +${data.phone}!`, 'success');
+            if (data.stats) applyLiveStats(data.stats);
+            showToast(`WhatsApp call session established with +${data.phone}`, 'success');
         } else {
             const errDetail = data.error || 'Failed to initiate outbound call';
             if (statusLabel) statusLabel.textContent = 'Call Failed';
             if (subLabel) subLabel.textContent = errDetail;
-            if (pulseCircle) pulseCircle.style.borderColor = '#ef4444';
+            if (ring) ring.classList.remove('active');
             if (transcriptBox) {
                 transcriptBox.innerHTML = `<div style="color: #ef4444;"><strong>Error:</strong> ${escapeHtml(errDetail)}</div>`;
             }
@@ -10740,7 +10919,7 @@ async function triggerDirectNumberCall() {
         console.error('[Direct Call Error]', err);
         if (statusLabel) statusLabel.textContent = 'Connection Error';
         if (subLabel) subLabel.textContent = err.message || 'Network error';
-        if (pulseCircle) pulseCircle.style.borderColor = '#ef4444';
+        if (ring) ring.classList.remove('active');
         showToast('Error connecting to outbound call service', 'error');
     } finally {
         if (directCallBtn) directCallBtn.disabled = false;
@@ -10752,107 +10931,117 @@ async function sendVoiceChatQuery(spokenText) {
     if (!spokenText || !spokenText.trim()) return;
     const transcriptBox = document.getElementById('voiceTranscriptBox');
     const statusLabel = document.getElementById('voiceCallStatusLabel');
-    const pulseCircle = document.getElementById('voiceCallPulseCircle');
+    const vadStatus = document.getElementById('callVADStatus');
 
-    if (statusLabel) statusLabel.textContent = 'Thinking... (AI generating response)';
-    if (pulseCircle) pulseCircle.style.borderColor = '#38bdf8';
+    if (statusLabel) statusLabel.textContent = 'AI Thinking...';
+    if (vadStatus) vadStatus.textContent = '● Processing speech input...';
+
+    // Check if auto-dispatch to WhatsApp is requested
+    const syncWaCheck = document.getElementById('chkCallSyncWhatsApp');
+    const shouldSyncWa = Boolean(syncWaCheck && syncWaCheck.checked);
+    const targetPhone = waActiveChatPartner ? normalizeWaPhone(waActiveChatPartner) : null;
 
     try {
         const res = await fetch('/api/v1/voice/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: spokenText.trim() })
+            body: JSON.stringify({ 
+                message: spokenText.trim(),
+                sync_whatsapp: shouldSyncWa,
+                phone: targetPhone
+            })
         });
         const data = await res.json();
         if (res.ok && data.success) {
             if (transcriptBox) {
                 transcriptBox.innerHTML = `
-                    <div style="margin-bottom: 8px;"><strong>You:</strong> ${escapeHtml(spokenText)}</div>
-                    <div style="color: #34d399;"><strong>AI Voice Agent:</strong> ${escapeHtml(data.reply_text)}</div>
+                    <div style="margin-bottom: 6px; color: #e9edef;"><strong>You:</strong> ${escapeHtml(spokenText)}</div>
+                    <div style="color: #00a884; font-weight: 500;"><strong>AI:</strong> ${escapeHtml(data.reply_text)}</div>
                 `;
                 transcriptBox.scrollTop = transcriptBox.scrollHeight;
             }
-            if (data.stats) {
-                applyLiveStats(data.stats);
-            }
-            if (typeof pollTelemetry === 'function') {
-                pollTelemetry(true);
-            }
+            if (data.stats) applyLiveStats(data.stats);
+            if (typeof pollTelemetry === 'function') pollTelemetry(true);
 
             if (data.audio_data_uri) {
-                if (statusLabel) statusLabel.textContent = 'Speaking... (AI audio response)';
-                if (pulseCircle) {
-                    pulseCircle.style.borderColor = '#10b981';
-                    pulseCircle.style.transform = 'scale(1.2)';
-                }
+                if (statusLabel) statusLabel.textContent = 'AI Speaking... (Interruptible)';
+                setEqualizerActive(true);
+
                 if (currentVoiceAudioPlayer) {
                     try { currentVoiceAudioPlayer.pause(); } catch (_) {}
                 }
                 currentVoiceAudioPlayer = new Audio(data.audio_data_uri);
+                currentVoiceAudioPlayer.muted = isSpeakerMuted;
                 currentVoiceAudioPlayer.onended = function() {
-                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak now';
-                    if (pulseCircle) {
-                        pulseCircle.style.transform = 'scale(1.05)';
-                        pulseCircle.style.borderColor = '#10b981';
-                    }
+                    setEqualizerActive(false);
+                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+                    if (vadStatus && liveVoiceCallActive) vadStatus.textContent = '● Continuous VAD active';
                 };
                 currentVoiceAudioPlayer.play().catch(e => {
                     console.warn('[Live Voice Audio Play Notice]', e);
-                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak now';
+                    setEqualizerActive(false);
+                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
                 });
             } else {
-                if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak now';
-                if (pulseCircle) pulseCircle.style.transform = 'scale(1.05)';
+                setEqualizerActive(false);
+                if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
             }
         } else {
-            if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak now';
+            if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
         }
     } catch (err) {
         console.warn('[Voice Chat Query Error]', err);
-        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak now';
+        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
     }
 }
 
 function openLiveVoiceCallModal() {
     const modal = document.getElementById('liveVoiceCallModal');
-    if (modal) {
-        modal.style.display = 'flex';
-    }
+    if (!modal) return;
+    modal.style.display = 'flex';
 }
 
 function closeLiveVoiceCallModal() {
     const modal = document.getElementById('liveVoiceCallModal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
-    if (liveVoiceCallActive) {
-        toggleLiveVoiceCall();
-    }
+    if (modal) modal.style.display = 'none';
+    if (liveVoiceCallActive) toggleLiveVoiceCall();
     if (currentVoiceAudioPlayer) {
         try { currentVoiceAudioPlayer.pause(); } catch (_) {}
         currentVoiceAudioPlayer = null;
     }
+    stopLiveCallTimer();
 }
 
 function toggleLiveVoiceCall() {
-    const btnText = document.getElementById('startVoiceBtnText');
+    const callBtn = document.getElementById('startVoiceCallBtn');
+    const callBtnIcon = document.getElementById('startVoiceBtnIcon');
     const statusLabel = document.getElementById('voiceCallStatusLabel');
     const subLabel = document.getElementById('voiceCallSubLabel');
-    const pulseCircle = document.getElementById('voiceCallPulseCircle');
+    const ring = document.getElementById('callPulseRing');
     const transcriptBox = document.getElementById('voiceTranscriptBox');
+    const vadStatus = document.getElementById('callVADStatus');
 
     if (!liveVoiceCallActive) {
-        // Start Call
+        // START CALL
         liveVoiceCallActive = true;
-        if (btnText) btnText.textContent = 'End Call';
-        if (statusLabel) statusLabel.textContent = 'Listening... Speak now';
-        if (subLabel) subLabel.textContent = 'Voice agent is actively listening in real-time (Urdu & English)';
-        if (pulseCircle) {
-            pulseCircle.style.transform = 'scale(1.15)';
-            pulseCircle.style.borderColor = '#10b981';
-        }
+        startLiveCallTimer();
 
-        // Active browser microphone capture
+        // Turn red end call button
+        if (callBtn) {
+            callBtn.style.background = '#ea4335';
+            callBtn.style.boxShadow = '0 4px 18px rgba(234, 67, 53, 0.45)';
+        }
+        if (callBtnIcon) {
+            callBtnIcon.textContent = '📞';
+            callBtnIcon.style.display = 'inline-block';
+            callBtnIcon.style.transform = 'rotate(135deg)';
+        }
+        if (statusLabel) statusLabel.textContent = 'Listening... Speak naturally';
+        if (subLabel) subLabel.textContent = 'Conversational Urdu & English Voice Agent Active';
+        if (vadStatus) vadStatus.textContent = '● Continuous VAD active';
+        if (ring) ring.classList.add('active');
+
+        // Microphone capture
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
             navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
                 liveMediaStream = stream;
@@ -10876,6 +11065,16 @@ function toggleLiveVoiceCall() {
                 liveVoiceRecognition.lang = 'ur-PK, en-US';
 
                 liveVoiceRecognition.onresult = function(event) {
+                    // NATURAL INTERRUPTIBILITY: If AI audio is playing and user speaks, stop AI immediately!
+                    if (currentVoiceAudioPlayer && !currentVoiceAudioPlayer.paused) {
+                        try {
+                            currentVoiceAudioPlayer.pause();
+                            currentVoiceAudioPlayer.currentTime = 0;
+                            setEqualizerActive(false);
+                            if (statusLabel) statusLabel.textContent = 'Listening... (Interrupted AI)';
+                        } catch (_) {}
+                    }
+
                     let interimTranscript = '';
                     let finalTranscript = '';
                     for (let i = event.resultIndex; i < event.results.length; ++i) {
@@ -10887,14 +11086,14 @@ function toggleLiveVoiceCall() {
                     }
                     const textToDisplay = finalTranscript || interimTranscript;
                     if (transcriptBox && textToDisplay) {
-                        transcriptBox.innerHTML = '<strong>You:</strong> ' + escapeHtml(textToDisplay);
+                        transcriptBox.innerHTML = '<div style="color:#e9edef;"><strong>You:</strong> ' + escapeHtml(textToDisplay) + '</div>';
                     }
                     clearTimeout(voiceSpeechDebounceTimer);
                     const textToSend = (finalTranscript || interimTranscript).trim();
                     if (textToSend.length > 2) {
                         voiceSpeechDebounceTimer = setTimeout(() => {
                             sendVoiceChatQuery(textToSend);
-                        }, 1300);
+                        }, 1200);
                     }
                 };
 
@@ -10903,7 +11102,6 @@ function toggleLiveVoiceCall() {
                 };
 
                 liveVoiceRecognition.onend = function() {
-                    // Auto-restart if call is still active
                     if (liveVoiceCallActive && liveVoiceRecognition) {
                         try { liveVoiceRecognition.start(); } catch (_) {}
                     }
@@ -10915,32 +11113,34 @@ function toggleLiveVoiceCall() {
             }
         } else {
             if (transcriptBox) {
-                transcriptBox.innerHTML = '<span style="color:#34d399;">● Live Voice Stream active. Speech recognition not natively supported in this browser.</span>';
+                transcriptBox.innerHTML = '<span style="color:#00a884;">● Two-way voice stream active. Browser Speech Recognition not supported.</span>';
             }
         }
+        showToast('AI Voice Call Connected! Speak naturally.', 'success');
     } else {
-        // End Call
+        // END CALL
         liveVoiceCallActive = false;
-        clearTimeout(voiceSpeechDebounceTimer);
-        if (btnText) btnText.textContent = 'Start Voice Call';
+        stopLiveCallTimer();
+        setEqualizerActive(false);
+
+        if (callBtn) {
+            callBtn.style.background = '#00a884';
+            callBtn.style.boxShadow = '0 4px 18px rgba(0, 168, 132, 0.45)';
+        }
+        if (callBtnIcon) {
+            callBtnIcon.textContent = '📞';
+            callBtnIcon.style.transform = 'none';
+        }
         if (statusLabel) statusLabel.textContent = 'Call Ended';
-        if (subLabel) subLabel.textContent = 'Click "Start Voice Call" to begin a new conversation';
-        if (pulseCircle) {
-            pulseCircle.style.transform = 'scale(1.0)';
-            pulseCircle.style.borderColor = '#10b981';
-        }
-        if (currentVoiceAudioPlayer) {
-            try { currentVoiceAudioPlayer.pause(); } catch (_) {}
-            currentVoiceAudioPlayer = null;
-        }
+        if (subLabel) subLabel.textContent = 'Click Call button to start a new voice session';
+        if (vadStatus) vadStatus.textContent = '● Call ended';
+        if (ring) ring.classList.remove('active');
+
         if (liveVoiceRecognition) {
-            try {
-                liveVoiceRecognition.onend = null;
-                liveVoiceRecognition.stop();
-            } catch (e) {}
+            try { liveVoiceRecognition.stop(); } catch (_) {}
             liveVoiceRecognition = null;
         }
-        if (liveMediaRecorder) {
+        if (liveMediaRecorder && liveMediaRecorder.state !== 'inactive') {
             try { liveMediaRecorder.stop(); } catch (_) {}
             liveMediaRecorder = null;
         }
@@ -10948,478 +11148,16 @@ function toggleLiveVoiceCall() {
             try { liveMediaStream.getTracks().forEach(t => t.stop()); } catch (_) {}
             liveMediaStream = null;
         }
-    }
-}
-
-// ============================================================================
-// WHATSAPP LINK QR & 8-DIGIT PAIRING MODAL CONTROLLER (BAILEYS BRIDGE)
-// ============================================================================
-let bridgeQrPollInterval = null;
-let waPairingCodeTimer = null;
-let waPairingCodeRemaining = 120;
-let waCurrentPairingCode = '';
-
-function switchLinkMode(mode) {
-    const qrLeft = document.getElementById('waInstructionsQrView');
-    const phoneLeft = document.getElementById('waInstructionsPhoneView');
-    const qrRight = document.getElementById('waRightColQrView');
-    const phoneRight = document.getElementById('waRightColPhoneView');
-
-    if (mode === 'phone') {
-        if (qrLeft) qrLeft.style.display = 'none';
-        if (phoneLeft) phoneLeft.style.display = 'block';
-        if (qrRight) qrRight.style.display = 'none';
-        if (phoneRight) phoneRight.style.display = 'block';
-        resetPairingPhoneInput();
-        const input = document.getElementById('waPairingPhoneInput');
-        if (input) setTimeout(() => input.focus(), 100);
-    } else {
-        if (qrLeft) qrLeft.style.display = 'block';
-        if (phoneLeft) phoneLeft.style.display = 'none';
-        if (qrRight) qrRight.style.display = 'flex';
-        if (phoneRight) phoneRight.style.display = 'none';
-        fetchBridgeQrCode(false);
-    }
-}
-window.switchLinkMode = switchLinkMode;
-
-function onPairingCountryChange() {
-    const sel = document.getElementById('waPairingCountrySelect');
-    const lbl = document.getElementById('waCountryPrefixLabel');
-    if (!sel || !lbl) return;
-    if (sel.value === 'other') {
-        lbl.textContent = '+';
-    } else {
-        lbl.textContent = `+${sel.value}`;
-    }
-}
-window.onPairingCountryChange = onPairingCountryChange;
-
-async function requestWaPairingCode() {
-    const sel = document.getElementById('waPairingCountrySelect');
-    const input = document.getElementById('waPairingPhoneInput');
-    const btn = document.getElementById('btnGeneratePairingCode');
-    if (!input) return;
-
-    let digits = (input.value || '').replace(/\D/g, '');
-    if (!digits) {
-        if (window.showToast) window.showToast('Please enter your WhatsApp phone number', 'warning');
-        input.focus();
-        return;
-    }
-
-    // Attach country prefix if not already present
-    const prefix = sel && sel.value !== 'other' ? sel.value : '92';
-    let fullPhone = digits;
-    if (digits.startsWith('0')) {
-        fullPhone = prefix + digits.slice(1);
-    } else if (!digits.startsWith(prefix) && digits.length <= 10) {
-        fullPhone = prefix + digits;
-    }
-
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #111b21;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span> Connecting...';
-    }
-
-    try {
-        let res = null;
-        try {
-            res = await fetch('/api/v1/whatsapp/pairing-code', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: fullPhone })
-            });
-        } catch (_) {
-            res = await fetch('/api/whatsapp/pairing-code', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: fullPhone })
-            });
+        if (currentVoiceAudioPlayer) {
+            try { currentVoiceAudioPlayer.pause(); } catch (_) {}
+            currentVoiceAudioPlayer = null;
         }
-
-        const data = await res.json();
-        if (data.success && (data.code || data.rawCode)) {
-            const raw = data.rawCode || String(data.code).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-            waCurrentPairingCode = raw;
-            renderPairingCodeBoxes(raw);
-
-            // Switch to result view
-            const formView = document.getElementById('waPhoneFormView');
-            const resultView = document.getElementById('waPhoneCodeResultView');
-            if (formView) formView.style.display = 'none';
-            if (resultView) resultView.style.display = 'block';
-
-            startPairingTimer(120);
-            if (window.showToast) window.showToast('8-Digit Pairing Code Generated! Check WhatsApp on your phone.', 'success');
-        } else if (data.status === 'connected' || data.connected) {
-            window._waIsConnected = true;
-            closeLinkWhatsAppQrModal();
-            if (window.showToast) window.showToast('WhatsApp is already linked!', 'success');
-        } else {
-            if (window.showToast) window.showToast(data.message || 'Failed to generate pairing code. Please try again.', 'error');
-        }
-    } catch (err) {
-        if (window.showToast) window.showToast('Pairing error: ' + err.message, 'error');
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '<span>⚡</span> Generate 8-Digit Code';
-        }
+        showToast('Voice call ended', 'info');
     }
 }
-window.requestWaPairingCode = requestWaPairingCode;
-
-function renderPairingCodeBoxes(codeStr) {
-    const container = document.getElementById('waPairingCodeBoxes');
-    if (!container) return;
-    const clean = String(codeStr || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-    const chars = clean.padEnd(8, ' ').slice(0, 8).split('');
-
-    const g1 = chars.slice(0, 4).map(ch => `<div class="wa-pairing-box">${ch.trim() || '&nbsp;'}</div>`).join('');
-    const g2 = chars.slice(4, 8).map(ch => `<div class="wa-pairing-box">${ch.trim() || '&nbsp;'}</div>`).join('');
-
-    container.innerHTML = `
-        <div style="display:flex;gap:5px;">${g1}</div>
-        <div class="wa-pairing-dash">—</div>
-        <div style="display:flex;gap:5px;">${g2}</div>
-    `;
-}
-window.renderPairingCodeBoxes = renderPairingCodeBoxes;
-
-function copyPairingCode() {
-    if (!waCurrentPairingCode) return;
-    const formatted = waCurrentPairingCode.length === 8 
-        ? `${waCurrentPairingCode.slice(0, 4)}-${waCurrentPairingCode.slice(4)}`
-        : waCurrentPairingCode;
-    navigator.clipboard.writeText(formatted).then(() => {
-        const btn = document.getElementById('btnCopyPairingCode');
-        if (btn) {
-            btn.textContent = '✓ Copied!';
-            setTimeout(() => { btn.textContent = '📋 Copy Code'; }, 2000);
-        }
-        if (window.showToast) window.showToast(`Pairing code ${formatted} copied to clipboard!`, 'info');
-    }).catch(() => {
-        if (window.showToast) window.showToast(`Code: ${formatted}`, 'info');
-    });
-}
-window.copyPairingCode = copyPairingCode;
-
-function resetPairingPhoneInput() {
-    if (waPairingCodeTimer) {
-        clearInterval(waPairingCodeTimer);
-        waPairingCodeTimer = null;
-    }
-    const formView = document.getElementById('waPhoneFormView');
-    const resultView = document.getElementById('waPhoneCodeResultView');
-    if (formView) formView.style.display = 'block';
-    if (resultView) resultView.style.display = 'none';
-    const input = document.getElementById('waPairingPhoneInput');
-    if (input) input.focus();
-}
-window.resetPairingPhoneInput = resetPairingPhoneInput;
-
-function startPairingTimer(seconds) {
-    if (waPairingCodeTimer) clearInterval(waPairingCodeTimer);
-    waPairingCodeRemaining = seconds;
-    const timerEl = document.getElementById('waCodeTimer');
-    if (timerEl) timerEl.textContent = `${waPairingCodeRemaining}s`;
-
-    waPairingCodeTimer = setInterval(() => {
-        waPairingCodeRemaining--;
-        if (timerEl) timerEl.textContent = `${waPairingCodeRemaining}s`;
-        if (waPairingCodeRemaining <= 0) {
-            clearInterval(waPairingCodeTimer);
-            waPairingCodeTimer = null;
-            if (timerEl) timerEl.textContent = 'Expired';
-        }
-    }, 1000);
-}
-
-function openLinkWhatsAppQrModal() {
-    const modal = document.getElementById('linkWhatsAppQrModal');
-    if (!modal) return;
-    modal.style.display = 'flex';
-
-    const connectedState = document.getElementById('qrConnectedState');
-    const pairingMainBody = document.getElementById('waPairingMainBody');
-
-    // GUARD: If WhatsApp is already connected, display connected confirmation and NEVER reset session or re-poll
-    if (window._waIsConnected) {
-        if (pairingMainBody) pairingMainBody.style.display = 'none';
-        if (connectedState) connectedState.style.display = 'block';
-        return;
-    }
-
-    if (connectedState) connectedState.style.display = 'none';
-    if (pairingMainBody) pairingMainBody.style.display = 'flex';
-    switchLinkMode('qr');
-
-    fetchBridgeQrCode(true);
-    if (bridgeQrPollInterval) clearInterval(bridgeQrPollInterval);
-    bridgeQrPollInterval = setInterval(() => fetchBridgeQrCode(false), 3000);
-}
-
-async function disconnectWhatsAppDevice() {
-    if (!confirm('Are you sure you want to log out and unlink your WhatsApp device? This will clear the session and generate a new QR code.')) {
-        return;
-    }
-    try {
-        const res = await fetch('/api/v1/whatsapp/bridge-disconnect', { method: 'POST' });
-        const data = await res.json();
-        window._waIsConnected = false;
-        if (window.showToast) window.showToast('WhatsApp device unlinked successfully.', 'info');
-        
-        const spinner = document.getElementById('qrLoadingSpinner');
-        const imageWrapper = document.getElementById('qrImageWrapper');
-        const connectedState = document.getElementById('qrConnectedState');
-        const refreshBtn = document.getElementById('qrRefreshBtn');
-        if (connectedState) connectedState.style.display = 'none';
-        if (spinner) spinner.style.display = 'flex';
-        if (imageWrapper) imageWrapper.style.display = 'none';
-        if (refreshBtn) refreshBtn.style.display = 'inline-block';
-        
-        setTimeout(() => {
-            fetchBridgeQrCode(true);
-            if (bridgeQrPollInterval) clearInterval(bridgeQrPollInterval);
-            bridgeQrPollInterval = setInterval(() => fetchBridgeQrCode(false), 3000);
-        }, 1200);
-    } catch (err) {
-        if (window.showToast) window.showToast('Failed to disconnect: ' + err.message, 'error');
-    }
-}
-window.disconnectWhatsAppDevice = disconnectWhatsAppDevice;
-
-function closeLinkWhatsAppQrModal() {
-    const modal = document.getElementById('linkWhatsAppQrModal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
-    if (bridgeQrPollInterval) {
-        clearInterval(bridgeQrPollInterval);
-        bridgeQrPollInterval = null;
-    }
-    if (waPairingCodeTimer) {
-        clearInterval(waPairingCodeTimer);
-        waPairingCodeTimer = null;
-    }
-}
-
-async function fetchBridgeQrCode(force) {
-    const spinner = document.getElementById('qrLoadingSpinner');
-    const imageWrapper = document.getElementById('qrImageWrapper');
-    const connectedState = document.getElementById('qrConnectedState');
-    const qrImg = document.getElementById('bridgeQrImage');
-    const statusText = document.getElementById('qrStatusText');
-    const connectedNumber = document.getElementById('qrConnectedNumber');
-
-    // If force refresh requested, signal bridge to drop stuck socket and regenerate
-    if (force) {
-        if (imageWrapper) imageWrapper.style.display = 'none';
-        if (spinner) spinner.style.display = 'flex';
-        if (statusText) statusText.textContent = 'Restarting QR session & generating fresh code...';
-        try {
-            await fetch('/api/v1/whatsapp/bridge-qr-refresh', { method: 'POST' });
-        } catch (_) {
-            try { await fetch('/api/whatsapp/bridge-qr-refresh', { method: 'POST' }); } catch (__) {}
-        }
-        await new Promise(r => setTimeout(r, 600));
-    }
-
-    try {
-        let res = null;
-        try {
-            res = await fetch('/api/v1/whatsapp/bridge-qr');
-        } catch (e) {
-            try {
-                res = await fetch('/api/whatsapp/bridge-qr');
-            } catch (e2) {
-                try {
-                    res = await fetch('/api/wa/qr');
-                } catch (e3) {
-                    res = await fetch('http://localhost:3001/qr');
-                }
-            }
-        }
-
-        if (!res) throw new Error('Bridge unreachable');
-        let data = {};
-        try {
-            data = await res.json();
-        } catch (_) {
-            data = { status: 'initializing', message: 'WhatsApp bridge is starting up...' };
-        }
-
-        if (data.status === 'connected' || data.connected) {
-            window._waIsConnected = true;
-            if (bridgeQrPollInterval) {
-                clearInterval(bridgeQrPollInterval);
-                bridgeQrPollInterval = null;
-            }
-            const pairingMainBody = document.getElementById('waPairingMainBody');
-            if (pairingMainBody) pairingMainBody.style.display = 'none';
-            if (spinner) spinner.style.display = 'none';
-            if (imageWrapper) imageWrapper.style.display = 'none';
-            if (connectedState) connectedState.style.display = 'block';
-            const refreshBtn = document.getElementById('qrRefreshBtn');
-            if (refreshBtn) refreshBtn.style.display = 'none';
-
-            if (connectedNumber) {
-                const phone = data.user?.id ? data.user.id.split(':')[0] : 'Linked';
-                connectedNumber.textContent = `Connected as +${phone} (Permanent Active Session).`;
-            }
-            const sidebarStatus = document.getElementById('waSidebarStatus');
-            if (sidebarStatus) {
-                sidebarStatus.textContent = '● Live Sync Active';
-                sidebarStatus.style.color = '#00a884';
-            }
-            return;
-        }
-
-        const qrDataUri = data.qrUrl || data.qrImageUrl;
-        if (data.status === 'qr_ready' && (qrDataUri || data.qrSvg || data.qr)) {
-            const svgContainer = document.getElementById('bridgeQrSvgContainer');
-
-            // 1. If base64 data URI is provided by local Node.js bridge, set the <img> src attribute directly (100% offline, zero network requests)
-            if (qrDataUri && (qrDataUri.startsWith('data:image/') || qrDataUri.startsWith('data:'))) {
-                if (qrImg) {
-                    qrImg.style.display = 'block';
-                    qrImg.src = qrDataUri;
-                }
-                if (svgContainer) svgContainer.style.display = 'none';
-            } else if (data.qrSvg) {
-                // 2. Direct vector SVG rendering
-                if (qrImg) qrImg.style.display = 'none';
-                if (svgContainer) {
-                    svgContainer.innerHTML = data.qrSvg;
-                    svgContainer.style.display = 'block';
-                }
-            } else {
-                // 3. Fallback to direct raw PNG proxy endpoint or fallback URL
-                const qrSrc = qrDataUri || `/api/v1/whatsapp/bridge-qr.png?t=${Date.now()}` || (data.qr ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(data.qr)}` : '');
-                if (qrImg) {
-                    qrImg.style.display = 'block';
-                    qrImg.src = qrSrc;
-                }
-                if (svgContainer) svgContainer.style.display = 'none';
-            }
-
-            if (qrImg) {
-                qrImg.onerror = function() {
-                    console.warn('[QR Image] Image loading error, applying SVG/provider fallback');
-                    if (data.qrSvg && svgContainer) {
-                        qrImg.style.display = 'none';
-                        svgContainer.innerHTML = data.qrSvg;
-                        svgContainer.style.display = 'block';
-                    } else if (data.qr) {
-                        qrImg.onerror = null;
-                        qrImg.src = `https://quickchart.io/qr?size=300&text=${encodeURIComponent(data.qr)}`;
-                    }
-                };
-            }
-
-            if (spinner) spinner.style.display = 'none';
-            if (connectedState) connectedState.style.display = 'none';
-            if (imageWrapper) imageWrapper.style.display = 'block';
-            return;
-        }
-
-        // Waiting or initializing
-        if (imageWrapper) imageWrapper.style.display = 'none';
-        if (connectedState) connectedState.style.display = 'none';
-        if (spinner) spinner.style.display = 'flex';
-        const rawMsg = data.message || 'WhatsApp Baileys bridge is initializing pairing session...';
-        const displayMsg = rawMsg.toLowerCase().includes('internal server error')
-            ? 'WhatsApp Baileys bridge is initializing... Please wait a few seconds.'
-            : rawMsg;
-        if (statusText) statusText.textContent = displayMsg;
-    } catch (err) {
-        console.warn('[Bridge QR Fetch Error]', err);
-        if (statusText) statusText.textContent = 'WhatsApp bridge starting up on port 3001... Please wait 5s.';
-    }
-}
-
-// Global window exposure for Link WhatsApp QR Modal
-window.openLinkWhatsAppQrModal = openLinkWhatsAppQrModal;
-window.closeLinkWhatsAppQrModal = closeLinkWhatsAppQrModal;
-window.fetchBridgeQrCode = fetchBridgeQrCode;
-
-// ==========================================================================
-// PROGRESSIVE WEB APP (PWA) REGISTRATION & INSTALLATION HANDLER
-// ==========================================================================
-let pwaDeferredInstallPrompt = null;
-
-if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
-            .then((registration) => {
-                console.log('[PWA] Service Worker registered with scope:', registration.scope);
-            })
-            .catch((error) => {
-                console.warn('[PWA] Service Worker registration failed:', error);
-            });
-    });
-
-    window.addEventListener('beforeinstallprompt', (e) => {
-        // Prevent default browser mini-infobar
-        e.preventDefault();
-        pwaDeferredInstallPrompt = e;
-        console.log('[PWA] Capture beforeinstallprompt event');
-
-        // Unhide install buttons in topbar and sidebar
-        const topbarBtn = document.getElementById('pwaInstallBtn');
-        if (topbarBtn) topbarBtn.style.display = 'inline-flex';
-
-        const sidebarTab = document.getElementById('sidebarPwaInstallTab');
-        if (sidebarTab) sidebarTab.style.display = 'flex';
-    });
-
-    window.addEventListener('appinstalled', () => {
-        console.log('[PWA] BashFlow Cloud installed successfully');
-        pwaDeferredInstallPrompt = null;
-
-        const topbarBtn = document.getElementById('pwaInstallBtn');
-        if (topbarBtn) topbarBtn.style.display = 'none';
-
-        const sidebarTab = document.getElementById('sidebarPwaInstallTab');
-        if (sidebarTab) sidebarTab.style.display = 'none';
-    });
-}
-
-function promptPWAInstall() {
-    if (pwaDeferredInstallPrompt) {
-        pwaDeferredInstallPrompt.prompt();
-        pwaDeferredInstallPrompt.userChoice.then((choiceResult) => {
-            if (choiceResult.outcome === 'accepted') {
-                console.log('[PWA] User accepted the installation');
-            } else {
-                console.log('[PWA] User dismissed the installation');
-            }
-            pwaDeferredInstallPrompt = null;
-            const topbarBtn = document.getElementById('pwaInstallBtn');
-            if (topbarBtn) topbarBtn.style.display = 'none';
-        });
-    } else {
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-        if (isIOS) {
-            alert('To install BashFlow Cloud on iPhone/iPad:\n1. Tap the Share button in Safari (square with up arrow)\n2. Scroll down and tap "Add to Home Screen"\n3. Tap "Add" to finish.');
-        } else {
-            alert('BashFlow Cloud is PWA-ready!\nTo install, open your browser menu (⋮) and select "Install App" or "Add to Home screen".');
-        }
-    }
-}
-
-window.promptPWAInstall = promptPWAInstall;
-
-// Global window exposure for Core Dashboard Navigation & WhatsApp Chat Controls
-window.switchTab = switchTab;
-window.initNavigationListeners = initNavigationListeners;
-window.initWhatsAppChatBarListeners = initWhatsAppChatBarListeners;
-window.sendWhatsAppReply = sendWhatsAppReply;
-window.handleWaReplyKeydown = handleWaReplyKeydown;
-window.toggleVoiceRecording = toggleVoiceRecording;
-window.cancelVoiceRecording = cancelVoiceRecording;
+window.toggleLiveVoiceCall = toggleLiveVoiceCall;
 window.openLiveVoiceCallModal = openLiveVoiceCallModal;
+
 window.closeLiveVoiceCallModal = closeLiveVoiceCallModal;
 window.toggleEmojiTray = toggleEmojiTray;
 window.toggleTemplatesTray = toggleTemplatesTray;
