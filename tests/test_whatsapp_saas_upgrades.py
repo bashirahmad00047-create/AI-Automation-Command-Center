@@ -144,3 +144,75 @@ def test_whatsapp_qr_and_status_guarantee(client):
     res_status = client.get("/api/v1/whatsapp/status")
     assert res_status.status_code == 200
     assert "connected" in res_status.get_json() or "status" in res_status.get_json()
+
+
+def test_conversational_tts_prosody_and_pauses(app):
+    """Dual-script phonetic pipeline injects breath pauses (commas/ellipses) into conversational TTS scripts."""
+    with app.app_context():
+        long_urdu_text = "ہمارا سافٹ ویئر آپ کے تمام واٹس ایپ میسجز کو خودکار طریقے سے جواب دیتا ہے اور گاہکوں کو آرڈر تصدیق بھیجتا ہے"
+        tuned = WhatsAppService._tune_conversational_tts_script(long_urdu_text)
+        assert len(tuned) > 0
+        # Check commas or pauses are injected
+        assert "،" in tuned or "..." in tuned or "," in tuned
+
+def test_urdu_voice_engine_system_prompt(app):
+    """AI System prompt enforces ultra-human Pakistani Urdu tone, fillers, and bans archaic words."""
+    with app.app_context():
+        kb = WhatsAppService._get_tenant_or_global_knowledge_base("org-enterprise-default")
+        assert isinstance(kb, str)
+        assert "ULTRA-HUMAN PAKISTANI URDU VOICE ENGINE" in kb
+        assert "Jee bilkul..." in kb
+        assert "mutaddid" in kb  # in the ban instruction
+        assert "CONVERSATIONAL MEMORY & NO REPETITION" in kb
+
+def test_lid_and_resolved_phone_handling(app):
+    """14-digit WhatsApp LID is properly mapped to resolved phone and pushName in message to_dict."""
+    with app.app_context():
+        lid_msg = WhatsAppMessage(
+            id="test-msg-lid-1",
+            organization_id="org-enterprise-default",
+            whatsapp_message_id="wamid-lid-1",
+            sender="91788283007142@lid",
+            recipient="923001234567@s.whatsapp.net",
+            body="Salam, I want to inquire about automation",
+            message_type="text",
+            raw_payload_json=json.dumps({
+                "pushName": "Kamran Khan",
+                "senderPn": "923219876543"
+            })
+        )
+        d = lid_msg.to_dict()
+        assert d["sender_name"] == "Kamran Khan"
+        assert d["sender"] == "923219876543"
+        assert d["resolved_phone"] == "923219876543"
+
+def test_auto_ingest_crm_lead_name_extraction_and_order(app):
+    """Customer name is extracted from message body and order intent upgrades lead status."""
+    with app.app_context():
+        phone = "923451122334"
+        # First message introducing customer name
+        lead_data = WhatsAppService.auto_ingest_crm_lead(
+            organization_id="org-enterprise-default",
+            from_phone=phone,
+            sender_name=None,
+            message_body="Mera naam Farhan Ahmed hai aur mujhe information chahiye"
+        )
+        assert lead_data is not None
+        assert "Farhan Ahmed" in lead_data["name"]
+
+        # Second message confirming order
+        updated_lead = WhatsAppService.auto_ingest_crm_lead(
+            organization_id="org-enterprise-default",
+            from_phone=phone,
+            message_body="Jee bilkul confirm kardo, mujhe suit buy karna hai"
+        )
+        assert updated_lead is not None
+        assert updated_lead["intent"] == "PRODUCT_ORDER"
+        assert updated_lead["status"] == "qualified"
+
+def test_conversational_memory_default_limit(app):
+    """WhatsAppService.get_conversation_history default limit is 10 for deep multi-turn memory."""
+    with app.app_context():
+        import inspect
+        sig = inspect.signature(WhatsAppService.get_conversation_history)
+        assert sig.parameters["limit"].default == 10

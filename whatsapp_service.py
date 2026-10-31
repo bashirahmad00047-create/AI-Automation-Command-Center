@@ -78,6 +78,9 @@ if os.path.exists("/etc/secrets") and os.path.isdir("/etc/secrets"):
 
 
 class WhatsAppService:
+    # Method aliases for conversational TTS tuning and knowledge base resolution
+    _tune_conversational_tts_script = None
+    _get_tenant_or_global_knowledge_base = None
     @classmethod
     def number_to_roman_urdu(cls, n: int) -> str:
         """Converts an integer into natural conversational Roman Urdu words.
@@ -206,6 +209,18 @@ class WhatsAppService:
             t = re.sub(r"(?i)\bTCS\b", "ٹی سی ایس", t)
             t = re.sub(r"(?i)\bM&P\b", "ایم اینڈ پی", t)
             t = re.sub(r"(?i)\bLeopards\b", "لیپرڈز", t)
+
+            # Breath pause injection: Add natural human breathing pauses (commas/ellipses) every 5-7 words
+            words = t.split()
+            if len(words) > 7:
+                chunked = []
+                for w_idx, w in enumerate(words):
+                    chunked.append(w)
+                    if (w_idx + 1) % 6 == 0 and w_idx < len(words) - 2:
+                        last_w = chunked[-1]
+                        if not any(last_w.endswith(p) for p in ('،', ',', '.', '!', '؟', '…')):
+                            chunked[-1] = last_w + '،'
+                t = ' '.join(chunked)
 
             # Smooth out redundant commas or spaces
             t = re.sub(r"[,\،]{2,}", "،", t)
@@ -1593,12 +1608,12 @@ class WhatsAppService:
             if configured_rate:
                 active_rate = configured_rate.strip()
             else:
-                active_rate = "+4%" if is_urdu else "+3%"
+                active_rate = "+6%" if is_urdu else "+3%"
 
             if configured_pitch:
                 active_pitch = configured_pitch.strip()
             else:
-                active_pitch = "+2Hz" if is_urdu else "+1Hz"
+                active_pitch = "-1Hz" if is_urdu else "+1Hz"
 
             if configured_volume:
                 active_volume = configured_volume.strip()
@@ -1672,11 +1687,11 @@ class WhatsAppService:
             }
             payload = {
                 "text": text[:1000],
-                "model_id": active_model,
+                "model_id": "eleven_multilingual_v2" if "multilingual" in active_model else active_model,
                 "voice_settings": {
-                    "stability": 0.40,
-                    "similarity_boost": 0.75,
-                    "style": 0.50,
+                    "stability": 0.32,
+                    "similarity_boost": 0.80,
+                    "style": 0.65,
                     "use_speaker_boost": True
                 }
             }
@@ -2692,7 +2707,7 @@ class WhatsAppService:
         cls,
         sender_phone: str,
         organization_id: Optional[str] = None,
-        limit: int = 5
+        limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Retrieves recent 3-5 conversation turns for this customer to enable multi-turn contextual AI responses with Pakistan timestamps."""
         if not sender_phone or not has_app_context():
@@ -2925,18 +2940,15 @@ class WhatsAppService:
             jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "Bashir Uddin"
             kb = (
                 f"Business Name: {b_name or 'BashFlow AI'}\n\n"
-                "ASSISTANT IDENTITY & CONVERSATIONAL GUIDELINES (NATURAL DOSTANA INSAAN):\n"
-                "1. ACT AS A REAL, FRIENDLY HUMAN: You are a warm, helpful customer care representative speaking like a natural, friendly person.\n"
-                "2. STRICT BAN ON NEWS ANCHOR / RADIO VOICE: Strictly DO NOT speak like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, archaic, robotic, or overly heavy literary words.\n"
-                "3. SHORT & CRISP SENTENCES: Speak in short, snappy, natural sentences (1 to 3 sentences maximum). Avoid long speeches.\n"
-                "4. NATURAL CONVERSATIONAL FILLERS: Freely and naturally sprinkle human conversational markers:\n"
-                "   - In Urdu / Roman Urdu: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor', 'Haan jee'.\n"
-                "   - In English: 'Sure thing', 'Got it', 'Let me check', 'Of course', 'Right away'.\n"
-                "5. STRICT LANGUAGE MATCHING: If the customer writes or speaks in Urdu (or Roman Urdu), reply 100% in natural Pakistani Urdu. If the customer messages in English, reply 100% in clear fluent English. NEVER mix languages or cross-translate.\n"
-                "6. GREETING PROTOCOL: If the customer greets you or says 'Kaise ho ap', 'Salam', or similar, answer warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
-                "7. DIRECT & HONEST: Answer questions on any general topic directly, naturally, and politely without markdown asterisks or bullet lists.\n"
-                "8. Only mention pricing if the customer explicitly asks about software or bot subscription plans (Starter PKR 7,500/mo, Pro PKR 25,000/mo, 2-day free trial; JazzCash: 03209350858 Bashir Uddin).\n"
-                "9. NEVER output robotic corporate introductory speeches.\n"
+                "ASSISTANT IDENTITY & CONVERSATIONAL GUIDELINES (ULTRA-HUMAN PAKISTANI URDU VOICE ENGINE):\n"
+                "1. ULTRA-HUMAN FRIENDLY LEHJA: Speak like an authentic, educated, friendly Pakistani friend in everyday natural spoken Urdu. Mukammal ban on archaic/bookish Urdu words ('mutaddid', 'faraham', 'tashreef', 'marhoon-e-minnat').\n"
+                "2. MANDATORY NATURAL FILLERS: Start or intersperse sentences with natural Pakistani fillers: 'Jee bilkul...', 'Acha dekhein...', 'Haan ji, main batata hoon...', 'Beshak, aap befikar rahein...', 'Sahi baat hai...'.\n"
+                "3. PRESERVE EVERYDAY ENGLISH TERMS: Keep common English words natural as used in Pakistan: 'price', 'order', 'message', 'system', 'discount', 'confirm', 'delivery', 'stock'.\n"
+                "4. CONVERSATIONAL MEMORY & NO REPETITION: Inspect recent conversation history turns. If a discussion is already underway, NEVER repeat robotic greeting formulas ('Main aapki kya madad kar sakta hoon'). Seamlessly continue the flow.\n"
+                "5. STRICT LANGUAGE MATCHING: Urdu/Roman Urdu -> 100% natural Pakistani Urdu; English -> 100% fluent English.\n"
+                "6. DIRECT & HONEST: Answer questions on any general topic directly, naturally, and politely without markdown asterisks or bullet lists.\n"
+                "7. Only mention pricing if the customer explicitly asks about software or bot subscription plans (Starter PKR 7,500/mo, Pro PKR 25,000/mo, 2-day free trial; JazzCash: 03209350858 Bashir Uddin).\n"
+                "8. NEVER output robotic corporate introductory speeches.\n"
             )
             return kb
 
@@ -3498,7 +3510,7 @@ class WhatsAppService:
             f"{sys_instruct}{history_section}\n\n"
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"CONVERSATIONAL AI ASSISTANT PROTOCOL (NATURAL DOSTANA INSAAN):\n"
+            f"CONVERSATIONAL AI ASSISTANT PROTOCOL (ULTRA-HUMAN PAKISTANI URDU VOICE ENGINE):\n"
             f"0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, heavy, bookish words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein (Urdu mein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor'; English mein: 'Sure thing', 'Got it', 'Let me check', 'Of course').\n"
             f"1. STRICT LANGUAGE MATCHING: Agar user ne Urdu (ya Roman Urdu) mein pucha hai toh jawab 100% natural Pakistani Urdu mein dein. Agar English mein baat ki hai toh jawab 100% fluent English mein dein. Kisi bhi surat mein zaban mix ya galat translate na ho.\n"
             f"2. NATURAL GREETINGS: If customer says 'Kaise ho ap', 'Salam', or greets you, reply warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
@@ -4271,7 +4283,7 @@ class WhatsAppService:
         # Multi-turn conversation history for contextual AI generation
         history = []
         if sender_phone:
-            history = cls.get_conversation_history(sender_phone, organization_id=organization_id, limit=6)
+            history = cls.get_conversation_history(sender_phone, organization_id=organization_id, limit=10)
 
         # 0. Intelligent handling of media / non-text messages
         lower_body = (message_body or "").strip().lower()
@@ -4920,7 +4932,7 @@ class WhatsAppService:
                     elif audio_bytes.startswith(b"RIFF"):
                         in_mime = "audio/wav"
 
-                    history = cls.get_conversation_history(clean_phone, organization_id=org_id, limit=6)
+                    history = cls.get_conversation_history(clean_phone, organization_id=org_id, limit=10)
                     mm_res = cls.call_gemini_multimodal_audio(
                         audio_bytes=audio_bytes,
                         mime_type=in_mime,
@@ -7322,18 +7334,54 @@ class WhatsAppService:
 
         # If lead already exists:
         if existing_lead:
+            updated = False
+            # Check for customer name update if previous name was generic/phone
+            if body_str:
+                for pat in [
+                    r"(?:mera\s+naam|my\s+name\s+is|i\s+am|mein|main)\s+([A-Za-z\u0600-\u06FF]{2,25}(?:\s+[A-Za-z\u0600-\u06FF]{2,25})?)",
+                    r"naam\s*[:=]\s*([A-Za-z\u0600-\u06FF]{2,25}(?:\s+[A-Za-z\u0600-\u06FF]{2,25})?)"
+                ]:
+                    m = re.search(pat, body_str, re.IGNORECASE)
+                    if m:
+                        extracted = m.group(1).strip()
+                        if extracted.lower() not in ("hai", "hoon", "here", "khan", "sahab", "jee", "bhai"):
+                            if existing_lead.name.startswith("WhatsApp") or existing_lead.name.startswith("+") or existing_lead.name == existing_lead.phone:
+                                existing_lead.name = extracted
+                                updated = True
+                            break
+
+            # If customer expresses purchase/order intent, upgrade lead status
+            lower_msg = (body_str or "").lower()
+            if any(w in lower_msg for w in ("order", "buy", "purchase", "kharidna", "خریدنا", "chahiye", "confirm", "book karo", "deliver")):
+                existing_lead.intent = "PRODUCT_ORDER"
+                existing_lead.status = "qualified"
+                existing_lead.lead_score = min(100, (existing_lead.lead_score or 70) + 20)
+                updated = True
+
             # If a new location was shared, append it directly into the existing lead's inquiry message
             if maps_url and maps_url not in (existing_lead.message or ""):
+                loc_note = f"\n\n📍 Updated Location: {loc_label + ' | ' if loc_label else ''}Google Maps: {maps_url}"
+                existing_lead.message = f"{existing_lead.message or ''}{loc_note}".strip()
+                updated = True
+
+            if updated:
                 try:
-                    loc_note = f"\n\n📍 Updated Location: {loc_label + ' | ' if loc_label else ''}Google Maps: {maps_url}"
-                    existing_lead.message = f"{existing_lead.message or ''}{loc_note}".strip()
                     db.session.commit()
+                    # Emit real-time update to CRM Leads & Executive Overview
+                    try:
+                        from app import socketio
+                        if socketio:
+                            lead_data = existing_lead.to_dict()
+                            socketio.emit("lead_updated", lead_data)
+                            socketio.emit("executive_kpi_update", {"type": "lead_updated", "lead": lead_data})
+                    except Exception:
+                        pass
                 except Exception as e:
                     try:
                         db.session.rollback()
                     except Exception:
                         pass
-                    logger.debug(f"Could not append location to existing lead: {e}")
+                    logger.debug(f"Could not commit existing lead update: {e}")
             return existing_lead.to_dict()
 
         # Build clean inquiry message with Google Maps link directly included
@@ -7363,6 +7411,20 @@ class WhatsAppService:
                 or raw_payload.get("profile", {}).get("name")
                 or ""
             ).strip()
+
+        # Intelligent Name Extraction from Urdu/English message body (e.g. "Mera naam Ali hai", "My name is Bilal")
+        if body_str:
+            name_patterns = [
+                r"(?:mera\s+naam|my\s+name\s+is|i\s+am|mein|main)\s+([A-Za-z\u0600-\u06FF]{2,25}(?:\s+[A-Za-z\u0600-\u06FF]{2,25})?)",
+                r"naam\s*[:=]\s*([A-Za-z\u0600-\u06FF]{2,25}(?:\s+[A-Za-z\u0600-\u06FF]{2,25})?)"
+            ]
+            for pat in name_patterns:
+                m = re.search(pat, body_str, re.IGNORECASE)
+                if m:
+                    extracted = m.group(1).strip()
+                    if extracted.lower() not in ("hai", "hoon", "here", "khan", "sahab", "jee", "bhai"):
+                        contact_name = extracted
+                        break
 
         if not contact_name or contact_name.lower() in ("whatsapp contact", "unknown", "website visitor", "anonymous", "none", "n/a"):
             contact_name = disp_phone or clean_phone
@@ -7432,6 +7494,16 @@ class WhatsAppService:
             db.session.add(lead_record)
             db.session.commit()
             logger.info(f"Auto-ingested new CRM Lead for WhatsApp contact {clean_phone} (Lead ID: {lead_record.id})")
+
+            # Real-time WebSocket emission to CRM Leads & Executive Overview
+            try:
+                from app import socketio
+                if socketio:
+                    lead_dict = lead_record.to_dict()
+                    socketio.emit("lead_created", lead_dict)
+                    socketio.emit("executive_kpi_update", {"type": "lead_created", "lead": lead_dict})
+            except Exception:
+                pass
 
             # Ingest event into automation engine if active
             engine = current_app.config.get("AUTOMATION_ENGINE") if has_app_context() else None
@@ -9152,3 +9224,8 @@ class WhatsAppService:
 
     send_text_message = send_message
 
+
+
+# Expose aliases on WhatsAppService class
+WhatsAppService._tune_conversational_tts_script = WhatsAppService.preprocess_text_for_human_speech
+WhatsAppService._get_tenant_or_global_knowledge_base = WhatsAppService.get_verified_business_knowledge_base
