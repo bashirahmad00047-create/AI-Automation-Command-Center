@@ -4267,60 +4267,40 @@ class WhatsAppService:
         is_ai_topic = any(w in lower_text for w in ("ai", "artificial intelligence", "machine learning", "bot", "automation", "software"))
         is_thanks = any(w in lower_text for w in ("shukriya", "thanks", "thank you", "jazakallah", "meherbani"))
 
+        # Strict Dynamic AI Thinking: Call Gemini AI dynamically for ALL queries & greetings (No hardcoded greetings)
+        direct_ai = cls.call_gemini_ai(
+            user_message=clean_text or "Hello",
+            organization_id=None,
+            customer_name=sender_name,
+            conversation_history=conversation_history
+        )
+        if direct_ai and direct_ai.strip():
+            return direct_ai.strip()
+
+        # Secondary fallback to Groq AI
+        groq_ai = cls.call_groq_ai(
+            user_message=clean_text or "Hello",
+            organization_id=None,
+            customer_name=sender_name,
+            conversation_history=conversation_history
+        )
+        if groq_ai and groq_ai.strip():
+            return groq_ai.strip()
+
+        # Contextual, respectful fallback only if LLMs are unreachable
         if lang_fmt == "roman_urdu":
             if is_greeting:
-                return f"Walaikum Assalam{cust_greeting}! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?"
+                return f"Salam{cust_greeting}! Main aap ki kya madad kar sakta hoon? Batayein aap kya janna chahte hain."
             elif is_thanks:
-                return f"Koi baat nahi{cust_greeting}! Yeh to mera farz hai. Agar koi aur sawal ya kaam ho to bila-jhijhak batayein."
-            elif is_weather:
-                return f"Mausam ke hawalay se maloomat ke liye aap apnay shehar ka naam share karein. Mazeed batayein main aap ki kya madad kar sakta hoon?"
-            elif any(w in lower_text for w in ("service", "services", "kaam", "offer", "features", "solutions")):
-                return f"Hamari services mein smart WhatsApp automation, AI customer support, real-time messaging, aur automated workflow orchestration shamil hain. Batayein aap ko kis specific service ke baray mein maloomat chahiye?"
-            elif is_ai_topic:
-                return f"AI aur smart automation se mukhtalif workflows aur rozmarrah ke kaam bohot asaani se mukammal kiye ja sakte hain. Batayein aap is hawalay se kya janna chahte hain?"
+                return f"Shukriya{cust_greeting}! Agar koi aur sawal ho to bila-jhijhak batayein."
             else:
-                # Dynamic generation via Gemini AI to guarantee authentic general thinking
-                direct_ai = cls.call_gemini_ai(
-                    user_message=clean_text or "Hello",
-                    organization_id=None,
-                    customer_name=sender_name,
-                    conversation_history=conversation_history
-                )
-                if direct_ai and direct_ai.strip():
-                    return direct_ai.strip()
-                # Secondary fallback to Groq AI
-                groq_ai = cls.call_groq_ai(
-                    user_message=clean_text or "Hello",
-                    organization_id=None,
-                    customer_name=sender_name,
-                    conversation_history=conversation_history
-                )
-                if groq_ai and groq_ai.strip():
-                    return groq_ai.strip()
                 return f"Salam{cust_greeting}! Aap ke is sawal ke hawalay se mazeed batayein taake main aap ki behtareen rehnumai kar sakoon."
-
         elif lang_fmt == "urdu_arabic":
-            if is_greeting:
-                return "وعلیکم السلام! الحمدللہ میں بالکل ٹھیک ہوں۔ OpsFlow Cloud میں آپ کا خیر مقدم ہے۔ آپ سنائیں آپ کیسے ہیں؟ میں آپ کی کیا مدد کر سکتا ہوں؟"
-            elif is_thanks:
-                return "آپ کا خیر مقدم ہے! میں ہر وقت آپ کی مدد کے لیے حاضر ہوں۔"
-            else:
-                return "وعلیکم السلام! OpsFlow Cloud میں آپ کا خیر مقدم ہے۔ فرمائیے آپ کیا جاننا چاہتے ہیں؟"
-
+            return "سلام! فرمائیے میں آپ کی کیا مدد کر سکتا ہوں؟"
         elif lang_fmt in ("pashto_arabic", "roman_pashto"):
-            if is_greeting:
-                return "Walaikum Assalam! Alhamdulillah za theek yam, taso kheryat sara yai? Za staso sa marasta kawale sham?"
-            else:
-                return "Walaikum Assalam! Za staso pa khabara pohegam. Taso ta sa maloomat pakaar de?"
-
+            return "Salam! Za staso sa marasta kawale sham? Mehherbani karke tapos karey."
         else:
-            # English
-            if is_greeting:
-                return f"Hello{cust_greeting}! I am doing great, thank you! How are you doing today, and how can I assist you?"
-            elif is_thanks:
-                return f"You're very welcome{cust_greeting}! Feel free to let me know if you need any further assistance."
-            else:
-                return f"Hello{cust_greeting}! I am here to assist you with your inquiry. Please let me know what information you need."
+            return f"Hello{cust_greeting}! How can I assist you with your inquiry today?"
 
     @classmethod
     def generate_ai_auto_response(

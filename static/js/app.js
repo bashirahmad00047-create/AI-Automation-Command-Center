@@ -11704,3 +11704,93 @@ setInterval(() => {
         }
     } catch (_) {}
 }, 3000);
+
+
+// ============================================================================
+// MODULE 3: LEAFLET.JS RADAR MAP & LOCATION TRACKING ENGINE
+// ============================================================================
+let leafletRadarMap = null;
+let radarMapMarkers = [];
+
+function initLeafletRadarMap() {
+    const mapEl = document.getElementById('liveRadarMap');
+    if (!mapEl || typeof L === 'undefined' || leafletRadarMap) return;
+    try {
+        leafletRadarMap = L.map('liveRadarMap', { zoomControl: true }).setView([31.5204, 74.3587], 6); // Centered on Pakistan
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(leafletRadarMap);
+    } catch (e) {
+        console.warn('[Leaflet Map Notice]:', e.message);
+    }
+}
+
+function addRadarMapPin(lat, lng, label, phone, gmapsUrl) {
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
+    initLeafletRadarMap();
+    if (!leafletRadarMap || typeof L === 'undefined') return;
+    try {
+        const marker = L.marker([Number(lat), Number(lng)]).addTo(leafletRadarMap);
+        const popupHtml = `
+            <div style="font-family: sans-serif; font-size: 12px; color: #111;">
+                <b style="color: #00a884;">📍 ${label || 'Customer'}</b><br>
+                ${phone ? `<span style="color:#555;">📞 +${phone}</span><br>` : ''}
+                <span style="color:#777; font-size:10px;">Lat: ${Number(lat).toFixed(4)}, Lng: ${Number(lng).toFixed(4)}</span><br>
+                <a href="${gmapsUrl || `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`}" target="_blank" style="color: #00a884; font-weight: bold; text-decoration: underline;">Open in Google Maps</a>
+            </div>
+        `;
+        marker.bindPopup(popupHtml);
+        radarMapMarkers.push(marker);
+        leafletRadarMap.setView([Number(lat), Number(lng)], 13);
+        const countEl = document.getElementById('radarMapPinsCount');
+        if (countEl) countEl.textContent = `${radarMapMarkers.length} Active Location Pins`;
+    } catch (err) {
+        console.debug('[Radar Marker Notice]:', err.message);
+    }
+}
+
+// Auto-initialize radar map when tab is opened
+window.addEventListener('load', () => {
+    setTimeout(initLeafletRadarMap, 1500);
+});
+
+// ============================================================================
+// MODULE 5: HYBRID ENGINE SWITCHER (BAILEYS BRIDGE VS OFFICIAL META CLOUD API)
+// ============================================================================
+async function switchWhatsAppEngine(mode) {
+    try {
+        const res = await fetch('/api/v1/whatsapp/engine-switch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ engine: mode })
+        });
+        const data = await res.json();
+        if (data.success) {
+            updateEngineSwitcherUI(mode);
+            showNotification(`WhatsApp Engine switched to ${mode.toUpperCase()}`, 'success');
+        } else {
+            showNotification(data.error || 'Failed to switch engine', 'error');
+        }
+    } catch (e) {
+        showNotification('Engine switch error: ' + e.message, 'error');
+    }
+}
+
+function updateEngineSwitcherUI(mode) {
+    const btnBaileys = document.getElementById('btnEngineBaileys');
+    const btnMeta = document.getElementById('btnEngineMeta');
+    if (!btnBaileys || !btnMeta) return;
+
+    if (mode === 'meta') {
+        btnMeta.className = 'hud-btn small blue';
+        btnMeta.textContent = '🔵 Meta Cloud API (Active)';
+        btnBaileys.className = 'hud-btn small outline';
+        btnBaileys.textContent = '⚪ Baileys Cloud Bridge';
+    } else {
+        btnBaileys.className = 'hud-btn small green';
+        btnBaileys.textContent = '🟢 Baileys Cloud Bridge (Active)';
+        btnMeta.className = 'hud-btn small outline';
+        btnMeta.textContent = '⚪ Meta Cloud API (Official)';
+    }
+}
