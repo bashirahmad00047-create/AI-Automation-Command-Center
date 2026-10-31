@@ -275,9 +275,11 @@
                     </div>
                                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                         <span id="radarMapPinsCount" class="status-pill green" style="font-size: 11px; font-weight: 600;">0 Active Pins</span>
+                        <button type="button" class="hud-btn small" onclick="openSetOrderLocationModal()" style="background: rgba(0, 168, 132, 0.2); border: 1px solid #00a884; color: #25d366; padding: 4px 10px; font-size: 11px; border-radius: 6px; font-weight: 700;">📍 + Set Order Location</button>
                         <button type="button" class="hud-btn small" onclick="sendLiveTrackingLinkToCustomer()" style="background: rgba(0, 168, 132, 0.2); border: 1px solid #00a884; color: #25d366; padding: 4px 10px; font-size: 11px; border-radius: 6px; font-weight: 700;" title="Send Live Google Maps Tracking Link to Active Customer">
                             🚀 Send Live Tracking Link to Customer
                         </button>
+                        <button type="button" class="hud-btn small outline" onclick="openBusinessTemplatesModal()" style="border-color: #00a884; color: #00a884; font-weight: 700;">💼 Business Templates</button>
                         <button type="button" class="hud-btn small outline" onclick="centerRadarMapPakistan()" style="padding: 4px 10px; font-size: 11px; border-radius: 6px;">🇵🇰 Center Pakistan</button>
                     </div>
                 </div>
@@ -947,3 +949,145 @@
 
 </body>
 </html>
+
+
+    <!-- MULTI-BUSINESS AI TEMPLATES STUDIO MODAL -->
+    <div class="hud-modal-backdrop" id="businessTemplatesStudioModal" style="display: none; position: fixed; inset: 0; background: rgba(5, 10, 14, 0.88); backdrop-filter: blur(12px); z-index: 10070; align-items: center; justify-content: center;">
+        <div class="hud-modal-content" style="background: #111b21; border: 1px solid #00a884; border-radius: 16px; width: 95%; max-width: 900px; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 60px rgba(0,0,0,0.85); color: #e9edef;">
+            <!-- Modal Header -->
+            <div style="padding: 16px 24px; border-bottom: 1px solid #202c33; display: flex; justify-content: space-between; align-items: center; background: #202c33; position: sticky; top: 0; z-index: 10;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 22px;">💼</span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 17px; font-weight: 700; color: #fff;">Multi-Business AI Templates Studio</h3>
+                        <span style="font-size: 11.5px; color: #00a884;">Select &amp; customize AI auto-responder for your specific business niche</span>
+                    </div>
+                </div>
+                <button type="button" onclick="closeBusinessTemplatesModal()" style="background: none; border: none; font-size: 22px; color: #8696a0; cursor: pointer; padding: 2px;">✕</button>
+            </div>
+
+            <div style="padding: 20px 24px;">
+                <!-- Template Preset Selector Tabs -->
+                <div style="margin-bottom: 18px;">
+                    <div style="font-size: 12px; font-weight: 700; color: #8696a0; text-transform: uppercase; margin-bottom: 8px;">1. Select Ready-Made Industry Template</div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px;" id="businessTemplateTabsList">
+                        <button type="button" class="hud-btn active" id="tabTplMobile" onclick="selectBusinessTemplate('mobile_electronics')" style="text-align: left; padding: 10px 12px; font-size: 12px; font-weight: 700; border-radius: 8px;">
+                            📱 Mobile &amp; Electronics
+                        </button>
+                        <button type="button" class="hud-btn outline" id="tabTplFood" onclick="selectBusinessTemplate('restaurant_food')" style="text-align: left; padding: 10px 12px; font-size: 12px; font-weight: 600; border-radius: 8px;">
+                            🍔 Food Delivery
+                        </button>
+                        <button type="button" class="hud-btn outline" id="tabTplRealEstate" onclick="selectBusinessTemplate('real_estate')" style="text-align: left; padding: 10px 12px; font-size: 12px; font-weight: 600; border-radius: 8px;">
+                            🏡 Real Estate
+                        </button>
+                        <button type="button" class="hud-btn outline" id="tabTplB2B" onclick="selectBusinessTemplate('wholesale_b2b')" style="text-align: left; padding: 10px 12px; font-size: 12px; font-weight: 600; border-radius: 8px;">
+                            📦 Wholesale B2B
+                        </button>
+                        <button type="button" class="hud-btn outline" id="tabTplClinic" onclick="selectBusinessTemplate('clinic_booking')" style="text-align: left; padding: 10px 12px; font-size: 12px; font-weight: 600; border-radius: 8px;">
+                            🩺 Clinic Booking
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Template Live Editor Form -->
+                <div style="background: #182229; border: 1px solid #2a3942; border-radius: 12px; padding: 18px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; border-bottom: 1px solid #202c33; padding-bottom: 8px;">
+                        <span style="font-weight: 700; font-size: 13.5px; color: #00a884;" id="editorTemplateHeading">Editing: Mobile &amp; Electronics Shop</span>
+                        <span class="status-pill green" style="font-size: 11px;">● Urdu Voice (+12% speed) Ready</span>
+                    </div>
+
+                    <input type="hidden" id="tplEditorTemplateId" value="mobile_electronics">
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+                        <div>
+                            <label style="font-size: 11.5px; font-weight: 600; color: #8696a0; display: block; margin-bottom: 4px;">Business Name:</label>
+                            <input type="text" id="tplEditorBusinessName" class="hud-input" style="width: 100%; background: #111b21; border: 1px solid #2a3942; border-radius: 6px; padding: 8px 12px; color: #e9edef; font-size: 13px;" value="Star Mobile &amp; Electronics Hub">
+                        </div>
+                        <div>
+                            <label style="font-size: 11.5px; font-weight: 600; color: #8696a0; display: block; margin-bottom: 4px;">Welcome Greeting (Roman Urdu &amp; Urdu):</label>
+                            <input type="text" id="tplEditorGreeting" class="hud-input" style="width: 100%; background: #111b21; border: 1px solid #2a3942; border-radius: 6px; padding: 8px 12px; color: #e9edef; font-size: 13px;" value="Assalam-o-Alaikum! Star Mobile mein khush aamdeed! Main aap ka AI sales assistant hoon.">
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 12px;">
+                        <label style="font-size: 11.5px; font-weight: 600; color: #8696a0; display: block; margin-bottom: 4px;">AI System Prompt / Talking Style (Colloquial Tone):</label>
+                        <textarea id="tplEditorSystemPrompt" rows="3" class="hud-input" style="width: 100%; background: #111b21; border: 1px solid #2a3942; border-radius: 6px; padding: 8px 12px; color: #e9edef; font-size: 12.5px; resize: vertical;"></textarea>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+                        <div>
+                            <label style="font-size: 11.5px; font-weight: 600; color: #8696a0; display: block; margin-bottom: 4px;">Verified Products &amp; Services Catalog:</label>
+                            <textarea id="tplEditorProducts" rows="3" class="hud-input" style="width: 100%; background: #111b21; border: 1px solid #2a3942; border-radius: 6px; padding: 8px 12px; color: #e9edef; font-size: 12px; resize: vertical;"></textarea>
+                        </div>
+                        <div>
+                            <label style="font-size: 11.5px; font-weight: 600; color: #8696a0; display: block; margin-bottom: 4px;">Official Prices &amp; Payment Options:</label>
+                            <textarea id="tplEditorPrices" rows="3" class="hud-input" style="width: 100%; background: #111b21; border: 1px solid #2a3942; border-radius: 6px; padding: 8px 12px; color: #e9edef; font-size: 12px; resize: vertical;"></textarea>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <label style="font-size: 11.5px; font-weight: 600; color: #8696a0; display: block; margin-bottom: 4px;">Custom Business Rules &amp; Policies (Warranty, Delivery, Down payment):</label>
+                        <textarea id="tplEditorRules" rows="3" class="hud-input" style="width: 100%; background: #111b21; border: 1px solid #2a3942; border-radius: 6px; padding: 8px 12px; color: #e9edef; font-size: 12px; resize: vertical;"></textarea>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div style="display: flex; justify-content: flex-end; gap: 10px; align-items: center;">
+                        <button type="button" class="hud-btn outline" onclick="resetActiveBusinessTemplate()" style="padding: 7px 16px; font-size: 12px;">
+                            🔄 Reset to Default
+                        </button>
+                        <button type="button" class="hud-btn primary" id="btnSaveBusinessTemplate" onclick="saveActiveBusinessTemplate()" style="background: #00a884; font-weight: 700; color: #fff; padding: 8px 22px; font-size: 13px; border-radius: 6px;">
+                            💾 Save &amp; Apply to Active Workspace
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SET ORDER LOCATION MODAL (FEATURE 2) -->
+    <div class="hud-modal-backdrop" id="setOrderLocationModal" style="display: none; position: fixed; inset: 0; background: rgba(5, 10, 14, 0.88); backdrop-filter: blur(10px); z-index: 10075; align-items: center; justify-content: center;">
+        <div class="hud-modal-content" style="background: #111b21; border: 1px solid #00a884; border-radius: 14px; width: 92%; max-width: 440px; padding: 20px; color: #e9edef;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; border-bottom: 1px solid #202c33; padding-bottom: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 18px;">📍</span>
+                    <strong style="font-size: 14px; color: #fff;">Set Order Delivery Location</strong>
+                </div>
+                <button type="button" onclick="closeSetOrderLocationModal()" style="background: none; border: none; font-size: 18px; color: #8696a0; cursor: pointer;">✕</button>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+                <div>
+                    <label style="font-size: 11px; color: #8696a0; margin-bottom: 3px; display: block;">Quick City Presets:</label>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button type="button" class="hud-btn small outline" onclick="applyPresetLocation(31.5204, 74.3587, 'Lahore Hub')">Lahore</button>
+                        <button type="button" class="hud-btn small outline" onclick="applyPresetLocation(24.8607, 67.0011, 'Karachi Center')">Karachi</button>
+                        <button type="button" class="hud-btn small outline" onclick="applyPresetLocation(33.6844, 73.0479, 'Islamabad F-7')">Islamabad</button>
+                        <button type="button" class="hud-btn small outline" onclick="applyPresetLocation(31.4504, 73.1350, 'Faisalabad')">Faisalabad</button>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div>
+                        <label style="font-size: 11px; color: #8696a0; margin-bottom: 2px; display: block;">Latitude:</label>
+                        <input type="number" step="0.0001" id="orderLocLat" class="hud-input" value="31.5204" style="width: 100%; background: #182229; border: 1px solid #2a3942; border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 12.5px;">
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; color: #8696a0; margin-bottom: 2px; display: block;">Longitude:</label>
+                        <input type="number" step="0.0001" id="orderLocLng" class="hud-input" value="74.3587" style="width: 100%; background: #182229; border: 1px solid #2a3942; border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 12.5px;">
+                    </div>
+                </div>
+
+                <div>
+                    <label style="font-size: 11px; color: #8696a0; margin-bottom: 2px; display: block;">Customer / Location Label:</label>
+                    <input type="text" id="orderLocLabel" class="hud-input" placeholder="e.g. Tariq Mahmood (Gulberg III)" style="width: 100%; background: #182229; border: 1px solid #2a3942; border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 12.5px;">
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                <button type="button" class="hud-btn outline small" onclick="closeSetOrderLocationModal()">Cancel</button>
+                <button type="button" class="hud-btn primary small" onclick="submitSetOrderLocation()" style="background: #00a884; font-weight: 700; color: #fff;">
+                    📍 Place Moving Pin
+                </button>
+            </div>
+        </div>
+    </div>

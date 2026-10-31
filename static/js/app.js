@@ -12140,3 +12140,235 @@ if (typeof window !== 'undefined' && window.location && window.location.search &
         }, 800);
     });
 }
+
+
+// ============================================================================
+// FEATURE 1: MULTI-BUSINESS AI TEMPLATES STUDIO CONTROLLER
+// ============================================================================
+const CACHED_BUSINESS_TEMPLATES = {
+    mobile_electronics: {
+        id: "mobile_electronics",
+        name: "Mobile & Electronics Shop",
+        business_name: "Star Mobile & Electronics Hub",
+        welcome_greeting: "Assalam-o-Alaikum! Star Mobile mein khush aamdeed! Main aap ka AI sales assistant hoon. Kis model ka stock ya PTA status maloom karna chahte hain?",
+        system_prompt: "You are Star Mobile's expert sales assistant. Answer questions on iPhone, Samsung, Xiaomi stock, 1-year brand warranties, PTA approved vs Non-PTA rates, and cash-on-delivery options. Speak naturally in Roman Urdu.",
+        products_services: "iPhone 13/14/15/16 Pro Max (PTA Approved), Samsung Galaxy S23/S24 Ultra, Xiaomi Redmi Note series, Original 20W/65W Fast Chargers, Airpods Pro, Smartwatches.",
+        verified_prices: "iPhone 15 128GB: Rs 285,000 | S24 Ultra 256GB: Rs 365,000 | Redmi Note 13: Rs 54,000 | 20W Fast Charger: Rs 4,500",
+        custom_rules: "1. Verify IMEI on PTA DIRBS before quoting non-PTA prices.\n2. 7 days replacement warranty and 1 year official brand warranty.\n3. Rs 1,000 advance delivery token required for COD."
+    },
+    restaurant_food: {
+        id: "restaurant_food",
+        name: "Restaurant & Food Delivery",
+        business_name: "Al-Bake Gourmet Burgers & Karahi",
+        welcome_greeting: "Assalam-o-Alaikum! Al-Bake mein khush aamdeed! Aaj aap ke liye mazedaar kya pack karwayein? Niche hamara live menu aur fast delivery mojood hai.",
+        system_prompt: "You are Al-Bake Food Order Concierge. Help customers pick from the menu, calculate order totals, confirm delivery addresses, and provide live Google Maps tracking links. Emphasize fresh ingredients and fast 30-45 minute delivery.",
+        products_services: "Gourmet Smash Beef Burger, Crispy Zinger Double, Chicken White Karahi (Full/Half), Mutton Shinwari, Garlic Mayo Fries, Special Mineral Water, Mint Margarita.",
+        verified_prices: "Double Smash Burger: Rs 950 | Crispy Zinger: Rs 650 | White Karahi Full: Rs 2,200 | Mint Margarita: Rs 350 | Delivery Charges: Rs 150",
+        custom_rules: "1. Free delivery on orders above Rs 2,500.\n2. Average delivery time 35-45 minutes.\n3. Always request house number, street, and live GPS location pin."
+    },
+    real_estate: {
+        id: "real_estate",
+        name: "Real Estate & Property",
+        business_name: "Apex Prime Properties & Builders",
+        welcome_greeting: "Assalam-o-Alaikum! Apex Prime Properties mein khush aamdeed! Main aap ka property investment advisor hoon. Kis society ya block mein residential ya commercial plot dekh rahe hain?",
+        system_prompt: "You are Apex Prime Real Estate Advisor. Provide accurate plot and house dimensions (5 Marla, 10 Marla, 1 Kanal), down payment details, quarterly installment breakdowns, and schedule on-site visits with Google Maps pin drops.",
+        products_services: "5 Marla Residential Plots, 10 Marla Luxury Villas, 1 Kanal Farmhouses, Commercial Boulevard Plazas, 3-Year Flexible Installment Files.",
+        verified_prices: "5 Marla Booking: Rs 650,000 down payment (Total 35 Lakh) | 10 Marla Plot: 75 Lakh | 1 Kanal Luxury House: 3.5 Crore",
+        custom_rules: "1. Site visits available Mon-Sun with prior 2-hour notice.\n2. All NOC approved societies (LDA/CDA/RDA approved).\n3. Zero hidden documentation charges."
+    },
+    wholesale_b2b: {
+        id: "wholesale_b2b",
+        name: "Wholesale / Alibaba B2B Catalog",
+        business_name: "Apex Bulk Global Wholesale Hub",
+        welcome_greeting: "Assalam-o-Alaikum! Apex Bulk B2B Catalog mein khush aamdeed. Minimum Order Quantity (MOQ) aur wholesale tier rates ke liye batayein konsi items chahiyein?",
+        system_prompt: "You are B2B Wholesale Account Manager. Quote tiered quantity discounts, calculate bulk carton shipping via TCS/Cargo, explain MOQ criteria (minimum 50 pieces), and draft proforma invoice summaries for business buyers.",
+        products_services: "Type-C Braided Cables (Carton of 200), High Capacity Power Banks (Box of 50), Wireless Earbuds (MOQ 100), Protective Phone Cases (Assorted).",
+        verified_prices: "Type-C Cable: Rs 120/pc (MOQ 200) | Power Bank 20000mAh: Rs 2,400/pc (MOQ 50) | TWS Earbuds: Rs 1,150/pc (MOQ 100)",
+        custom_rules: "1. Payment terms: 50% advance via company bank account, 50% before cargo dispatch.\n2. Official GST/NTN invoice provided with all bulk consignments.\n3. Cargo dispatch within 24 hours of payment verification."
+    },
+    clinic_booking: {
+        id: "clinic_booking",
+        name: "Clinic / Service Booking",
+        business_name: "Al-Shifa Healthcare & Dental Clinic",
+        welcome_greeting: "Assalam-o-Alaikum! Al-Shifa Clinic mein khush aamdeed. Main appointment coordinator hoon. Kis specialist doctor ke sath slot book karna chahte hain?",
+        system_prompt: "You are Al-Shifa Clinic's appointment coordinator. Guide patients regarding consultant doctor timings, consultation fees (Rs 2,000), appointment slot bookings, clinic location, and parking directions. Always advise urgent ER visits for emergency chest pain or acute trauma.",
+        products_services: "General Physician Consultation, Dental Scaling & Root Canal, Child Specialist (Pediatrician), Dermatologist Skin Care, Ultrasound & Laboratory Blood Tests.",
+        verified_prices: "Consultation Fee: Rs 2,000 | Dental Scaling: Rs 3,500 | Complete Blood Count (CBC): Rs 1,200 | Ultrasound: Rs 2,500",
+        custom_rules: "1. Clinic timings: Monday to Saturday 4:00 PM to 10:00 PM.\n2. Prior booking recommended to avoid wait times.\n3. Clinic address: Main Boulevard, Gulberg III, Lahore with free parking."
+    }
+};
+
+let currentSelectedTemplateId = 'mobile_electronics';
+
+function openBusinessTemplatesModal() {
+    const modal = document.getElementById('businessTemplatesStudioModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    selectBusinessTemplate(currentSelectedTemplateId);
+}
+window.openBusinessTemplatesModal = openBusinessTemplatesModal;
+
+function closeBusinessTemplatesModal() {
+    const modal = document.getElementById('businessTemplatesStudioModal');
+    if (modal) modal.style.display = 'none';
+}
+window.closeBusinessTemplatesModal = closeBusinessTemplatesModal;
+
+function selectBusinessTemplate(templateId) {
+    currentSelectedTemplateId = templateId;
+    const tpl = CACHED_BUSINESS_TEMPLATES[templateId];
+    if (!tpl) return;
+
+    // Update active tab buttons
+    const tabs = {
+        mobile_electronics: 'tabTplMobile',
+        restaurant_food: 'tabTplFood',
+        real_estate: 'tabTplRealEstate',
+        wholesale_b2b: 'tabTplB2B',
+        clinic_booking: 'tabTplClinic'
+    };
+    Object.keys(tabs).forEach(k => {
+        const btn = document.getElementById(tabs[k]);
+        if (btn) {
+            btn.className = (k === templateId) ? 'hud-btn active' : 'hud-btn outline';
+        }
+    });
+
+    const heading = document.getElementById('editorTemplateHeading');
+    if (heading) heading.textContent = `Editing: ${tpl.name}`;
+
+    const idInput = document.getElementById('tplEditorTemplateId');
+    if (idInput) idInput.value = tpl.id;
+
+    const nameInput = document.getElementById('tplEditorBusinessName');
+    if (nameInput) nameInput.value = tpl.business_name || '';
+
+    const greetInput = document.getElementById('tplEditorGreeting');
+    if (greetInput) greetInput.value = tpl.welcome_greeting || '';
+
+    const promptInput = document.getElementById('tplEditorSystemPrompt');
+    if (promptInput) promptInput.value = tpl.system_prompt || '';
+
+    const prodInput = document.getElementById('tplEditorProducts');
+    if (prodInput) prodInput.value = tpl.products_services || '';
+
+    const priceInput = document.getElementById('tplEditorPrices');
+    if (priceInput) priceInput.value = tpl.verified_prices || '';
+
+    const rulesInput = document.getElementById('tplEditorRules');
+    if (rulesInput) rulesInput.value = tpl.custom_rules || '';
+}
+window.selectBusinessTemplate = selectBusinessTemplate;
+
+function resetActiveBusinessTemplate() {
+    selectBusinessTemplate(currentSelectedTemplateId);
+    showToast('Template fields reset to original defaults.', 'info');
+}
+window.resetActiveBusinessTemplate = resetActiveBusinessTemplate;
+
+async function saveActiveBusinessTemplate() {
+    const btn = document.getElementById('btnSaveBusinessTemplate');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Saving & Applying...';
+    }
+
+    const payload = {
+        template_id: currentSelectedTemplateId,
+        business_name: (document.getElementById('tplEditorBusinessName') || {}).value || '',
+        welcome_greeting: (document.getElementById('tplEditorGreeting') || {}).value || '',
+        system_prompt: (document.getElementById('tplEditorSystemPrompt') || {}).value || '',
+        products_services: (document.getElementById('tplEditorProducts') || {}).value || '',
+        verified_prices: (document.getElementById('tplEditorPrices') || {}).value || '',
+        custom_rules: (document.getElementById('tplEditorRules') || {}).value || ''
+    };
+
+    // Update local cache
+    if (CACHED_BUSINESS_TEMPLATES[currentSelectedTemplateId]) {
+        Object.assign(CACHED_BUSINESS_TEMPLATES[currentSelectedTemplateId], payload);
+    }
+
+    try {
+        const res = await fetch('/api/whatsapp/business-template', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            showToast(`✅ ${data.message || 'Template applied!'} AI voice & replies are now active for this business.`, 'success');
+            closeBusinessTemplatesModal();
+        } else {
+            showToast(data.message || 'Template saved locally!', 'info');
+            closeBusinessTemplatesModal();
+        }
+    } catch (err) {
+        showToast('Template saved locally: ' + err.message, 'info');
+        closeBusinessTemplatesModal();
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '💾 Save & Apply to Active Workspace';
+        }
+    }
+}
+window.saveActiveBusinessTemplate = saveActiveBusinessTemplate;
+
+// ============================================================================
+// FEATURE 2: ORDER DELIVERY LOCATION MODAL CONTROLLER
+// ============================================================================
+function openSetOrderLocationModal() {
+    const modal = document.getElementById('setOrderLocationModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+
+    // Populate active contact name into label field
+    const labelInput = document.getElementById('orderLocLabel');
+    const headerName = document.getElementById('waActiveContactName');
+    if (labelInput && headerName && headerName.textContent.trim() && !headerName.textContent.includes('Select a Conversation')) {
+        labelInput.value = headerName.textContent.trim();
+    }
+}
+window.openSetOrderLocationModal = openSetOrderLocationModal;
+
+function closeSetOrderLocationModal() {
+    const modal = document.getElementById('setOrderLocationModal');
+    if (modal) modal.style.display = 'none';
+}
+window.closeSetOrderLocationModal = closeSetOrderLocationModal;
+
+function applyPresetLocation(lat, lng, label) {
+    const latIn = document.getElementById('orderLocLat');
+    const lngIn = document.getElementById('orderLocLng');
+    const lblIn = document.getElementById('orderLocLabel');
+    if (latIn) latIn.value = lat;
+    if (lngIn) lngIn.value = lng;
+    if (lblIn && !lblIn.value) lblIn.value = label;
+}
+window.applyPresetLocation = applyPresetLocation;
+
+function submitSetOrderLocation() {
+    const lat = parseFloat((document.getElementById('orderLocLat') || {}).value || 31.5204);
+    const lng = parseFloat((document.getElementById('orderLocLng') || {}).value || 74.3587);
+    const label = (document.getElementById('orderLocLabel') || {}).value || 'Customer';
+    const phone = (window.currentActiveContact && window.currentActiveContact.phone) || '';
+
+    addRadarMapPin(lat, lng, label, phone, null, 'On the Way');
+    closeSetOrderLocationModal();
+
+    const mapSection = document.getElementById('liveRadarMapSection');
+    if (mapSection) mapSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    showToast(`📍 Live moving pin set for ${label} at [${lat.toFixed(4)}, ${lng.toFixed(4)}]!`, 'success');
+}
+window.submitSetOrderLocation = submitSetOrderLocation;
+
+function toggleRadarMapSection() {
+    const map = document.getElementById('liveRadarMap');
+    if (!map) return;
+    const isHidden = map.style.display === 'none';
+    map.style.display = isHidden ? 'block' : 'none';
+    if (isHidden && typeof refreshLeafletRadarMap === 'function') {
+        refreshLeafletRadarMap();
+    }
+}
+window.toggleRadarMapSection = toggleRadarMapSection;
