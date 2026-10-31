@@ -3604,8 +3604,7 @@ def ai_voice_chat():
         try:
             ai_res = WhatsAppService.generate_ai_auto_response(
                 organization_id=org_id,
-                message_body=user_msg,
-                system_prompt=voice_call_system_prompt,
+                message_body=f"{user_msg}\n\n[Voice call context with {caller_name}]",
                 sender_name=caller_name,
                 sender_phone="voice_session"
             )
@@ -3629,8 +3628,11 @@ def ai_voice_chat():
         except Exception as p_err:
             logger.warning(f"[Voice Chat] Pollinations AI notice: {p_err}")
 
+    # Guaranteed conversational voice fallback
     if not reply_text:
-        return jsonify({"success": False, "error": "AI brain temporarily unavailable"}), 503
+        reply_text = f"Assalam-o-Alaikum! Haan ji {caller_name}, main sun raha hoon, batayein main aap ki kya madad kar sakta hoon?"
+        tts_text = f"السلام علیکم! ہاں جی {caller_name}، میں سن رہا ہوں، بتائیں میں آپ کی کیا مدد کر سکتا ہوں؟"
+        lang = "ur" 
 
     clean_reply = re.sub(r"[*_~`#>]", "", reply_text).strip()
     speech_to_synthesize = tts_text or clean_reply
