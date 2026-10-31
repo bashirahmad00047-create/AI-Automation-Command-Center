@@ -2417,18 +2417,22 @@ class WhatsAppService:
 
     @classmethod
     def get_auto_responder_config(cls, organization_id: Optional[str] = None) -> Dict[str, Any]:
-        """Retrieves AI Auto-Responder configuration for an organization."""
+        """Retrieves AI Auto-Responder configuration for an organization (default: Enabled/True)."""
         enabled_str = (
             cls._get_tenant_or_global_setting("AI_AUTO_REPLY_ENABLED", organization_id)
             or os.environ.get("AI_AUTO_REPLY_ENABLED")
         )
+        if enabled_str is None:
+            enabled = True
+        else:
+            enabled = str(enabled_str).strip().lower() not in ("false", "0", "no", "off")
+
         gemini_key = cls.get_gemini_api_key(organization_id=organization_id)
         gemini_model = cls.get_gemini_model_name(organization_id=organization_id)
         groq_key = cls.get_groq_api_key(organization_id=organization_id)
         has_gemini = bool(gemini_key)
         has_groq = bool(groq_key)
         has_ai = has_gemini or has_groq
-        enabled = has_ai or ((enabled_str or "").strip().lower() in ("true", "1", "yes", "on"))
 
         mode = cls._get_tenant_or_global_setting("AI_AUTO_REPLY_MODE", organization_id) or "smart_concierge"
         system_prompt = cls._get_tenant_or_global_setting("AI_SYSTEM_PROMPT", organization_id) or ""
@@ -2556,9 +2560,9 @@ class WhatsAppService:
 
     @classmethod
     def is_auto_reply_enabled(cls, organization_id: Optional[str] = None) -> bool:
-        """Returns True if AI Auto-Responder is enabled for this organization."""
+        """Returns True if AI Auto-Responder is enabled for this organization (defaults to True)."""
         conf = cls.get_auto_responder_config(organization_id=organization_id)
-        return conf.get("enabled", False)
+        return conf.get("enabled", True)
 
     @classmethod
     def get_gemini_api_key(cls, organization_id: Optional[str] = None) -> Optional[str]:

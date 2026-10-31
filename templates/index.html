@@ -899,7 +899,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                         <button type="button" class="hud-btn small active" id="btnViewWaWeb" onclick="setWhatsAppViewMode('web')" style="border: none; border-radius: 0; padding: 5px 12px; font-size: 11px;">💬 WhatsApp Web</button>
                         <button type="button" class="hud-btn small" id="btnViewWaClassic" onclick="setWhatsAppViewMode('classic')" style="border: none; border-radius: 0; padding: 5px 12px; font-size: 11px;">⚙️ Gateway &amp; Audit</button>
                     </div>
-                    <span class="status-pill blue" id="whatsappModeBadge">🧪 Simulation</span>
+                    <span class="status-pill green" id="whatsappModeBadge">● Live Production</span>
                     <button class="hud-btn outline small" onclick="loadWhatsAppDashboard()">🔄 Refresh</button>
                 </div>
             </div>
@@ -909,9 +909,9 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <span style="font-size: 1.4rem;">🧪</span>
                     <div>
-                        <strong id="whatsappBannerTitle" style="color: #00f0ff;">Simulation Mode Active</strong>
+                        <strong id="whatsappBannerTitle" style="color: #10b981;">Production WhatsApp Cloud Active</strong>
                         <div id="whatsappBannerDesc" style="color: var(--text-secondary); font-size: 0.82rem; margin-top: 2px;">
-                            Operating in local sandbox mode. Outbound dispatches are simulated and persisted to local logs. Webhooks verify locally without external Meta API calls.
+                            Operating in live production mode with Baileys Cloud Bridge on port 3001. Messages and AI replies process in real-time with zero Meta fees.
                         </div>
                     </div>
                 </div>
@@ -1095,9 +1095,9 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                         </div>
                         <div id="waActiveChatActions" class="hud-flex-row hud-gap-sm">
                             <div class="ai-auto-responder-pill" id="waHeaderAiToggle" onclick="toggleWhatsAppAiAutoResponder()" title="Toggle AI Auto-Responder for Active Workspace">
-                                <span class="ai-pill-dot" id="waHeaderAiDot"></span>
+                                <span class="ai-pill-dot" id="waHeaderAiDot" style="background: #34d399;"></span>
                                 <span>AI Auto-Responder</span>
-                                <span id="waHeaderAiStatusText" style="font-weight: 700; font-size: 10px;">OFF</span>
+                                <span id="waHeaderAiStatusText" style="font-weight: 700; font-size: 10px; color: #34d399;">ON</span>
                             </div>
                             <button type="button" class="wa-icon-btn" title="Simulate Inbound Voice Note" onclick="simulateInboundVoiceNote()" aria-label="Simulate Inbound Voice Note">
                                 <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
@@ -1184,14 +1184,14 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 <div class="hud-panel flex-1">
                     <div class="panel-header">
                         <h3>📱 GATEWAY CONFIGURATION</h3>
-                        <span id="waActiveProviderBadge" class="status-pill blue" style="font-size: 11px;">Simulation Mode</span>
+                        <span id="waActiveProviderBadge" class="status-pill green" style="font-size: 11px;">Baileys Cloud Bridge (Live)</span>
                     </div>
                     
                     <div style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 20px;">
                         <!-- Connection Status -->
                         <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;">
                             <span style="font-size: 0.82rem; color: var(--text-secondary);">WhatsApp Active Connection</span>
-                            <span id="waConnectionStatus"><span class="status-pill blue" style="font-size:0.75rem;">🧪 Simulation (Sandbox)</span></span>
+                            <span id="waConnectionStatus"><span class="status-pill green" style="font-size:0.75rem;">● Live Connected (Baileys Bridge)</span></span>
                         </div>
 
                         <!-- Business Phone / Green-API Instance ID -->
