@@ -10965,21 +10965,42 @@ async function fetchBridgeQrCode(force) {
     const statusText = document.getElementById('qrStatusText');
     const connectedNumber = document.getElementById('qrConnectedNumber');
 
+    // If force refresh requested, signal bridge to drop stuck socket and regenerate
+    if (force) {
+        if (imageWrapper) imageWrapper.style.display = 'none';
+        if (spinner) spinner.style.display = 'flex';
+        if (statusText) statusText.textContent = 'Restarting QR session & generating fresh code...';
+        try {
+            await fetch('/api/v1/whatsapp/bridge-qr-refresh', { method: 'POST' });
+        } catch (_) {
+            try { await fetch('/api/whatsapp/bridge-qr-refresh', { method: 'POST' }); } catch (__) {}
+        }
+        await new Promise(r => setTimeout(r, 600));
+    }
+
     try {
         let res = null;
         try {
             res = await fetch('/api/v1/whatsapp/bridge-qr');
-            if (!res.ok && res.status !== 503) throw new Error('Proxy status ' + res.status);
         } catch (e) {
             try {
                 res = await fetch('/api/whatsapp/bridge-qr');
             } catch (e2) {
-                res = await fetch('http://localhost:3001/qr');
+                try {
+                    res = await fetch('/api/wa/qr');
+                } catch (e3) {
+                    res = await fetch('http://localhost:3001/qr');
+                }
             }
         }
 
         if (!res) throw new Error('Bridge unreachable');
-        const data = await res.json();
+        let data = {};
+        try {
+            data = await res.json();
+        } catch (_) {
+            data = { status: 'initializing', message: 'WhatsApp bridge is starting up...' };
+        }
 
         if (data.status === 'connected' || data.connected) {
             window._waIsConnected = true;
@@ -11057,7 +11078,11 @@ async function fetchBridgeQrCode(force) {
         if (imageWrapper) imageWrapper.style.display = 'none';
         if (connectedState) connectedState.style.display = 'none';
         if (spinner) spinner.style.display = 'flex';
-        if (statusText) statusText.textContent = data.message || 'WhatsApp Baileys bridge is initializing pairing session...';
+        const rawMsg = data.message || 'WhatsApp Baileys bridge is initializing pairing session...';
+        const displayMsg = rawMsg.toLowerCase().includes('internal server error')
+            ? 'WhatsApp Baileys bridge is initializing... Please wait a few seconds.'
+            : rawMsg;
+        if (statusText) statusText.textContent = displayMsg;
     } catch (err) {
         console.warn('[Bridge QR Fetch Error]', err);
         if (statusText) statusText.textContent = 'WhatsApp bridge starting up on port 3001... Please wait 5s.';

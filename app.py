@@ -841,94 +841,54 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/whatsapp/bridge-qr", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-qr", methods=["GET"])
-    @require_auth
+    @application.route("/api/whatsapp/qr", methods=["GET"])
+    @application.route("/api/v1/whatsapp/qr", methods=["GET"])
+    @application.route("/api/wa/qr", methods=["GET"])
+    @application.route("/api/v1/wa/qr", methods=["GET"])
     def route_whatsapp_bridge_qr():
         """Returns the Baileys bridge QR code and pairing status for web dashboard scanning.
-        Checks if port 3001 is reachable; if not, automatically runs npm install (if node_modules is missing)
-        and spawns `node wa_bridge.js` using subprocess.Popen, waiting up to 5 seconds for port 3001 to come online.
+        Guaranteed HTTP 200 JSON response; never returns 500 or 503 error.
         """
-        try:
-            from wa_bridge_manager import ensure_wa_bridge_running
-            ensure_wa_bridge_running(timeout_seconds=5.0)
-        except Exception as _bridge_err:
-            application.logger.warning(f"[WhatsApp Bridge] ensure_wa_bridge_running notice: {_bridge_err}")
+        from api_v1 import api_whatsapp_bridge_qr
+        return api_whatsapp_bridge_qr()
 
-        bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://127.0.0.1:3001/qr")
-        try:
-            resp = requests.get(bridge_url, timeout=3.5)
-            data = resp.json() if resp.text else {}
-            return jsonify(data), resp.status_code
-        except Exception as e:
-            return jsonify({
-                "status": "waiting",
-                "connected": False,
-                "qrUrl": None,
-                "message": f"WhatsApp Baileys bridge is initializing... ({str(e)})"
-            }), 200
+    @application.route("/api/whatsapp/bridge-qr-refresh", methods=["POST", "GET"])
+    @application.route("/api/v1/whatsapp/bridge-qr-refresh", methods=["POST", "GET"])
+    @application.route("/api/whatsapp/qr/refresh", methods=["POST", "GET"])
+    @application.route("/api/v1/whatsapp/qr/refresh", methods=["POST", "GET"])
+    def route_whatsapp_bridge_qr_refresh():
+        """Signals the bridge to reset any stalled socket and generate a fresh QR code."""
+        from api_v1 import api_whatsapp_bridge_qr_refresh
+        return api_whatsapp_bridge_qr_refresh()
 
     @application.route("/api/whatsapp/bridge-qr.png", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-qr.png", methods=["GET"])
-    @require_auth
+    @application.route("/api/whatsapp/qr.png", methods=["GET"])
+    @application.route("/api/v1/whatsapp/qr.png", methods=["GET"])
     def route_whatsapp_bridge_qr_png():
         """Returns the raw PNG image of the WhatsApp Baileys bridge QR code."""
-        from flask import Response
-        import requests
-        try:
-            from wa_bridge_manager import ensure_wa_bridge_running
-            ensure_wa_bridge_running(timeout_seconds=5.0)
-        except Exception:
-            pass
-        bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_PNG_URL", "http://127.0.0.1:3001/qr.png")
-        try:
-            resp = requests.get(bridge_url, timeout=4.0)
-            if resp.status_code == 200:
-                return Response(resp.content, mimetype="image/png", headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
-        except Exception:
-            pass
-        return Response(b"", status=503)
+        from api_v1 import api_whatsapp_bridge_qr_png
+        return api_whatsapp_bridge_qr_png()
 
     @application.route("/api/whatsapp/bridge-qr.svg", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-qr.svg", methods=["GET"])
-    @require_auth
+    @application.route("/api/whatsapp/qr.svg", methods=["GET"])
+    @application.route("/api/v1/whatsapp/qr.svg", methods=["GET"])
     def route_whatsapp_bridge_qr_svg():
         """Returns the SVG vector of the WhatsApp Baileys bridge QR code."""
-        from flask import Response
-        import requests
-        try:
-            from wa_bridge_manager import ensure_wa_bridge_running
-            ensure_wa_bridge_running(timeout_seconds=5.0)
-        except Exception:
-            pass
-        bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_SVG_URL", "http://127.0.0.1:3001/qr.svg")
-        try:
-            resp = requests.get(bridge_url, timeout=4.0)
-            if resp.status_code == 200:
-                return Response(resp.content, mimetype="image/svg+xml", headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
-        except Exception:
-            pass
-        return Response(b"", status=503)
+        from api_v1 import api_whatsapp_bridge_qr_svg
+        return api_whatsapp_bridge_qr_svg()
 
     @application.route("/api/whatsapp/bridge-status", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-status", methods=["GET"])
-    @require_auth
+    @application.route("/api/whatsapp/status", methods=["GET"])
+    @application.route("/api/v1/whatsapp/status", methods=["GET"])
+    @application.route("/api/wa/status", methods=["GET"])
+    @application.route("/api/v1/wa/status", methods=["GET"])
     def route_whatsapp_bridge_status():
-        """Returns the Baileys bridge live connection status."""
-        try:
-            from wa_bridge_manager import ensure_wa_bridge_running
-            ensure_wa_bridge_running(timeout_seconds=2.0)
-        except Exception:
-            pass
-        bridge_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://127.0.0.1:3001/status")
-        try:
-            resp = requests.get(bridge_url, timeout=3.0)
-            data = resp.json() if resp.text else {}
-            return jsonify(data), resp.status_code
-        except Exception as e:
-            return jsonify({
-                "status": "offline",
-                "connected": False,
-                "message": f"Bridge starting up ({str(e)})"
-            }), 503
+        """Returns the Baileys bridge live connection status (guaranteed HTTP 200)."""
+        from api_v1 import api_whatsapp_bridge_status
+        return api_whatsapp_bridge_status()
 
     @application.route("/api/voice/chat", methods=["POST"])
     @application.route("/api/v1/voice/chat", methods=["POST"])

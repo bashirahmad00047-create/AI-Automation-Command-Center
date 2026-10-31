@@ -249,6 +249,46 @@ def start_wa_session_auto_backup(root_dir: str = None, app=None):
     logger.info("[WA Bridge] Background WhatsApp session backup daemon started.")
 
 
+_auto_heal_started = False
+_auto_heal_lock = threading.Lock()
+
+
+def start_bridge_auto_heal_daemon(app=None, check_interval: float = 6.0):
+    """Spawns an autonomous supervisor watchdog daemon that continuously monitors
+    wa_bridge.js on port 3001. If the bridge process crashes, exits, or stops responding,
+    it automatically resurrects and restarts the bridge subprocess.
+    """
+    global _auto_heal_started
+    with _auto_heal_lock:
+        if _auto_heal_started:
+            return
+        _auto_heal_started = True
+
+    def _watchdog_loop():
+        # Initial grace period while main application boots
+        time.sleep(3.0)
+        logger.info("[WA Bridge Auto-Heal] Supervisor watchdog daemon active (monitoring port 3001 every 6s).")
+        consecutive_offline = 0
+        while True:
+            try:
+                time.sleep(check_interval)
+                online = is_port_reachable("127.0.0.1", 3001, timeout=0.6)
+                if not online:
+                    consecutive_offline += 1
+                    logger.warning(
+                        f"[WA Bridge Auto-Heal] Port 3001 is offline (detection #{consecutive_offline}). "
+                        "Resurrecting WhatsApp bridge subprocess..."
+                    )
+                    ensure_wa_bridge_running(timeout_seconds=5.0, app=app)
+                else:
+                    consecutive_offline = 0
+            except Exception as e:
+                logger.warning(f"[WA Bridge Auto-Heal] Watchdog cycle warning: {e}")
+
+    t = threading.Thread(target=_watchdog_loop, daemon=True, name="WABridgeAutoHealWatchdog")
+    t.start()
+
+
 def is_port_reachable(host: str = "127.0.0.1", port: int = 3001, timeout: float = 0.5) -> bool:
     """Checks whether the specified TCP host and port are accepting connections."""
     try:
@@ -260,13 +300,13 @@ def is_port_reachable(host: str = "127.0.0.1", port: int = 3001, timeout: float 
 
 
 def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app=None) -> bool:
-    """Guarantees session restoration, background backup thread execution,
-    and checks if port 3001 is reachable; if not, spawns `node wa_bridge.js`.
+    """Guarantees session restoration, background backup thread execution, auto-heal watchdog
+    supervisor, and checks if port 3001 is reachable; if not, spawns `node wa_bridge.js`.
     """
     global _bridge_proc
     root_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # 1. Unconditionally ensure DB session restore and start background backup thread
+    # 1. Unconditionally ensure DB session restore, start backup thread, and start auto-heal watchdog
     try:
         restore_wa_session_from_db(root_dir, app=app)
     except Exception as r_err:
@@ -276,6 +316,11 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app
         start_wa_session_auto_backup(root_dir, app=app)
     except Exception as b_err:
         logger.warning(f"[WA Bridge] start_wa_session_auto_backup notice: {b_err}")
+
+    try:
+        start_bridge_auto_heal_daemon(app=app)
+    except Exception as h_err:
+        logger.warning(f"[WA Bridge] start_bridge_auto_heal_daemon notice: {h_err}")
 
     # 2. Check if port is already responsive
     if is_port_reachable("127.0.0.1", port, timeout=0.3):
@@ -311,13 +356,23 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app
             except Exception as setup_err:
                 logger.warning(f"[WA Bridge] install_node note: {setup_err}")
 
-        # 4. Locate Node executable
-        node_bin = (
-            shutil.which("node")
-            or os.path.join(os.path.dirname(sys.executable), "node")
-            or os.path.join(root_dir, ".node", "bin", "node")
-            or "node"
-        )
+        # 4. Locate Node executable robustly across environments (Windows, Render Linux, Docker)
+        node_candidates = [
+            shutil.which("node"),
+            "/usr/bin/node",
+            "/usr/local/bin/node",
+            "/opt/render/project/src/.node/bin/node",
+            os.path.join(os.path.dirname(sys.executable), "node"),
+            os.path.join(root_dir, ".node", "bin", "node"),
+            os.path.expanduser("~/.nvm/versions/node/v20.0.0/bin/node"),
+            os.path.expanduser("~/.nvm/versions/node/v18.0.0/bin/node"),
+            "node"
+        ]
+        node_bin = "node"
+        for candidate in node_candidates:
+            if candidate and (os.path.exists(candidate) if candidate != "node" else True):
+                node_bin = candidate
+                break
 
         env = os.environ.copy()
         env["PORT"] = str(port)
