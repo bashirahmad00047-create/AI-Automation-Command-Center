@@ -4538,7 +4538,33 @@ class WhatsAppService:
         if order_grounding:
             custom_prompt = f"{custom_prompt}\n\n{order_grounding}" if custom_prompt else order_grounding
 
-        # 1. Direct Gemini AI Generation
+        # 1. Try Groq First (Ultra-fast Llama 3 - Zero Noticeable Latency ~250ms)
+        groq_reply = cls.call_groq_ai(
+            message_body,
+            system_prompt=custom_prompt,
+            organization_id=organization_id,
+            customer_name=sender_name,
+            conversation_history=history
+        )
+        if groq_reply:
+            return {
+                "reply_body": groq_reply.strip(),
+                "intent": intent,
+                "urgency": urgency,
+                "lead_score": lead_score,
+                "route_department": route_dept,
+                "entities": entities,
+                "mode": "groq_ai",
+                "detected_language": detected_lang["language"],
+                "detected_script": detected_lang["script"],
+                "language_format": lang_fmt,
+                "is_gemini": False,
+                "is_groq": True,
+                "is_ai_generated": True,
+                "confidence": 98
+            }
+
+        # 2. Fallback to Google Gemini API (gemini-2.5-flash / flash-lite)
         ai_reply = cls.call_gemini_ai(
             message_body,
             system_prompt=custom_prompt,
@@ -4562,32 +4588,6 @@ class WhatsAppService:
                 "is_groq": False,
                 "is_ai_generated": True,
                 "confidence": 98
-            }
-
-        # 2. Secondary Groq AI Generation (High-speed LPU fallback)
-        groq_reply = cls.call_groq_ai(
-            message_body,
-            system_prompt=custom_prompt,
-            organization_id=organization_id,
-            customer_name=sender_name,
-            conversation_history=history
-        )
-        if groq_reply:
-            return {
-                "reply_body": groq_reply.strip(),
-                "intent": intent,
-                "urgency": urgency,
-                "lead_score": lead_score,
-                "route_department": route_dept,
-                "entities": entities,
-                "mode": "groq_ai",
-                "detected_language": detected_lang["language"],
-                "detected_script": detected_lang["script"],
-                "language_format": lang_fmt,
-                "is_gemini": False,
-                "is_groq": True,
-                "is_ai_generated": True,
-                "confidence": 96
             }
 
         # 3. Tertiary OpenAI Generation
@@ -9312,3 +9312,73 @@ class WhatsAppService:
 # Expose aliases on WhatsAppService class
 WhatsAppService._tune_conversational_tts_script = WhatsAppService.preprocess_text_for_human_speech
 WhatsAppService._get_tenant_or_global_knowledge_base = WhatsAppService.get_verified_business_knowledge_base
+
+
+# ==============================================================================
+# MULTI-LLM ROTATING & FALLBACK POOL (GROQ + GEMINI + ULTIMATE BACKUP)
+# ==============================================================================
+def get_ai_smart_reply(prompt_text: str, sender_number: Optional[str] = None, organization_id: Optional[str] = None) -> str:
+    """Multi-LLM Rotating & Fallback Pool:
+    1. Try Groq First (Ultra-fast Llama 3.3 70B - Zero Noticeable Latency)
+    2. Fallback to Google Gemini API (gemini-2.5-flash / flash-lite)
+    3. Ultimate Fallback (Pollinations AI + Smart Concierge Knowledge Base)
+    """
+    # 1. Try Groq First (Ultra-fast Llama 3 - Zero Noticeable Latency)
+    try:
+        groq_api_key = os.environ.get("GROQ_API_KEY") or WhatsAppService.get_groq_api_key(organization_id=organization_id)
+        if groq_api_key:
+            try:
+                from groq import Groq
+                client = Groq(api_key=groq_api_key)
+                completion = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt_text}],
+                    temperature=0.7,
+                    max_tokens=300
+                )
+                reply = completion.choices[0].message.content
+                if reply and str(reply).strip():
+                    return str(reply).strip()
+            except Exception as e:
+                logger.debug(f"Groq SDK fallback to REST: {e}")
+            groq_reply = WhatsAppService.call_groq_ai(prompt_text, organization_id=organization_id)
+            if groq_reply and str(groq_reply).strip():
+                return str(groq_reply).strip()
+    except Exception as e:
+        logger.warning(f"Groq API limit or error, switching to fallback: {e}")
+
+    # 2. Fallback to Google Gemini API
+    try:
+        gemini_api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or WhatsAppService.get_gemini_api_key(organization_id=organization_id)
+        if gemini_api_key:
+            try:
+                from google import genai
+                client = genai.Client(api_key=gemini_api_key)
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt_text,
+                )
+                if response and response.text and str(response.text).strip():
+                    return str(response.text).strip()
+            except Exception as g_err:
+                logger.debug(f"google.genai SDK notice: {g_err}")
+            gemini_reply = WhatsAppService.call_gemini_ai(prompt_text, organization_id=organization_id)
+            if gemini_reply and str(gemini_reply).strip():
+                return str(gemini_reply).strip()
+    except Exception as e:
+        logger.warning(f"Gemini API limit or error, switching to backup: {e}")
+
+    # 3. Ultimate Fallback (If all limits are exhausted)
+    try:
+        poll_res = WhatsAppService.call_pollinations_ai(prompt_text, organization_id=organization_id)
+        if poll_res:
+            res_str = poll_res.display_text if hasattr(poll_res, "display_text") else str(poll_res)
+            if res_str and res_str.strip():
+                return res_str.strip()
+    except Exception as p_err:
+        logger.debug(f"Pollinations AI fallback notice: {p_err}")
+
+    b_name = WhatsAppService.get_tenant_business_name(organization_id=organization_id)
+    return f"Assalam-o-Alaikum! {b_name} mein khush aamdeed. Main aap ka paigham note kar chuka hoon aur hamari team foran aap se rabta kare gi. Shukriya!"
+
+WhatsAppService.get_ai_smart_reply = staticmethod(get_ai_smart_reply)
