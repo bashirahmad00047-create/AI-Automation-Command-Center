@@ -481,22 +481,31 @@ async function pollTelemetry(force = false) {
         updateNavBadge('tabIncidentCount', stats.open_alerts || 0);
 
         const telem = data.telemetry || {};
-        document.getElementById('statUptime').textContent = telem.uptime_formatted || '0s';
+        const uptimeEl = document.getElementById('statUptime');
+        if (uptimeEl) uptimeEl.textContent = telem.uptime_formatted || '0s';
 
         const cpu = Math.round(telem.cpu_percent || 0);
         const ram = Math.round(telem.memory_percent || 0);
         const disk = Math.round(telem.disk_percent || 0);
 
-        document.getElementById('telemCpuVal').textContent = `${cpu}%`;
-        document.getElementById('telemCpuBar').style.width = `${Math.min(100, cpu)}%`;
+        const cpuVal = document.getElementById('telemCpuVal');
+        if (cpuVal) cpuVal.textContent = `${cpu}%`;
+        const cpuBar = document.getElementById('telemCpuBar');
+        if (cpuBar) cpuBar.style.width = `${Math.min(100, cpu)}%`;
 
-        document.getElementById('telemRamVal').textContent = `${ram}%`;
-        document.getElementById('telemRamBar').style.width = `${Math.min(100, ram)}%`;
-        document.getElementById('telemRamGb').textContent = `${telem.memory_used_gb || 0} / ${telem.memory_total_gb || 0} GB`;
+        const ramVal = document.getElementById('telemRamVal');
+        if (ramVal) ramVal.textContent = `${ram}%`;
+        const ramBar = document.getElementById('telemRamBar');
+        if (ramBar) ramBar.style.width = `${Math.min(100, ram)}%`;
+        const ramGb = document.getElementById('telemRamGb');
+        if (ramGb) ramGb.textContent = `${telem.memory_used_gb || 0} / ${telem.memory_total_gb || 0} GB`;
 
-        document.getElementById('telemDiskVal').textContent = `${disk}%`;
-        document.getElementById('telemDiskBar').style.width = `${Math.min(100, disk)}%`;
-        document.getElementById('telemDiskGb').textContent = `${telem.disk_used_gb || 0} / ${telem.disk_total_gb || 0} GB`;
+        const diskVal = document.getElementById('telemDiskVal');
+        if (diskVal) diskVal.textContent = `${disk}%`;
+        const diskBar = document.getElementById('telemDiskBar');
+        if (diskBar) diskBar.style.width = `${Math.min(100, disk)}%`;
+        const diskGb = document.getElementById('telemDiskGb');
+        if (diskGb) diskGb.textContent = `${telem.disk_used_gb || 0} / ${telem.disk_total_gb || 0} GB`;
     } catch (e) {
         telemetryFailures++;
         console.debug('Failed to poll telemetry (backing off):', e?.message || e);

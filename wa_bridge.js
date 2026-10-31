@@ -1324,88 +1324,38 @@ if (!text) text = '[Voice note]';
             }
           };
 
-          // Fail-Safe Webhook Dispatch with up to 2 Auto-Retries
-          const dispatchToPythonWithRetry = async (combinedPayload) => {
+          // Direct, Immediate Webhook Dispatch (Zero-Drop Guarantee & Dynamic AI Reply)
+          (async () => {
             let resData = null;
-            for (let attempt = 1; attempt <= 3; attempt++) {
+            for (let attempt = 1; attempt <= 2; attempt++) {
               try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 16000);
+                const timeoutId = setTimeout(() => controller.abort(), 28000);
                 const resp = await fetch(PYTHON_WEBHOOK_URL, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'User-Agent': 'WhatsApp-Baileys-Bridge/1.0' },
-                  body: JSON.stringify(combinedPayload),
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'WhatsApp-Baileys-Bridge/1.0'
+                  },
+                  body: JSON.stringify(payload),
                   signal: controller.signal
                 });
                 clearTimeout(timeoutId);
+                console.log(`[Webhook Forward] Dispatched to ${PYTHON_WEBHOOK_URL} (attempt ${attempt}) -> HTTP ${resp.status}`);
                 if (resp.ok) {
                   resData = await resp.json().catch(() => null);
                   if (resData) break;
                 }
               } catch (e) {
                 console.warn(`[Webhook Forward Warning] Attempt ${attempt} failed: ${e.message}`);
-                if (attempt < 3) await new Promise(r => setTimeout(r, 1200));
+                if (attempt < 2) await new Promise(r => setTimeout(r, 1200));
               }
             }
-            return resData;
-          };
 
-          // If incoming message is audio/voice or image, forward immediately without combining
-          if (isAudio || isVoice || isImage) {
-            (async () => {
-              const resData = await dispatchToPythonWithRetry(payload);
-              if (resData) await deliverAiResponse(resData, targetJid);
-            })().catch(err => console.error('[Voice Webhook Dispatch Error]:', err.message));
-          } else {
-            // Text Message: Per-User Smart Queue with 2.5s accumulator
-            if (!userMessageQueues.has(remoteJid)) {
-              userMessageQueues.set(remoteJid, { timer: null, queue: [], isProcessing: false, targetJid });
+            if (resData && (resData.reply || resData.audio_base64)) {
+              await deliverAiResponse(resData, targetJid);
             }
-            const q = userMessageQueues.get(remoteJid);
-            q.targetJid = targetJid;
-            q.queue.push(payload);
-
-            const triggerQueueProcess = () => {
-              if (q.isProcessing || q.queue.length === 0) return;
-              q.isProcessing = true;
-              const batch = q.queue.splice(0, q.queue.length);
-
-              (async () => {
-                // Merge texts from multiple messages into one comprehensive prompt
-                const mergedText = batch.map(b => b.message || b.body).filter(Boolean).join('\n');
-                const primaryPayload = { ...batch[batch.length - 1], message: mergedText, body: mergedText };
-
-                console.log(`[Smart Queue] Merged ${batch.length} message(s) from ${remoteJid}: "${mergedText}"`);
-
-                let resData = await dispatchToPythonWithRetry(primaryPayload);
-                if (!resData) {
-                  // Fail-safe polite fallback
-                  resData = {
-                    reply: "Jee bilkul, aapka paigham receive ho chuka hai. Main abhi aapki poori madad karta hoon, baraye meharbani aik lamha intezar karein!",
-                    send_as_voice: false
-                  };
-                }
-
-                await deliverAiResponse(resData, q.targetJid || targetJid);
-                q.isProcessing = false;
-
-                // If new messages arrived while processing, process next batch immediately
-                if (q.queue.length > 0) {
-                  triggerQueueProcess();
-                }
-              })().catch(qErr => {
-                console.error('[Smart Queue Error]:', qErr.message);
-                q.isProcessing = false;
-              });
-            };
-
-            // 2.5 second debounce timer to combine consecutive messages
-            if (q.timer) clearTimeout(q.timer);
-            q.timer = setTimeout(() => {
-              q.timer = null;
-              triggerQueueProcess();
-            }, 2500);
-          }
+          })().catch(err => console.error('[Webhook Ingress Error]:', err.message));
         }
       } catch (upsertErr) {
         console.error('[WhatsApp Bridge] messages.upsert processing error:', upsertErr.message);
