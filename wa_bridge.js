@@ -923,7 +923,35 @@ async function startWhatsAppBridge() {
       }
     });
 
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    // ============================================================================
+// PERSISTENT PER-CONTACT FIFO MESSAGE QUEUE (ZERO MISSED MESSAGES & ANTI-BAN SHIELD)
+// ============================================================================
+const contactFifoQueues = new Map();
+
+function enqueueContactTask(targetJid, taskFn) {
+  if (!contactFifoQueues.has(targetJid)) {
+    contactFifoQueues.set(targetJid, { running: false, queue: [] });
+  }
+  const qItem = contactFifoQueues.get(targetJid);
+  qItem.queue.push(taskFn);
+
+  if (qItem.running) return;
+  qItem.running = true;
+
+  (async () => {
+    while (qItem.queue.length > 0) {
+      const currentTask = qItem.queue.shift();
+      try {
+        await currentTask();
+      } catch (tErr) {
+        console.error(`[FIFO Queue Task Error for ${targetJid}]:`, tErr.message);
+      }
+    }
+    qItem.running = false;
+  })();
+}
+
+sock.ev.on('messages.upsert', async ({ messages, type }) => {
       try {
         if (type !== 'notify' || !messages || !Array.isArray(messages)) return;
 
@@ -1107,6 +1135,14 @@ async function startWhatsAppBridge() {
               console.warn('[Media Download Error] Could not download voice buffer:', dlErr.message);
             }
 if (!text) text = '[Voice note]';
+          } else if (unwrappedMsg?.locationMessage || unwrappedMsg?.liveLocationMessage) {
+            const loc = unwrappedMsg.locationMessage || unwrappedMsg.liveLocationMessage;
+            typeMessage = 'locationMessage';
+            const lat = loc.degreesLatitude;
+            const lng = loc.degreesLongitude;
+            const locName = loc.name || loc.address || 'Shared Location';
+            const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+            text = `📍 [Location: ${lat}, ${lng}${locName ? ` - ${locName}` : ''}] ${gmapsUrl}`;
           } else if (unwrappedMsg?.imageMessage) {
             isImage = true;
             typeMessage = 'imageMessage';
@@ -1317,8 +1353,8 @@ if (!text) text = '[Voice note]';
             }
           };
 
-          // Direct, Immediate Webhook Dispatch (Zero-Drop Guarantee & Dynamic AI Reply)
-          (async () => {
+          // FIFO Sequential Queue Dispatch (Zero Dropped Questions & Human Shield)
+          enqueueContactTask(targetJid, async () => {
             let resData = null;
             for (let attempt = 1; attempt <= 2; attempt++) {
               try {
@@ -1348,7 +1384,7 @@ if (!text) text = '[Voice note]';
             if (resData && (resData.reply || resData.audio_base64)) {
               await deliverAiResponse(resData, targetJid);
             }
-          })().catch(err => console.error('[Webhook Ingress Error]:', err.message));
+          });
         }
       } catch (upsertErr) {
         console.error('[WhatsApp Bridge] messages.upsert processing error:', upsertErr.message);

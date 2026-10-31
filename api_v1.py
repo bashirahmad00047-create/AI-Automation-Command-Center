@@ -3848,6 +3848,60 @@ def ai_outbound_voice_call():
     }), 200
 
 
+@api_v1.route("/meta/webhook", methods=["GET"])
+@api_v1.route("/api/meta/webhook", methods=["GET"])
+def meta_webhook_verification():
+    """Official Meta Cloud API Webhook Subscription Verification (hub.challenge)."""
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    org_id = request.args.get("org_id")
+    from whatsapp_service import WhatsAppService
+    valid_challenge = WhatsAppService.verify_webhook_challenge(mode, token, challenge, organization_id=org_id)
+    if valid_challenge is not None:
+        return valid_challenge, 200, {"Content-Type": "text/plain"}
+    return jsonify({"error": "Forbidden: invalid verification token or mode"}), 403
+
+
+@api_v1.route("/meta/webhook", methods=["POST"])
+@api_v1.route("/api/meta/webhook", methods=["POST"])
+def meta_webhook_ingress():
+    """Official Meta Cloud API Webhook Ingress Gateway."""
+    return whatsapp_webhook_ingress()
+
+
+@api_v1.route("/whatsapp/engine-status", methods=["GET"])
+def api_whatsapp_engine_status():
+    """Returns active engine status for Hybrid Switcher (Baileys vs Meta Cloud API)."""
+    from models import SystemSetting
+    active_engine = SystemSetting.get_val("WHATSAPP_ACTIVE_ENGINE", "baileys")
+    has_meta = bool(os.environ.get("META_WA_TOKEN") or SystemSetting.get_val("META_WA_TOKEN"))
+    return jsonify({
+        "success": True,
+        "active_engine": active_engine,
+        "baileys_available": True,
+        "meta_cloud_available": has_meta,
+        "meta_verify_token": os.environ.get("META_VERIFY_TOKEN", "opsflow_whatsapp_verify_2026"),
+        "meta_webhook_url": f"{request.host_url.rstrip('/')}/api/meta/webhook"
+    }), 200
+
+
+@api_v1.route("/whatsapp/engine-switch", methods=["POST"])
+def api_whatsapp_engine_switch():
+    """Switches active WhatsApp engine between Baileys Bridge and Meta Cloud API."""
+    data = request.get_json(silent=True) or {}
+    new_engine = data.get("engine") or data.get("mode", "baileys")
+    if new_engine not in ("baileys", "meta"):
+        return jsonify({"success": False, "error": "Invalid engine mode. Choose 'baileys' or 'meta'."}), 400
+    from models import SystemSetting
+    SystemSetting.set_val("WHATSAPP_ACTIVE_ENGINE", new_engine)
+    return jsonify({
+        "success": True,
+        "active_engine": new_engine,
+        "message": f"Switched WhatsApp Engine to {new_engine.upper()}."
+    }), 200
+
+
 @api_v1.route("/webhooks/whatsapp", methods=["GET"])
 def whatsapp_webhook_verification():
     """Meta Cloud API Webhook Subscription Verification (hub.mode, hub.verify_token, hub.challenge)."""
