@@ -216,3 +216,51 @@ def test_conversational_memory_default_limit(app):
         import inspect
         sig = inspect.signature(WhatsAppService.get_conversation_history)
         assert sig.parameters["limit"].default == 10
+
+
+def test_whatsapp_conversations_endpoint(client):
+    """GET /api/whatsapp/conversations returns live conversations grouped by partner."""
+    res = client.get("/api/whatsapp/conversations")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert "conversations" in data
+
+def test_whatsapp_contacts_endpoint(client):
+    """GET /api/whatsapp/contacts returns 1-on-1 contact list."""
+    res = client.get("/api/whatsapp/contacts")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert "contacts" in data
+
+def test_whatsapp_groups_endpoint(client):
+    """GET /api/whatsapp/groups returns group chats with AI toggle status."""
+    res = client.get("/api/whatsapp/groups")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert "groups" in data
+
+def test_whatsapp_contacts_create_endpoint(client):
+    """POST /api/whatsapp/contacts/create saves contact and seeds chat."""
+    res = client.post("/api/whatsapp/contacts/create", json={
+        "phone": "923119988776",
+        "name": "Zubair Hashmi"
+    })
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert data["contact"]["phone"] == "923119988776"
+
+def test_whatsapp_groups_create_endpoint(client):
+    """POST /api/whatsapp/groups/create creates a real WhatsApp group."""
+    res = client.post("/api/whatsapp/groups/create", json={
+        "subject": "BashFlow VIP Pakistan",
+        "participants": ["923001234567"]
+    })
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert "group_jid" in data
+    assert "@g.us" in data["group_jid"]
