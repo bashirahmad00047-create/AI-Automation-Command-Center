@@ -879,6 +879,15 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_whatsapp_bridge_qr_svg
         return api_whatsapp_bridge_qr_svg()
 
+    @application.route("/api/whatsapp/pairing-code", methods=["POST", "GET"])
+    @application.route("/api/v1/whatsapp/pairing-code", methods=["POST", "GET"])
+    @application.route("/api/wa/pairing-code", methods=["POST", "GET"])
+    @application.route("/api/v1/wa/pairing-code", methods=["POST", "GET"])
+    def route_whatsapp_pairing_code():
+        """Generates an 8-character official WhatsApp Web pairing code."""
+        from api_v1 import api_whatsapp_pairing_code
+        return api_whatsapp_pairing_code()
+
     @application.route("/api/whatsapp/bridge-status", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-status", methods=["GET"])
     @application.route("/api/whatsapp/status", methods=["GET"])

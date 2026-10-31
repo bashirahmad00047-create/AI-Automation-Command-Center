@@ -1024,6 +1024,8 @@ class WhatsAppMessage(db.Model):
             "is_ai_generated": is_ai_generated,
             "response_source": response_source,
             "ai_intent": ai_intent,
+            "is_group": bool((self.sender and "@g.us" in str(self.sender)) or (self.recipient and "@g.us" in str(self.recipient))),
+            "chat_type": "group" if bool((self.sender and "@g.us" in str(self.sender)) or (self.recipient and "@g.us" in str(self.recipient))) else "individual",
             "status": self.status,
             "execution_id": self.execution_id,
             "error_message": self.error_message,

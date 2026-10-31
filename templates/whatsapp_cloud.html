@@ -197,10 +197,27 @@
                     </div>
 
                     <!-- Search / Filter Bar -->
-                    <div style="padding: 8px 12px; background: #111b21; border-bottom: 1px solid #202c33;">
+                    <div style="padding: 8px 12px 4px 12px; background: #111b21; border-bottom: 1px solid #202c33;">
                         <div style="background: #202c33; border-radius: 8px; display: flex; align-items: center; padding: 6px 12px; gap: 8px;">
                             <span style="color: #8696a0; font-size: 13px;">🔍</span>
                             <input type="text" id="waChatSearchInput" placeholder="Search conversations or contacts..." oninput="handleWhatsAppChatSearch(this.value)" style="background: transparent; border: none; outline: none; color: #e9edef; font-size: 12.5px; width: 100%;">
+                        </div>
+                    </div>
+
+                    <!-- WhatsApp Web Chat Filters (All | Unread | Contacts | Groups) -->
+                    <div style="padding: 6px 12px 8px 12px; background: #111b21; border-bottom: 1px solid #202c33; display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; align-items: center; gap: 6px; overflow-x: auto;" class="wa-filter-chips-bar">
+                            <button type="button" class="wa-filter-chip active" id="waChipAll" onclick="setWaChatFilter('all')">All</button>
+                            <button type="button" class="wa-filter-chip" id="waChipUnread" onclick="setWaChatFilter('unread')">Unread</button>
+                            <button type="button" class="wa-filter-chip" id="waChipContacts" onclick="setWaChatFilter('contacts')">Contacts</button>
+                            <button type="button" class="wa-filter-chip" id="waChipGroups" onclick="setWaChatFilter('groups')">Groups</button>
+                        </div>
+                        <div style="display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #8696a0; padding: 2px 2px 0 2px;">
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none;">
+                                <input type="checkbox" id="waHideGroupsToggle" checked onchange="toggleHideGroupsFromAll(this.checked)" style="accent-color: #00a884; width: 13px; height: 13px; cursor: pointer;">
+                                <span>Hide Groups from "All" tab</span>
+                            </label>
+                            <span id="waFilterSummary" style="color: #00a884; font-weight: 600;">0 chats</span>
                         </div>
                     </div>
 
@@ -516,60 +533,185 @@
         </div>
     </div>
 
-    <!-- LINK WHATSAPP QR MODAL (BAILEYS BRIDGE) -->
-    <div class="hud-modal-backdrop" id="linkWhatsAppQrModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); z-index: 10060; align-items: center; justify-content: center;">
-        <div class="hud-modal-content" style="background: #0f172a; border: 1px solid #334155; border-radius: 16px; width: 92%; max-width: 480px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6); color: #f8fafc;">
-            <div style="padding: 16px 20px; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; background: #1e293b;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="width: 32px; height: 32px; border-radius: 50%; background: #10b981; display: flex; align-items: center; justify-content: center; font-size: 16px;">
+        <!-- LINK WHATSAPP QR & PHONE PAIRING MODAL (BAILEYS BRIDGE) -->
+    <div class="hud-modal-backdrop" id="linkWhatsAppQrModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(10px); z-index: 10060; align-items: center; justify-content: center;">
+        <div class="hud-modal-content" style="background: #111b21; border: 1px solid #222e35; border-radius: 16px; width: 95%; max-width: 800px; overflow: hidden; box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.85); color: #e9edef;">
+            <!-- Modal Header -->
+            <div style="padding: 16px 24px; border-bottom: 1px solid #202c33; display: flex; justify-content: space-between; align-items: center; background: #202c33;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="width: 36px; height: 36px; border-radius: 50%; background: #00a884; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #111b21;">
                         📱
                     </div>
                     <div>
-                        <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff;">Link WhatsApp Device</h3>
-                        <span style="font-size: 11px; color: #34d399;" id="qrModalSubtitle">● Live Baileys Cloud Bridge</span>
+                        <h3 style="margin: 0; font-size: 16.5px; font-weight: 700; color: #fff;">Use WhatsApp on your computer</h3>
+                        <span style="font-size: 11.5px; color: #00a884;" id="qrModalSubtitle">● Live Baileys Cloud Bridge</span>
                     </div>
                 </div>
-                <button type="button" onclick="closeLinkWhatsAppQrModal()" style="background: none; border: none; font-size: 20px; color: #94a3b8; cursor: pointer;">✕</button>
+                <button type="button" onclick="closeLinkWhatsAppQrModal()" style="background: none; border: none; font-size: 22px; color: #8696a0; cursor: pointer; padding: 4px; line-height: 1;">✕</button>
             </div>
-            
-            <div style="padding: 24px; text-align: center;">
-                <div id="qrLoadingSpinner" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 260px;">
-                    <div style="width: 44px; height: 44px; border: 4px solid #334155; border-top-color: #10b981; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-                    <p style="margin-top: 16px; font-size: 13px; color: #94a3b8;" id="qrStatusText">Connecting to WhatsApp Baileys bridge...</p>
-                </div>
 
-                <div id="qrImageWrapper" style="display: none;">
-                    <div style="background: #ffffff; padding: 12px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.4); margin-bottom: 14px; min-width: 220px; min-height: 220px; max-width: 220px;">
-                        <img id="bridgeQrImage" src="" alt="WhatsApp Link QR Code" style="max-width: 220px; width: 220px; height: 220px; display: block; object-fit: contain; margin: 0 auto;" />
-                        <div id="bridgeQrSvgContainer" style="display: none; max-width: 220px; width: 220px; height: 220px; margin: 0 auto;"></div>
-                    </div>
-                    <div style="font-size: 13px; color: #e2e8f0; font-weight: 600; margin-bottom: 4px;">
-                        Open WhatsApp &gt; Linked Devices &gt; Link a Device
-                    </div>
-                    <p style="font-size: 12px; color: #94a3b8; margin: 0 0 16px 0;">
-                        Point your camera at this QR code. Automatically refreshes on connect.
-                    </p>
+            <!-- Connected View (Shown when WhatsApp is already linked) -->
+            <div id="qrConnectedState" style="display: none; padding: 48px 24px; text-align: center;">
+                <div style="width: 76px; height: 76px; border-radius: 50%; background: rgba(0, 168, 132, 0.15); border: 2.5px solid #00a884; color: #00a884; font-size: 38px; display: flex; align-items: center; justify-content: center; margin: 0 auto 18px auto;">
+                    ✓
                 </div>
-
-                <div id="qrConnectedState" style="display: none; padding: 30px 20px;">
-                    <div style="width: 70px; height: 70px; border-radius: 50%; background: rgba(16, 185, 129, 0.2); border: 2px solid #10b981; color: #10b981; font-size: 34px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px auto;">
-                        ✓
-                    </div>
-                    <h4 style="margin: 0 0 6px 0; color: #10b981; font-size: 18px; font-weight: 700;">WhatsApp Connected!</h4>
-                    <p id="qrConnectedNumber" style="font-size: 13px; color: #94a3b8; margin: 0 0 16px 0;">Your device is active and permanently synced for unlimited free messaging.</p>
-                    <button type="button" class="hud-btn danger small" onclick="disconnectWhatsAppDevice()" style="background: #ef4444; color: #fff; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                <h4 style="margin: 0 0 8px 0; color: #00a884; font-size: 20px; font-weight: 700;">WhatsApp Connected!</h4>
+                <p id="qrConnectedNumber" style="font-size: 14px; color: #8696a0; margin: 0 0 24px 0; max-width: 440px; margin-left: auto; margin-right: auto;">Your device is active and permanently synced for unlimited free messaging & AI automation.</p>
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button type="button" class="hud-btn danger small" onclick="disconnectWhatsAppDevice()" style="background: #ef4444; color: #fff; font-size: 12.5px; font-weight: 600; padding: 8px 18px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
                         <span>⏻</span> Disconnect / Unlink WhatsApp
                     </button>
-                </div>
-
-                <div style="display: flex; gap: 10px; justify-content: center; margin-top: 10px;">
-                    <button type="button" id="qrRefreshBtn" onclick="fetchBridgeQrCode(true)" class="hud-btn outline small" style="font-size: 12px;">
-                        🔄 Refresh QR
-                    </button>
-                    <button type="button" onclick="closeLinkWhatsAppQrModal()" class="hud-btn small" style="background: #334155; color: #cbd5e1; font-size: 12px;">
+                    <button type="button" onclick="closeLinkWhatsAppQrModal()" class="hud-btn small" style="background: #202c33; color: #cbd5e1; font-size: 12.5px; padding: 8px 18px; border-radius: 8px; border: 1px solid #334155;">
                         Close
                     </button>
                 </div>
+            </div>
+
+            <!-- Main 2-Column Pairing Container -->
+            <div id="waPairingMainBody" style="display: flex; flex-direction: row; flex-wrap: wrap;">
+                
+                <!-- LEFT COLUMN: Step-by-Step Instructions -->
+                <div style="flex: 1.25; min-width: 300px; padding: 28px 26px; border-right: 1px solid #202c33;">
+                    
+                    <!-- Mode A: QR Code Instructions -->
+                    <div id="waInstructionsQrView">
+                        <h4 style="margin: 0 0 16px 0; font-size: 17px; font-weight: 600; color: #e9edef;">To link your WhatsApp:</h4>
+                        <ol style="margin: 0 0 20px 0; padding-left: 20px; font-size: 13.5px; color: #8696a0; line-height: 2.1;">
+                            <li>Open <strong style="color: #e9edef;">WhatsApp</strong> on your phone</li>
+                            <li>Tap <strong style="color: #e9edef;">Menu (⋮)</strong> on Android or <strong style="color: #e9edef;">Settings (⚙)</strong> on iPhone</li>
+                            <li>Tap <strong style="color: #e9edef;">Linked Devices</strong> and then <strong style="color: #e9edef;">Link a device</strong></li>
+                            <li>Point your phone to this screen to capture the QR code</li>
+                        </ol>
+
+                        <label style="display: flex; align-items: center; gap: 9px; font-size: 13px; color: #8696a0; cursor: pointer; user-select: none; margin-top: 14px;">
+                            <input type="checkbox" id="waStayLoggedInCheck" checked style="accent-color: #00a884; width: 16px; height: 16px; cursor: pointer;">
+                            <span>Stay logged in on this browser</span>
+                        </label>
+
+                        <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid #202c33;">
+                            <button type="button" onclick="switchLinkMode('phone')" style="background: none; border: none; padding: 0; color: #00a884; font-size: 13.5px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+                                <span>📱</span> Log in with phone number &gt;
+                            </button>
+                            <p style="font-size: 11.5px; color: #8696a0; margin: 4px 0 0 0;">No camera required. Link your phone using an 8-character pairing code.</p>
+                        </div>
+                    </div>
+
+                    <!-- Mode B: Phone Pairing Instructions -->
+                    <div id="waInstructionsPhoneView" style="display: none;">
+                        <h4 style="margin: 0 0 12px 0; font-size: 17px; font-weight: 600; color: #e9edef;">Enter phone number</h4>
+                        <p style="font-size: 13px; color: #8696a0; line-height: 1.5; margin: 0 0 16px 0;">
+                            Select your country code and enter your WhatsApp phone number to generate an official 8-digit pairing code.
+                        </p>
+                        <ol style="margin: 0 0 20px 0; padding-left: 20px; font-size: 13.5px; color: #8696a0; line-height: 2.1;">
+                            <li>Open <strong style="color: #e9edef;">WhatsApp</strong> on your phone</li>
+                            <li>Tap <strong style="color: #e9edef;">Linked Devices &gt; Link a device</strong></li>
+                            <li>Tap <strong style="color: #00a884;">Link with phone number instead</strong> at the bottom</li>
+                            <li>Enter the <strong style="color: #00a884;">8-character code</strong> displayed here</li>
+                        </ol>
+
+                        <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid #202c33;">
+                            <button type="button" onclick="switchLinkMode('qr')" style="background: none; border: none; padding: 0; color: #00a884; font-size: 13.5px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+                                <span>📷</span> &lt; Link with QR code instead
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RIGHT COLUMN: Interactive QR or 8-Digit Pairing Code View -->
+                <div style="flex: 1; min-width: 280px; padding: 28px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: #111b21;">
+                    
+                    <!-- QR VIEW -->
+                    <div id="waRightColQrView" style="width: 100%; display: flex; flex-direction: column; align-items: center;">
+                        <div id="qrLoadingSpinner" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 240px;">
+                            <div style="width: 44px; height: 44px; border: 4px solid #202c33; border-top-color: #00a884; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                            <p style="margin-top: 16px; font-size: 13px; color: #8696a0;" id="qrStatusText">Connecting to WhatsApp Baileys bridge...</p>
+                        </div>
+
+                        <div id="qrImageWrapper" style="display: none; width: 100%; text-align: center;">
+                            <div style="background: #ffffff; padding: 12px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.5); margin-bottom: 14px; width: 220px; height: 220px;">
+                                <img id="bridgeQrImage" src="" alt="WhatsApp Link QR Code" style="width: 100%; height: 100%; display: block; object-fit: contain; margin: 0 auto;" />
+                                <div id="bridgeQrSvgContainer" style="display: none; width: 100%; height: 100%; margin: 0 auto;"></div>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 240px; margin: 0 auto;">
+                                <button type="button" id="btnSwitchToPhonePairing" onclick="switchLinkMode('phone')" class="hud-btn outline small" style="border-color: #00a884; color: #00a884; font-weight: 600; font-size: 12.5px; padding: 8px 12px; border-radius: 8px;">
+                                    📱 Log in with phone number &gt;
+                                </button>
+                                <button type="button" id="qrRefreshBtn" onclick="fetchBridgeQrCode(true)" class="hud-btn small" style="background: #202c33; color: #8696a0; border: 1px solid #2a3942; font-size: 12px; padding: 7px 12px; border-radius: 8px;">
+                                    🔄 Refresh QR
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PHONE PAIRING VIEW -->
+                    <div id="waRightColPhoneView" style="display: none; width: 100%; max-width: 300px; margin: 0 auto; text-align: left;">
+                        <!-- Step 1: Input Phone Form -->
+                        <div id="waPhoneFormView">
+                            <label style="display: block; font-size: 12px; font-weight: 600; color: #8696a0; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Country / Region</label>
+                            <div style="margin-bottom: 12px;">
+                                <select id="waPairingCountrySelect" onchange="onPairingCountryChange()" style="width: 100%; background: #202c33; border: 1px solid #2a3942; color: #e9edef; border-radius: 8px; padding: 9px 12px; font-size: 13px; outline: none; cursor: pointer;">
+                                    <option value="92" selected>🇵🇰 Pakistan (+92)</option>
+                                    <option value="971">🇦🇪 UAE (+971)</option>
+                                    <option value="966">🇸🇦 Saudi Arabia (+966)</option>
+                                    <option value="44">🇬🇧 United Kingdom (+44)</option>
+                                    <option value="1">🇺🇸 United States (+1)</option>
+                                    <option value="91">🇮🇳 India (+91)</option>
+                                    <option value="60">🇲🇾 Malaysia (+60)</option>
+                                    <option value="90">🇹🇷 Turkey (+90)</option>
+                                    <option value="other">🌐 Other Country Code</option>
+                                </select>
+                            </div>
+
+                            <label style="display: block; font-size: 12px; font-weight: 600; color: #8696a0; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">WhatsApp Phone Number</label>
+                            <div style="display: flex; align-items: center; background: #202c33; border: 1px solid #2a3942; border-radius: 8px; overflow: hidden; margin-bottom: 14px;">
+                                <span id="waCountryPrefixLabel" style="padding: 9px 10px 9px 12px; font-size: 13.5px; font-weight: 700; color: #00a884; border-right: 1px solid #2a3942; user-select: none;">+92</span>
+                                <input type="tel" id="waPairingPhoneInput" placeholder="300 1234567" onkeydown="if(event.key==='Enter')requestWaPairingCode()" style="background: transparent; border: none; outline: none; color: #e9edef; font-size: 14px; font-weight: 600; padding: 9px 12px; width: 100%;">
+                            </div>
+
+                            <button type="button" id="btnGeneratePairingCode" onclick="requestWaPairingCode()" style="width: 100%; background: #00a884; color: #111b21; font-weight: 700; font-size: 13.5px; padding: 10px; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 15px rgba(0, 168, 132, 0.35); transition: opacity 0.2s;">
+                                <span>⚡</span> Generate 8-Digit Code
+                            </button>
+
+                            <button type="button" onclick="switchLinkMode('qr')" style="width: 100%; background: transparent; border: 1px solid #334155; color: #8696a0; font-size: 12px; padding: 8px; border-radius: 8px; margin-top: 10px; cursor: pointer;">
+                                &lt; Scan QR Code Instead
+                            </button>
+                        </div>
+
+                        <!-- Step 2: 8-Digit Pairing Code Display -->
+                        <div id="waPhoneCodeResultView" style="display: none; text-align: center;">
+                            <div style="font-size: 12px; color: #8696a0; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Enter this code on your phone:</div>
+                            
+                            <!-- 8 Stylized Boxes Container: 4 boxes - dash - 4 boxes -->
+                            <div id="waPairingCodeBoxes" style="display: flex; align-items: center; justify-content: center; gap: 6px; margin: 0 auto 16px auto;">
+                                <!-- Rendered dynamically by renderPairingCodeBoxes -->
+                            </div>
+
+                            <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 12px;">
+                                <button type="button" id="btnCopyPairingCode" onclick="copyPairingCode()" class="hud-btn small outline" style="border-color: #00a884; color: #00a884; font-size: 12px; padding: 6px 14px;">
+                                    📋 Copy Code
+                                </button>
+                                <button type="button" onclick="resetPairingPhoneInput()" class="hud-btn small" style="background: #202c33; color: #cbd5e1; font-size: 12px; padding: 6px 14px; border: 1px solid #334155;">
+                                    Change Number
+                                </button>
+                            </div>
+
+                            <div id="waPairingCodeNotice" style="font-size: 11px; color: #8696a0; line-height: 1.4;">
+                                Code expires in <span id="waCodeTimer" style="color: #00a884; font-weight: 700;">120s</span>. Confirm on WhatsApp prompt.
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div style="padding: 12px 24px; border-top: 1px solid #202c33; background: #202c33; display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: #8696a0;">
+                <div>
+                    <span>🔒 End-to-end encrypted Baileys multi-device protocol</span>
+                </div>
+                <button type="button" onclick="closeLinkWhatsAppQrModal()" class="hud-btn small" style="background: #334155; color: #cbd5e1; font-size: 12px; padding: 5px 14px; border-radius: 6px;">
+                    Close
+                </button>
             </div>
         </div>
     </div>
