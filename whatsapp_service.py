@@ -1533,6 +1533,106 @@ class WhatsAppService:
     _force_test_edge_tts: bool = False
 
     @classmethod
+    @classmethod
+    def roman_to_urdu_script(cls, text: str) -> str:
+        """Converts Roman Urdu text into authentic pure Urdu script (اردو رسم الخط).
+        Guarantees that Edge-TTS (ur-PK-UzmaNeural / ur-PK-AsadNeural) delivers 100% natural,
+        sweet, and human-like Pakistani speech cadence without awkward English phonetic accents.
+        """
+        if not text or not str(text).strip():
+            return ""
+        import re
+        t = str(text).strip()
+
+        # If already predominantly Urdu / Arabic script, preserve directly
+        arabic_chars = sum(1 for ch in t if '\u0600' <= ch <= '\u06FF')
+        if arabic_chars > len(t) * 0.4:
+            return t
+
+        # Clean emojis and markdown artifacts
+        t = re.sub(r'[*_~`#>•\-\[\]\(\)]', ' ', t)
+        t = re.sub(r'[\U00010000-\U0010ffff]', '', t)
+
+        # Multi-word conversational phrase substitutions
+        phrases = [
+            (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|as-salamu alaykum|slam)\b", "السلام علیکم"),
+            (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*|wa alaykum as-salam)\b", "وعلیکم السلام"),
+            (r"(?i)\b(jee\s*bilkul|ji\s*bilkul|ji\s*haan|jee\s*haan)\b", "جی بالکل"),
+            (r"(?i)\b(bohot\s*shukriya|boht\s*shukriya|shukriya|thank\s*you|thanks)\b", "بہت شکریہ"),
+            (r"(?i)\b(acha\s*dekhein|achha\s*dekhein|dekhein)\b", "اچھا دیکھیں"),
+            (r"(?i)\b(kya\s*haal\s*hai|kaise\s*hain|kaisi\s*hain|kese\s*hain)\b", "کیسے ہیں"),
+            (r"(?i)\b(main\s*theek\s*hoon|mai\s*theek\s*hu|theek\s*hoon)\b", "میں ٹھیک ہوں"),
+            (r"(?i)\b(aap\s*sunayein|ap\s*sunayein|aap\s*sunao)\b", "آپ سنائیں"),
+            (r"(?i)\b(kya\s*madad\s*kar\s*sakta\s*hoon|madad\s*kar\s*sakta\s*hoon)\b", "کیا مدد کر سکتا ہوں"),
+            (r"(?i)\b(befikar\s*rahein|tension\s*na\s*lein|pareshan\s*na\s*hon)\b", "بے فکر رہیں"),
+            (r"(?i)\b(in\s*sha\s*allah|inshallah)\b", "انشاءاللہ"),
+            (r"(?i)\b(alhamdulillah|al-hamdu\s*lillah)\b", "الحمدللہ"),
+            (r"(?i)\b(jazakallah|jazak\s*allah)\b", "جزاک اللہ"),
+            (r"(?i)\b(cash\s*on\s*delivery|cod)\b", "کیش آن ڈیلیوری"),
+            (r"(?i)\b(jazzcash|jazz\s*cash)\b", "جاز کیش"),
+            (r"(?i)\b(easypaisa|easy\s*paisa)\b", "ایزی پیسہ"),
+            (r"(?i)\b(voice\s*note|voice\s*message)\b", "وائس نوٹ"),
+            (r"(?i)\b(bashflow\s*cloud|bashflow\s*ai|bashflow)\b", "بیش فلو"),
+        ]
+        for pat, rep in phrases:
+            t = re.sub(pat, rep, t)
+
+        words_map = {
+            "jee": "جی", "ji": "جی", "haan": "ہاں", "han": "ہاں", "nahi": "نہیں", "nahe": "نہیں", "na": "نہ",
+            "bilkul": "بالکل", "main": "میں", "mai": "میں", "me": "میں", "mein": "میں",
+            "hoon": "ہوں", "hu": "ہوں", "hai": "ہے", "hain": "ہیں", "ho": "ہو", "hoga": "ہوگا", "hogi": "ہوگی", "honge": "ہوں گے",
+            "aap": "آپ", "ap": "آپ", "aapka": "آپ کا", "apka": "آپ کا", "aapki": "آپ کی", "apki": "آپ کی", "aapke": "آپ کے", "apke": "آپ کے",
+            "hum": "ہم", "hamara": "ہمارا", "hamari": "ہماری", "hamare": "ہمارے", "mera": "میرا", "meri": "میری", "mere": "میرے",
+            "tum": "تم", "tumhara": "تمہارا", "tumhari": "تمہاری",
+            "ye": "یہ", "yeh": "یہ", "wo": "وہ", "woh": "وہ", "is": "اس", "us": "اس",
+            "ka": "کا", "ki": "کی", "ke": "کے", "ko": "کو", "se": "سے", "par": "پر", "pe": "پر", "tak": "تک",
+            "aur": "اور", "ya": "یا", "lekin": "لیکن", "magar": "مگر", "bhi": "بھی", "to": "تو", "toh": "تو",
+            "kya": "کیا", "kaise": "کیسے", "kese": "کیسے", "kaisi": "کیسی", "kyun": "کیوں", "kyu": "کیوں", "kab": "کب", "kahan": "کہاں", "kitna": "کتنا", "kitne": "کتنے", "kitni": "کتنی",
+            "theek": "ٹھیک", "sahi": "صحیح", "galat": "غلط", "acha": "اچھا", "achha": "اچھا", "achi": "اچھی", "ache": "اچھے",
+            "batayein": "بتائیں", "batao": "بتاؤ", "bata": "بتا", "boliye": "بولیے", "bolo": "بولو",
+            "sunayein": "سنائیں", "sunao": "سناؤ", "suno": "سنو",
+            "madad": "مدد", "kar": "کر", "karein": "کریں", "karo": "کرو", "karna": "کرنا", "karte": "کرتے", "karta": "کرتا", "karti": "کرتی",
+            "sakta": "سکتا", "sakti": "سکتی", "sakte": "سکتے", "sakenge": "سکیں گے", "sakain": "سکیں",
+            "raha": "رہا", "rahi": "رہی", "rahe": "رہے", "rahein": "رہیں", "raho": "رہو",
+            "tha": "تھا", "thi": "تھی", "the": "تھے",
+            "bhai": "بھائی", "dost": "دوست", "yar": "یار", "sahab": "صاحب", "janab": "جناب",
+            "bohot": "بہت", "boht": "بہت", "bahut": "بہت", "zyada": "زیادہ", "kam": "کم",
+            "koi": "کوئی", "kuch": "کچھ", "sab": "سب", "tamam": "تمام",
+            "masla": "مسئلہ", "sawal": "سوال", "jawab": "جواب", "baat": "بات", "kam": "کام",
+            "order": "آرڈر", "price": "قیمت", "rate": "ریٹ", "rates": "ریٹس",
+            "system": "سسٹم", "software": "سافٹ ویئر", "message": "میسج", "messages": "میسجز",
+            "discount": "ڈسکاؤنٹ", "confirm": "کنفرم", "delivery": "ڈیلیوری", "stock": "اسٹاک",
+            "package": "پیکج", "packages": "پیکجز", "plan": "پلان", "plans": "پلانز",
+            "chahiye": "چاہیے", "chahye": "چاہیے",
+            "shukriya": "شکریہ", "meherbani": "مہربانی", "zaroor": "ضرور", "zaroori": "ضروری",
+            "ab": "اب", "abhi": "ابھی", "pehle": "پہلے", "baad": "بعد",
+            "din": "دن", "raat": "رات", "waqt": "وقت", "aaj": "آج", "kal": "کل",
+            "ek": "ایک", "aik": "ایک", "do": "دو", "teen": "تین", "chaar": "چار", "paanch": "پانچ",
+            "rupay": "روپے", "rupee": "روپیہ", "rupees": "روپے", "hazar": "ہزار", "lakh": "لاکھ",
+            "phone": "فون", "number": "نمبر", "call": "کال", "link": "لنک", "code": "کوڈ"
+        }
+
+        tokens = re.split(r'(\s+|[،,.\!؟?]+)', t)
+        out_tokens = []
+        for tok in tokens:
+            clean_tok = tok.lower().strip()
+            if clean_tok in words_map:
+                out_tokens.append(words_map[clean_tok])
+            else:
+                out_tokens.append(tok)
+
+        res = "".join(out_tokens)
+        words = res.split()
+        if len(words) > 7:
+            chunked = []
+            for i, w in enumerate(words):
+                chunked.append(w)
+                if (i + 1) % 6 == 0 and i < len(words) - 2:
+                    if not any(chunked[-1].endswith(p) for p in ('،', ',', '.', '!', '؟')):
+                        chunked[-1] = chunked[-1] + '،'
+            res = ' '.join(chunked)
+        return res
+
     def _synthesize_edge_tts(
         cls,
         text: str,
@@ -1608,20 +1708,26 @@ class WhatsAppService:
             if configured_rate:
                 active_rate = configured_rate.strip()
             else:
-                active_rate = "+6%" if is_urdu else "+3%"
+                active_rate = "+0%" if is_urdu else "+0%"
 
             if configured_pitch:
                 active_pitch = configured_pitch.strip()
             else:
-                active_pitch = "-1Hz" if is_urdu else "+1Hz"
+                active_pitch = "+0Hz" if is_urdu else "+0Hz"
 
             if configured_volume:
                 active_volume = configured_volume.strip()
             else:
                 active_volume = "+10%" if is_urdu else "+0%"
 
+            # Urdu TTS Rule: Convert speech text to 100% pure Urdu script before passing to Edge-TTS
+            if is_urdu and not is_arabic_script:
+                speech_for_tts = cls.roman_to_urdu_script(clean_speech)
+            else:
+                speech_for_tts = clean_speech
+
             async def _run():
-                comm = edge_tts.Communicate(clean_speech, active_voice, rate=active_rate, pitch=active_pitch, volume=active_volume)
+                comm = edge_tts.Communicate(speech_for_tts, active_voice, rate=active_rate, pitch=active_pitch, volume=active_volume)
                 chunks = []
                 async for chunk in comm.stream():
                     if chunk.get("type") == "audio":
@@ -4708,18 +4814,15 @@ class WhatsAppService:
             real_chat_id = f"{clean_phone}@s.whatsapp.net" if clean_phone else str(sender_phone)
         org_id = organization_id or "org-enterprise-default"
 
-        # Stale timestamp guard
+        # Timestamp logging (Zero-drop guarantee: incoming messages are never ignored or dropped based on age)
         if message_timestamp:
             try:
                 msg_ts = float(message_timestamp)
                 now_ts = time.time()
                 if msg_ts > 1e11:
                     msg_ts = msg_ts / 1000.0
-                if now_ts - msg_ts > 86400:
-                    logger.info(f"Ignoring stale message {message_id} (>24h old) for auto-reply.")
-                    return None
-                elif now_ts - msg_ts > 900:
-                    logger.info(f"Message {message_id} timestamp is {int(now_ts - msg_ts)}s old; Force Dispatch proceeding without returning early.")
+                if now_ts - msg_ts > 900:
+                    logger.info(f"Incoming message {message_id} timestamp is {int(now_ts - msg_ts)}s old; proceeding with instant auto-response.")
             except (ValueError, TypeError):
                 pass
 

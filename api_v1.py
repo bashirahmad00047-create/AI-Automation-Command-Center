@@ -3724,13 +3724,19 @@ def ai_outbound_voice_call():
     is_pk = clean_phone.startswith("92")
     lang = "ur" if (is_pk or not custom_prompt or any(w in str(custom_prompt).lower() for w in ["urdu", "salam", "aap"])) else "en"
 
-    # Generate genuine friendly AI greeting (Natural Dostana Insaan tone)
+    # Generate genuine friendly dynamic AI greeting (Natural Dostana Insaan tone)
     if custom_prompt:
         greeting_text = str(custom_prompt).strip()
-    elif lang == "ur":
-        greeting_text = "Walaikum Assalam! Jee bilkul, main BashFlow Cloud AI Voice Agent baat kar raha hoon. Acha dekhein, humne aapke number par live AI voice session initiate kiya hai. Batayein main aapki kya madad kar sakta hoon?"
     else:
-        greeting_text = "Hello! Sure thing, this is your BashFlow Cloud AI Voice Assistant calling you. I have initiated our live voice session, let me check how I can assist you today!"
+        dynamic_gen = WhatsAppService.generate_ai_auto_response(
+            organization_id=org_id,
+            message_body="Salam, live voice assistance call session initiated.",
+            sender_name=None,
+            sender_phone=clean_phone
+        )
+        greeting_text = (dynamic_gen.get("reply_body") or "").strip()
+        if not greeting_text:
+            greeting_text = "Salam! Jee bilkul, batayein main aap ki kya madad kar sakta hoon?" if lang == "ur" else "Hello! How can I assist you today?"
 
     clean_greeting = re.sub(r"[*_~`#>]", "", greeting_text).strip()
 
