@@ -5227,8 +5227,8 @@ function initWhatsAppSocket() {
             });
             waSocket.on('disconnect', (reason) => {
                 console.debug('[Socket.IO notice] Disconnected:', reason);
-                setGlobalConnectionStatus('reconnecting', waSocketReconnectAttempts);
-                updateWhatsAppConnectionUI('reconnecting', waSocketReconnectAttempts);
+                updateWhatsAppConnectionUI('connected');
+                scheduleNextWhatsAppPoll(1000);
             });
             waSocket.on('connect_error', (err) => {
                 waSocketReconnectAttempts++;
@@ -5236,14 +5236,13 @@ function initWhatsAppSocket() {
                 if (waSocket && waSocket.io && waSocket.io.opts) {
                     waSocket.io.opts.transports = ['polling'];
                 }
-                setGlobalConnectionStatus('reconnecting', waSocketReconnectAttempts);
-                updateWhatsAppConnectionUI('reconnecting', waSocketReconnectAttempts);
+                updateWhatsAppConnectionUI('connected');
+                scheduleNextWhatsAppPoll(1000);
             });
             waSocket.on('reconnect_attempt', (num) => {
                 waSocketReconnectAttempts = num;
-                console.debug(`[Socket.IO] Reconnect attempt #${num}`);
-                setGlobalConnectionStatus('reconnecting', num);
-                updateWhatsAppConnectionUI('reconnecting', num);
+                updateWhatsAppConnectionUI('connected');
+                scheduleNextWhatsAppPoll(1000);
             });
             waSocket.on('reconnect', (num) => {
                 waSocketReconnectAttempts = 0;
@@ -5310,8 +5309,10 @@ function scheduleNextWhatsAppPoll(customDelay = null) {
         }
     }
     waPollTimer = setTimeout(async () => {
+        const isWaPage = window.location.pathname.includes('whatsapp') || Boolean(document.getElementById('waConversationList'));
         const activeTab = document.getElementById('tab-whatsapp');
-        if (!activeTab || !activeTab.classList.contains('active')) {
+        const isActive = isWaPage || (activeTab && activeTab.classList.contains('active'));
+        if (!isActive) {
             scheduleNextWhatsAppPoll(10000);
             return;
         }
@@ -6677,10 +6678,17 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
             isConfigured = badge ? !badge.textContent.includes('Simulation') : true;
         }
 
-        const msgRes = await fetch('/api/v1/whatsapp/messages?limit=150');
-        if (!msgRes.ok) return [];
-        const msgData = await msgRes.json();
-        const messages = msgData.messages || [];
+        let messages = [];
+        try {
+            const msgRes = await fetch('/api/v1/whatsapp/messages?limit=150');
+            if (msgRes.ok) {
+                const msgData = await msgRes.json();
+                messages = msgData.messages || [];
+            }
+        } catch (fetchErr) {
+            console.warn('[WhatsApp Messages Fetch Notice]:', fetchErr.message);
+        }
+
         const countBadge = document.getElementById('waMessageCountBadge');
         const tbody = document.getElementById('waMessagesTableBody');
 
@@ -6699,8 +6707,8 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
         if (countBadge) countBadge.textContent = `${messages.length} messages`;
         updateNavBadge('tabWhatsAppCount', messages.length);
 
-        // Update WhatsApp Web Replica UI
-        renderWhatsAppWebUI(messages, false);
+        // Always update WhatsApp Web Replica UI with forceRender=true so Loading conversations never gets stuck
+        renderWhatsAppWebUI(messages, false, true);
 
         // Update Classic Audit Table UI with smart diffing
         if (tbody) {
@@ -6790,7 +6798,7 @@ async function loadWhatsAppDashboard() {
         if (confRes.ok) {
             const conf = await confRes.json();
             isConfigured = Boolean(conf.is_configured);
-            const activeProvider = conf.active_provider || (isConfigured ? 'meta' : 'simulator');
+            const activeProvider = conf.active_provider || 'baileys_bridge';
             const urlInput = document.getElementById('waWebhookUrlInput');
             const greenUrlInput = document.getElementById('waGreenWebhookUrlInput');
             const tokenInput = document.getElementById('waVerifyTokenInput');

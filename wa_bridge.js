@@ -950,7 +950,7 @@ async function startWhatsAppBridge() {
             const cachedParticipantName =
               contactNamesMap.get(participantJid) ||
               (senderPhone ? contactNamesMap.get(senderPhone) : null) ||
-              (senderPhone ? contactNamesMap.get(`+${phone}`) : null);
+              (senderPhone ? contactNamesMap.get(`+${senderPhone}`) : null);
             displayName = msg.pushName || cachedParticipantName || (senderPhone ? `+${senderPhone}` : 'WhatsApp Group User');
 
             // Look up cached group subject or fetch via groupMetadata
@@ -973,7 +973,7 @@ async function startWhatsAppBridge() {
 
           const pushName = displayName || msg.pushName || (isGroupChat ? 'WhatsApp Group User' : 'WhatsApp User');
           const chatTitle = isGroupChat ? (groupSubject || 'WhatsApp Group') : pushName;
-          const messageId = msg.key?.id || msg_;
+          const messageId = msg.key?.id || ('msg_' + Date.now());
           const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
 
           // Advanced Anti-Ban Human Shield: 1.5 second delay before blue tick (read receipt)
@@ -1244,82 +1244,80 @@ if (!text) text = '[Voice note]';
 
             console.log(`[Webhook Forward] Dispatched to ${PYTHON_WEBHOOK_URL} -> HTTP ${response.status}`);
 
-            // Direct Bridge Delivery: Deliver AI auto-reply directly via active socket to the recipient
+            // Direct Bridge Delivery: Deliver AI auto-reply asynchronously so incoming messages are never blocked
             if (response.ok) {
               const resData = await response.json().catch(() => null);
               if (resData && (resData.reply || resData.audio_base64)) {
                 const senderDigits = cleanPhoneNumber(senderPhone) || cleanPhoneNumber(remoteJid);
                 const targetJid = remoteJid?.endsWith('@g.us') ? remoteJid : (senderDigits ? `${senderDigits}@s.whatsapp.net` : (remoteJid?.endsWith('@s.whatsapp.net') ? remoteJid : replyJid));
-
-                let sentMsg = null;
                 const shouldSendVoice = Boolean(resData.audio_base64 && (resData.send_as_voice || resData.is_voice));
-
-                // 1. Anti-spam queue slot acquisition (enforces max 12 msgs/min)
-                await acquireAntiSpamDispatchSlot();
-
-                // 2. Dynamic Jitter Delay (3.5s to 8.5s) based on response length
                 const replyTextForDelay = resData.reply || resData.tts_text || resData.text || '';
                 const jitterMs = calculateDynamicJitterDelay(replyTextForDelay);
 
-                if (shouldSendVoice) {
-                  // Non-blocking recording presence during jitter delay
-                  try {
-                    await sock.sendPresenceUpdate('recording', targetJid);
-                    console.log(`[Anti-Ban Shield] Presence 'recording' active for ${targetJid} during ${jitterMs}ms jitter delay...`);
-                  } catch (_) {}
+                // Run dispatch in background task with human simulation presence and rate-limiting
+                (async () => {
+                  // 1. Anti-spam queue slot acquisition (enforces max 12 msgs/min)
+                  await acquireAntiSpamDispatchSlot();
 
-                  await new Promise(r => setTimeout(r, jitterMs));
-
-                  let audioBuf = Buffer.from(resData.audio_base64, 'base64');
-                  let outMime = 'audio/ogg; codecs=opus';
-                  let outPtt = true;
-
-                  const isAlreadyOgg = audioBuf.slice(0, 4).toString() === 'OggS';
-                  if (isAlreadyOgg) {
-                    outMime = 'audio/ogg; codecs=opus';
-                  } else {
+                  let sentMsg = null;
+                  if (shouldSendVoice) {
                     try {
-                      const oggBuf = await convertAudioToOggOpus(audioBuf);
-                      if (oggBuf && oggBuf.length > 0) {
-                        audioBuf = oggBuf;
-                        outMime = 'audio/ogg; codecs=opus';
+                      await sock.sendPresenceUpdate('recording', targetJid);
+                      console.log(`[Anti-Ban Shield] Presence 'recording' active for ${targetJid} during ${jitterMs}ms jitter delay...`);
+                    } catch (_) {}
+
+                    await new Promise(r => setTimeout(r, jitterMs));
+
+                    let audioBuf = Buffer.from(resData.audio_base64, 'base64');
+                    let outMime = 'audio/ogg; codecs=opus';
+                    let outPtt = true;
+
+                    const isAlreadyOgg = audioBuf.slice(0, 4).toString() === 'OggS';
+                    if (isAlreadyOgg) {
+                      outMime = 'audio/ogg; codecs=opus';
+                    } else {
+                      try {
+                        const oggBuf = await convertAudioToOggOpus(audioBuf);
+                        if (oggBuf && oggBuf.length > 0) {
+                          audioBuf = oggBuf;
+                          outMime = 'audio/ogg; codecs=opus';
+                        }
+                      } catch (_) {
+                        outMime = 'audio/mp4';
                       }
-                    } catch (_) {
-                      outMime = 'audio/mp4';
+                    }
+
+                    try {
+                      sentMsg = await sock.sendMessage(targetJid, {
+                        audio: audioBuf,
+                        mimetype: outMime,
+                        ptt: outPtt,
+                        fileName: outMime.includes('ogg') ? 'voice_reply.oga' : 'voice_reply.mp4'
+                      });
+                      console.log(`[Direct Bridge Dispatch Success] Outbound PTT voice note delivered to ${targetJid}: ID=${sentMsg?.key?.id}`);
+                    } catch (aErr) {
+                      console.warn('[Direct Bridge Audio Error]:', aErr.message);
+                    } finally {
+                      try { await sock.sendPresenceUpdate('paused', targetJid); } catch (_) {}
+                    }
+                  } else if (!shouldSendVoice && resData.reply) {
+                    try {
+                      await sock.sendPresenceUpdate('composing', targetJid);
+                      console.log(`[Anti-Ban Shield] Presence 'composing' active for ${targetJid} during ${jitterMs}ms jitter delay...`);
+                    } catch (_) {}
+
+                    await new Promise(r => setTimeout(r, jitterMs));
+
+                    try {
+                      sentMsg = await sock.sendMessage(targetJid, { text: String(resData.reply) });
+                      console.log(`[Direct Bridge Dispatch Success] Outbound text delivered to ${targetJid}: ID=${sentMsg?.key?.id}`);
+                    } catch (tErr) {
+                      console.warn('[Direct Bridge Text Error]:', tErr.message);
+                    } finally {
+                      try { await sock.sendPresenceUpdate('paused', targetJid); } catch (_) {}
                     }
                   }
-
-                  try {
-                    sentMsg = await sock.sendMessage(targetJid, {
-                      audio: audioBuf,
-                      mimetype: outMime,
-                      ptt: outPtt,
-                      fileName: outMime.includes('ogg') ? 'voice_reply.oga' : 'voice_reply.mp4'
-                    });
-                    console.log(`[Direct Bridge Dispatch Success] Outbound PTT voice note delivered to ${targetJid}: ID=${sentMsg?.key?.id}`);
-                  } catch (aErr) {
-                    console.warn('[Direct Bridge Audio Error]:', aErr.message);
-                  } finally {
-                    try { await sock.sendPresenceUpdate('paused', targetJid); } catch (_) {}
-                  }
-                } else if (!shouldSendVoice && resData.reply) {
-                  // Non-blocking composing presence during jitter delay
-                  try {
-                    await sock.sendPresenceUpdate('composing', targetJid);
-                    console.log(`[Anti-Ban Shield] Presence 'composing' active for ${targetJid} during ${jitterMs}ms jitter delay...`);
-                  } catch (_) {}
-
-                  await new Promise(r => setTimeout(r, jitterMs));
-
-                  try {
-                    sentMsg = await sock.sendMessage(targetJid, { text: String(resData.reply) });
-                    console.log(`[Direct Bridge Dispatch Success] Outbound text delivered to ${targetJid}: ID=${sentMsg?.key?.id}`);
-                  } catch (tErr) {
-                    console.warn('[Direct Bridge Text Error]:', tErr.message);
-                  } finally {
-                    try { await sock.sendPresenceUpdate('paused', targetJid); } catch (_) {}
-                  }
-                }
+                })().catch(outErr => console.error('[Direct Bridge Outbound Error]:', outErr.message));
               }
             }
           } catch (err) {
