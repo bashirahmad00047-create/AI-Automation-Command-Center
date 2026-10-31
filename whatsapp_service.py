@@ -9378,7 +9378,6 @@ def get_ai_smart_reply(prompt_text: str, sender_number: Optional[str] = None, or
     except Exception as p_err:
         logger.debug(f"Pollinations AI fallback notice: {p_err}")
 
-    b_name = WhatsAppService.get_tenant_business_name(organization_id=organization_id)
-    return f"Assalam-o-Alaikum! {b_name} mein khush aamdeed. Main aap ka paigham note kar chuka hoon aur hamari team foran aap se rabta kare gi. Shukriya!"
+    return "Jee bilkul, main aapki baat samajh raha hoon. Mazeed tafseel ke liye thori dair mein rabta karte hain!"
 
 WhatsAppService.get_ai_smart_reply = staticmethod(get_ai_smart_reply)
