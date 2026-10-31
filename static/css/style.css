@@ -7211,3 +7211,69 @@ html.dark .dark\:hover\:bg-slate-800:hover, .dark .dark\:hover\:bg-slate-800:hov
     height: 100%;
     object-fit: cover;
 }
+
+
+/* ==========================================================================
+   WHATSAPP WEB FILTER CHIPS & PAIRING CODE BOXES
+   ========================================================================== */
+.wa-filter-chips-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding-bottom: 2px;
+}
+.wa-filter-chips-bar::-webkit-scrollbar {
+    display: none;
+}
+.wa-filter-chip {
+    background: #202c33;
+    color: #8696a0;
+    border: 1px solid transparent;
+    border-radius: 18px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+    user-select: none;
+    outline: none;
+}
+.wa-filter-chip:hover {
+    background: #2a3942;
+    color: #e9edef;
+}
+.wa-filter-chip.active {
+    background: #00a884 !important;
+    color: #111b21 !important;
+    font-weight: 700;
+    box-shadow: 0 2px 6px rgba(0, 168, 132, 0.35);
+}
+
+.wa-pairing-box {
+    width: 30px;
+    height: 42px;
+    background: #202c33;
+    border: 1.5px solid #00a884;
+    border-radius: 6px;
+    font-size: 20px;
+    font-weight: 700;
+    color: #00a884;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    box-shadow: 0 2px 8px rgba(0, 168, 132, 0.25);
+    user-select: all;
+    letter-spacing: 0;
+}
+.wa-pairing-dash {
+    color: #8696a0;
+    font-size: 20px;
+    font-weight: 700;
+    padding: 0 4px;
+    user-select: none;
+}

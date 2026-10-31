@@ -1675,6 +1675,85 @@ app.all(['/refresh-qr', '/qr-refresh', '/restart-socket'], async (req, res) => {
 });
 
 /**
+ * WhatsApp Web Style 8-Digit Pairing Code Endpoint
+ * POST /pairing-code
+ * Body: { "phoneNumber": "923001234567" }
+ * Invokes native Baileys sock.requestPairingCode(phoneNumber)
+ */
+app.all(['/pairing-code', '/api/pairing-code', '/request-pairing-code'], async (req, res) => {
+  try {
+    const rawPhone = (req.body?.phone || req.body?.phoneNumber || req.query?.phone || '').toString();
+    const cleanDigits = rawPhone.replace(/\D/g, '');
+
+    if (!cleanDigits || cleanDigits.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid phone number with country code (e.g., 923001234567).'
+      });
+    }
+
+    if (isConnected || (sock?.user && !currentQr)) {
+      return res.status(200).json({
+        success: true,
+        status: 'connected',
+        connected: true,
+        message: 'WhatsApp is already linked and connected.',
+        user: sock?.user || null
+      });
+    }
+
+    // Ensure socket is initialized
+    if (!sock) {
+      await startWhatsAppBridge();
+      await new Promise(r => setTimeout(r, 1200));
+    }
+
+    if (sock && typeof sock.requestPairingCode === 'function') {
+      try {
+        let code = await sock.requestPairingCode(cleanDigits);
+        if (!code && sock.authState?.creds?.pairingCode) {
+          code = sock.authState.creds.pairingCode;
+        }
+
+        const rawCode = String(code || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        const formattedCode = rawCode.length === 8 ? `${rawCode.slice(0, 4)}-${rawCode.slice(4)}` : rawCode;
+
+        console.log(`[WhatsApp Bridge] 8-Digit Pairing Code generated for +${cleanDigits}: ${formattedCode}`);
+
+        return res.status(200).json({
+          success: true,
+          status: 'pairing_code_ready',
+          code: formattedCode,
+          rawCode: rawCode,
+          phone: cleanDigits,
+          message: 'Pairing code generated successfully.'
+        });
+      } catch (pairErr) {
+        console.error('[WhatsApp Bridge] requestPairingCode error:', pairErr.message);
+        return res.status(200).json({
+          success: false,
+          status: 'error',
+          message: 'Failed to generate pairing code: ' + pairErr.message
+        });
+      }
+    } else {
+      return res.status(200).json({
+        success: false,
+        status: 'error',
+        message: 'Bridge socket is initializing. Please try again in 3 seconds.'
+      });
+    }
+  } catch (err) {
+    console.error('[WhatsApp Bridge] /pairing-code handler error:', err.message);
+    return res.status(200).json({
+      success: false,
+      status: 'error',
+      message: 'Pairing code error: ' + err.message
+    });
+  }
+});
+
+/**
  * Send Message Endpoint:
  * POST /send-message
  * Body: { "chatId": "923001234567", "message": "Hello from Bridge!" }

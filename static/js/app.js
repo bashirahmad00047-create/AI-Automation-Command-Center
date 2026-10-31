@@ -5523,6 +5523,8 @@ function groupWhatsAppConversations(messages) {
             map[normKey] = {
                 phone: displayPhone,
                 normalizedPhone: normKey,
+                isGroup: Boolean(isGroup),
+                chatType: isGroup ? 'group' : 'individual',
                 // Prefer group subject for groups; contact name for inbound 1-on-1 chats
                 name: (isGroup ? (m.chat_name || 'WhatsApp Group') : (isInbound ? m.sender_name : '')) || displayPhone,
                 lastMessage: initialMsg,
@@ -6351,6 +6353,29 @@ function simulateInboundVoiceNote() {
     showToast('Inbound voice note simulated. Click ▶ to listen to audio playback!', 'info');
 }
 
+let waCurrentFilter = 'all'; // 'all', 'unread', 'contacts', 'groups'
+let waHideGroupsFromAll = true;
+
+function setWaChatFilter(filter) {
+    waCurrentFilter = filter || 'all';
+    ['waChipAll', 'waChipUnread', 'waChipContacts', 'waChipGroups'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.remove('active');
+    });
+    const activeChipId = filter === 'unread' ? 'waChipUnread' : (filter === 'contacts' ? 'waChipContacts' : (filter === 'groups' ? 'waChipGroups' : 'waChipAll'));
+    const activeChip = document.getElementById(activeChipId);
+    if (activeChip) activeChip.classList.add('active');
+
+    renderWhatsAppWebUI(waAllMessagesCache, false, true);
+}
+window.setWaChatFilter = setWaChatFilter;
+
+function toggleHideGroupsFromAll(checked) {
+    waHideGroupsFromAll = Boolean(checked);
+    renderWhatsAppWebUI(waAllMessagesCache, false, true);
+}
+window.toggleHideGroupsFromAll = toggleHideGroupsFromAll;
+
 function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender = false) {
     const convList = document.getElementById('waConversationList');
     const msgStream = document.getElementById('waMessagesStream');
@@ -6358,10 +6383,40 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
 
     const conversations = groupWhatsAppConversations(messages);
 
+    // Apply chat filter (All | Unread | Contacts | Groups) & Group Isolation
+    let filteredConv = conversations.filter(c => {
+        const isGrp = Boolean(c.isGroup || (c.phone && c.phone.includes('@g.us')) || (c.normalizedPhone && c.normalizedPhone.includes('@g.us')));
+        const unreadCount = (c.messages || []).filter(m => m.direction === 'inbound' && m.status !== 'read').length;
+
+        if (waCurrentFilter === 'unread') {
+            return unreadCount > 0;
+        } else if (waCurrentFilter === 'contacts') {
+            return !isGrp;
+        } else if (waCurrentFilter === 'groups') {
+            return isGrp;
+        } else {
+            // 'all'
+            if (waHideGroupsFromAll && isGrp) {
+                return false;
+            }
+            return true;
+        }
+    });
+
     // Apply search filter if present
-    const filteredConv = waChatSearchTerm
-        ? conversations.filter(c => c.name.toLowerCase().includes(waChatSearchTerm) || c.phone.toLowerCase().includes(waChatSearchTerm) || c.lastMessage.toLowerCase().includes(waChatSearchTerm))
-        : conversations;
+    if (waChatSearchTerm) {
+        filteredConv = filteredConv.filter(c => 
+            (c.name && c.name.toLowerCase().includes(waChatSearchTerm)) ||
+            (c.phone && c.phone.toLowerCase().includes(waChatSearchTerm)) ||
+            (c.lastMessage && c.lastMessage.toLowerCase().includes(waChatSearchTerm))
+        );
+    }
+
+    // Update filter count badge
+    const filterSummary = document.getElementById('waFilterSummary');
+    if (filterSummary) {
+        filterSummary.textContent = `${filteredConv.length} chat${filteredConv.length === 1 ? '' : 's'}`;
+    }
 
     // Default active chat partner
     if (!waActiveChatPartner && filteredConv.length > 0) {
@@ -6369,7 +6424,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
     }
 
     // Compute signature for conversation list to prevent unnecessary repainting / blinking
-    const convSignature = (waChatSearchTerm || '') + '::' + (waActiveChatPartner || '') + '::' + filteredConv.map(c => {
+    const convSignature = (waCurrentFilter || 'all') + '::' + (waHideGroupsFromAll ? '1' : '0') + '::' + (waChatSearchTerm || '') + '::' + (waActiveChatPartner || '') + '::' + filteredConv.map(c => {
         const unreadCount = (c.messages || []).filter(m => m.direction === 'inbound' && m.status !== 'read').length;
         const isActive = isSameWaPhone(c.normalizedPhone || c.phone, waActiveChatPartner);
         return `${c.phone}_${c.name}_${c.lastMessage}_${c.timestamp}_${unreadCount}_${isActive ? 1 : 0}`;
@@ -10897,27 +10952,208 @@ function toggleLiveVoiceCall() {
 }
 
 // ============================================================================
-// WHATSAPP LINK QR MODAL CONTROLLER (BAILEYS BRIDGE)
+// WHATSAPP LINK QR & 8-DIGIT PAIRING MODAL CONTROLLER (BAILEYS BRIDGE)
 // ============================================================================
 let bridgeQrPollInterval = null;
+let waPairingCodeTimer = null;
+let waPairingCodeRemaining = 120;
+let waCurrentPairingCode = '';
+
+function switchLinkMode(mode) {
+    const qrLeft = document.getElementById('waInstructionsQrView');
+    const phoneLeft = document.getElementById('waInstructionsPhoneView');
+    const qrRight = document.getElementById('waRightColQrView');
+    const phoneRight = document.getElementById('waRightColPhoneView');
+
+    if (mode === 'phone') {
+        if (qrLeft) qrLeft.style.display = 'none';
+        if (phoneLeft) phoneLeft.style.display = 'block';
+        if (qrRight) qrRight.style.display = 'none';
+        if (phoneRight) phoneRight.style.display = 'block';
+        resetPairingPhoneInput();
+        const input = document.getElementById('waPairingPhoneInput');
+        if (input) setTimeout(() => input.focus(), 100);
+    } else {
+        if (qrLeft) qrLeft.style.display = 'block';
+        if (phoneLeft) phoneLeft.style.display = 'none';
+        if (qrRight) qrRight.style.display = 'flex';
+        if (phoneRight) phoneRight.style.display = 'none';
+        fetchBridgeQrCode(false);
+    }
+}
+window.switchLinkMode = switchLinkMode;
+
+function onPairingCountryChange() {
+    const sel = document.getElementById('waPairingCountrySelect');
+    const lbl = document.getElementById('waCountryPrefixLabel');
+    if (!sel || !lbl) return;
+    if (sel.value === 'other') {
+        lbl.textContent = '+';
+    } else {
+        lbl.textContent = `+${sel.value}`;
+    }
+}
+window.onPairingCountryChange = onPairingCountryChange;
+
+async function requestWaPairingCode() {
+    const sel = document.getElementById('waPairingCountrySelect');
+    const input = document.getElementById('waPairingPhoneInput');
+    const btn = document.getElementById('btnGeneratePairingCode');
+    if (!input) return;
+
+    let digits = (input.value || '').replace(/\D/g, '');
+    if (!digits) {
+        if (window.showToast) window.showToast('Please enter your WhatsApp phone number', 'warning');
+        input.focus();
+        return;
+    }
+
+    // Attach country prefix if not already present
+    const prefix = sel && sel.value !== 'other' ? sel.value : '92';
+    let fullPhone = digits;
+    if (digits.startsWith('0')) {
+        fullPhone = prefix + digits.slice(1);
+    } else if (!digits.startsWith(prefix) && digits.length <= 10) {
+        fullPhone = prefix + digits;
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #111b21;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span> Connecting...';
+    }
+
+    try {
+        let res = null;
+        try {
+            res = await fetch('/api/v1/whatsapp/pairing-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: fullPhone })
+            });
+        } catch (_) {
+            res = await fetch('/api/whatsapp/pairing-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: fullPhone })
+            });
+        }
+
+        const data = await res.json();
+        if (data.success && (data.code || data.rawCode)) {
+            const raw = data.rawCode || String(data.code).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+            waCurrentPairingCode = raw;
+            renderPairingCodeBoxes(raw);
+
+            // Switch to result view
+            const formView = document.getElementById('waPhoneFormView');
+            const resultView = document.getElementById('waPhoneCodeResultView');
+            if (formView) formView.style.display = 'none';
+            if (resultView) resultView.style.display = 'block';
+
+            startPairingTimer(120);
+            if (window.showToast) window.showToast('8-Digit Pairing Code Generated! Check WhatsApp on your phone.', 'success');
+        } else if (data.status === 'connected' || data.connected) {
+            window._waIsConnected = true;
+            closeLinkWhatsAppQrModal();
+            if (window.showToast) window.showToast('WhatsApp is already linked!', 'success');
+        } else {
+            if (window.showToast) window.showToast(data.message || 'Failed to generate pairing code. Please try again.', 'error');
+        }
+    } catch (err) {
+        if (window.showToast) window.showToast('Pairing error: ' + err.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span>⚡</span> Generate 8-Digit Code';
+        }
+    }
+}
+window.requestWaPairingCode = requestWaPairingCode;
+
+function renderPairingCodeBoxes(codeStr) {
+    const container = document.getElementById('waPairingCodeBoxes');
+    if (!container) return;
+    const clean = String(codeStr || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const chars = clean.padEnd(8, ' ').slice(0, 8).split('');
+
+    const g1 = chars.slice(0, 4).map(ch => `<div class="wa-pairing-box">${ch.trim() || '&nbsp;'}</div>`).join('');
+    const g2 = chars.slice(4, 8).map(ch => `<div class="wa-pairing-box">${ch.trim() || '&nbsp;'}</div>`).join('');
+
+    container.innerHTML = `
+        <div style="display:flex;gap:5px;">${g1}</div>
+        <div class="wa-pairing-dash">—</div>
+        <div style="display:flex;gap:5px;">${g2}</div>
+    `;
+}
+window.renderPairingCodeBoxes = renderPairingCodeBoxes;
+
+function copyPairingCode() {
+    if (!waCurrentPairingCode) return;
+    const formatted = waCurrentPairingCode.length === 8 
+        ? `${waCurrentPairingCode.slice(0, 4)}-${waCurrentPairingCode.slice(4)}`
+        : waCurrentPairingCode;
+    navigator.clipboard.writeText(formatted).then(() => {
+        const btn = document.getElementById('btnCopyPairingCode');
+        if (btn) {
+            btn.textContent = '✓ Copied!';
+            setTimeout(() => { btn.textContent = '📋 Copy Code'; }, 2000);
+        }
+        if (window.showToast) window.showToast(`Pairing code ${formatted} copied to clipboard!`, 'info');
+    }).catch(() => {
+        if (window.showToast) window.showToast(`Code: ${formatted}`, 'info');
+    });
+}
+window.copyPairingCode = copyPairingCode;
+
+function resetPairingPhoneInput() {
+    if (waPairingCodeTimer) {
+        clearInterval(waPairingCodeTimer);
+        waPairingCodeTimer = null;
+    }
+    const formView = document.getElementById('waPhoneFormView');
+    const resultView = document.getElementById('waPhoneCodeResultView');
+    if (formView) formView.style.display = 'block';
+    if (resultView) resultView.style.display = 'none';
+    const input = document.getElementById('waPairingPhoneInput');
+    if (input) input.focus();
+}
+window.resetPairingPhoneInput = resetPairingPhoneInput;
+
+function startPairingTimer(seconds) {
+    if (waPairingCodeTimer) clearInterval(waPairingCodeTimer);
+    waPairingCodeRemaining = seconds;
+    const timerEl = document.getElementById('waCodeTimer');
+    if (timerEl) timerEl.textContent = `${waPairingCodeRemaining}s`;
+
+    waPairingCodeTimer = setInterval(() => {
+        waPairingCodeRemaining--;
+        if (timerEl) timerEl.textContent = `${waPairingCodeRemaining}s`;
+        if (waPairingCodeRemaining <= 0) {
+            clearInterval(waPairingCodeTimer);
+            waPairingCodeTimer = null;
+            if (timerEl) timerEl.textContent = 'Expired';
+        }
+    }, 1000);
+}
 
 function openLinkWhatsAppQrModal() {
     const modal = document.getElementById('linkWhatsAppQrModal');
     if (!modal) return;
     modal.style.display = 'flex';
 
+    const connectedState = document.getElementById('qrConnectedState');
+    const pairingMainBody = document.getElementById('waPairingMainBody');
+
     // GUARD: If WhatsApp is already connected, display connected confirmation and NEVER reset session or re-poll
     if (window._waIsConnected) {
-        const spinner = document.getElementById('qrLoadingSpinner');
-        const imageWrapper = document.getElementById('qrImageWrapper');
-        const connectedState = document.getElementById('qrConnectedState');
-        const refreshBtn = document.getElementById('qrRefreshBtn');
-        if (spinner) spinner.style.display = 'none';
-        if (imageWrapper) imageWrapper.style.display = 'none';
+        if (pairingMainBody) pairingMainBody.style.display = 'none';
         if (connectedState) connectedState.style.display = 'block';
-        if (refreshBtn) refreshBtn.style.display = 'none';
         return;
     }
+
+    if (connectedState) connectedState.style.display = 'none';
+    if (pairingMainBody) pairingMainBody.style.display = 'flex';
+    switchLinkMode('qr');
 
     fetchBridgeQrCode(true);
     if (bridgeQrPollInterval) clearInterval(bridgeQrPollInterval);
@@ -10962,6 +11198,10 @@ function closeLinkWhatsAppQrModal() {
     if (bridgeQrPollInterval) {
         clearInterval(bridgeQrPollInterval);
         bridgeQrPollInterval = null;
+    }
+    if (waPairingCodeTimer) {
+        clearInterval(waPairingCodeTimer);
+        waPairingCodeTimer = null;
     }
 }
 
@@ -11016,6 +11256,8 @@ async function fetchBridgeQrCode(force) {
                 clearInterval(bridgeQrPollInterval);
                 bridgeQrPollInterval = null;
             }
+            const pairingMainBody = document.getElementById('waPairingMainBody');
+            if (pairingMainBody) pairingMainBody.style.display = 'none';
             if (spinner) spinner.style.display = 'none';
             if (imageWrapper) imageWrapper.style.display = 'none';
             if (connectedState) connectedState.style.display = 'block';

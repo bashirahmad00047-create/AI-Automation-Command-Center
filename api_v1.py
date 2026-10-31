@@ -2743,6 +2743,47 @@ def api_whatsapp_bridge_qr_refresh():
         }), 200
 
 
+@api_v1.route("/whatsapp/pairing-code", methods=["POST", "GET"])
+@api_v1.route("/wa/pairing-code", methods=["POST", "GET"])
+def api_whatsapp_pairing_code():
+    """Generates an 8-character official WhatsApp Web pairing code for phone-number linking.
+    Calls Baileys native sock.requestPairingCode(phoneNumber).
+    Guaranteed: Always returns HTTP 200 with JSON response.
+    """
+    import requests
+    phone = ""
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        phone = data.get("phone") or data.get("phoneNumber") or data.get("number") or ""
+    if not phone:
+        phone = request.args.get("phone") or request.args.get("phoneNumber") or request.args.get("number") or ""
+
+    if not phone:
+        return jsonify({
+            "success": False,
+            "status": "error",
+            "message": "Phone number is required (e.g. 923001234567)."
+        }), 200
+
+    try:
+        from wa_bridge_manager import ensure_wa_bridge_running
+        ensure_wa_bridge_running(timeout_seconds=4.0)
+    except Exception as _mgr_err:
+        logger.warning(f"[WA Bridge] Manager error: {_mgr_err}")
+
+    pairing_url = os.environ.get("BAILEYS_BRIDGE_PAIRING_URL", "http://127.0.0.1:3001/pairing-code")
+    try:
+        resp = requests.post(pairing_url, json={"phone": phone}, timeout=10.0)
+        data = resp.json() if resp.text else {"success": False, "status": "error", "message": "No response from bridge"}
+        return jsonify(data), 200
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "status": "error",
+            "message": f"Bridge error generating pairing code: {str(e)}"
+        }), 200
+
+
 @api_v1.route("/whatsapp/bridge-disconnect", methods=["POST", "DELETE"])
 @require_auth
 def api_whatsapp_bridge_disconnect():
