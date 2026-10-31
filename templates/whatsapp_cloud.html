@@ -248,6 +248,9 @@
                             </div>
                         </div>
                         <div id="waActiveChatActions" class="hud-flex-row hud-gap-sm">
+                            <button type="button" class="btn btn-sm" id="waHeaderVoiceCallBtn" onclick="openLiveVoiceCallModal()" style="background: rgba(0, 168, 132, 0.15); border: 1px solid #00a884; color: #00a884; font-weight: 700; font-size: 11.5px; padding: 4px 10px; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: all 0.2s;" title="Start Real WhatsApp Voice Call">
+                                <span>📞</span> <span>WhatsApp Call</span>
+                            </button>
                             <div class="ai-auto-responder-pill" id="waHeaderAiToggle" onclick="toggleWhatsAppAiAutoResponder()" title="Toggle AI Auto-Responder for Active Workspace">
                                 <span class="ai-pill-dot" id="waHeaderAiDot" style="background: #34d399;"></span>
                                 <span>AI Auto-Responder</span>
@@ -317,10 +320,21 @@
 
                         <div style="flex: 1; position: relative;">
                             <textarea id="waReplyInput" class="wa-reply-input" rows="1" placeholder="Type a message (Press Enter to send, Shift+Enter for newline)..." onkeydown="handleWaReplyKeydown(event)"></textarea>
-                            <div id="waRecordingIndicator" style="display: none; position: absolute; inset: 0; background: #202c33; border-radius: 8px; align-items: center; padding: 0 14px; gap: 10px; color: #ef4444; font-size: 13px; font-weight: 600;">
-                                <span>🔴 Recording Voice Note...</span>
-                                <span id="waRecordingTimer" style="color: #cbd5e1; font-family: monospace;">00:00</span>
-                                <button type="button" onclick="cancelVoiceRecording()" style="margin-left: auto; background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 12px;">Cancel</button>
+                            <div id="waRecordingIndicator" style="display: none; position: absolute; inset: 0; background: #202c33; border-radius: 8px; align-items: center; padding: 0 12px; gap: 10px; z-index: 15; box-shadow: inset 0 0 10px rgba(0,0,0,0.4);">
+                                <button type="button" onclick="cancelVoiceRecording()" title="Discard recording" style="background: none; border: none; color: #ef4444; font-size: 16px; cursor: pointer; padding: 4px; display: flex; align-items: center;" aria-label="Discard recording">🗑️</button>
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #ef4444; animation: waBlink 1s infinite;"></span>
+                                    <span id="waRecordingTimer" style="color: #e9edef; font-family: monospace; font-size: 13.5px; font-weight: 700;">00:00</span>
+                                </div>
+                                <div style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 3px; height: 22px;">
+                                    <span class="wa-wave-bar" style="height: 12px; animation: waWave 1.2s ease-in-out infinite;"></span>
+                                    <span class="wa-wave-bar" style="height: 18px; animation: waWave 0.9s ease-in-out infinite 0.2s;"></span>
+                                    <span class="wa-wave-bar" style="height: 22px; animation: waWave 1.4s ease-in-out infinite 0.4s;"></span>
+                                    <span class="wa-wave-bar" style="height: 14px; animation: waWave 0.8s ease-in-out infinite 0.1s;"></span>
+                                    <span class="wa-wave-bar" style="height: 20px; animation: waWave 1.1s ease-in-out infinite 0.3s;"></span>
+                                    <span class="wa-wave-bar" style="height: 10px; animation: waWave 1.3s ease-in-out infinite 0.5s;"></span>
+                                </div>
+                                <button type="button" onclick="stopVoiceRecording()" title="Send Voice Note" style="background: #00a884; border: none; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 15px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,168,132,0.4);" aria-label="Send Voice Note">➤</button>
                             </div>
                         </div>
 
@@ -765,5 +779,55 @@
             </div>
         </div>
     </div>
+
+    <!-- NEW CHAT & GROUP MODAL -->
+    <div class="hud-modal-backdrop" id="newConversationModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(10px); z-index: 10070; align-items: center; justify-content: center;">
+        <div class="hud-modal-content" style="background: #111b21; border: 1px solid #222e35; border-radius: 16px; width: 95%; max-width: 480px; overflow: hidden; box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.85); color: #e9edef;">
+            <div style="padding: 16px 20px; border-bottom: 1px solid #202c33; display: flex; justify-content: space-between; align-items: center; background: #202c33;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 20px;">💬</span>
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff;" id="newConvModalTitle">New Chat / Group</h3>
+                </div>
+                <button type="button" onclick="closeNewConversationModal()" style="background: none; border: none; font-size: 20px; color: #8696a0; cursor: pointer; padding: 4px; line-height: 1;">✕</button>
+            </div>
+
+            <div style="display: flex; border-bottom: 1px solid #202c33; background: #111b21;">
+                <button type="button" id="tabModeNewChat" onclick="switchNewConvTab('chat')" style="flex: 1; padding: 12px; background: transparent; border: none; border-bottom: 2px solid #00a884; color: #00a884; font-size: 13px; font-weight: 700; cursor: pointer;">
+                    👤 1-on-1 Contact Chat
+                </button>
+                <button type="button" id="tabModeNewGroup" onclick="switchNewConvTab('group')" style="flex: 1; padding: 12px; background: transparent; border: none; border-bottom: 2px solid transparent; color: #8696a0; font-size: 13px; font-weight: 600; cursor: pointer;">
+                    👥 Create WhatsApp Group
+                </button>
+            </div>
+
+            <div id="newChatPane" style="padding: 20px;">
+                <label style="display: block; font-size: 11.5px; font-weight: 600; color: #8696a0; margin-bottom: 6px; text-transform: uppercase;">Contact Name (Optional)</label>
+                <input type="text" id="newChatContactName" placeholder="e.g. Tariq Mahmood, Bilal Khan" style="width: 100%; background: #202c33; border: 1px solid #2a3942; border-radius: 8px; padding: 10px 12px; color: #e9edef; font-size: 13.5px; outline: none; margin-bottom: 14px;">
+
+                <label style="display: block; font-size: 11.5px; font-weight: 600; color: #8696a0; margin-bottom: 6px; text-transform: uppercase;">WhatsApp Phone Number</label>
+                <div style="display: flex; align-items: center; background: #202c33; border: 1px solid #2a3942; border-radius: 8px; overflow: hidden; margin-bottom: 16px;">
+                    <span style="padding: 10px 12px; font-size: 13.5px; font-weight: 700; color: #00a884; border-right: 1px solid #2a3942; user-select: none;">+92</span>
+                    <input type="tel" id="newChatPhoneInput" placeholder="300 1234567" onkeydown="if(event.key==='Enter')submitNewChat()" style="background: transparent; border: none; outline: none; color: #e9edef; font-size: 14px; font-weight: 600; padding: 10px 12px; width: 100%;">
+                </div>
+
+                <button type="button" id="btnSubmitNewChat" onclick="submitNewChat()" style="width: 100%; background: #00a884; color: #111b21; font-weight: 700; font-size: 13.5px; padding: 11px; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 15px rgba(0, 168, 132, 0.35);">
+                    <span>💬</span> Save Contact &amp; Open Chat
+                </button>
+            </div>
+
+            <div id="newGroupPane" style="display: none; padding: 20px;">
+                <label style="display: block; font-size: 11.5px; font-weight: 600; color: #8696a0; margin-bottom: 6px; text-transform: uppercase;">Group Subject / Name</label>
+                <input type="text" id="newGroupSubject" placeholder="e.g. BashFlow VIP Clients, Support Team" style="width: 100%; background: #202c33; border: 1px solid #2a3942; border-radius: 8px; padding: 10px 12px; color: #e9edef; font-size: 13.5px; outline: none; margin-bottom: 14px;">
+
+                <label style="display: block; font-size: 11.5px; font-weight: 600; color: #8696a0; margin-bottom: 6px; text-transform: uppercase;">Participant Phone Numbers</label>
+                <input type="text" id="newGroupParticipants" placeholder="e.g. 923001234567, 923215566778" style="width: 100%; background: #202c33; border: 1px solid #2a3942; border-radius: 8px; padding: 10px 12px; color: #e9edef; font-size: 13.5px; outline: none; margin-bottom: 16px;">
+
+                <button type="button" id="btnSubmitNewGroup" onclick="submitNewGroup()" style="width: 100%; background: #00a884; color: #111b21; font-weight: 700; font-size: 13.5px; padding: 11px; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 15px rgba(0, 168, 132, 0.35);">
+                    <span>👥</span> Create Real WhatsApp Group
+                </button>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>

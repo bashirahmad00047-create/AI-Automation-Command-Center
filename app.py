@@ -911,6 +911,46 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_whatsapp_bridge_status
         return api_whatsapp_bridge_status()
 
+    @application.route("/api/whatsapp/conversations", methods=["GET"])
+    @application.route("/api/v1/whatsapp/conversations", methods=["GET"])
+    @application.route("/api/wa/conversations", methods=["GET"])
+    @application.route("/api/v1/wa/conversations", methods=["GET"])
+    def route_whatsapp_conversations():
+        from api_v1 import api_whatsapp_conversations
+        return api_whatsapp_conversations()
+
+    @application.route("/api/whatsapp/contacts", methods=["GET"])
+    @application.route("/api/v1/whatsapp/contacts", methods=["GET"])
+    @application.route("/api/wa/contacts", methods=["GET"])
+    @application.route("/api/v1/wa/contacts", methods=["GET"])
+    def route_whatsapp_contacts():
+        from api_v1 import api_whatsapp_contacts
+        return api_whatsapp_contacts()
+
+    @application.route("/api/whatsapp/contacts/create", methods=["POST"])
+    @application.route("/api/v1/whatsapp/contacts/create", methods=["POST"])
+    @application.route("/api/wa/contacts/create", methods=["POST"])
+    @application.route("/api/v1/wa/contacts/create", methods=["POST"])
+    def route_whatsapp_contacts_create():
+        from api_v1 import api_whatsapp_contacts_create
+        return api_whatsapp_contacts_create()
+
+    @application.route("/api/whatsapp/groups", methods=["GET"])
+    @application.route("/api/v1/whatsapp/groups", methods=["GET"])
+    @application.route("/api/wa/groups", methods=["GET"])
+    @application.route("/api/v1/wa/groups", methods=["GET"])
+    def route_whatsapp_groups():
+        from api_v1 import api_whatsapp_groups
+        return api_whatsapp_groups()
+
+    @application.route("/api/whatsapp/groups/create", methods=["POST"])
+    @application.route("/api/v1/whatsapp/groups/create", methods=["POST"])
+    @application.route("/api/wa/groups/create", methods=["POST"])
+    @application.route("/api/v1/wa/groups/create", methods=["POST"])
+    def route_whatsapp_groups_create():
+        from api_v1 import api_whatsapp_groups_create
+        return api_whatsapp_groups_create()
+
     @application.route("/api/voice/chat", methods=["POST"])
     @application.route("/api/v1/voice/chat", methods=["POST"])
     def route_ai_voice_chat():

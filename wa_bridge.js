@@ -1857,6 +1857,45 @@ app.all(['/pairing-code', '/api/pairing-code', '/request-pairing-code'], async (
  * Explicit disconnect / logout endpoint
  * Unlinks the device ONLY when user intentionally clicks Disconnect
  */
+/**
+ * Real WhatsApp Group Creation via Baileys sock.groupCreate
+ */
+app.post(['/create-group', '/api/create-group'], async (req, res) => {
+  try {
+    const { subject, participants } = req.body || {};
+    if (!subject) {
+      return res.status(400).json({ success: false, message: 'Group subject is required.' });
+    }
+    if (!sock) {
+      return res.status(503).json({ success: false, message: 'WhatsApp socket is not connected.' });
+    }
+
+    let participantJids = [];
+    if (Array.isArray(participants)) {
+      participantJids = participants.map(p => {
+        const d = cleanPhoneNumber(p);
+        return d ? `${d}@s.whatsapp.net` : null;
+      }).filter(Boolean);
+    }
+
+    if (participantJids.length === 0) {
+      participantJids = [sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : '923209350858@s.whatsapp.net'];
+    }
+
+    const groupResult = await sock.groupCreate(String(subject).slice(0, 100), participantJids);
+    console.log(`[Baileys Group Create] Successfully created WhatsApp group: ${groupResult?.id} (${subject})`);
+    return res.json({
+      success: true,
+      groupJid: groupResult?.id,
+      subject: subject,
+      group: groupResult
+    });
+  } catch (err) {
+    console.error('[Baileys Group Create Error]:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.post(['/disconnect', '/logout'], async (req, res) => {
   console.log('[WhatsApp Bridge] Explicit logout requested by user.');
   try {

@@ -7336,3 +7336,22 @@ html.dark .dark\:hover\:bg-slate-800:hover, .dark .dark\:hover\:bg-slate-800:hov
     border-color: #ef4444 !important;
     color: #ef4444 !important;
 }
+
+/* WhatsApp Live Audio Waves & Recording Bar Animation */
+@keyframes waBlink {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.25; transform: scale(0.85); }
+}
+
+@keyframes waWave {
+    0%, 100% { transform: scaleY(0.35); }
+    50% { transform: scaleY(1.1); }
+}
+
+.wa-wave-bar {
+    display: inline-block;
+    width: 3px;
+    background: #00a884;
+    border-radius: 2px;
+    transform-origin: bottom;
+}
