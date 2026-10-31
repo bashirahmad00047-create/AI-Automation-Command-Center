@@ -1,4 +1,5 @@
 
+// BashFlow Cloud: Enterprise Pakistan #1 AI & WhatsApp Automation Engine (Production)
 function cleanPakistaniNumber(jid) {
     if (!jid) return "";
     let digits = jid.replace(/\D/g, "");
