@@ -305,7 +305,7 @@ class GeminiAIProvider(BaseAIProvider):
                 f"Message: {message or ''}\n"
                 f"Department: {route_department}\n"
                 f"Intent: {intent}\n"
-                "Draft a short, helpful, courteous response (under 120 words)."
+                "Draft a short, helpful, courteous response (under 120 words). AI is strictly prohibited from speaking like a stiff news anchor or formal announcer. Speak warmly and naturally like a friendly customer representative."
             )
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}]

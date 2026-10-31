@@ -1639,7 +1639,8 @@ class WhatsAppService:
     ) -> Optional[bytes]:
         """Synthesizes text into ultra-natural human speech using ElevenLabs Multilingual Neural TTS engine.
         Defaults to natural voice_id='QwMurwQUOf6t7fnABXar' and model_id='eleven_multilingual_v2'
-        with stability=0.50, similarity_boost=0.75, style=0.40, use_speaker_boost=True for natural Pakistani human touch.
+        with conversational tuning: stability=0.40 (conversational range 0.35-0.45), similarity_boost=0.75, style=0.50, use_speaker_boost=True
+        eliminating flat news-reader cadence with expressive human prosody and natural pitch inflection.
         """
         eleven_key = (
             cls._get_tenant_or_global_setting("ELEVENLABS_API_KEY", organization_id=organization_id)
@@ -1673,9 +1674,9 @@ class WhatsAppService:
                 "text": text[:1000],
                 "model_id": active_model,
                 "voice_settings": {
-                    "stability": 0.50,
+                    "stability": 0.40,
                     "similarity_boost": 0.75,
-                    "style": 0.40,
+                    "style": 0.50,
                     "use_speaker_boost": True
                 }
             }
@@ -2920,13 +2921,18 @@ class WhatsAppService:
             jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "Bashir Uddin"
             kb = (
                 f"Business Name: {b_name or 'BashFlow AI'}\n\n"
-                "ASSISTANT IDENTITY & CONVERSATIONAL GUIDELINES:\n"
-                "1. Act as a friendly, intelligent, helpful conversational AI assistant on WhatsApp.\n"
-                "2. Speak naturally and warmly in conversational Roman Urdu, natural Urdu, or English.\n"
-                "3. If the customer greets you or says 'Kaise ho ap', 'Salam', or similar, answer warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
-                "4. Answer questions on any general topic directly, naturally, and politely in 1 to 3 friendly sentences without markdown formatting (*, #).\n"
-                "5. Only mention pricing if the customer explicitly asks about software or bot subscription plans (Starter PKR 7,500/mo, Pro PKR 25,000/mo, 2-day free trial; JazzCash: 03209350858 Bashir Uddin).\n"
-                "6. NEVER output robotic corporate introductory speeches.\n"
+                "ASSISTANT IDENTITY & CONVERSATIONAL GUIDELINES (NATURAL DOSTANA INSAAN):\n"
+                "1. ACT AS A REAL, FRIENDLY HUMAN: You are a warm, helpful customer care representative speaking like a natural, friendly person.\n"
+                "2. STRICT BAN ON NEWS ANCHOR / RADIO VOICE: Strictly DO NOT speak like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, archaic, robotic, or overly heavy literary words.\n"
+                "3. SHORT & CRISP SENTENCES: Speak in short, snappy, natural sentences (1 to 3 sentences maximum). Avoid long speeches.\n"
+                "4. NATURAL CONVERSATIONAL FILLERS: Freely and naturally sprinkle human conversational markers:\n"
+                "   - In Urdu / Roman Urdu: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor', 'Haan jee'.\n"
+                "   - In English: 'Sure thing', 'Got it', 'Let me check', 'Of course', 'Right away'.\n"
+                "5. STRICT LANGUAGE MATCHING: If the customer writes or speaks in Urdu (or Roman Urdu), reply 100% in natural Pakistani Urdu. If the customer messages in English, reply 100% in clear fluent English. NEVER mix languages or cross-translate.\n"
+                "6. GREETING PROTOCOL: If the customer greets you or says 'Kaise ho ap', 'Salam', or similar, answer warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
+                "7. DIRECT & HONEST: Answer questions on any general topic directly, naturally, and politely without markdown asterisks or bullet lists.\n"
+                "8. Only mention pricing if the customer explicitly asks about software or bot subscription plans (Starter PKR 7,500/mo, Pro PKR 25,000/mo, 2-day free trial; JazzCash: 03209350858 Bashir Uddin).\n"
+                "9. NEVER output robotic corporate introductory speeches.\n"
             )
             return kb
 
@@ -3105,9 +3111,11 @@ class WhatsAppService:
             "hello", "hi", "hey", "how", "what", "is", "are", "the", "can", "you",
             "please", "thanks", "thank", "price", "pricing", "cost", "features", "help",
             "need", "want", "automate", "automation", "whatsapp", "cloud", "account",
-            "demo", "trial", "interested", "service", "integration", "workflow", "support",
+            "demo", "trial", "interested", "service", "services", "integration", "workflow", "support",
             "issue", "down", "payment", "plan", "plans", "setup", "available", "information",
-            "details", "quote", "connect", "assist", "assistance", "welcome"
+            "details", "quote", "connect", "assist", "assistance", "welcome", "tell", "provide",
+            "give", "would", "like", "good", "morning", "evening", "afternoon", "sir", "madam",
+            "call", "agent", "software", "bot", "business", "company", "and", "for", "with", "about"
         }
 
         pashto_phrase_hits = len(all_phrases.intersection(roman_pashto_phrases))
@@ -3119,6 +3127,7 @@ class WhatsAppService:
         urdu_latin_score = urdu_phrase_hits * 4 + urdu_word_hits * 2
 
         english_hits = len(token_set.intersection(english_words))
+        english_score = english_hits * 3
 
         # Check conversation history for short / single-word Latin messages (e.g. 'ok', 'ji', 'ha', 'salam')
         if len(tokens) <= 2 and pashto_latin_score == 0 and urdu_latin_score == 0 and conversation_history:
@@ -3128,7 +3137,15 @@ class WhatsAppService:
                     if past_info["language"] in ("pashto", "urdu"):
                         return past_info
 
-        if pashto_latin_score > 0 and pashto_latin_score >= urdu_latin_score:
+        if english_score > urdu_latin_score and english_score > pashto_latin_score:
+            return {
+                "language": "english",
+                "script": "latin",
+                "format": "english",
+                "name": "English",
+                "confidence": min(0.98, 0.7 + 0.04 * english_hits)
+            }
+        elif pashto_latin_score > 0 and pashto_latin_score >= urdu_latin_score:
             return {
                 "language": "pashto",
                 "script": "latin",
@@ -3136,7 +3153,7 @@ class WhatsAppService:
                 "name": "Roman Pashto",
                 "confidence": min(0.98, 0.7 + 0.05 * pashto_latin_score)
             }
-        elif urdu_latin_score > 0 and urdu_latin_score > pashto_latin_score:
+        elif urdu_latin_score > 0 and urdu_latin_score >= english_score:
             return {
                 "language": "urdu",
                 "script": "latin",
@@ -3164,6 +3181,7 @@ class WhatsAppService:
                 "LANGUAGE REQUIREMENT (CRITICAL - NATURAL CONVERSATIONAL ROMAN URDU / URDU):\n"
                 f"- The customer messaged in Pashto script: '{clean_text}'.\n"
                 "- Reply in simple, warm, conversational Roman Urdu (or natural Urdu) sounding like a polite, friendly assistant.\n"
+                "- NO NEWS ANCHOR TONE: Speak like a normal human, using short sentences and conversational fillers like 'Jee bilkul', 'Behtar'.\n"
                 "- Keep sentences simple, smooth, and conversational."
             )
         elif fmt == "roman_pashto":
@@ -3171,35 +3189,41 @@ class WhatsAppService:
                 "LANGUAGE REQUIREMENT (CRITICAL - CONVERSATIONAL ROMAN URDU / ROMAN PASHTO):\n"
                 f"- The customer messaged in Roman Pashto: '{clean_text}'.\n"
                 "- Reply in simple, warm, conversational Roman Urdu sounding like a helpful, friendly assistant.\n"
+                "- NO NEWS ANCHOR TONE: Use friendly, human tone with fillers like 'Jee bilkul', 'Acha dekhein'.\n"
                 "- Avoid complex corporate vocabulary."
             )
         elif fmt == "urdu_arabic":
             return (
-                "LANGUAGE REQUIREMENT (CRITICAL - CONVERSATIONAL URDU SCRIPT):\n"
+                "LANGUAGE REQUIREMENT (CRITICAL - CONVERSATIONAL URDU SCRIPT - 100% URDU):\n"
                 f"- The customer messaged in Urdu script (اردو): '{clean_text}'.\n"
-                "- Formulate your entire reply in natural, polite Urdu as a friendly assistant.\n"
-                "- Use warm phrasing: e.g. 'السلام علیکم! بتائیے میں آپ کی کیا مدد کر سکتا ہوں؟'.\n"
+                "- Formulate your entire reply 100% in natural, polite Urdu as a friendly assistant.\n"
+                "- TONE (NATURAL DOSTANA INSAAN): Strictly DO NOT sound like a news anchor or radio reader. Use short sentences with human fillers like 'جی بالکل'، 'اچھا دیکھیں'، 'بہتر'، 'ضرور'.\n"
+                "- STRICT NO-MIX: Do NOT mix English words into the Urdu reply.\n"
                 "- Avoid robotic corporate phrases."
             )
         elif fmt == "roman_urdu":
             return (
-                "LANGUAGE REQUIREMENT (CRITICAL - CONVERSATIONAL ROMAN URDU):\n"
+                "LANGUAGE REQUIREMENT (CRITICAL - CONVERSATIONAL ROMAN URDU - 100% URDU):\n"
                 f"- The customer messaged in Roman Urdu (Latin alphabet): '{clean_text}'.\n"
-                "- Formulate your entire reply in natural, friendly, colloquial Roman Urdu sounding 100% natural and polite on WhatsApp.\n"
-                "- Use natural phrasing: e.g. 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
+                "- Formulate your entire reply 100% in natural, friendly, colloquial Roman Urdu sounding 100% natural and polite on WhatsApp.\n"
+                "- TONE (NATURAL DOSTANA INSAAN): AI is strictly prohibited from speaking like a news anchor, radio announcer, or formal narrator. Use short sentences and natural conversational fillers: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor'.\n"
+                "- STRICT NO-MIX: Do NOT mix into English.\n"
                 "- Avoid robotic corporate clichés, disclaimers, or IT jargon."
             )
         elif fmt == "english":
             return (
-                "LANGUAGE REQUIREMENT (CRITICAL - ENGLISH):\n"
+                "LANGUAGE REQUIREMENT (CRITICAL - 100% FLUENT CONVERSATIONAL ENGLISH):\n"
                 f"- The customer messaged in English: '{clean_text}'.\n"
-                "- You MUST formulate your entire reply in clear, friendly English as a helpful assistant."
+                "- You MUST formulate your entire reply 100% in clear, friendly, natural conversational English as an approachable customer representative.\n"
+                "- TONE (NATURAL FRIENDLY HUMAN): Strictly DO NOT sound like a news broadcaster, radio announcer, or corporate robot. Speak in short, crisp sentences.\n"
+                "- NATURAL FILLERS: Use conversational markers like 'Sure thing', 'Got it', 'Let me check', 'Of course', 'Right away'.\n"
+                "- STRICT NO-MIX: Do NOT translate or mix Urdu words into the English reply."
             )
         else:
             return (
-                "LANGUAGE REQUIREMENT (CRITICAL - ROMAN URDU):\n"
+                "LANGUAGE REQUIREMENT (CRITICAL - NATURAL CONVERSATIONAL ROMAN URDU):\n"
                 f"- The customer messaged in an unspecified language (defaulting to Roman Urdu): '{clean_text}'.\n"
-                "- You MUST formulate your entire reply in natural, conversational Roman Urdu (Latin script Urdu).\n"
+                "- You MUST formulate your entire reply in natural, conversational Roman Urdu (Latin script Urdu) with friendly fillers like 'Jee bilkul', 'Acha dekhein'.\n"
                 "- Do NOT answer in English by default.\n"
                 "- Use natural Roman Urdu phrasing: e.g. 'Salam! Khush-amdeed, main aapki kya madad kar sakta hoon?'."
             )
@@ -3470,11 +3494,12 @@ class WhatsAppService:
             f"{sys_instruct}{history_section}\n\n"
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"CONVERSATIONAL AI ASSISTANT PROTOCOL:\n"
-            f"0. NATURAL HUMAN GREETING: If customer says 'Kaise ho ap', 'Kaisa ho aap', or greets you, reply naturally: 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
-            f"1. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, smart, general-purpose conversational partner. Answer what the customer asked directly and intelligently in 1 to 3 concise, friendly sentences in conversational Roman Urdu (or English/Urdu matching the user's language). Do NOT impose any mobile shop restrictions.\n"
-            f"2. NO ROBOTIC CORPORATE PITCHES: Answer the customer's actual question naturally without unsolicited software pitches.\n"
-            f"3. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences. No asterisks, hashtags, or bullet symbols."
+            f"CONVERSATIONAL AI ASSISTANT PROTOCOL (NATURAL DOSTANA INSAAN):\n"
+            f"0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, heavy, bookish words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein (Urdu mein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor'; English mein: 'Sure thing', 'Got it', 'Let me check', 'Of course').\n"
+            f"1. STRICT LANGUAGE MATCHING: Agar user ne Urdu (ya Roman Urdu) mein pucha hai toh jawab 100% natural Pakistani Urdu mein dein. Agar English mein baat ki hai toh jawab 100% fluent English mein dein. Kisi bhi surat mein zaban mix ya galat translate na ho.\n"
+            f"2. NATURAL GREETINGS: If customer says 'Kaise ho ap', 'Salam', or greets you, reply warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
+            f"3. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, helpful conversational partner. Answer what the customer asked directly and politely in 1 to 3 short friendly sentences. Do not pitch software or pricing unless asked.\n"
+            f"4. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences. No asterisks, hashtags, or bullet symbols."
         )
 
         configured_model = cls.get_gemini_model_name(organization_id=organization_id)
@@ -3714,11 +3739,12 @@ class WhatsAppService:
             f"{sys_instruct}{history_section}\n\n"
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"CONVERSATIONAL AI ASSISTANT PROTOCOL:\n"
-            f"0. NATURAL HUMAN GREETING: If customer says 'Kaise ho ap', 'Kaisa ho aap', or greets you, reply naturally: 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
-            f"1. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, smart, general-purpose conversational partner. Answer what the customer asked directly and intelligently in 1 to 3 concise, friendly sentences in conversational Roman Urdu (or English/Urdu matching the user's language). Do NOT impose any mobile shop restrictions.\n"
-            f"2. NO ROBOTIC CORPORATE PITCHES: Answer the customer's actual question naturally without unsolicited software pitches.\n"
-            f"3. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences. No asterisks, hashtags, or bullet symbols."
+            f"CONVERSATIONAL AI ASSISTANT PROTOCOL (NATURAL DOSTANA INSAAN):\n"
+            f"0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, heavy, bookish words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein (Urdu mein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor'; English mein: 'Sure thing', 'Got it', 'Let me check', 'Of course').\n"
+            f"1. STRICT LANGUAGE MATCHING: Agar user ne Urdu (ya Roman Urdu) mein pucha hai toh jawab 100% natural Pakistani Urdu mein dein. Agar English mein baat ki hai toh jawab 100% fluent English mein dein. Kisi bhi surat mein zaban mix ya galat translate na ho.\n"
+            f"2. NATURAL GREETINGS: If customer says 'Kaise ho ap', 'Salam', or greets you, reply warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
+            f"3. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, helpful conversational partner. Answer what the customer asked directly and politely in 1 to 3 short friendly sentences. Do not pitch software or pricing unless asked.\n"
+            f"4. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences. No asterisks, hashtags, or bullet symbols."
         )
 
         configured_groq_model = (
@@ -3864,11 +3890,12 @@ class WhatsAppService:
             f"Current Real-World Time: {pkt_time_str}.\n\n"
             f"{sys_instruct}\n\n"
             f"{lang_directive}\n\n"
-            f"CONVERSATIONAL AI ASSISTANT PROTOCOL:\n"
-            f"0. NATURAL HUMAN GREETING: If customer says 'Kaise ho ap', 'Kaisa ho aap', or greets you, reply naturally: 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Main aap ki kya madad kar sakta hoon?'.\n"
-            f"1. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, smart, general-purpose conversational partner. Answer what the customer asked directly and intelligently in 1 to 3 concise, friendly sentences in conversational Roman Urdu (or English/Urdu matching the user's language). Do NOT impose any mobile shop restrictions.\n"
-            f"2. NO ROBOTIC CORPORATE PITCHES: Answer the customer's actual question naturally without unsolicited software pitches.\n"
-            f"3. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences. No asterisks, hashtags, or bullet symbols."
+            f"CONVERSATIONAL AI ASSISTANT PROTOCOL (NATURAL DOSTANA INSAAN):\n"
+            f"0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, heavy, bookish words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein (Urdu mein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor'; English mein: 'Sure thing', 'Got it', 'Let me check', 'Of course').\n"
+            f"1. STRICT LANGUAGE MATCHING: Agar user ne Urdu (ya Roman Urdu) mein pucha hai toh jawab 100% natural Pakistani Urdu mein dein. Agar English mein baat ki hai toh jawab 100% fluent English mein dein. Kisi bhi surat mein zaban mix ya galat translate na ho.\n"
+            f"2. NATURAL GREETINGS: If customer says 'Kaise ho ap', 'Salam', or greets you, reply warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
+            f"3. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, helpful conversational partner. Answer what the customer asked directly and politely in 1 to 3 short friendly sentences. Do not pitch software or pricing unless asked.\n"
+            f"4. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences. No asterisks, hashtags, or bullet symbols."
         )
 
         messages = [{"role": "system", "content": sys_content}]
@@ -3994,20 +4021,21 @@ class WhatsAppService:
 
         sys_content = (
             "You are a friendly, highly intelligent AI conversational assistant.\n"
-            "CRITICAL RULES:\n"
-            "1. LANGUAGE MATCHING RULE:\n"
-            "   - If the customer speaks or writes in Urdu, Roman Urdu, or Hindi (text or voice):\n"
-            "     * Reply warmly in natural Urdu.\n"
-            "     * 'display_text': Natural, friendly conversational Roman Urdu for reading on dashboard.\n"
-            "     * 'tts_text': Pure Urdu script in Urdu characters (اردو) for crystal-clear human speech pronunciation.\n"
+            "CRITICAL PROTOCOLS (NATURAL DOSTANA INSAAN):\n"
+            "0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, radio announcer, or formal broadcaster. Avoid stiff, heavy literary words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein (Urdu mein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor'; English mein: 'Sure thing', 'Got it', 'Let me check', 'Of course').\n"
+            "1. STRICT AUTO-LANGUAGE MATCHING (NEVER MIX):\n"
+            "   - If the customer speaks or writes in Urdu or Roman Urdu (text or voice):\n"
+            "     * Reply 100% in natural Pakistani Urdu.\n"
+            "     * 'display_text': Natural, friendly conversational Roman Urdu with fillers like 'Jee bilkul', 'Acha dekhein'.\n"
+            "     * 'tts_text': Pure Urdu script in Urdu characters (اردو) for crystal-clear natural speech pronunciation.\n"
             "     * 'lang': 'ur'\n"
             "   - If the customer speaks or writes in English:\n"
-            "     * Reply warmly in natural conversational English.\n"
-            "     * 'display_text': Natural conversational English.\n"
+            "     * Reply 100% in natural, fluent conversational English.\n"
+            "     * 'display_text': Natural conversational English with fillers like 'Sure thing', 'Got it'.\n"
             "     * 'tts_text': Same natural conversational English.\n"
             "     * 'lang': 'en'\n"
-            "2. DIRECT & CONVERSATIONAL: Answer the customer's exact question or greeting directly in 1-3 natural, warm sentences.\n"
-            "3. NO ROBOTIC CORPORATE PITCHES: Never give unsolicited marketing or pricing packages.\n"
+            "2. DIRECT & CONVERSATIONAL: Answer the customer's exact question or greeting directly in 1-3 short, natural, warm sentences.\n"
+            "3. NO ROBOTIC CORPORATE PITCHES: Never give unsolicited marketing or pricing packages unless explicitly asked.\n"
             "4. Return STRICT JSON ONLY with format:\n"
             '{"display_text": "<friendly Roman Urdu or English text>", "tts_text": "<Pure Urdu script or English for voice>", "lang": "ur" or "en"}'
         )
