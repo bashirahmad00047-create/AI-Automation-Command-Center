@@ -1434,8 +1434,9 @@ if (!text) text = '[Voice note]';
               console.warn('[Incoming Call] Webhook notice:', whErr.message);
             }
 
-            // Dynamically generate AI response for incoming voice call
-            let autoReplyText = "Assalam-o-Alaikum! Aap ki call receive nahi ho saki kyun kay yeh automated AI assistance number hai. Barah-e-karam apna paigham voice note ya text mein bhejein, main foran jawab doon ga.";
+            // Dynamically generate AI response for incoming voice call with 1-Click Live Call link
+            const liveCallUrl = 'https://ai-automation-command-center-4.onrender.com/?livecall=1';
+            let autoReplyText = `Assalam-o-Alaikum! Main BashFlow AI Voice Assistant hoon. Main ne aap ki call note kar li hai.\n\nAap foran niche diye gaye 1-Click link par tap karke mere sath direct live phone call par baat kar sakte hain:\n\n📞 ${liveCallUrl}\n\nClick karte hi humari live phone call foran connect ho jaye gi!`;
             let voiceAudioBase64 = null;
 
             try {

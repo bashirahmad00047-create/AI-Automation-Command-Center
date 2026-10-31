@@ -3580,20 +3580,42 @@ def ai_voice_chat():
     reply_text = None
     tts_text = None
 
-    try:
-        ai_res = WhatsAppService.generate_ai_auto_response(
-            organization_id=org_id,
-            message_body=user_msg,
-            sender_name="Voice User",
-            sender_phone="voice_session"
+    is_greeting = bool(data.get("is_greeting"))
+    raw_caller = str(data.get("caller_name") or "Bashir bhai").strip()
+    if raw_caller.lower() in ("select a conversation", "voice user", "customer", ""):
+        caller_name = "Bashir bhai"
+    elif not any(s in raw_caller.lower() for s in ("bhai", "sahab", "janab", "ji", "sb")):
+        caller_name = f"{raw_caller} bhai"
+    else:
+        caller_name = raw_caller
+
+    if is_greeting:
+        reply_text = f"Assalam-o-Alaikum! Haan ji {caller_name}, main sun raha hoon, batayein..."
+        tts_text = f"السلام علیکم! ہاں جی {caller_name}، میں سن رہا ہوں، بتائیں..."
+        lang = "ur"
+    else:
+        voice_call_system_prompt = (
+            "You are BashFlow AI Live Voice Agent on a real-time two-way telephone call.\n"
+            "CRITICAL VOICE CALL CADENCE:\n"
+            "1. You are talking LIVE ON THE PHONE (not in chat). Use warm, fluent, spoken Pakistani Urdu (or English if customer speaks English).\n"
+            "2. Natural Fillers: Always begin or interlace speech with natural human fillers ('Haan ji...', 'Bilkul sahi...', 'Acha dekhein...', 'Jee zaroor...', 'Sahi baat hai...').\n"
+            "3. Brevity & Flow: Deliver 1 to 2 short conversational sentences that flow smoothly in a single breath. Never use bullet points, markdown formatting, or stiff formal jargon."
         )
-        if ai_res and isinstance(ai_res, dict):
-            reply_text = ai_res.get("reply_body") or ai_res.get("reply")
-            tts_text = ai_res.get("tts_text") or ai_res.get("tts_script")
-            if ai_res.get("detected_lang"):
-                lang = ai_res["detected_lang"]
-    except Exception as ai_err:
-        logger.warning(f"[Voice Chat] AI generation error: {ai_err}")
+        try:
+            ai_res = WhatsAppService.generate_ai_auto_response(
+                organization_id=org_id,
+                message_body=user_msg,
+                system_prompt=voice_call_system_prompt,
+                sender_name=caller_name,
+                sender_phone="voice_session"
+            )
+            if ai_res and isinstance(ai_res, dict):
+                reply_text = ai_res.get("reply_body") or ai_res.get("reply")
+                tts_text = ai_res.get("tts_text") or ai_res.get("tts_script")
+                if ai_res.get("detected_lang"):
+                    lang = ai_res["detected_lang"]
+        except Exception as ai_err:
+            logger.warning(f"[Voice Chat] AI generation error: {ai_err}")
 
     # Fallback to zero-key Pollinations AI if Gemini/Groq unavailable
     if not reply_text:

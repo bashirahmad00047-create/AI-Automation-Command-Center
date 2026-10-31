@@ -11464,9 +11464,7 @@ async function sendVoiceChatQuery(spokenText) {
     if (statusLabel) statusLabel.textContent = 'AI Thinking...';
     if (vadStatus) vadStatus.textContent = '● Processing speech input...';
 
-    // Check if auto-dispatch to WhatsApp is requested
-    const syncWaCheck = document.getElementById('chkCallSyncWhatsApp');
-    const shouldSyncWa = Boolean(syncWaCheck && syncWaCheck.checked);
+    // Strictly NO chat message bubble sent during live voice call - live audio stream only!
     const targetPhone = waActiveChatPartner ? normalizeWaPhone(waActiveChatPartner) : null;
 
     try {
@@ -11475,7 +11473,8 @@ async function sendVoiceChatQuery(spokenText) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 message: spokenText.trim(),
-                sync_whatsapp: shouldSyncWa,
+                sync_whatsapp: false,
+                caller_name: (window.currentActiveContact && window.currentActiveContact.name) || 'Bashir bhai',
                 phone: targetPhone
             })
         });
@@ -11523,7 +11522,7 @@ async function sendVoiceChatQuery(spokenText) {
     }
 }
 
-function openLiveVoiceCallModal() {
+function openLiveVoiceCallModal(autoConnect = true) {
     const modal = document.getElementById('liveVoiceCallModal');
     if (!modal) return;
     modal.style.display = 'flex';
@@ -11531,10 +11530,19 @@ function openLiveVoiceCallModal() {
     // Populate active contact name in calling screen
     const nameElem = document.getElementById('callContactName');
     const headerName = document.getElementById('waActiveContactName');
-    if (nameElem && headerName && headerName.textContent.trim()) {
-        nameElem.textContent = headerName.textContent.trim();
-    } else if (nameElem && waActiveChatPartner) {
-        nameElem.textContent = `+${waActiveChatPartner.replace(/\D/g, '')}`;
+    let resolvedName = 'Bashir bhai';
+    if (headerName && headerName.textContent.trim() && !headerName.textContent.includes('Select a Conversation')) {
+        resolvedName = headerName.textContent.trim();
+    } else if (window.currentActiveContact && window.currentActiveContact.name) {
+        resolvedName = window.currentActiveContact.name;
+    } else if (waActiveChatPartner) {
+        resolvedName = `+${waActiveChatPartner.replace(/\D/g, '')}`;
+    }
+    if (nameElem) nameElem.textContent = resolvedName;
+
+    // Real Two-Way Calling Agent: Auto-pick up call within 1 second without sending chat messages!
+    if (autoConnect && !liveVoiceCallActive) {
+        startLiveVoiceCall(resolvedName);
     }
 }
 
@@ -11547,6 +11555,161 @@ function closeLiveVoiceCallModal() {
         currentVoiceAudioPlayer = null;
     }
     stopLiveCallTimer();
+}
+
+async function startLiveVoiceCall(callerName = 'Bashir bhai') {
+    const callBtn = document.getElementById('startVoiceCallBtn');
+    const callBtnIcon = document.getElementById('startVoiceBtnIcon');
+    const statusLabel = document.getElementById('voiceCallStatusLabel');
+    const subLabel = document.getElementById('voiceCallSubLabel');
+    const ring = document.getElementById('callPulseRing');
+    const transcriptBox = document.getElementById('voiceTranscriptBox');
+    const vadStatus = document.getElementById('callVADStatus');
+
+    liveVoiceCallActive = true;
+    startLiveCallTimer();
+
+    // Turn red end call button
+    if (callBtn) {
+        callBtn.style.background = '#ea4335';
+        callBtn.style.boxShadow = '0 4px 18px rgba(234, 67, 53, 0.45)';
+    }
+    if (callBtnIcon) {
+        callBtnIcon.textContent = '📞';
+        callBtnIcon.style.display = 'inline-block';
+        callBtnIcon.style.transform = 'rotate(135deg)';
+    }
+
+    if (ring) ring.classList.add('active');
+    if (statusLabel) statusLabel.textContent = 'Ringing AI Voice Agent...';
+    if (subLabel) subLabel.textContent = 'Connecting Two-Way Live Audio Stream';
+
+    // 1-second pickup delay: AI answers with natural greeting
+    setTimeout(async () => {
+        if (!liveVoiceCallActive) return;
+        if (statusLabel) statusLabel.textContent = 'Call Connected ● Live Voice Stream';
+        if (subLabel) subLabel.textContent = 'Assalam-o-Alaikum! Haan ji Bashir bhai, main sun raha hoon...';
+        if (vadStatus) vadStatus.textContent = '● Continuous VAD active (Interruptible)';
+
+        const greetingText = `Assalam-o-Alaikum! Haan ji ${callerName}, main sun raha hoon, batayein...`;
+        if (transcriptBox) {
+            transcriptBox.innerHTML = `<div style="color: #00a884; font-weight: 600;"><strong>AI:</strong> ${escapeHtml(greetingText)}</div>`;
+        }
+
+        // Fetch synthesized voice greeting (strictly NO chat message dispatched!)
+        try {
+            const res = await fetch('/api/v1/voice/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    is_greeting: true,
+                    caller_name: callerName,
+                    sync_whatsapp: false
+                })
+            });
+            const data = await res.json();
+            if (data && data.audio_data_uri && liveVoiceCallActive) {
+                if (currentVoiceAudioPlayer) {
+                    try { currentVoiceAudioPlayer.pause(); } catch (_) {}
+                }
+                currentVoiceAudioPlayer = new Audio(data.audio_data_uri);
+                currentVoiceAudioPlayer.muted = isSpeakerMuted;
+                setEqualizerActive(true);
+                if (statusLabel) statusLabel.textContent = 'AI Speaking... (Interruptible)';
+                currentVoiceAudioPlayer.onended = function() {
+                    setEqualizerActive(false);
+                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+                };
+                currentVoiceAudioPlayer.play().catch(e => console.warn('[Greeting Audio Play Notice]', e));
+            }
+        } catch (greetErr) {
+            console.warn('[Voice Greeting Notice]', greetErr);
+        }
+
+        // Start continuous microphone VAD & SpeechRecognition
+        startContinuousVoiceVAD();
+    }, 900);
+}
+
+function startContinuousVoiceVAD() {
+    const statusLabel = document.getElementById('voiceCallStatusLabel');
+    const transcriptBox = document.getElementById('voiceTranscriptBox');
+
+    // Microphone capture
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            liveMediaStream = stream;
+            try {
+                liveMediaRecorder = new MediaRecorder(stream);
+                liveAudioChunks = [];
+                liveMediaRecorder.ondataavailable = e => {
+                    if (e.data && e.data.size > 0) liveAudioChunks.push(e.data);
+                };
+                liveMediaRecorder.start(1000);
+            } catch (_) {}
+        }).catch(mErr => console.warn('[Live Mic Permission Notice]', mErr));
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+        try {
+            if (liveVoiceRecognition) {
+                try { liveVoiceRecognition.stop(); } catch (_) {}
+            }
+            liveVoiceRecognition = new SpeechRecognition();
+            liveVoiceRecognition.continuous = true;
+            liveVoiceRecognition.interimResults = true;
+            liveVoiceRecognition.lang = 'ur-PK, en-US';
+
+            liveVoiceRecognition.onresult = function(event) {
+                // INSTANT INTERRUPTIBILITY (BARGE-IN): If user speaks while AI audio is playing, stop AI immediately!
+                if (currentVoiceAudioPlayer && !currentVoiceAudioPlayer.paused) {
+                    try {
+                        currentVoiceAudioPlayer.pause();
+                        currentVoiceAudioPlayer.currentTime = 0;
+                        setEqualizerActive(false);
+                        if (statusLabel) statusLabel.textContent = 'Listening... (Interrupted AI)';
+                    } catch (_) {}
+                }
+
+                let interimTranscript = '';
+                let finalTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+                const textToDisplay = finalTranscript || interimTranscript;
+                if (transcriptBox && textToDisplay) {
+                    transcriptBox.innerHTML = '<div style="color:#e9edef;"><strong>You:</strong> ' + escapeHtml(textToDisplay) + '</div>';
+                }
+                clearTimeout(voiceSpeechDebounceTimer);
+                const textToSend = (finalTranscript || interimTranscript).trim();
+                if (textToSend.length > 2) {
+                    // Turnaround silence detection: 650ms for snappy conversational exchange
+                    voiceSpeechDebounceTimer = setTimeout(() => {
+                        sendVoiceChatQuery(textToSend);
+                    }, 650);
+                }
+            };
+
+            liveVoiceRecognition.onerror = function(err) {
+                console.warn('[Live Voice Call] Speech recognition note:', err);
+            };
+
+            liveVoiceRecognition.onend = function() {
+                if (liveVoiceCallActive && liveVoiceRecognition) {
+                    try { liveVoiceRecognition.start(); } catch (_) {}
+                }
+            };
+
+            liveVoiceRecognition.start();
+        } catch (recErr) {
+            console.warn('[Live Voice Call] Mic init note:', recErr);
+        }
+    }
 }
 
 function toggleLiveVoiceCall() {
@@ -11965,3 +12128,15 @@ function updateWhatsAppConnectionUI(isConnected, phone) {
     }
 }
 window.updateWhatsAppConnectionUI = updateWhatsAppConnectionUI;
+
+
+// 1-Click Live Call Direct URL Launcher (?livecall=1)
+if (typeof window !== 'undefined' && window.location && window.location.search && window.location.search.includes('livecall=1')) {
+    window.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => {
+            if (typeof openLiveVoiceCallModal === 'function') {
+                openLiveVoiceCallModal(true);
+            }
+        }, 800);
+    });
+}
