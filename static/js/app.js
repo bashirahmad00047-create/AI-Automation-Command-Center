@@ -117,11 +117,9 @@ async function initAuthAndTenancy() {
             return;
         } else {
             console.warn(`[Auth Check] Server responded with HTTP ${res.status}. Retaining local session.`);
-            setGlobalConnectionStatus('degraded');
         }
     } catch (e) {
         console.warn('[Auth Check] Network unreachable during probe. Retaining local session without reload:', e?.message || e);
-        setGlobalConnectionStatus('reconnecting');
     }
 }
 
@@ -406,7 +404,9 @@ async function pollTelemetry(force = false) {
         const res = await fetch('/api/v1/system/telemetry');
         if (!res.ok) {
             telemetryFailures++;
-            setGlobalConnectionStatus('reconnecting', telemetryFailures);
+            if (telemetryFailures >= 3) {
+                setGlobalConnectionStatus('reconnecting', telemetryFailures);
+            }
             return;
         }
         const data = await res.json();
@@ -509,7 +509,9 @@ async function pollTelemetry(force = false) {
     } catch (e) {
         telemetryFailures++;
         console.debug('Failed to poll telemetry (backing off):', e?.message || e);
-        setGlobalConnectionStatus('reconnecting', telemetryFailures);
+        if (telemetryFailures >= 3) {
+            setGlobalConnectionStatus('reconnecting', telemetryFailures);
+        }
     }
 }
 
@@ -11724,3 +11726,12 @@ window.insertEmojiIntoReply = insertEmojiIntoReply;
 window.insertTemplateReply = insertTemplateReply;
 window.toggleWhatsAppAiAutoResponder = toggleWhatsAppAiAutoResponder;
 window.toggleSidebarCollapse = toggleSidebarCollapse;
+
+// Live Chat Sync Engine: Silently sync active chat and conversation list every 3 seconds
+setInterval(() => {
+    try {
+        if (typeof document !== 'undefined' && !document.hidden && typeof loadWhatsAppMessagesOnly === 'function') {
+            loadWhatsAppMessagesOnly();
+        }
+    } catch (_) {}
+}, 3000);

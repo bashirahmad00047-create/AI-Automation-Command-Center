@@ -67,15 +67,12 @@ function convertAudioToOggOpus(buffer) {
     }
     const uniqueAudioId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const args = [
+      '-y',
       '-i', 'pipe:0',
-      '-af', 'acompressor,equalizer=f=300:width_type=h:width=200:g=3,alimiter',
-      '-metadata', `title=VoiceNote_${uniqueAudioId}`,
-      '-metadata', `comment=WhatsApp PTT ${Date.now()}`,
       '-c:a', 'libopus',
-      '-b:a', '32k',
+      '-b:a', '48k',
       '-vbr', 'on',
       '-compression_level', '10',
-      '-frame_duration', '60',
       '-application', 'voip',
       '-f', 'ogg',
       'pipe:1'
@@ -224,6 +221,7 @@ let currentQrUrl = null;
 let currentQrSvg = null;
 let isStarting = false;
 let reconnectTimer = null;
+let reconnectAttempts = 0;
 
 // ============================================================================
 // ADVANCED WHATSAPP ANTI-BAN ENGINE (HUMAN SIMULATION SHIELD)
@@ -668,9 +666,10 @@ async function startWhatsAppBridge() {
       logger: pino({ level: 'silent' }),
       printQRInTerminal: false,
       syncFullHistory: false,
+      markOnlineOnConnect: false,
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
-      keepAliveIntervalMs: 25000,
+      keepAliveIntervalMs: 30000,
       browser: Browsers.macOS('Desktop'),
       getMessage: async (key) => undefined
     });
@@ -760,22 +759,15 @@ async function startWhatsAppBridge() {
 
         destroyOldSocket();
 
-        // Intelligent Auto-Recovery with smart backoff based on disconnect reason
-        let restartDelay = 2000;
+        // Bulletproof Safe Backoff Auto-Recovery (5s -> 10s -> 20s)
+        reconnectAttempts++;
+        const backoffDelays = [5000, 10000, 20000];
+        let restartDelay = backoffDelays[Math.min(reconnectAttempts - 1, backoffDelays.length - 1)];
         if (statusCode === DisconnectReason.restartRequired) {
-          restartDelay = 500;
-          console.log('[WhatsApp Bridge Auto-Recovery] Server requested restart (code 515). Re-syncing immediately in 500ms...');
-        } else if (statusCode === DisconnectReason.timedOut || statusCode === DisconnectReason.connectionLost) {
-          restartDelay = 1500;
-          console.log('[WhatsApp Bridge Auto-Recovery] Transient network loss/timeout (code 408). Re-syncing in 1.5s...');
-        } else if (statusCode === DisconnectReason.connectionClosed) {
-          restartDelay = 1500;
-          console.log('[WhatsApp Bridge Auto-Recovery] Socket closed normally (code 428). Auto-recovering in 1.5s...');
-        } else if (statusCode === DisconnectReason.connectionReplaced) {
-          restartDelay = 4000;
-          console.log('[WhatsApp Bridge Auto-Recovery] Socket connection replaced (code 440). Waiting 4s before re-sync...');
-        } else if (isLoggedOut) {
-          restartDelay = 2000;
+          restartDelay = 1000;
+          console.log('[WhatsApp Bridge Auto-Recovery] Server requested restart (code 515). Re-syncing in 1s...');
+        } else {
+          console.log(`[WhatsApp Bridge Auto-Recovery] Safe backoff reconnect attempt #${reconnectAttempts} in ${restartDelay / 1000}s...`);
         }
 
         console.log(`[WhatsApp Bridge Auto-Recovery] Scheduling socket re-sync in ${restartDelay}ms...`);
@@ -792,6 +784,7 @@ async function startWhatsAppBridge() {
         }, restartDelay);
       } else if (connection === 'open') {
         isConnected = true;
+        reconnectAttempts = 0;
         triggerSessionBackup();
         currentQr = null;
         currentQrUrl = null;
@@ -1262,8 +1255,9 @@ if (!text) text = '[Voice note]';
           const deliverAiResponse = async (resData, finalTargetJid) => {
             if (!resData || (!resData.reply && !resData.audio_base64)) return;
             const shouldSendVoice = Boolean(resData.audio_base64 && (resData.send_as_voice || resData.is_voice));
+            // Safe async human delay: 3 to 5 seconds
             const replyTextForDelay = resData.reply || resData.tts_text || resData.text || '';
-            const jitterMs = calculateDynamicJitterDelay(replyTextForDelay);
+            const jitterMs = Math.floor(Math.random() * 2000) + 3000; // 3.0s - 5.0s range
 
             await acquireAntiSpamDispatchSlot();
 
