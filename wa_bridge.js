@@ -554,9 +554,22 @@ async function startWhatsAppBridge() {
       fs.mkdirSync(AUTH_DIR, { recursive: true });
     }
 
-    // Query DB for session credentials if local creds are absent
+    // Query DB for session credentials if local creds are absent or corrupted
     const credsCheckPath = path.join(AUTH_DIR, 'creds.json');
+    let credsNeedRestore = false;
     if (!fs.existsSync(credsCheckPath) || fs.statSync(credsCheckPath).size < 20) {
+      credsNeedRestore = true;
+    } else {
+      try {
+        JSON.parse(fs.readFileSync(credsCheckPath, 'utf8'));
+      } catch (e) {
+        console.warn('[WhatsApp Bridge] Existing creds.json is invalid JSON. Purging and re-fetching from database...');
+        try { fs.unlinkSync(credsCheckPath); } catch (_) {}
+        credsNeedRestore = true;
+      }
+    }
+
+    if (credsNeedRestore) {
       try {
         console.log('[WhatsApp Bridge] Checking database for saved session credentials...');
         const restored = await tryRestoreFromPythonBackend();
@@ -566,7 +579,7 @@ async function startWhatsAppBridge() {
       } catch (_) {}
     }
 
-    // Load or reset multi-file auth credentials safely
+    // Load or reset multi-file auth credentials safely with automatic corrupt session recovery
     let state, saveCreds;
     try {
       const auth = await useMultiFileAuthState(AUTH_DIR);
@@ -574,35 +587,55 @@ async function startWhatsAppBridge() {
       saveCreds = auth.saveCreds;
     } catch (authErr) {
       console.error('[WhatsApp Bridge] Auth state read error:', authErr.message);
-      const credsFile = path.join(AUTH_DIR, 'creds.json');
-      let isCorruptJson = false;
-      if (fs.existsSync(credsFile)) {
-        try {
-          JSON.parse(fs.readFileSync(credsFile, 'utf8'));
-        } catch (_) {
-          isCorruptJson = true;
-        }
-      }
-      if (isCorruptJson) {
-        console.warn('[WhatsApp Bridge] creds.json is corrupted JSON. Resetting auth directory...');
-        try {
-          if (fs.existsSync(AUTH_DIR)) {
-            // Prevent auto-wiping session so login stays permanent
-            fs.mkdirSync(AUTH_DIR, { recursive: true });
+      // Purge corrupted files in AUTH_DIR and recreate clean state
+      try {
+        if (fs.existsSync(AUTH_DIR)) {
+          const files = fs.readdirSync(AUTH_DIR);
+          for (const file of files) {
+            try {
+              fs.unlinkSync(path.join(AUTH_DIR, file));
+            } catch (_) {}
           }
-          const auth = await useMultiFileAuthState(AUTH_DIR);
-          state = auth.state;
-          saveCreds = auth.saveCreds;
-        } catch (resetErr) {
-          console.error('[WhatsApp Bridge] Fatal error resetting auth state:', resetErr);
-          throw resetErr;
+        } else {
+          fs.mkdirSync(AUTH_DIR, { recursive: true });
         }
-      } else {
-        // Transient filesystem access delay; wait briefly and retry once
-        await new Promise(r => setTimeout(r, 1000));
+      } catch (cleanErr) {
+        console.error('[WhatsApp Bridge] Clean auth directory notice:', cleanErr.message);
+      }
+
+      try {
         const auth = await useMultiFileAuthState(AUTH_DIR);
         state = auth.state;
         saveCreds = auth.saveCreds;
+        console.log('[WhatsApp Bridge] Clean auth state re-initialized successfully after corruption recovery.');
+      } catch (reAuthErr) {
+        console.error('[WhatsApp Bridge] Secondary auth recovery error (using memory state):', reAuthErr.message);
+        state = {
+          creds: {
+            noiseKey: undefined,
+            pairingEphemeralKeyPair: undefined,
+            signedIdentityKey: undefined,
+            signedPreKey: undefined,
+            registrationId: 0,
+            advSecretKey: undefined,
+            processedHistoryMessages: [],
+            nextPreKeyId: 1,
+            firstUnuploadedPreKeyId: 1,
+            accountSyncCounter: 0,
+            accountSettings: { unarchiveChats: false },
+            deviceId: '0',
+            phoneId: '0',
+            identityId: Buffer.alloc(0),
+            registered: false,
+            backupToken: Buffer.alloc(0),
+            registration: {}
+          },
+          keys: {
+            get: () => ({}),
+            set: () => {}
+          }
+        };
+        saveCreds = async () => {};
       }
     }
 
@@ -1440,86 +1473,120 @@ app.use(express.json());
 /**
  * Health & status endpoint
  */
-app.get(['/', '/status'], (req, res) => {
-  res.json({
-    bridge: 'WhatsApp Baileys Bridge',
-    status: isConnected ? 'connected' : (currentQr ? 'waiting_for_qr_scan' : 'connecting'),
-    connected: isConnected,
-    qrUrl: currentQrUrl,
-    qr: currentQr,
-    user: sock?.user || null,
-    target_webhook: PYTHON_WEBHOOK_URL,
-    uptime_seconds: Math.floor(process.uptime())
-  });
+app.get(['/', '/status', '/health', '/api/status'], (req, res) => {
+  try {
+    return res.status(200).json({
+      bridge: 'WhatsApp Baileys Bridge',
+      status: isConnected ? 'connected' : (currentQr ? 'qr_ready' : (isStarting ? 'initializing' : 'waiting')),
+      connected: isConnected,
+      hasQr: !!currentQr,
+      qrUrl: currentQrUrl,
+      qr: currentQr,
+      user: sock?.user || null,
+      target_webhook: PYTHON_WEBHOOK_URL,
+      uptime_seconds: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    return res.status(200).json({
+      bridge: 'WhatsApp Baileys Bridge',
+      status: 'initializing',
+      connected: false,
+      hasQr: false,
+      message: 'Bridge starting up...'
+    });
+  }
 });
 
 /**
  * QR Code status endpoint (for inspection and live dashboard linking)
+ * ALWAYS returns HTTP 200 with clean state, NEVER 500 or 503.
  */
-app.get('/qr', async (req, res) => {
-  // GUARD: If WhatsApp is already connected, return connected status immediately without resetting
-  if (isConnected || (sock?.user && !currentQr)) {
-    return res.json({
-      status: 'connected',
-      connected: true,
-      qrUrl: null,
-      qr: null,
-      message: 'WhatsApp is already linked and connected.',
-      user: sock?.user || null
+app.get(['/qr', '/api/qr', '/wa/qr'], async (req, res) => {
+  try {
+    // GUARD: If WhatsApp is already connected, return connected status immediately without resetting
+    if (isConnected || (sock?.user && !currentQr)) {
+      return res.status(200).json({
+        status: 'connected',
+        connected: true,
+        qrUrl: null,
+        qr: null,
+        message: 'WhatsApp is already linked and connected.',
+        user: sock?.user || null
+      });
+    }
+
+    if (!currentQr) {
+      if (!isStarting && !sock) {
+        startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Auto-start on /qr error:', e.message));
+      }
+      return res.status(200).json({
+        status: isStarting ? 'initializing' : 'waiting',
+        connected: false,
+        qrUrl: null,
+        qr: null,
+        message: isStarting ? 'WhatsApp Baileys bridge is initializing pairing session...' : 'QR code not generated yet or renewing.'
+      });
+    }
+
+    // Ensure currentQrUrl is ready (base64 Data URI)
+    let dataUrl = currentQrUrl;
+    if (!dataUrl) {
+      try {
+        dataUrl = await qrcode.toDataURL(currentQr, {
+          errorCorrectionLevel: 'M',
+          type: 'image/png',
+          margin: 2,
+          width: 220,
+          color: { dark: '#000000', light: '#ffffff' }
+        });
+        currentQrUrl = dataUrl;
+      } catch (e) {
+        console.error('[Bridge QR] Inline data URL generation error:', e.message);
+      }
+    }
+
+    let svgData = currentQrSvg;
+    if (!svgData) {
+      try {
+        svgData = await qrcode.toString(currentQr, { type: 'svg', margin: 2, width: 220 });
+        currentQrSvg = svgData;
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    return res.status(200).json({
+      status: 'qr_ready',
+      connected: false,
+      qrUrl: dataUrl,
+      qrImageUrl: dataUrl,
+      qr: currentQr,
+      qrSvg: svgData
     });
-  }
-  if (!currentQr) {
-    return res.json({
-      status: 'waiting',
+  } catch (err) {
+    console.error('[Bridge QR] Error handling /qr request:', err.message);
+    return res.status(200).json({
+      status: 'initializing',
       connected: false,
       qrUrl: null,
-      message: 'QR code not generated yet or renewing.'
+      qr: null,
+      message: 'WhatsApp Baileys bridge is initializing... Please wait.'
     });
   }
-
-  // Ensure currentQrUrl is ready (base64 Data URI)
-  let dataUrl = currentQrUrl;
-  if (!dataUrl) {
-    try {
-      dataUrl = await qrcode.toDataURL(currentQr, {
-        errorCorrectionLevel: 'M',
-        type: 'image/png',
-        margin: 2,
-        width: 220,
-        color: { dark: '#000000', light: '#ffffff' }
-      });
-      currentQrUrl = dataUrl;
-    } catch (e) {
-      console.error('[Bridge QR] Inline data URL generation error:', e);
-    }
-  }
-
-  let svgData = currentQrSvg;
-  if (!svgData) {
-    try {
-      svgData = await qrcode.toString(currentQr, { type: 'svg', margin: 2, width: 220 });
-      currentQrSvg = svgData;
-    } catch (e) {
-      // ignore
-    }
-  }
-
-  res.json({
-    status: 'qr_ready',
-    connected: false,
-    qrUrl: dataUrl,
-    qrImageUrl: dataUrl,
-    qr: currentQr,
-    qrSvg: svgData
-  });
 });
 
 /**
- * Raw PNG QR image endpoint (serves live image/png stream directly)
+ * Raw PNG QR image endpoint (serves live image/png stream directly).
+ * Falls back to 1x1 transparent PNG with HTTP 200 so <img> tags never render broken icons.
  */
 app.get(['/qr.png', '/qr-image'], async (req, res) => {
+  const transparentPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
   if (!currentQr) {
-    return res.status(404).send('QR code not ready yet.');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('X-QR-Status', isStarting ? 'initializing' : 'waiting');
+    return res.status(200).send(transparentPng);
   }
   try {
     const buffer = await qrcode.toBuffer(currentQr, {
@@ -1530,26 +1597,82 @@ app.get(['/qr.png', '/qr-image'], async (req, res) => {
     });
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-    res.send(buffer);
+    res.setHeader('X-QR-Status', 'ready');
+    return res.status(200).send(buffer);
   } catch (err) {
-    res.status(500).send('Error generating QR image buffer');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('X-QR-Status', 'error');
+    return res.status(200).send(transparentPng);
   }
 });
 
 /**
- * Raw SVG QR endpoint
+ * Raw SVG QR endpoint. Falls back to empty SVG with HTTP 200.
  */
 app.get('/qr.svg', async (req, res) => {
   if (!currentQr) {
-    return res.status(404).send('QR code not ready yet.');
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('X-QR-Status', isStarting ? 'initializing' : 'waiting');
+    return res.status(200).send('<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220"></svg>');
   }
   try {
     const svg = await qrcode.toString(currentQr, { type: 'svg', margin: 2, width: 220 });
     res.setHeader('Content-Type', 'image/svg+xml');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-    res.send(svg);
+    res.setHeader('X-QR-Status', 'ready');
+    return res.status(200).send(svg);
   } catch (err) {
-    res.status(500).send('Error generating QR SVG');
+    res.setHeader('Content-Type', 'image/svg+xml');
+    return res.status(200).send('<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220"></svg>');
+  }
+});
+
+/**
+ * Force Refresh QR code endpoint
+ * Resets socket, clears pending un-paired creds and immediately generates a fresh QR code.
+ */
+app.all(['/refresh-qr', '/qr-refresh', '/restart-socket'], async (req, res) => {
+  console.log('[WhatsApp Bridge] Fresh QR generation requested via /refresh-qr endpoint.');
+  try {
+    isConnected = false;
+    currentQr = null;
+    currentQrUrl = null;
+    currentQrSvg = null;
+    destroyOldSocket();
+
+    // If device is not already connected, clean pending credentials to guarantee a fresh pairing QR
+    if (!sock?.user) {
+      try {
+        if (fs.existsSync(AUTH_DIR)) {
+          const files = fs.readdirSync(AUTH_DIR);
+          for (const file of files) {
+            try {
+              fs.unlinkSync(path.join(AUTH_DIR, file));
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+
+    isStarting = false;
+    setTimeout(() => {
+      startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Socket restart error:', e.message));
+    }, 200);
+
+    return res.status(200).json({
+      success: true,
+      status: 'refreshing',
+      message: 'Generating fresh QR code...'
+    });
+  } catch (refreshErr) {
+    console.error('[WhatsApp Bridge] Error during /refresh-qr:', refreshErr.message);
+    return res.status(200).json({
+      success: false,
+      status: 'error',
+      message: 'Failed to restart QR session: ' + refreshErr.message
+    });
   }
 });
 
