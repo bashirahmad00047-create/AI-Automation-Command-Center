@@ -264,3 +264,14 @@ def test_whatsapp_groups_create_endpoint(client):
     assert data["success"] is True
     assert "group_jid" in data
     assert "@g.us" in data["group_jid"]
+
+def test_roman_to_urdu_script_conversion():
+    """Roman Urdu is accurately translated to pure Urdu script for Edge-TTS HD voice synthesis."""
+    from whatsapp_service import WhatsAppService
+    sample = "Walaikum Assalam! Jee bilkul, main theek hoon. Aap sunayein aap kaise hain? Batayein main aap ki kya madad kar sakta hoon?"
+    urdu_out = WhatsAppService.roman_to_urdu_script(sample)
+    assert len(urdu_out) > 0
+    assert any('\u0600' <= ch <= '\u06FF' for ch in urdu_out)
+    assert "وعلیکم السلام" in urdu_out or "السلام" in urdu_out
+    assert "جی بالکل" in urdu_out or "بالکل" in urdu_out
+

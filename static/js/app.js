@@ -335,10 +335,22 @@ function setGlobalConnectionStatus(status, attempt = 0) {
             if (readyStatusText.textContent !== 'System Operational') readyStatusText.textContent = 'System Operational';
             if (systemReadyBadge) systemReadyBadge.title = 'Subsystem Health: Connected. All systems operational.';
         } else if (status === 'reconnecting') {
-            if (readyDot.className !== 'status-dot yellow pulse') readyDot.className = 'status-dot yellow pulse';
-            const text = attempt > 0 ? `Reconnecting (#${attempt})...` : 'Reconnecting...';
-            if (readyStatusText.textContent !== text) readyStatusText.textContent = text;
-            if (systemReadyBadge) systemReadyBadge.title = `Connection paused. Backing off retries smoothly (attempt ${attempt}).`;
+            const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+            if (isOffline) {
+                if (readyDot.className !== 'status-dot red pulse') readyDot.className = 'status-dot red pulse';
+                if (readyStatusText.textContent !== 'Connection Offline') readyStatusText.textContent = 'Connection Offline';
+                if (systemReadyBadge) systemReadyBadge.title = 'Network connection offline. Waiting for network...';
+            } else if (attempt >= 15) {
+                if (readyDot.className !== 'status-dot yellow pulse') readyDot.className = 'status-dot yellow pulse';
+                const text = attempt > 0 ? `Reconnecting (#${attempt})...` : 'Reconnecting...';
+                if (readyStatusText.textContent !== text) readyStatusText.textContent = text;
+                if (systemReadyBadge) systemReadyBadge.title = `Connection paused. Backing off retries smoothly (attempt ${attempt}).`;
+            } else {
+                // Keep steady green System Operational during brief background polling retries
+                if (readyDot.className !== 'status-dot green') readyDot.className = 'status-dot green';
+                if (readyStatusText.textContent !== 'System Operational') readyStatusText.textContent = 'System Operational';
+                if (systemReadyBadge) systemReadyBadge.title = 'Subsystem Health: Connected. All systems operational.';
+            }
         } else if (status === 'degraded') {
             if (readyDot.className !== 'status-dot yellow') readyDot.className = 'status-dot yellow';
             if (readyStatusText.textContent !== 'Service Degraded') readyStatusText.textContent = 'Service Degraded';
@@ -7341,52 +7353,9 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
             console.warn('[WhatsApp Messages Fetch Notice]:', fetchErr.message);
         }
 
-        // Fresh database guarantee: If still empty, provide initial active chats so tabs are never 0
-        if (messages.length === 0) {
-            messages = [
-                {
-                    id: 'wam-init-01',
-                    direction: 'inbound',
-                    sender: '923215566778@s.whatsapp.net',
-                    recipient: 'org-enterprise-default',
-                    sender_name: 'Tariq Mahmood',
-                    resolved_phone: '923215566778',
-                    body: 'Salam! Mujhe Enterprise WhatsApp AI Automation aur voice calling agent chahiye.',
-                    message_type: 'text',
-                    status: 'received',
-                    is_audio: false,
-                    is_group: false,
-                    created_at: new Date(Date.now() - 15 * 60000).toISOString()
-                },
-                {
-                    id: 'wam-init-02',
-                    direction: 'inbound',
-                    sender: '923001234567@s.whatsapp.net',
-                    recipient: 'org-enterprise-default',
-                    sender_name: 'Ali Raza',
-                    resolved_phone: '923001234567',
-                    body: 'Ji bilkul, order confirm kar diya hai. Shukriya!',
-                    message_type: 'text',
-                    status: 'read',
-                    is_audio: false,
-                    is_group: false,
-                    created_at: new Date(Date.now() - 45 * 60000).toISOString()
-                },
-                {
-                    id: 'wam-init-03',
-                    direction: 'inbound',
-                    sender: '923334455667@s.whatsapp.net',
-                    recipient: '12036302488192@g.us',
-                    chat_name: 'BashFlow Pakistan Community',
-                    sender_name: 'Usman Farooq',
-                    body: 'Welcome to Pakistan #1 AI Automation Hub community! 🚀',
-                    message_type: 'text',
-                    status: 'read',
-                    is_audio: false,
-                    is_group: true,
-                    created_at: new Date(Date.now() - 90 * 60000).toISOString()
-                }
-            ];
+        // Real conversations only: If empty, messages remains empty array
+        if (!Array.isArray(messages)) {
+            messages = [];
         }
 
         const countBadge = document.getElementById('waMessageCountBadge');

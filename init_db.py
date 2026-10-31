@@ -629,53 +629,7 @@ def init_and_seed_database(seed_data: Optional[bool] = None):
         except Exception as _cmp_err:
             print(f"[WARN] Campaign seeding notice: {_cmp_err}")
 
-        # 13. Sample WhatsApp Messages for All | Unread | Contacts | Groups
-        try:
-            from models import WhatsAppMessage
-            if WhatsAppMessage.query.filter_by(organization_id=org_acme.id).count() < 3:
-                w1 = WhatsAppMessage(
-                    id="wam-lead-01",
-                    organization_id=org_acme.id,
-                    whatsapp_message_id="wamid-lead-01",
-                    sender="923215566778@s.whatsapp.net",
-                    recipient="org-enterprise-default",
-                    body="Salam! Mujhe Enterprise AI Automation aur voice bot chahiye, pricing details dein?",
-                    message_type="text",
-                    status="received",
-                    direction="inbound",
-                    raw_payload_json=json.dumps({"senderName": "Tariq Mahmood", "senderPn": "923215566778"}),
-                    created_at=now_dt - datetime.timedelta(minutes=18)
-                )
-                w2 = WhatsAppMessage(
-                    id="wam-contact-01",
-                    organization_id=org_acme.id,
-                    whatsapp_message_id="wamid-contact-01",
-                    sender="923001234567@s.whatsapp.net",
-                    recipient="org-enterprise-default",
-                    body="Ji bilkul, maine payment transfer kar di hai. Shukriya!",
-                    message_type="text",
-                    status="read",
-                    direction="inbound",
-                    raw_payload_json=json.dumps({"senderName": "Ali Raza", "senderPn": "923001234567"}),
-                    created_at=now_dt - datetime.timedelta(hours=1)
-                )
-                w3 = WhatsAppMessage(
-                    id="wam-group-01",
-                    organization_id=org_acme.id,
-                    whatsapp_message_id="wamid-group-01",
-                    sender="923334455667@s.whatsapp.net",
-                    recipient="12036302488192@g.us",
-                    body="Welcome to Pakistan #1 AI Automation Hub community! 🚀",
-                    message_type="text",
-                    status="read",
-                    direction="inbound",
-                    raw_payload_json=json.dumps({"chatName": "BashFlow Pakistan Community", "senderName": "Usman Farooq"}),
-                    created_at=now_dt - datetime.timedelta(hours=2)
-                )
-                db.session.add_all([w1, w2, w3])
-                print("[OK] Seeded initial WhatsApp messages for All, Unread, Contacts, Groups.")
-        except Exception as _wam_err:
-            print(f"[WARN] WhatsApp message seeding notice: {_wam_err}")
+        # 13. WhatsApp Messages: No dummy or seed messages inserted (Strict Real-Data Only)
 
         db.session.commit()
         if not is_production_environment():
