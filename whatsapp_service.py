@@ -13,7 +13,7 @@ Architecture:
 - Safe development / mock mode when real credentials are not configured
 - Zero hardcoded tokens or secrets
 """
-# Release: Fluent +12% Urdu voice without pauses, visible live delivery tracking map, 5-tech status bar, permanent WhatsApp login
+# Release: Editable multi-business AI templates, visible live delivery map UI, and smooth Urdu voice
 
 from __future__ import annotations
 
