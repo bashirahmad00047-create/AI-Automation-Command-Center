@@ -1839,3 +1839,7 @@ class WASessionStore(db.Model):
             "size_bytes": len(self.zip_b64) if self.zip_b64 else 0,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }
+
+
+# Enterprise Alias for WhatsAppSessionStore
+WhatsAppSessionStore = WASessionStore
