@@ -1720,6 +1720,12 @@ class WhatsAppService:
             else:
                 speech_for_tts = clean_speech
 
+            if is_urdu:
+                # 100% Smooth Single-Breath Cadence: Strip intra-sentence commas and pause markers that cause Edge-TTS to hesitate
+                speech_for_tts = re.sub(r'[\.]{2,}|\u2026|[-]{2,}', ' ', speech_for_tts)
+                speech_for_tts = re.sub(r'[,\،]', ' ', speech_for_tts)
+                speech_for_tts = re.sub(r'\s+', ' ', speech_for_tts).strip()
+
             async def _run():
                 comm = edge_tts.Communicate(speech_for_tts, active_voice, rate=active_rate, pitch=active_pitch, volume=active_volume)
                 chunks = []
