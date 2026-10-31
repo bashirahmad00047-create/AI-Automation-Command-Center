@@ -32,7 +32,11 @@ fi
 export AUTH_DIR
 mkdir -p "$AUTH_DIR" 2>/dev/null || true
 
-# 1. Start WhatsApp Baileys bridge in background with 192MB max heap to protect Render 512MB RAM
+# 1. Synchronously restore WhatsApp Baileys credentials from Database BEFORE starting bridge!
+echo "[start.sh] Synchronously restoring WhatsApp credentials from Database into $AUTH_DIR..."
+python -c "from wa_bridge_manager import restore_wa_session_from_db; restore_wa_session_from_db()" >> wa_bridge.log 2>&1 || true
+
+# 2. Start WhatsApp Baileys bridge in background with 192MB max heap to protect Render 512MB RAM
 (
     sleep 2
     while true; do
@@ -40,14 +44,7 @@ mkdir -p "$AUTH_DIR" 2>/dev/null || true
         sleep 3
     done
 ) &
-echo "[start.sh] WhatsApp Baileys bridge supervisor queued in background."
-
-# 2. Run session restore in background after Gunicorn binds
-(
-    sleep 3
-    python -c "from wa_bridge_manager import restore_wa_session_from_db; restore_wa_session_from_db()" >> wa_bridge.log 2>&1 || true
-) &
-echo "[start.sh] Background DB session restore queued."
+echo "[start.sh] WhatsApp Baileys bridge supervisor started with restored credentials."
 
 # 3. IMMEDIATELY start Gunicorn with 1 worker and 4 threads to stay strictly under Render 512MB RAM
 echo "=== Starting Gunicorn immediately on 0.0.0.0:${PORT:-10000} ==="

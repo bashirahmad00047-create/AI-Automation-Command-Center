@@ -11794,3 +11794,22 @@ function updateEngineSwitcherUI(mode) {
         btnMeta.textContent = '⚪ Meta Cloud API (Official)';
     }
 }
+
+
+function centerRadarMapPakistan() {
+    initLeafletRadarMap();
+    if (leafletRadarMap) {
+        leafletRadarMap.setView([30.3753, 69.3451], 6);
+        leafletRadarMap.invalidateSize();
+    }
+}
+
+// Invalidate Leaflet Map Size whenever tab view changes
+function refreshLeafletRadarMap() {
+    initLeafletRadarMap();
+    if (leafletRadarMap) {
+        setTimeout(() => {
+            try { leafletRadarMap.invalidateSize(); } catch (_) {}
+        }, 200);
+    }
+}

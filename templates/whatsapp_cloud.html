@@ -174,6 +174,93 @@
             </div>
 
             <!-- VIEW 1: WHATSAPP WEB FULL REPLICA -->
+            
+            <!-- 5-TECH ENTERPRISE ENGINE LIVE STATUS HUD -->
+            <div id="techEnterpriseStatusPanel" style="margin-bottom: 16px; background: #111b21; border: 1px solid #2a3942; border-radius: 10px; padding: 14px 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid #202c33; padding-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 16px;">🚀</span>
+                        <span style="font-weight: 700; font-size: 13px; color: #e9edef; letter-spacing: 0.5px;">5-TECH ENTERPRISE ENGINE LIVE ARCHITECTURE</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span class="status-pill green" style="font-size: 11px;">● 100% Operational</span>
+                        <div style="display: flex; gap: 6px;">
+                            <button type="button" id="btnEngineBaileys" onclick="switchWhatsAppEngine('baileys')" class="hud-btn small green" style="font-weight: 600; font-size: 11px; padding: 4px 10px; border-radius: 6px;">
+                                🟢 Baileys (Active)
+                            </button>
+                            <button type="button" id="btnEngineMeta" onclick="switchWhatsAppEngine('meta')" class="hud-btn small outline" style="font-weight: 600; font-size: 11px; padding: 4px 10px; border-radius: 6px;">
+                                🔵 Meta Cloud API
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                    <!-- Tech 1 -->
+                    <div style="background: #182229; border: 1px solid #2a3942; border-radius: 8px; padding: 10px 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span style="font-size: 11px; font-weight: 700; color: #00a884;">1. SUPABASE CLOUD DB</span>
+                            <span class="status-dot green pulse" style="width: 8px; height: 8px;"></span>
+                        </div>
+                        <div style="font-size: 12px; color: #e9edef; font-weight: 600;">PostgreSQL Pooling</div>
+                        <div style="font-size: 10.5px; color: #8696a0; margin-top: 2px;">Session Auto-Backup &amp; Restore</div>
+                    </div>
+                    <!-- Tech 2 -->
+                    <div style="background: #182229; border: 1px solid #2a3942; border-radius: 8px; padding: 10px 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span style="font-size: 11px; font-weight: 700; color: #00a884;">2. URDU VOICE ENGINE</span>
+                            <span class="status-dot green pulse" style="width: 8px; height: 8px;"></span>
+                        </div>
+                        <div style="font-size: 12px; color: #e9edef; font-weight: 600;">Fluent Pakistani TTS</div>
+                        <div style="font-size: 10.5px; color: #8696a0; margin-top: 2px;">UzmaNeural + Pure Urdu Script</div>
+                    </div>
+                    <!-- Tech 3 -->
+                    <div style="background: #182229; border: 1px solid #2a3942; border-radius: 8px; padding: 10px 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span style="font-size: 11px; font-weight: 700; color: #00a884;">3. LEAFLET RADAR MAP</span>
+                            <span class="status-dot green pulse" style="width: 8px; height: 8px;"></span>
+                        </div>
+                        <div style="font-size: 12px; color: #e9edef; font-weight: 600;">OpenStreetMap CDN</div>
+                        <div style="font-size: 10.5px; color: #8696a0; margin-top: 2px;">WhatsApp GPS + Google Maps Link</div>
+                    </div>
+                    <!-- Tech 4 -->
+                    <div style="background: #182229; border: 1px solid #2a3942; border-radius: 8px; padding: 10px 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span style="font-size: 11px; font-weight: 700; color: #00a884;">4. FIFO MESSAGE QUEUE</span>
+                            <span class="status-dot green pulse" style="width: 8px; height: 8px;"></span>
+                        </div>
+                        <div style="font-size: 12px; color: #e9edef; font-weight: 600;">Zero-Ban Shield Active</div>
+                        <div style="font-size: 10.5px; color: #8696a0; margin-top: 2px;">1.5s Blue Tick + Human Jitter Delay</div>
+                    </div>
+                    <!-- Tech 5 -->
+                    <div style="background: #182229; border: 1px solid #2a3942; border-radius: 8px; padding: 10px 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span style="font-size: 11px; font-weight: 700; color: #00a884;">5. HYBRID DUAL-ENGINE</span>
+                            <span class="status-dot green pulse" style="width: 8px; height: 8px;"></span>
+                        </div>
+                        <div style="font-size: 12px; color: #e9edef; font-weight: 600;">Baileys + Meta Switcher</div>
+                        <div style="font-size: 10.5px; color: #8696a0; margin-top: 2px;">1-Click Mode Transition</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LIVE DELIVERY & LOCATION RADAR MAP (PROMINENT SCREEN DISPLAY) -->
+            <div id="liveRadarMapSection" class="hud-panel" style="margin-bottom: 16px; background: #111b21; border: 1px solid #2a3942; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+                <div style="padding: 12px 16px; background: #202c33; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2a3942;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 16px;">🗺️</span>
+                        <div>
+                            <div style="font-size: 12.5px; font-weight: 700; color: #00a884; letter-spacing: 0.5px;">LIVE DELIVERY &amp; LOCATION RADAR MAP (LEAFLET.JS)</div>
+                            <div style="font-size: 11px; color: #8696a0;">Real-time GPS tracking from WhatsApp location shares and dispatch coordinates.</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span id="radarMapPinsCount" class="status-pill green" style="font-size: 11px; font-weight: 600;">0 Active Pins</span>
+                        <button type="button" class="hud-btn small outline" onclick="centerRadarMapPakistan()" style="padding: 4px 10px; font-size: 11px; border-radius: 6px;">🇵🇰 Center Pakistan</button>
+                    </div>
+                </div>
+                <div id="liveRadarMap" style="height: 280px; width: 100%; background: #0b141a; position: relative; z-index: 1;"></div>
+            </div>
+
             <div id="waWebViewContainer" class="wa-web-app" style="margin-bottom: 24px;">
                 <!-- SIDEBAR: CONTACTS & SEARCH -->
                 <div class="wa-sidebar">

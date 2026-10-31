@@ -149,68 +149,52 @@ function triggerSessionBackup() {
     sessionBackupDebounce = null;
     try {
       const backupUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-backup`;
-      const http = backupUrl.startsWith('https') ? require('https') : require('http');
-      const u = new URL(backupUrl);
-      const req = http.request({
-        hostname: u.hostname,
-        port: u.port,
-        path: u.pathname,
+      const res = await fetch(backupUrl, {
         method: 'POST',
-        timeout: 4000
-      }, (res) => { res.resume(); });
-      req.on('error', () => {});
-      req.end();
-    } catch (_) {}
-  }, 2500);
+        headers: { 'Content-Type': 'application/json', 'X-Internal-Bridge': '1' },
+        signal: AbortSignal.timeout(6000)
+      });
+      const data = await res.json().catch(() => null);
+      if (data && data.success) {
+        console.log('[WhatsApp Bridge] Session credentials permanently saved to Database!');
+      }
+    } catch (e) {
+      console.warn('[WhatsApp Bridge] Session backup notice:', e.message);
+    }
+  }, 1500);
 }
 
 function triggerSessionClear() {
   try {
     const clearUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-clear`;
-    const http = clearUrl.startsWith('https') ? require('https') : require('http');
-    const u = new URL(clearUrl);
-    const req = http.request({
-      hostname: u.hostname,
-      port: u.port,
-      path: u.pathname,
+    fetch(clearUrl, {
       method: 'POST',
-      timeout: 4000
-    }, (res) => { res.resume(); });
-    req.on('error', () => {});
-    req.end();
+      headers: { 'Content-Type': 'application/json', 'X-Internal-Bridge': '1' },
+      signal: AbortSignal.timeout(4000)
+    }).catch(() => {});
   } catch (_) {}
 }
 
 async function tryRestoreFromPythonBackend() {
-  return new Promise((resolve) => {
+  for (let attempt = 1; attempt <= 4; attempt++) {
     try {
       const restoreUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-restore`;
-      const http = restoreUrl.startsWith('https') ? require('https') : require('http');
-      const u = new URL(restoreUrl);
-      const req = http.request({
-        hostname: u.hostname,
-        port: u.port,
-        path: u.pathname,
+      const res = await fetch(restoreUrl, {
         method: 'GET',
-        timeout: 5000
-      }, (res) => {
-        let body = '';
-        res.on('data', chunk => { body += chunk; });
-        res.on('end', () => {
-          try {
-            const data = JSON.parse(body);
-            resolve(!!data.restored);
-          } catch (_) {
-            resolve(false);
-          }
-        });
+        headers: { 'X-Internal-Bridge': '1' },
+        signal: AbortSignal.timeout(5000)
       });
-      req.on('error', () => resolve(false));
-      req.end();
-    } catch (_) {
-      resolve(false);
-    }
-  });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data && data.restored) {
+          console.log(`[WhatsApp Bridge] Permanent session restored from Database on attempt ${attempt}!`);
+          return true;
+        }
+      }
+    } catch (_) {}
+    if (attempt < 4) await new Promise(r => setTimeout(r, 1200));
+  }
+  return false;
 }
 
 // Global socket state
