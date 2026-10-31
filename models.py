@@ -890,12 +890,14 @@ class WhatsAppMessage(db.Model):
         is_ai_generated = False
         ai_intent = None
         response_source = None
+        resolved_pn = None
         parent_id = getattr(self, "parent_message_id", None)
         if self.raw_payload_json:
             try:
                 raw = json.loads(self.raw_payload_json)
                 if isinstance(raw, dict):
-                    sender_name = raw.get("senderName") or raw.get("sender_name") or raw.get("senderContactName")
+                    sender_name = raw.get("senderName") or raw.get("sender_name") or raw.get("senderContactName") or raw.get("pushName") or raw.get("push_name") or raw.get("name")
+                    resolved_pn = raw.get("senderPn") or raw.get("sender_pn") or raw.get("senderPhone") or raw.get("phone") or raw.get("remoteJidAlt")
                     chat_name = raw.get("chatName") or raw.get("chat_name") or raw.get("groupSubject")
                     # Robust media URL and audio base64 resolution
                     audio_b64 = (
@@ -996,6 +998,11 @@ class WhatsAppMessage(db.Model):
 
         clean_sender = _clean_phone(self.sender)
         clean_recipient = _clean_phone(self.recipient)
+        # If sender is a 14-digit LID but resolved phone number exists, use the resolved phone
+        if resolved_pn and (len(clean_sender) > 13 or "@lid" in str(self.sender)):
+            resolved_clean = _clean_phone(resolved_pn)
+            if resolved_clean and len(resolved_clean) <= 13:
+                clean_sender = resolved_clean
 
         return {
             "id": self.id,
@@ -1009,6 +1016,7 @@ class WhatsAppMessage(db.Model):
             "raw_sender": self.sender,
             "raw_recipient": self.recipient,
             "sender_name": sender_name,
+            "resolved_phone": _clean_phone(resolved_pn) if resolved_pn else None,
             "chat_name": chat_name or ("WhatsApp Group" if (clean_sender.endswith("@g.us") or clean_recipient.endswith("@g.us")) else None),
             "duration": duration,
             "message_type": "audio" if is_audio else self.message_type,

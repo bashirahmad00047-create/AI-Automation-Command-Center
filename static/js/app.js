@@ -5499,6 +5499,19 @@ function isSameWaPhone(p1, p2) {
     return false;
 }
 
+function formatWaListTime(ts) {
+    if (!ts) return '';
+    try {
+        const d = new Date(ts);
+        if (isNaN(d.getTime())) {
+            return String(ts).substring(11, 16) || String(ts);
+        }
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    } catch (_) {
+        return String(ts).substring(11, 16) || String(ts);
+    }
+}
+
 function groupWhatsAppConversations(messages) {
     const map = {};
     (messages || []).forEach(m => {
@@ -5513,8 +5526,11 @@ function groupWhatsAppConversations(messages) {
         }
 
         const isGroup = rawPartner && String(rawPartner).includes('@g.us');
-        const normKey = isGroup ? rawPartner : (normalizeWaPhone(rawPartner) || 'Unknown');
-        const displayPhone = isGroup ? (m.chat_name || 'WhatsApp Group') : (formatWaDisplayPhone(rawPartner) || normKey);
+        const isLid = rawPartner && (String(rawPartner).includes('@lid') || String(rawPartner).replace(/\D/g, '').length > 13);
+        const resolvedPhone = m.resolved_phone || (isLid ? '' : rawPartner);
+        const normKey = isGroup ? rawPartner : (resolvedPhone ? normalizeWaPhone(resolvedPhone) : (normalizeWaPhone(rawPartner) || 'Unknown'));
+        const displayPhone = isGroup ? (m.chat_name || 'WhatsApp Group') : (resolvedPhone ? formatWaDisplayPhone(resolvedPhone) : (m.sender_name || 'WhatsApp Contact'));
+        const contactName = isGroup ? (m.chat_name || 'WhatsApp Group') : (m.sender_name || (resolvedPhone ? formatWaDisplayPhone(resolvedPhone) : 'WhatsApp Contact'));
 
         if (!map[normKey]) {
             let initialMsg = (m.body && m.body !== '(no text)') ? m.body : (m.is_audio ? '🎙️ Voice note' : '(no text)');
@@ -5526,11 +5542,10 @@ function groupWhatsAppConversations(messages) {
                 normalizedPhone: normKey,
                 isGroup: Boolean(isGroup),
                 chatType: isGroup ? 'group' : 'individual',
-                // Prefer group subject for groups; contact name for inbound 1-on-1 chats
-                name: (isGroup ? (m.chat_name || 'WhatsApp Group') : (isInbound ? m.sender_name : '')) || displayPhone,
+                name: contactName,
                 lastMessage: initialMsg,
                 timestamp: m.created_at || '',
-                is_audio: Boolean(m.is_audio),
+                is_audio: Boolean(m.is_audio || m.type === 'audio' || m.message_type === 'audio' || m.audio_url || m.media_url),
                 messages: []
             };
         }
@@ -5543,9 +5558,9 @@ function groupWhatsAppConversations(messages) {
         }
         map[normKey].lastMessage = latestText;
         map[normKey].timestamp = latestMsg.created_at || map[normKey].timestamp;
-        map[normKey].is_audio = Boolean(latestMsg.is_audio);
-        // Prefer contact name from any inbound sender_name
-        if (m.sender_name && m.direction === 'inbound' && (!map[normKey].name || map[normKey].name === displayPhone || map[normKey].name === normKey)) {
+        map[normKey].is_audio = Boolean(latestMsg.is_audio || latestMsg.type === 'audio' || latestMsg.message_type === 'audio' || latestMsg.audio_url || latestMsg.media_url);
+        // Prefer real contact name or resolved phone over 14-digit raw strings
+        if (m.sender_name && (!map[normKey].name || map[normKey].name === 'WhatsApp Contact' || map[normKey].name.startsWith('9178') || map[normKey].name.length > 13)) {
             map[normKey].name = m.sender_name;
         }
     });
@@ -6497,6 +6512,21 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
         );
     }
 
+    // Calculate and update live filter tab counters (All | Unread | Contacts | Groups)
+    const allCount = conversations.filter(c => !waHideGroupsFromAll || !c.isGroup).length;
+    const unreadCountTotal = conversations.filter(c => (c.messages || []).some(m => m.direction === 'inbound' && m.status !== 'read')).length;
+    const contactsCount = conversations.filter(c => !c.isGroup).length;
+    const groupsCount = conversations.filter(c => c.isGroup).length;
+
+    const chipAll = document.getElementById('waChipAll');
+    if (chipAll) chipAll.textContent = `All (${allCount})`;
+    const chipUnread = document.getElementById('waChipUnread');
+    if (chipUnread) chipUnread.textContent = `Unread (${unreadCountTotal})`;
+    const chipContacts = document.getElementById('waChipContacts');
+    if (chipContacts) chipContacts.textContent = `Contacts (${contactsCount})`;
+    const chipGroups = document.getElementById('waChipGroups');
+    if (chipGroups) chipGroups.textContent = `Groups (${groupsCount})`;
+
     // Update filter count badge
     const filterSummary = document.getElementById('waFilterSummary');
     if (filterSummary) {
@@ -6558,7 +6588,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                         <div class="wa-chat-meta">
                             <div class="wa-chat-top">
                                 <span class="wa-chat-name" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</span>
-                                <span class="wa-chat-time">${escapeHtml(c.timestamp.substring(11, 16) || c.timestamp)}</span>
+                                <span class="wa-chat-time">${escapeHtml(formatWaListTime(c.timestamp))}</span>
                             </div>
                             <div class="wa-chat-bottom">
                                 <span class="wa-chat-preview" title="${escapeHtml(previewText)}">${previewIcon}${escapeHtml(previewText)}</span>
