@@ -1355,12 +1355,12 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                     </div>
 
                     <!-- Bottom Reply Bar -->
-                    <div class="wa-reply-bar">
+                    <div class="wa-reply-bar wa-chat-input-bar">
                         <button type="button" class="wa-icon-btn" id="waEmojiToggleBtn" onclick="toggleEmojiTray()" title="Insert Emoji">😊</button>
                         <button type="button" class="wa-icon-btn" id="waTemplateToggleBtn" onclick="toggleTemplatesTray()" title="Quick Reply Templates">📎</button>
 
-                        <div style="flex: 1; position: relative;">
-                            <textarea id="waReplyInput" class="wa-reply-input" rows="1" placeholder="Type a message (Press Enter to send, Shift+Enter for newline)..." onkeydown="handleWaReplyKeydown(event)"></textarea>
+                        <div style="flex: 1; min-width: 180px; position: relative;">
+                            <textarea id="waReplyInput" class="wa-reply-input wa-chat-input" rows="1" placeholder="Type a message (Press Enter to send, Shift+Enter for newline)..." onkeydown="handleWaReplyKeydown(event)"></textarea>
                             <div id="waRecordingIndicator" style="display: none; position: absolute; inset: 0; background: #202c33; border-radius: 8px; align-items: center; padding: 0 12px; gap: 10px; z-index: 15; box-shadow: inset 0 0 10px rgba(0,0,0,0.4);">
                                 <button type="button" onclick="cancelVoiceRecording()" title="Discard recording" style="background: none; border: none; color: #ef4444; font-size: 16px; cursor: pointer; padding: 4px; display: flex; align-items: center;" aria-label="Discard recording">🗑️</button>
                                 <div style="display: flex; align-items: center; gap: 6px;">

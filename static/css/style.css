@@ -7804,14 +7804,40 @@ html.dark .dark\:hover\:bg-slate-800:hover, .dark .dark\:hover\:bg-slate-800:hov
     overflow-x: hidden !important;
 }
 
-.wa-reply-bar {
+/* Bottom chat input bar */
+.wa-chat-input-bar, .wa-reply-bar {
     width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
     box-sizing: border-box !important;
+    padding: 10px 14px !important;
+    background-color: #202c33 !important;
+    border-top: 1px solid #222d34 !important;
+    position: relative !important;
+    z-index: 10 !important;
+    flex-shrink: 0 !important;
 }
 
+.wa-chat-input-bar .wa-chat-input,
+.wa-chat-input-bar textarea,
+.wa-chat-input-bar input,
+.wa-reply-bar textarea,
 .wa-reply-input {
-    flex: 1 1 auto !important;
-    width: 100% !important;
-    min-width: 150px !important;
+    flex: 1 !important;
+    min-width: 180px !important;
+    height: 42px !important;
+    max-height: 42px !important;
+    overflow: hidden !important;
     box-sizing: border-box !important;
+    background-color: #2a3942 !important;
+    border: none !important;
+    outline: none !important;
+    border-radius: 8px !important;
+    color: #e9edef !important;
+    padding: 10px 14px !important;
+    font-size: 13.5px !important;
+    resize: none !important;
+    font-family: inherit !important;
+    line-height: 20px !important;
 }
