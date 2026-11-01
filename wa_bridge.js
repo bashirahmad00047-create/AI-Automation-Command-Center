@@ -152,45 +152,16 @@ function triggerSessionBackup() {
       const res = await fetch(backupUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Internal-Bridge': '1' },
-        body: JSON.stringify({ action: 'backup_full_bundle' }),
-        signal: AbortSignal.timeout(8000)
+        signal: AbortSignal.timeout(6000)
       });
       const data = await res.json().catch(() => null);
       if (data && data.success) {
-        console.log('[WhatsApp Bridge] Complete multi-file auth bundle (creds + pre-keys) permanently saved to Database!');
+        console.log('[WhatsApp Bridge] Session credentials permanently saved to Database!');
       }
     } catch (e) {
       console.warn('[WhatsApp Bridge] Session backup notice:', e.message);
     }
   }, 1500);
-}
-
-let isResettingCorruptedSession = false;
-function handleCorruptedSessionReset(reason = 'Bad MAC decryption error') {
-  if (isResettingCorruptedSession) return;
-  isResettingCorruptedSession = true;
-  console.warn(`[WhatsApp Bridge] Signal Protocol session reset triggered (${reason}). Auto-purging corrupted session & issuing fresh QR...`);
-  try {
-    destroyOldSocket();
-    if (fs.existsSync(AUTH_DIR)) {
-      const files = fs.readdirSync(AUTH_DIR);
-      for (const file of files) {
-        try { fs.unlinkSync(path.join(AUTH_DIR, file)); } catch (_) {}
-      }
-    }
-  } catch (e) {
-    console.error('[WhatsApp Bridge] Error wiping auth folder on corruption reset:', e.message);
-  }
-  triggerSessionClear();
-  isConnected = false;
-  currentQr = null;
-  currentQrUrl = null;
-  currentQrSvg = null;
-  isStarting = false;
-  setTimeout(() => {
-    isResettingCorruptedSession = false;
-    startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Socket auto-restart error:', e.message));
-  }, 1200);
 }
 
 function triggerSessionClear() {
@@ -281,20 +252,12 @@ async function acquireAntiSpamDispatchSlot() {
   }
 }
 
-// Process-wide guard against unhandled network crashes with auto-reset on Bad MAC
+// Process-wide guard against unhandled network crashes
 process.on('uncaughtException', (err) => {
   console.error('[WhatsApp Bridge] Uncaught Exception (guarded):', err);
-  const errMsg = (err?.message || String(err)).toLowerCase();
-  if (errMsg.includes('bad mac') || errMsg.includes('decrypt') || errMsg.includes('pre-key')) {
-    handleCorruptedSessionReset(err?.message || 'Bad MAC');
-  }
 });
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[WhatsApp Bridge] Unhandled Rejection (guarded):', reason);
-  const reasonMsg = (reason?.message || String(reason)).toLowerCase();
-  if (reasonMsg.includes('bad mac') || reasonMsg.includes('decrypt') || reasonMsg.includes('pre-key')) {
-    handleCorruptedSessionReset(reason?.message || 'Bad MAC');
-  }
 });
 
 /**
@@ -974,7 +937,7 @@ function enqueueContactTask(targetJid, taskFn) {
 
 sock.ev.on('messages.upsert', async ({ messages, type }) => {
       try {
-        if (!messages || !Array.isArray(messages) || (type !== 'notify' && type !== 'append')) return;
+        if (type !== 'notify' || !messages || !Array.isArray(messages)) return;
 
         for (const msg of messages) {
           const ownPhone = sock?.user?.id ? cleanPhoneNumber(sock.user.id.split(':')[0]) : '';
@@ -1374,43 +1337,32 @@ if (!text) text = '[Voice note]';
             }
           };
 
-          // FIFO Sequential Queue Dispatch (Zero Dropped Questions & Smart Fallback)
+          // FIFO Sequential Queue Dispatch (Zero Dropped Questions & Human Shield)
           enqueueContactTask(targetJid, async () => {
             let resData = null;
-            const candidateUrls = [
-              PYTHON_WEBHOOK_URL,
-              `http://127.0.0.1:${PYTHON_PORT}/api/v1/webhooks/whatsapp`,
-              `http://127.0.0.1:${PYTHON_PORT}/api/whatsapp/incoming`,
-              `http://127.0.0.1:${PYTHON_PORT}/api/v1/whatsapp/webhook`
-            ];
-            const uniqueUrls = [...new Set(candidateUrls.filter(Boolean))];
-
-            for (const webhookUrl of uniqueUrls) {
-              for (let attempt = 1; attempt <= 2; attempt++) {
-                try {
-                  const controller = new AbortController();
-                  const timeoutId = setTimeout(() => controller.abort(), 28000);
-                  const resp = await fetch(webhookUrl, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'User-Agent': 'WhatsApp-Baileys-Bridge/1.0'
-                    },
-                    body: JSON.stringify(payload),
-                    signal: controller.signal
-                  });
-                  clearTimeout(timeoutId);
-                  console.log(`[Webhook Forward] Dispatched to ${webhookUrl} (attempt ${attempt}) -> HTTP ${resp.status}`);
-                  if (resp.ok) {
-                    resData = await resp.json().catch(() => null);
-                    if (resData) break;
-                  }
-                } catch (e) {
-                  console.warn(`[Webhook Forward Warning] Endpoint ${webhookUrl} attempt ${attempt} failed: ${e.message}`);
-                  if (attempt < 2) await new Promise(r => setTimeout(r, 600));
+            for (let attempt = 1; attempt <= 2; attempt++) {
+              try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 28000);
+                const resp = await fetch(PYTHON_WEBHOOK_URL, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'WhatsApp-Baileys-Bridge/1.0'
+                  },
+                  body: JSON.stringify(payload),
+                  signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                console.log(`[Webhook Forward] Dispatched to ${PYTHON_WEBHOOK_URL} (attempt ${attempt}) -> HTTP ${resp.status}`);
+                if (resp.ok) {
+                  resData = await resp.json().catch(() => null);
+                  if (resData) break;
                 }
+              } catch (e) {
+                console.warn(`[Webhook Forward Warning] Attempt ${attempt} failed: ${e.message}`);
+                if (attempt < 2) await new Promise(r => setTimeout(r, 1200));
               }
-              if (resData) break;
             }
 
             if (resData && (resData.reply || resData.audio_base64)) {
@@ -1493,7 +1445,7 @@ if (!text) text = '[Voice note]';
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  message: `[Incoming WhatsApp Voice Call from ${callerPhone}]: Generate a polite, natural 1-2 sentence Pakistani Urdu voice response: Assalam-o-Alaikum! BashFlow AI Voice Agent bol raha hoon. Is waqt line masroof hai, baraye meharbani apna paigham voice note mein record karwayen, hum foran jawab denge. Shukriya!`,
+                  message: `[Incoming WhatsApp Voice Call from ${callerPhone}]: The user placed a WhatsApp voice call. Generate a polite, natural 1-2 sentence Roman Urdu response explaining this is an automated AI assistance system and asking them to send a voice note or text message so we can assist immediately.`,
                   language: 'ur'
                 })
               });
@@ -1738,14 +1690,38 @@ app.get('/qr.svg', async (req, res) => {
  * Force Refresh QR code endpoint
  * Resets socket, clears pending un-paired creds and immediately generates a fresh QR code.
  */
-app.all(['/refresh-qr', '/qr-refresh', '/restart-socket', '/api/refresh-qr'], async (req, res) => {
-  console.log('[WhatsApp Bridge] User requested complete session wipe & fresh authentic QR code.');
+app.all(['/refresh-qr', '/qr-refresh', '/restart-socket'], async (req, res) => {
+  console.log('[WhatsApp Bridge] Fresh QR generation requested via /refresh-qr endpoint.');
   try {
-    handleCorruptedSessionReset('User clicked QR Re-Link / Sync');
+    isConnected = false;
+    currentQr = null;
+    currentQrUrl = null;
+    currentQrSvg = null;
+    destroyOldSocket();
+
+    // If device is not already connected, clean pending credentials to guarantee a fresh pairing QR
+    if (!sock?.user) {
+      try {
+        if (fs.existsSync(AUTH_DIR)) {
+          const files = fs.readdirSync(AUTH_DIR);
+          for (const file of files) {
+            try {
+              fs.unlinkSync(path.join(AUTH_DIR, file));
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+
+    isStarting = false;
+    setTimeout(() => {
+      startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Socket restart error:', e.message));
+    }, 200);
+
     return res.status(200).json({
       success: true,
       status: 'refreshing',
-      message: 'Old session wiped. Generating fresh authentic QR code...'
+      message: 'Generating fresh QR code...'
     });
   } catch (refreshErr) {
     console.error('[WhatsApp Bridge] Error during /refresh-qr:', refreshErr.message);

@@ -2738,29 +2738,19 @@ def api_whatsapp_bridge_qr():
 @api_v1.route("/whatsapp/bridge-qr-refresh", methods=["POST", "GET"])
 @api_v1.route("/whatsapp/qr/refresh", methods=["POST", "GET"])
 def api_whatsapp_bridge_qr_refresh():
-    """Wipes any stuck or corrupted Baileys session on disk and in DB,
-    and forces the bridge to generate an authentic, fresh QR code immediately.
+    """Forces the Baileys bridge to close any stuck socket, reset un-paired credentials,
+    and generate a brand new fresh QR code immediately.
     """
     import requests
     try:
-        from wa_bridge_manager import clear_wa_session_in_db, resolve_auth_dir, ensure_wa_bridge_running
-        clear_wa_session_in_db()
-        auth_dir = resolve_auth_dir()
-        if os.path.exists(auth_dir):
-            for fname in os.listdir(auth_dir):
-                try:
-                    fpath = os.path.join(auth_dir, fname)
-                    if os.path.isfile(fpath):
-                        os.unlink(fpath)
-                except Exception:
-                    pass
+        from wa_bridge_manager import ensure_wa_bridge_running
         ensure_wa_bridge_running(timeout_seconds=3.0)
-    except Exception as _clear_err:
-        logger.debug(f"Bridge session wipe notice: {_clear_err}")
+    except Exception:
+        pass
 
     refresh_url = os.environ.get("BAILEYS_BRIDGE_REFRESH_URL", "http://127.0.0.1:3001/refresh-qr")
     try:
-        resp = requests.post(refresh_url, timeout=6.0)
+        resp = requests.post(refresh_url, timeout=4.0)
         data = resp.json() if resp.text else {"success": True, "status": "refreshing"}
         return jsonify(data), 200
     except Exception as e:
@@ -2812,16 +2802,6 @@ def api_whatsapp_conversations():
     # Strictly real conversations from Baileys WhatsApp (no fake or seed data)
 
     messages = WhatsAppMessage.query.filter_by(organization_id=org_id).order_by(WhatsAppMessage.created_at.desc()).limit(200).all()
-    if not messages:
-        # Fallback to any messages in the system across orgs to prevent 0 chats after restart
-        messages = WhatsAppMessage.query.order_by(WhatsAppMessage.created_at.desc()).limit(200).all()
-
-    # Strictly real conversations from Baileys WhatsApp (filter out any lingering demo seeds)
-    messages = [
-        m for m in (messages or [])
-        if m.sender != "923001234567" and m.recipient != "923001234567" and "Demo Customer" not in str(m.body or "")
-    ]
-
     msg_dicts = [m.to_dict() for m in messages]
 
     conv_map = {}
@@ -3230,8 +3210,6 @@ def api_whatsapp_session_state():
 
 def _is_bridge_or_authenticated():
     """Allows local Baileys bridge or authenticated user session."""
-    if request.headers.get("X-Internal-Bridge") == "1":
-        return True
     client_ip = request.remote_addr or ""
     if client_ip in ("127.0.0.1", "::1", "localhost", "testclient"):
         return True
@@ -3244,33 +3222,26 @@ def _is_bridge_or_authenticated():
 
 @api_v1.route("/whatsapp/session-backup", methods=["POST", "GET"])
 def api_whatsapp_session_backup():
-    """Triggers an immediate database backup of complete Baileys auth bundle (creds + all pre-keys)."""
+    """Triggers an immediate database backup of Baileys auth files to Supabase / PostgreSQL."""
     if not _is_bridge_or_authenticated():
         return jsonify({"error": "Unauthorized"}), 401
     try:
         from wa_bridge_manager import backup_wa_session_to_db
         success = backup_wa_session_to_db()
-        return jsonify({
-            "success": success,
-            "message": "Complete Baileys auth bundle (creds + pre-keys) backed up to DB" if success else "No credentials to backup"
-        }), 200
+        return jsonify({"success": success, "message": "WhatsApp session backed up to DB" if success else "No credentials to backup"}), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @api_v1.route("/whatsapp/session-restore", methods=["POST", "GET"])
 def api_whatsapp_session_restore():
-    """Restores complete Baileys session bundle (creds + pre-keys) from DB into auth dir."""
+    """Restores Baileys session files from DB into the auth folder on container boot."""
     if not _is_bridge_or_authenticated():
         return jsonify({"error": "Unauthorized"}), 401
     try:
         from wa_bridge_manager import restore_wa_session_from_db
         restored = restore_wa_session_from_db()
-        return jsonify({
-            "success": True,
-            "restored": restored,
-            "message": "Complete WhatsApp session bundle (creds + pre-keys) restored from DB" if restored else "No session found in DB"
-        }), 200
+        return jsonify({"success": True, "restored": restored, "message": "WhatsApp session restored from DB" if restored else "No session found in DB"}), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -3486,16 +3457,79 @@ def get_session_storage_path():
 # Baileys Incoming Webhook (Enhanced)
 # ------------------------------------------
 
-@api_v1.route("/whatsapp/webhook", methods=["GET", "POST"])
-@api_v1.route("/whatsapp/incoming", methods=["GET", "POST"])
-@api_v1.route("/whatsapp/baileys/incoming", methods=["GET", "POST"])
-@api_v1.route("/whatsapp/messages/incoming", methods=["GET", "POST"])
+@api_v1.route("/whatsapp/webhook", methods=["POST"])
 def handle_incoming_webhook():
-    """Universal incoming WhatsApp Baileys & Meta webhook endpoint.
-    Delegates directly to whatsapp_webhook_ingress so messages are recorded in DB,
-    CRM leads are auto-captured, and AI Auto-Responder dispatches replies.
+    """Receives incoming Baileys webhook payloads with full message parsing.
+
+    Extracts sender phone, detects group/personal, processes voice notes,
+    and extracts text content from conversation/extendedTextMessage.
     """
-    return whatsapp_webhook_ingress()
+    payload = request.get_json(force=True, silent=True)
+    if not payload:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    clean_number, is_group = extract_real_phone_number(payload)
+    if not clean_number:
+        return jsonify({"status": "ignored", "reason": "Invalid or non-personal JID"}), 200
+
+    audio_info = None
+    if "audioMessage" in payload.get("message", {}):
+        audio_info = process_and_save_voice_note(payload)
+
+    msg_box = payload.get("message", {})
+    text_content = (
+        msg_box.get("conversation")
+        or msg_box.get("extendedTextMessage", {}).get("text")
+        or ""
+    )
+
+    response_data = {
+        "status": "success",
+        "sender_phone": clean_number,
+        "is_group": is_group,
+        "text": text_content.strip() if text_content else None,
+        "audio": audio_info,
+    }
+    return jsonify(response_data), 200
+
+
+@api_v1.route("/whatsapp/baileys/incoming", methods=["POST"])
+def api_baileys_incoming_webhook():
+    """Receives incoming Baileys webhook payloads (messages, voice notes).
+
+    Legacy-compatible endpoint — internally delegates to handle_incoming_webhook logic.
+    """
+    payload = request.get_json(force=True, silent=True) or {}
+    if not payload:
+        return jsonify({"status": "error", "detail": "Empty payload received"}), 400
+
+    try:
+        clean_number, is_group = extract_real_phone_number(payload)
+        if not clean_number:
+            return jsonify({"status": "ignored", "reason": "Not a valid personal WhatsApp sender"}), 200
+
+        audio_info = None
+        if "audioMessage" in payload.get("message", {}):
+            audio_info = process_and_save_voice_note(payload)
+
+        msg_box = payload.get("message", {})
+        text_content = (
+            msg_box.get("conversation")
+            or msg_box.get("extendedTextMessage", {}).get("text")
+            or ""
+        )
+
+        return jsonify({
+            "status": "success",
+            "sender_phone": clean_number,
+            "is_group": is_group,
+            "text": text_content.strip() if text_content else None,
+            "audio": audio_info,
+        }), 200
+    except Exception as exc:
+        logger.error(f"[Baileys Webhook] Processing error: {exc}", exc_info=True)
+        return jsonify({"status": "error", "detail": str(exc)}), 500
+
 
 
 
@@ -3680,23 +3714,6 @@ def ai_voice_chat():
             db.session.commit()
         except Exception as we_err:
             logger.debug(f"[Voice Chat WorkflowExecution Notice] {we_err}")
-
-    # Dispatch live voice note stream directly to WhatsApp if requested
-    if data.get("sync_whatsapp") and data.get("phone"):
-        try:
-            target_wa_phone = str(data.get("phone")).replace("+", "").strip()
-            if target_wa_phone and len(target_wa_phone) >= 10:
-                WhatsAppService.send_message(
-                    organization_id=org_id,
-                    recipient=target_wa_phone,
-                    message_type="voice",
-                    body=clean_reply,
-                    audio_base64=audio_base64,
-                    is_voice=True
-                )
-                logger.info(f"[Voice Chat] Synced live AI voice note stream to customer WhatsApp: {target_wa_phone}")
-        except Exception as wa_sync_err:
-            logger.debug(f"[Voice Chat WhatsApp Sync Notice] {wa_sync_err}")
 
     storage = get_storage()
     stats = storage.get_stats(org_id) if storage else {}
@@ -3934,13 +3951,12 @@ def whatsapp_webhook_ingress():
     """
     payload = request.get_json(silent=True) or {}
 
-    # Detect Baileys Bridge / Green-API vs Meta Cloud API format
-    is_meta = bool(payload.get("object") == "whatsapp_business_account" or ("entry" in payload and isinstance(payload.get("entry"), list)))
+    # Detect Green-API Webhook format (typeWebhook or instanceData)
+    is_green_api = bool(payload.get("typeWebhook") or payload.get("instanceData"))
 
-    if not is_meta:
-        # Universal Baileys Bridge / Green-API Webhook handling
+    if is_green_api:
         messages = WhatsAppService.parse_green_api_payload(payload)
-        provider_name = "baileys_bridge"
+        provider_name = "green_api"
     else:
         # Meta Cloud API signature verification
         raw_body = request.get_data()
@@ -4459,37 +4475,6 @@ def whatsapp_send_message():
             "status": result.get("status"),
             "template_name": template_name
         })
-
-        # Inbound / UI Chat Auto-Responder:
-        # If sent from UI or testing with trigger_ai, trigger AI Auto-Responder so the user gets instant AI text & Urdu voice reply
-        trigger_ai = data.get("trigger_ai", True)
-        from_ui = data.get("from_ui", False)
-        if trigger_ai and (from_ui or "demo" in str(to_phone).lower() or to_phone in ("923001234567", "923209350858")):
-            try:
-                def _respond_ui_msg(app_ctx, org_id, user_text, recipient_p, is_v):
-                    with app_ctx.app_context():
-                        try:
-                            time.sleep(0.5)
-                            WhatsAppService.handle_inbound_auto_response(
-                                organization_id=org_id,
-                                sender_phone=recipient_p,
-                                message_body=user_text,
-                                sender_name="Customer",
-                                is_voice=is_v,
-                                reply_as_voice=True,
-                                chat_id=recipient_p
-                            )
-                        except Exception as _ui_ai_err:
-                            logger.error(f"UI chat AI auto-response error: {_ui_ai_err}")
-
-                threading.Thread(
-                    target=_respond_ui_msg,
-                    args=(current_app._get_current_object(), org.id, message, to_phone, is_voice),
-                    daemon=True
-                ).start()
-            except Exception as _thr_err:
-                logger.warning(f"Could not spawn UI auto-responder thread: {_thr_err}")
-
         status_code = 200 if result.get("success") else 400
         return jsonify(result), status_code
     except ValueError as ve:
@@ -6198,10 +6183,6 @@ def list_ecommerce_products():
     """List and search active products with inventory stock levels and pricing."""
     org = get_current_org()
     if not org:
-        from models import Organization
-        req_org_id = request.args.get("org_id") or session.get("active_org_id") or session.get("org_id") or "org-enterprise-default"
-        org = Organization.query.get(req_org_id) or Organization.query.first()
-    if not org:
         return jsonify({"error": "No active organization found.", "code": "NO_ORG"}), 400
 
     query_term = request.args.get("query") or request.args.get("q")
@@ -7359,334 +7340,73 @@ def fix_incoming_whatsapp_message():
 
 
 # ==============================================================================
-# ==============================================================================
 # FEATURE 1: MULTI-BUSINESS AI TEMPLATES STUDIO BACKEND
 # ==============================================================================
 BUILTIN_BUSINESS_TEMPLATES = [
     {
         "id": "mobile_electronics",
-        "name": "Mobile Store",
+        "name": "Mobile & Electronics Shop",
         "icon": "📱",
         "business_name": "Star Mobile & Electronics Hub",
         "industry": "Retail / Consumer Electronics",
         "talking_style": "Professional, knowledgeable, and fast with specs, IMEI checks, and warranty policies.",
         "welcome_greeting": "Assalam-o-Alaikum! Star Mobile mein khush aamdeed! Main aap ka AI sales assistant hoon. Kis model ka stock ya PTA status maloom karna chahte hain?",
-        "system_prompt": "You are Star Mobile's expert sales assistant. Answer questions on iPhone 16 Pro Max, Samsung S24 Ultra, Xiaomi Redmi Note 13, 65W Fast Charger, and AirPods Pro 2. Always quote exact prices from our catalog in Pakistani Rupees (PKR) and explain 1-year official brand warranty and PTA approval status.",
-        "products_services": "iPhone 16 Pro Max 256GB (Rs 445,000), Samsung Galaxy S24 Ultra 512GB (Rs 395,000), Xiaomi Redmi Note 13 Pro (Rs 72,000), 65W GaN Fast Charger (Rs 5,500), AirPods Pro 2 (Rs 68,000).",
-        "verified_prices": "iPhone 16 Pro Max 256GB: Rs 445,000 | Samsung S24 Ultra 512GB: Rs 395,000 | Redmi Note 13 Pro: Rs 72,000 | 65W Fast Charger: Rs 5,500 | AirPods Pro 2: Rs 68,000",
-        "custom_rules": "1. All devices are PTA Approved with 1-year official brand warranty.\n2. 7 days replacement check warranty.\n3. Cash on Delivery (COD) available with Rs 1,000 advance delivery token.",
-        "catalog_products": [
-            {
-                "name": "iPhone 16 Pro Max 256GB (PTA Approved)",
-                "category": "Smartphones",
-                "description": "Apple iPhone 16 Pro Max, 256GB, Desert Titanium, Official PTA Approved with 1-Year Mercantile Warranty.",
-                "sku": "MOB-IP16PM-256",
-                "price": 445000.0,
-                "currency": "PKR",
-                "stock_quantity": 25,
-                "unit": "piece"
-            },
-            {
-                "name": "Samsung Galaxy S24 Ultra 512GB",
-                "category": "Smartphones",
-                "description": "Samsung Galaxy S24 Ultra, 512GB, Titanium Gray, Galaxy AI features, Official 1-Year Warranty.",
-                "sku": "MOB-S24U-512",
-                "price": 395000.0,
-                "currency": "PKR",
-                "stock_quantity": 20,
-                "unit": "piece"
-            },
-            {
-                "name": "Xiaomi Redmi Note 13 Pro",
-                "category": "Smartphones",
-                "description": "Xiaomi Redmi Note 13 Pro, 8GB RAM, 256GB Storage, 200MP OIS Camera, 67W Turbo Fast Charging.",
-                "sku": "MOB-RDM-N13P",
-                "price": 72000.0,
-                "currency": "PKR",
-                "stock_quantity": 40,
-                "unit": "piece"
-            },
-            {
-                "name": "65W GaN Dual-Port Fast Charger",
-                "category": "Accessories",
-                "description": "Ultra-compact Gallium Nitride (GaN) fast charger with Type-C PD and USB-A quick charge ports.",
-                "sku": "ACC-CHG-65W",
-                "price": 5500.0,
-                "currency": "PKR",
-                "stock_quantity": 100,
-                "unit": "piece"
-            },
-            {
-                "name": "Apple AirPods Pro 2 (USB-C)",
-                "category": "Audio",
-                "description": "Apple AirPods Pro 2 with USB-C MagSafe Case, Active Noise Cancellation, and Adaptive Audio.",
-                "sku": "ACC-AIR-PRO2",
-                "price": 68000.0,
-                "currency": "PKR",
-                "stock_quantity": 30,
-                "unit": "piece"
-            }
-        ]
+        "system_prompt": "You are Star Mobile's expert sales assistant. Answer questions on iPhone, Samsung, Xiaomi stock, 1-year brand warranties, PTA approved vs Non-PTA rates, and cash-on-delivery options. Speak naturally in Roman Urdu.",
+        "products_services": "iPhone 13/14/15/16 Pro Max (PTA Approved), Samsung Galaxy S23/S24 Ultra, Xiaomi Redmi Note series, Original 20W/65W Fast Chargers, Airpods Pro, Smartwatches.",
+        "verified_prices": "iPhone 15 128GB: Rs 285,000 | S24 Ultra 256GB: Rs 365,000 | Redmi Note 13: Rs 54,000 | 20W Fast Charger: Rs 4,500",
+        "custom_rules": "1. Verify IMEI on PTA DIRBS before quoting non-PTA prices.\n2. 7 days replacement warranty and 1 year official brand warranty.\n3. Rs 1,000 advance delivery token required for COD."
     },
     {
-        "id": "restaurant_biryani",
-        "name": "Restaurant & Biryani",
+        "id": "restaurant_food",
+        "name": "Restaurant & Food Delivery",
         "icon": "🍔",
-        "business_name": "Al-Bake Biryani & Gourmet Karahi",
+        "business_name": "Al-Bake Gourmet Burgers & Karahi",
         "industry": "Hospitality / Food Delivery",
         "talking_style": "Warm, mouth-watering, energetic Pakistani food concierge.",
-        "welcome_greeting": "Assalam-o-Alaikum! Al-Bake Biryani & Karahi mein khush aamdeed! Aaj aap ke liye mazedaar kya pack karwayein? Niche hamara live menu aur fast delivery mojood hai.",
-        "system_prompt": "You are Al-Bake Food Order Concierge. Help customers pick from the menu: Special Chicken Dum Biryani (Rs 650), Mutton Shinwari Karahi (Rs 2,800), Gourmet Beef Smash Burger (Rs 850), Crispy Zinger Double (Rs 620), and Mint Lemon Margarita (Rs 320). Calculate totals, confirm delivery addresses, and emphasize fresh hot food with fast 30-45 minute delivery.",
-        "products_services": "Special Chicken Dum Biryani (Rs 650), Mutton Shinwari Karahi 1 KG (Rs 2,800), Gourmet Beef Smash Burger (Rs 850), Crispy Zinger Double (Rs 620), Fresh Mint Lemon Margarita (Rs 320).",
-        "verified_prices": "Special Chicken Dum Biryani: Rs 650 | Mutton Shinwari Karahi (1 KG): Rs 2,800 | Gourmet Smash Burger: Rs 850 | Crispy Zinger Double: Rs 620 | Mint Margarita: Rs 320 | Delivery Charges: Rs 150",
-        "custom_rules": "1. Free delivery on orders above Rs 2,500.\n2. Average delivery time 35-45 minutes.\n3. Always request house number, street, and live GPS location pin.",
-        "catalog_products": [
-            {
-                "name": "Special Chicken Dum Biryani",
-                "category": "Rice & Biryani",
-                "description": "Traditional aromatic basmati rice layered with spiced chicken, potato, zeera raita, and fresh salad.",
-                "sku": "FOOD-CHK-BIRYANI",
-                "price": 650.0,
-                "currency": "PKR",
-                "stock_quantity": 150,
-                "unit": "plate"
-            },
-            {
-                "name": "Mutton Shinwari Karahi (1 KG)",
-                "category": "Karahi & BBQ",
-                "description": "Authentic KPK Shinwari style mutton cooked fresh in pure animal fat with tomatoes, green chillies, and black pepper.",
-                "sku": "FOOD-MUT-SHINWARI",
-                "price": 2800.0,
-                "currency": "PKR",
-                "stock_quantity": 40,
-                "unit": "kg"
-            },
-            {
-                "name": "Gourmet Beef Smash Burger",
-                "category": "Fast Food",
-                "description": "Two crispy smashed beef patties, double melted cheddar cheese, caramelized onions, and secret burger sauce on brioche bun.",
-                "sku": "FOOD-BGR-SMASH",
-                "price": 850.0,
-                "currency": "PKR",
-                "stock_quantity": 80,
-                "unit": "piece"
-            },
-            {
-                "name": "Crispy Zinger Double Patty Burger",
-                "category": "Fast Food",
-                "description": "Double fried crispy spicy chicken fillets, crunchy iceberg lettuce, pickled jalapenos, and garlic mayo.",
-                "sku": "FOOD-BGR-ZINGER",
-                "price": 620.0,
-                "currency": "PKR",
-                "stock_quantity": 100,
-                "unit": "piece"
-            },
-            {
-                "name": "Fresh Mint Lemon Margarita",
-                "category": "Beverages",
-                "description": "Chilled beverage with crushed ice, fresh garden mint leaves, freshly squeezed lemon juice, and black salt.",
-                "sku": "FOOD-BEV-MINT",
-                "price": 320.0,
-                "currency": "PKR",
-                "stock_quantity": 120,
-                "unit": "glass"
-            }
-        ]
-    },
-    {
-        "id": "ecommerce_brand",
-        "name": "E-Commerce Brand",
-        "icon": "🛍️",
-        "business_name": "Urban Trendz E-Commerce Store",
-        "industry": "Apparel & Lifestyle",
-        "talking_style": "Trendy, polite, and helpful modern fashion brand representative.",
-        "welcome_greeting": "Assalam-o-Alaikum! Urban Trendz mein khush aamdeed! Main aap ka shopping concierge hoon. Kis collection ya product ke baare mein janna chahte hain?",
-        "system_prompt": "You are Urban Trendz customer care and sales assistant. Help customers choose apparel, footwear, and accessories. Always quote exact catalog prices: Oversized Graphic Heavyweight Tee (Rs 2,800), Slim Fit Stretch Denim Jeans (Rs 4,500), Genuine Leather Crossbody Bag (Rs 7,200), Casual White Low-Top Sneakers (Rs 5,900), and Minimalist Matte Black Watch (Rs 8,500). Explain size guides, 7-day hassle-free return policy, and nationwide cash on delivery.",
-        "products_services": "Oversized Graphic Heavyweight Tee (Rs 2,800), Slim Fit Stretch Denim Jeans (Rs 4,500), Genuine Leather Crossbody Bag (Rs 7,200), Casual White Low-Top Sneakers (Rs 5,900), Minimalist Matte Black Watch (Rs 8,500).",
-        "verified_prices": "Oversized Graphic Tee: Rs 2,800 | Slim Fit Denim Jeans: Rs 4,500 | Genuine Leather Bag: Rs 7,200 | White Sneakers: Rs 5,900 | Matte Black Watch: Rs 8,500",
-        "custom_rules": "1. Free nationwide delivery on orders over Rs 5,000.\n2. 7 days money-back and exchange guarantee.\n3. Cash on Delivery available across all cities of Pakistan.",
-        "catalog_products": [
-            {
-                "name": "Oversized Graphic Heavyweight Tee",
-                "category": "Apparel",
-                "description": "240 GSM 100% combed cotton premium streetwear tee with high-density puff print and relaxed drop-shoulder fit.",
-                "sku": "APP-TEE-OVS01",
-                "price": 2800.0,
-                "currency": "PKR",
-                "stock_quantity": 75,
-                "unit": "piece"
-            },
-            {
-                "name": "Slim Fit Stretch Denim Jeans",
-                "category": "Apparel",
-                "description": "Premium dark indigo denim with 2% elastane flex stretch, heavy-duty YKK zipper, and signature rivets.",
-                "sku": "APP-JNS-SLIM",
-                "price": 4500.0,
-                "currency": "PKR",
-                "stock_quantity": 60,
-                "unit": "piece"
-            },
-            {
-                "name": "Genuine Leather Crossbody Messenger Bag",
-                "category": "Accessories",
-                "description": "Handcrafted 100% full-grain cowhide leather crossbody bag with antique brass hardware and padded tablet sleeve.",
-                "sku": "ACC-BAG-LTHR",
-                "price": 7200.0,
-                "currency": "PKR",
-                "stock_quantity": 35,
-                "unit": "piece"
-            },
-            {
-                "name": "Casual White Low-Top Sneakers",
-                "category": "Footwear",
-                "description": "Clean minimalist low-top sneakers in breathable microfiber leather with anti-slip rubber cupsole and memory insole.",
-                "sku": "FTW-SNK-WHT",
-                "price": 5900.0,
-                "currency": "PKR",
-                "stock_quantity": 50,
-                "unit": "pair"
-            },
-            {
-                "name": "Minimalist Matte Black Chronograph Watch",
-                "category": "Accessories",
-                "description": "All-black stainless steel mesh strap, Japanese quartz movement, 3ATM water resistant, date sub-dial.",
-                "sku": "ACC-WTC-BLK",
-                "price": 8500.0,
-                "currency": "PKR",
-                "stock_quantity": 40,
-                "unit": "piece"
-            }
-        ]
+        "welcome_greeting": "Assalam-o-Alaikum! Al-Bake mein khush aamdeed! Aaj aap ke liye mazedaar kya pack karwayein? Niche hamara live menu aur fast delivery mojood hai.",
+        "system_prompt": "You are Al-Bake Food Order Concierge. Help customers pick from the menu, calculate order totals, confirm delivery addresses, and provide live Google Maps tracking links. Emphasize fresh ingredients and fast 30-45 minute delivery.",
+        "products_services": "Gourmet Smash Beef Burger, Crispy Zinger Double, Chicken White Karahi (Full/Half), Mutton Shinwari, Garlic Mayo Fries, Special Mineral Water, Mint Margarita.",
+        "verified_prices": "Double Smash Burger: Rs 950 | Crispy Zinger: Rs 650 | White Karahi Full: Rs 2,200 | Mint Margarita: Rs 350 | Delivery Charges: Rs 150",
+        "custom_rules": "1. Free delivery on orders above Rs 2,500.\n2. Average delivery time 35-45 minutes.\n3. Always request house number, street, and live GPS location pin."
     },
     {
         "id": "real_estate",
-        "name": "Real Estate",
+        "name": "Real Estate & Property",
         "icon": "🏡",
         "business_name": "Apex Prime Properties & Builders",
         "industry": "Real Estate & Developments",
         "talking_style": "Trustworthy, professional, and sophisticated property investment advisor.",
         "welcome_greeting": "Assalam-o-Alaikum! Apex Prime Properties mein khush aamdeed! Main aap ka property investment advisor hoon. Kis society ya block mein residential ya commercial plot dekh rahe hain?",
-        "system_prompt": "You are Apex Prime Real Estate Advisor. Provide accurate plot and property pricing: 5 Marla Prime Residential Plot (Rs 3,800,000), 10 Marla Luxury Modern Villa (Rs 28,500,000), 1 Kanal Agro Farmhouse File (Rs 8,500,000), Commercial Boulevard Shop (Rs 14,000,000), and Executive Corporate Office Suite (Rs 11,500,000). Always explain flexible payment plans, down payment options, and schedule on-site visits with Google Maps pin drops.",
-        "products_services": "5 Marla Prime Residential Plot (Rs 3,800,000), 10 Marla Luxury Modern Villa (Rs 28,500,000), 1 Kanal Agro Farmhouse File (Rs 8,500,000), Ground Floor Commercial Boulevard Shop (Rs 14,000,000), Executive Corporate Office Suite (Rs 11,500,000).",
-        "verified_prices": "5 Marla Residential Plot: Rs 3,800,000 | 10 Marla Luxury Villa: Rs 28,500,000 | 1 Kanal Farmhouse File: Rs 8,500,000 | Commercial Boulevard Shop: Rs 14,000,000 | Executive Office: Rs 11,500,000",
-        "custom_rules": "1. Site visits available Mon-Sun with prior 2-hour notice.\n2. All NOC approved societies (LDA/CDA/RDA approved).\n3. Zero hidden documentation charges.",
-        "catalog_products": [
-            {
-                "name": "5 Marla Prime Residential Plot",
-                "category": "Plots",
-                "description": "LDA approved prime sector plot with underground electricity, carpeted roads, and 24/7 gated security.",
-                "sku": "EST-PLT-05M",
-                "price": 3800000.0,
-                "currency": "PKR",
-                "stock_quantity": 12,
-                "unit": "plot"
-            },
-            {
-                "name": "10 Marla Luxury Modern Villa",
-                "category": "Houses",
-                "description": "Brand new 4-bedroom luxury villa with attached bathrooms, Spanish tiled flooring, designer kitchen, and servant quarter.",
-                "sku": "EST-VIL-10M",
-                "price": 28500000.0,
-                "currency": "PKR",
-                "stock_quantity": 3,
-                "unit": "house"
-            },
-            {
-                "name": "1 Kanal Agro Farmhouse File",
-                "category": "Farmhouses",
-                "description": "Lush green gated agro community file with 3-year flexible installment plan, lake view, and country club membership.",
-                "sku": "EST-FRM-01K",
-                "price": 8500000.0,
-                "currency": "PKR",
-                "stock_quantity": 8,
-                "unit": "file"
-            },
-            {
-                "name": "Ground Floor Commercial Boulevard Shop",
-                "category": "Commercial",
-                "description": "Main 120-feet boulevard front corner retail shop with guaranteed high rental yield and massive customer footfall.",
-                "sku": "EST-COM-GF01",
-                "price": 14000000.0,
-                "currency": "PKR",
-                "stock_quantity": 5,
-                "unit": "shop"
-            },
-            {
-                "name": "Executive Corporate Office Suite (800 Sqft)",
-                "category": "Commercial",
-                "description": "800 sq ft fitted corporate office on 3rd floor with central HVAC, high-speed elevators, and reserved basement parking.",
-                "sku": "EST-OFC-800",
-                "price": 11500000.0,
-                "currency": "PKR",
-                "stock_quantity": 6,
-                "unit": "office"
-            }
-        ]
+        "system_prompt": "You are Apex Prime Real Estate Advisor. Provide accurate plot and house dimensions (5 Marla, 10 Marla, 1 Kanal), down payment details, quarterly installment breakdowns, and schedule on-site visits with Google Maps pin drops.",
+        "products_services": "5 Marla Residential Plots, 10 Marla Luxury Villas, 1 Kanal Farmhouses, Commercial Boulevard Plazas, 3-Year Flexible Installment Files.",
+        "verified_prices": "5 Marla Booking: Rs 650,000 down payment (Total 35 Lakh) | 10 Marla Plot: 75 Lakh | 1 Kanal Luxury House: 3.5 Crore",
+        "custom_rules": "1. Site visits available Mon-Sun with prior 2-hour notice.\n2. All NOC approved societies (LDA/CDA/RDA approved).\n3. Zero hidden documentation charges."
+    },
+    {
+        "id": "wholesale_b2b",
+        "name": "Wholesale / Alibaba B2B Catalog",
+        "icon": "📦",
+        "business_name": "Apex Bulk Global Wholesale Hub",
+        "industry": "Wholesale / B2B Supply",
+        "talking_style": "Direct, efficient, trade-focused B2B sales manager.",
+        "welcome_greeting": "Assalam-o-Alaikum! Apex Bulk B2B Catalog mein khush aamdeed. Minimum Order Quantity (MOQ) aur wholesale tier rates ke liye batayein konsi items chahiyein?",
+        "system_prompt": "You are B2B Wholesale Account Manager. Quote tiered quantity discounts, calculate bulk carton shipping via TCS/Cargo, explain MOQ criteria (minimum 50 pieces), and draft proforma invoice summaries for business buyers.",
+        "products_services": "Type-C Braided Cables (Carton of 200), High Capacity Power Banks (Box of 50), Wireless Earbuds (MOQ 100), Protective Phone Cases (Assorted).",
+        "verified_prices": "Type-C Cable: Rs 120/pc (MOQ 200) | Power Bank 20000mAh: Rs 2,400/pc (MOQ 50) | TWS Earbuds: Rs 1,150/pc (MOQ 100)",
+        "custom_rules": "1. Payment terms: 50% advance via company bank account, 50% before cargo dispatch.\n2. Official GST/NTN invoice provided with all bulk consignments.\n3. Cargo dispatch within 24 hours of payment verification."
     },
     {
         "id": "clinic_booking",
-        "name": "Clinic Booking",
+        "name": "Clinic / Service Booking",
         "icon": "🩺",
         "business_name": "Al-Shifa Healthcare & Dental Clinic",
         "industry": "Healthcare & Medical Services",
         "talking_style": "Empathetic, calm, polite, and reassuring clinical receptionist in Urdu.",
         "welcome_greeting": "Assalam-o-Alaikum! Al-Shifa Clinic mein khush aamdeed. Main appointment coordinator hoon. Kis specialist doctor ke sath slot book karna chahte hain?",
-        "system_prompt": "You are Al-Shifa Clinic's appointment coordinator. Guide patients regarding consultant doctor timings and appointments: Senior Consultant Physician (Rs 2,500), Dental Scaling & Polishing (Rs 4,000), Complete Blood Count Test (Rs 1,500), Whole Abdomen Ultrasound (Rs 3,200), and Pediatric Child Specialist Exam (Rs 2,200). Always quote exact fees and advise urgent ER visits for life-threatening chest pain.",
-        "products_services": "Senior Consultant Physician Consultation (Rs 2,500), Dental Scaling & Polishing (Rs 4,000), Complete Blood Count CBC (Rs 1,500), Whole Abdomen Ultrasound (Rs 3,200), Pediatric Child Specialist Exam (Rs 2,200).",
-        "verified_prices": "Consultant Physician: Rs 2,500 | Dental Scaling & Polishing: Rs 4,000 | CBC Blood Test: Rs 1,500 | Ultrasound Scan: Rs 3,200 | Pediatric Exam: Rs 2,200",
-        "custom_rules": "1. Clinic timings: Monday to Saturday 4:00 PM to 10:00 PM.\n2. Prior booking recommended to avoid wait times.\n3. Clinic address: Main Boulevard, Gulberg III, Lahore with free parking.",
-        "catalog_products": [
-            {
-                "name": "Senior Consultant Physician Consultation",
-                "category": "Consultations",
-                "description": "Comprehensive physical examination, medical history evaluation, vital signs check, and digital prescription.",
-                "sku": "MED-CON-GEN",
-                "price": 2500.0,
-                "currency": "PKR",
-                "stock_quantity": 100,
-                "unit": "visit"
-            },
-            {
-                "name": "Dental Scaling, Polishing & Whitening",
-                "category": "Dental",
-                "description": "Ultrasonic deep scaling to remove tartar and plaque, followed by diamond paste polishing for stain removal.",
-                "sku": "MED-DEN-SCL",
-                "price": 4000.0,
-                "currency": "PKR",
-                "stock_quantity": 50,
-                "unit": "session"
-            },
-            {
-                "name": "Complete Blood Count (CBC) + ESR Diagnostic Profile",
-                "category": "Diagnostics",
-                "description": "Automated 5-part hematology differential analyzer panel covering hemoglobin, platelets, WBC, RBC, and ESR.",
-                "sku": "MED-LAB-CBC",
-                "price": 1500.0,
-                "currency": "PKR",
-                "stock_quantity": 200,
-                "unit": "test"
-            },
-            {
-                "name": "Whole Abdomen & Pelvis Ultrasound Scan",
-                "category": "Radiology",
-                "description": "High-definition Doppler ultrasound imaging of liver, gallbladder, kidneys, spleen, and pelvic organs with print report.",
-                "sku": "MED-RAD-USG",
-                "price": 3200.0,
-                "currency": "PKR",
-                "stock_quantity": 80,
-                "unit": "scan"
-            },
-            {
-                "name": "Pediatric Child Specialist Clinical Exam",
-                "category": "Consultations",
-                "description": "Complete infant and child developmental milestone checkup, vaccination review, and pediatric consultation.",
-                "sku": "MED-PED-CHK",
-                "price": 2200.0,
-                "currency": "PKR",
-                "stock_quantity": 90,
-                "unit": "visit"
-            }
-        ]
+        "system_prompt": "You are Al-Shifa Clinic's appointment coordinator. Guide patients regarding consultant doctor timings, consultation fees (Rs 2,000), appointment slot bookings, clinic location, and parking directions. Always advise urgent ER visits for emergency chest pain or acute trauma.",
+        "products_services": "General Physician Consultation, Dental Scaling & Root Canal, Child Specialist (Pediatrician), Dermatologist Skin Care, Ultrasound & Laboratory Blood Tests.",
+        "verified_prices": "Consultation Fee: Rs 2,000 | Dental Scaling: Rs 3,500 | Complete Blood Count (CBC): Rs 1,200 | Ultrasound: Rs 2,500",
+        "custom_rules": "1. Clinic timings: Monday to Saturday 4:00 PM to 10:00 PM.\n2. Prior booking recommended to avoid wait times.\n3. Clinic address: Main Boulevard, Gulberg III, Lahore with free parking."
     }
 ]
 
@@ -7703,16 +7423,9 @@ def api_business_templates_get():
 
 @api_v1.route("/whatsapp/business-template", methods=["POST"])
 def api_business_template_save():
-    """Saves and applies an edited business template to active workspace knowledge base and auto-syncs products into the catalog."""
+    """Saves and applies an edited business template to active workspace knowledge base."""
     data = request.get_json(silent=True) or {}
     org_id = request.args.get("org_id") or "org-enterprise-default"
-
-    raw_tpl_id = str(data.get("template_id") or "mobile_electronics").strip()
-    alias_map = {
-        "restaurant_food": "restaurant_biryani",
-        "wholesale_b2b": "ecommerce_brand"
-    }
-    tpl_id = alias_map.get(raw_tpl_id, raw_tpl_id)
 
     b_name = str(data.get("business_name") or "Business Operations").strip()
     sys_prompt = str(data.get("system_prompt") or "").strip()
@@ -7744,49 +7457,8 @@ def api_business_template_save():
     except Exception as _ar_err:
         logger.debug(f"Auto-responder prompt sync notice: {_ar_err}")
 
-    # Pillar 2 & Products Catalog Sync: Auto-populate 5 preset products into Product catalog
-    synced_product_count = 0
-    try:
-        from models import Product, db
-        # Find matching preset from BUILTIN_BUSINESS_TEMPLATES
-        matched_tpl = next((t for t in BUILTIN_BUSINESS_TEMPLATES if t["id"] == tpl_id or t.get("id") == raw_tpl_id), None)
-        products_to_sync = (matched_tpl.get("catalog_products") if matched_tpl else []) or data.get("catalog_products") or []
-
-        if products_to_sync:
-            for item in products_to_sync:
-                sku = item.get("sku")
-                p = Product.query.filter_by(organization_id=org_id, sku=sku).first()
-                if not p:
-                    p = Product(
-                        organization_id=org_id,
-                        name=item.get("name"),
-                        category=item.get("category", "General"),
-                        description=item.get("description", ""),
-                        sku=sku,
-                        price=float(item.get("price", 0.0)),
-                        currency=item.get("currency", "PKR"),
-                        stock_quantity=int(item.get("stock_quantity", 50)),
-                        unit=item.get("unit", "piece"),
-                        is_active=True
-                    )
-                    db.session.add(p)
-                else:
-                    p.name = item.get("name", p.name)
-                    p.category = item.get("category", p.category)
-                    p.description = item.get("description", p.description)
-                    p.price = float(item.get("price", p.price))
-                    p.currency = item.get("currency", p.currency)
-                    p.stock_quantity = int(item.get("stock_quantity", p.stock_quantity))
-                    p.is_active = True
-                synced_product_count += 1
-            db.session.commit()
-            logger.info(f"[Business Template Sync] Successfully populated {synced_product_count} products for org {org_id} ({tpl_id}).")
-    except Exception as _sync_err:
-        logger.warning(f"Catalog product sync error: {_sync_err}")
-
     return jsonify({
         "success": True,
-        "message": f"Template '{b_name}' applied! 5 ready-made products synced to Catalog with PKR prices.",
-        "active_profile": updated,
-        "synced_products": synced_product_count
+        "message": f"Business Template applied successfully for '{b_name}'!",
+        "updated_profile": updated
     }), 200

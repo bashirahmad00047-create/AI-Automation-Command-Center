@@ -314,6 +314,14 @@ function switchTab(tabId) {
     if (tabId === 'campaigns') {
         if (typeof loadCampaignsDashboard === 'function') loadCampaignsDashboard();
     }
+    if (tabId === 'delivery-map') {
+        setTimeout(() => {
+            if (typeof initLeafletRadarMap === 'function') initLeafletRadarMap();
+            if (typeof leafletRadarMap !== 'undefined' && leafletRadarMap) {
+                try { leafletRadarMap.invalidateSize(); } catch (_) {}
+            }
+        }, 150);
+    }
     if (tabId === 'company-messaging') {
         if (typeof loadCompanyMessagingDashboard === 'function') loadCompanyMessagingDashboard();
         if (typeof startCompanyMessagingAutoPoll === 'function') startCompanyMessagingAutoPoll();
@@ -8139,6 +8147,7 @@ async function checkSystemReadiness(notify = false) {
 
 const TAB_TITLES = {
     dashboard: 'Executive Overview',
+    'delivery-map': 'Live Delivery Radar Map',
     rules: 'Workflow Studio',
     leads: 'CRM Leads',
     incidents: 'Incidents',
@@ -12324,10 +12333,13 @@ function closeRadarMapModal() {
 window.closeRadarMapModal = closeRadarMapModal;
 
 function trackActiveDelivery() {
-    openRadarMapModal();
-    if (leafletRadarMap) {
-        try { leafletRadarMap.invalidateSize(); } catch (_) {}
-    }
+    switchTab('delivery-map');
+    setTimeout(() => {
+        if (typeof initLeafletRadarMap === 'function') initLeafletRadarMap();
+        if (typeof leafletRadarMap !== 'undefined' && leafletRadarMap) {
+            try { leafletRadarMap.invalidateSize(); } catch (_) {}
+        }
+    }, 200);
 
     const activePhone = (window.currentActiveContact && window.currentActiveContact.phone) 
         || (document.getElementById('waActiveContactPhone') && document.getElementById('waActiveContactPhone').textContent) 
@@ -12803,7 +12815,7 @@ function submitSetOrderLocation() {
     addRadarMapPin(lat, lng, label, phone, null, 'On the Way');
     closeSetOrderLocationModal();
 
-    openRadarMapModal();
+    switchTab('delivery-map');
     showToast(`📍 Live moving pin set for ${label} at [${lat.toFixed(4)}, ${lng.toFixed(4)}]!`, 'success');
 }
 window.submitSetOrderLocation = submitSetOrderLocation;

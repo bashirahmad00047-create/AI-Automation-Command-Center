@@ -102,6 +102,11 @@
                 <span class="tab-label">Campaigns &amp; Broadcasts</span>
                 <span class="nav-counter-pill" id="tabCampaignsCount" style="display:none;">0</span>
             </button>
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" id="tabNavDeliveryMap" onclick="switchTab('delivery-map')" title="Live Delivery Radar Map (Leaflet.js)">
+                <span class="tab-icon">📍</span>
+                <span class="tab-label">Live Delivery Map</span>
+                <span class="nav-counter-pill success" id="tabDeliveryMapCount" style="display:none;">0</span>
+            </button>
         </nav>
 
         <!-- Sidebar Collapse / Expand Footer -->
@@ -900,45 +905,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
 
         <!-- TAB: WHATSAPP BUSINESS & META CLOUD API -->
         <section id="tab-whatsapp" class="tab-panel" style="padding-top: 2px;">
-            <!-- STREAMLINED WORLD NO. 1 GLASSMORHIC COMMAND TOPBAR -->
-            <div class="panel-header enterprise-glass-header" style="align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; padding: 12px 18px; border-radius: 12px; background: rgba(17, 27, 33, 0.92); border: 1px solid rgba(0, 168, 132, 0.35); backdrop-filter: blur(16px); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);">
-                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span style="font-size: 24px;">💬</span>
-                        <div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <h2 style="font-size: 15px; font-weight: 700; color: #e9edef; margin: 0; letter-spacing: 0.3px;">WHATSAPP CLOUD &amp; VOICE AGENT</h2>
-                                <span class="status-pill green" id="whatsappModeBadge" style="font-size: 10px; padding: 2px 7px; font-weight: 700;">● 100% Operational</span>
-                            </div>
-                            <div style="font-size: 11px; color: #8696a0; display: flex; align-items: center; gap: 6px; margin-top: 2px;">
-                                <span>Groq Llama 3.3 + Gemini 2.5 Brain</span>
-                                <span>&bull;</span>
-                                <span style="color: #25d366; font-weight: 600;">Pakistani Urdu Neural Voice Active</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
-                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                    <!-- Engine Switcher -->
-                    <div style="display: inline-flex; align-items: center; gap: 3px; background: #182229; padding: 2px 4px; border-radius: 8px; border: 1px solid #2a3942;">
-                        <button type="button" id="btnEngineBaileys" onclick="switchWhatsAppEngine('baileys')" class="hud-btn small green" style="font-weight: 700; font-size: 11px; padding: 4px 10px; border-radius: 6px; border: 1px solid #00a884;">
-                            🟢 Baileys Bridge
-                        </button>
-                        <button type="button" id="btnEngineMeta" onclick="switchWhatsAppEngine('meta')" class="hud-btn small outline" style="font-weight: 600; font-size: 11px; padding: 4px 10px; border-radius: 6px;">
-                            🔵 Meta Cloud
-                        </button>
-                    </div>
-
-                    <button type="button" class="hud-btn outline small" id="btnWaBusinessTemplates" onclick="openBusinessTemplatesModal()" style="font-weight: 600; display: inline-flex; align-items: center; gap: 6px; border-color: #00a884; color: #00a884; font-size: 11.5px; padding: 5px 12px; border-radius: 6px;">
-                        <span>💼</span> Blueprints &amp; Catalog
-                    </button>
-                    <button type="button" class="hud-btn primary small" id="btnLinkWhatsAppQr" onclick="openLinkWhatsAppQrModal()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700; color: #fff; border: none; border-radius: 6px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; cursor: pointer; box-shadow: 0 2px 10px rgba(16, 185, 129, 0.35);">
-                        <span>📱</span> Link WhatsApp QR
-                    </button>
-                    <button class="hud-btn outline small" onclick="loadWhatsAppDashboard()" style="font-size: 11.5px; padding: 5px 10px; border-radius: 6px;">🔄 Sync</button>
-                </div>
-            </div>
 
             <!-- REAL-TIME INCOMING WHATSAPP CALL RING ALERT BANNER -->
             <div id="waIncomingCallAlertBanner" style="display: none; margin-bottom: 12px; background: linear-gradient(135deg, rgba(20, 83, 45, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1.5px solid #22c55e; border-radius: 12px; padding: 12px 18px; box-shadow: 0 8px 30px rgba(34, 197, 94, 0.3); color: #e9edef; backdrop-filter: blur(14px);">
@@ -982,7 +949,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                             </div>
                             <div>
                                 <div style="font-size: 13.5px; font-weight: 600; color: #e9edef;">WhatsApp Web</div>
-                                <div id="waSidebarStatus" style="font-size: 11px; color: #00a884; cursor: pointer;" onclick="openLinkWhatsAppQrModal()" title="Click to Link WhatsApp QR">● Live Sync Active</div>
+                                <div id="waSidebarStatus" style="font-size: 11px; color: #f59e0b; cursor: pointer;" onclick="openLinkWhatsAppQrModal()" title="Click to Link WhatsApp QR">● Scan QR Code</div>
                             </div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 6px;">
@@ -5541,32 +5508,38 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
     </div>
 
     <!-- SET ORDER LOCATION MODAL (FEATURE 2) -->
-        <!-- LIVE RADAR TRACKING MODAL (Opens ONLY when clicking Track Delivery) -->
-    <div class="hud-modal-backdrop" id="liveRadarTrackingModal" style="display: none; position: fixed; inset: 0; background: rgba(5, 10, 14, 0.88); backdrop-filter: blur(10px); z-index: 10070; align-items: center; justify-content: center;">
-        <div class="hud-modal-content" style="background: #111b21; border: 1px solid #00a884; border-radius: 14px; width: 94%; max-width: 900px; padding: 0; overflow: hidden; color: #e9edef; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-            <div style="padding: 14px 18px; background: #202c33; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2a3942; flex-wrap: wrap; gap: 8px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 20px;">🗺️</span>
+        
+        <!-- TAB: LIVE DELIVERY RADAR MAP (SEPARATE DEDICATED SIDEBAR TAB) -->
+        <section id="tab-delivery-map" class="tab-panel">
+            <div class="panel-header" style="align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; background: rgba(17, 27, 33, 0.9); border: 1px solid rgba(0, 168, 132, 0.35); border-radius: 12px; padding: 12px 18px; backdrop-filter: blur(14px);">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 26px;">🗺️</span>
                     <div>
-                        <div style="font-size: 14px; font-weight: 700; color: #00a884; letter-spacing: 0.5px;">LIVE DELIVERY &amp; RADAR TRACKING MAP (LEAFLET.JS)</div>
-                        <div style="font-size: 11.5px; color: #8696a0;">Live GPS coordinates from customer WhatsApp location pin &amp; order route.</div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <h2 style="font-size: 15px; font-weight: 700; color: #e9edef; margin: 0; letter-spacing: 0.3px;">LIVE DELIVERY RADAR MAP</h2>
+                            <span class="status-pill green" id="radarMapPinsCount" style="font-size: 11px; font-weight: 600;">0 Active Pins</span>
+                        </div>
+                        <p style="color: #8696a0; margin: 2px 0 0 0; font-size: 11.5px;">
+                            Real-time GPS tracking from customer WhatsApp location pins &amp; live delivery route bounds.
+                        </p>
                     </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                    <span id="radarMapPinsCount" class="status-pill green" style="font-size: 11px; font-weight: 600;">0 Active Pins</span>
-                    <button type="button" class="hud-btn small" onclick="openSetOrderLocationModal()" style="background: rgba(0, 168, 132, 0.2); border: 1px solid #00a884; color: #25d366; padding: 5px 10px; font-size: 11.5px; border-radius: 6px; font-weight: 700;" title="Set Order Delivery Coordinates">
+                    <button type="button" class="hud-btn small" onclick="openSetOrderLocationModal()" style="background: rgba(0, 168, 132, 0.2); border: 1px solid #00a884; color: #25d366; padding: 6px 14px; font-size: 11.5px; border-radius: 6px; font-weight: 700;" title="Set Order Delivery Coordinates">
                         📍 + Set Location Pin
                     </button>
-                    <button type="button" class="hud-btn small" onclick="sendLiveTrackingLinkToCustomer()" style="background: rgba(0, 168, 132, 0.2); border: 1px solid #00a884; color: #25d366; padding: 5px 10px; font-size: 11.5px; border-radius: 6px; font-weight: 700;" title="Send Live Google Maps Tracking Link">
+                    <button type="button" class="hud-btn small" onclick="sendLiveTrackingLinkToCustomer()" style="background: rgba(0, 168, 132, 0.2); border: 1px solid #00a884; color: #25d366; padding: 6px 14px; font-size: 11.5px; border-radius: 6px; font-weight: 700;" title="Send Live Google Maps Tracking Link">
                         🚀 Send Link to Customer
                     </button>
-                    <button type="button" class="hud-btn small outline" onclick="centerRadarMapPakistan()" style="padding: 5px 10px; font-size: 11.5px; border-radius: 6px;">🇵🇰 Center Pakistan</button>
-                    <button type="button" onclick="closeRadarMapModal()" style="background: none; border: none; font-size: 20px; color: #8696a0; cursor: pointer; padding: 2px 6px;" title="Close Map">✕</button>
+                    <button type="button" class="hud-btn small outline" onclick="centerRadarMapPakistan()" style="padding: 6px 12px; font-size: 11.5px; border-radius: 6px;">🇵🇰 Center Pakistan</button>
                 </div>
             </div>
-            <div id="wa-delivery-map" class="liveRadarMap wa-delivery-map-container" style="height: 440px; width: 100%; background: #0f172a; position: relative; z-index: 1;"></div>
-        </div>
-    </div>
+
+            <!-- Full Viewport Leaflet Delivery Map Box -->
+            <div style="background: #0f172a; border: 1px solid rgba(0, 168, 132, 0.3); border-radius: 14px; overflow: hidden; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45); height: calc(100vh - 170px); min-height: 580px; position: relative;">
+                <div id="wa-delivery-map" class="liveRadarMap wa-delivery-map-container" style="height: 100%; width: 100%; background: #0f172a; position: relative; z-index: 1;"></div>
+            </div>
+        </section>
 
 <div class="hud-modal-backdrop" id="setOrderLocationModal" style="display: none; position: fixed; inset: 0; background: rgba(5, 10, 14, 0.88); backdrop-filter: blur(10px); z-index: 10075; align-items: center; justify-content: center;">
         <div class="hud-modal-content" style="background: #111b21; border: 1px solid #00a884; border-radius: 14px; width: 92%; max-width: 440px; padding: 20px; color: #e9edef;">
