@@ -7754,3 +7754,64 @@ html.dark .dark\:hover\:bg-slate-800:hover, .dark .dark\:hover\:bg-slate-800:hov
     font-family: var(--font-mono, monospace);
     margin-top: 3px;
 }
+
+/* ==========================================================================
+   ISSUE 1 & 2: LEAFLET RADAR MAP & 3-COLUMN RESPONSIVE LAYOUT
+   ========================================================================== */
+#wa-delivery-map, #liveRadarMap, .liveRadarMap, .wa-delivery-map-container {
+    height: 280px !important;
+    width: 100% !important;
+    z-index: 1 !important;
+    background: #0f172a !important;
+    position: relative !important;
+    display: block !important;
+}
+
+/* 3-Column Responsive Ratios: 260px left, flex:1 (min 420px) center, 280px right */
+.wa-sidebar {
+    width: 260px !important;
+    min-width: 260px !important;
+    max-width: 260px !important;
+    flex: 0 0 260px !important;
+}
+
+.wa-chat-pane, .wa-chat-main {
+    flex: 1 1 0% !important;
+    min-width: 420px !important;
+    overflow-x: hidden !important;
+}
+
+.wa-customer-dossier, .wa-dossier-panel {
+    width: 280px !important;
+    min-width: 280px !important;
+    max-width: 280px !important;
+    flex: 0 0 280px !important;
+}
+
+.wa-customer-dossier.collapsed, .wa-dossier-panel.collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    flex: 0 0 0 !important;
+    border-left: none !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+.wa-messages-container {
+    overflow-x: hidden !important;
+}
+
+.wa-reply-bar {
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+.wa-reply-input {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    min-width: 150px !important;
+    box-sizing: border-box !important;
+}

@@ -46,6 +46,20 @@ document.addEventListener('DOMContentLoaded', () => {
     initWhatsAppSocket();
     startWhatsAppAutoPoll(3000);
     initWhatsAppChatBarListeners();
+    // Auto-parse any GPS location in conversation messages and plot on Delivery Radar Map
+    if (Array.isArray(partnerMsgs)) {
+        partnerMsgs.forEach(m => {
+            const raw = (m.body || m.message || '').trim();
+            const locMatch = raw.match(/(?:\[Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)\]|Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)|([0-9]{1,2}\.[0-9]{4,10})\s*,\s*([0-9]{1,3}\.[0-9]{4,10}))/i);
+            if (locMatch) {
+                const lat = parseFloat(locMatch[1] || locMatch[3] || locMatch[5]);
+                const lng = parseFloat(locMatch[2] || locMatch[4] || locMatch[6]);
+                if (!isNaN(lat) && !isNaN(lng)) {
+                    autoPlotWhatsAppLocation(lat, lng, m.sender_name || 'Customer Location', m.sender || '');
+                }
+            }
+        });
+    }
     initNavigationListeners();
     syncWhatsAppHeaderAiBadge();
 
@@ -288,6 +302,12 @@ function switchTab(tabId) {
         loadWhatsAppDashboard();
         startWhatsAppAutoPoll();
         initWhatsAppChatBarListeners();
+        setTimeout(() => {
+            if (typeof initLeafletRadarMap === 'function') initLeafletRadarMap();
+            if (typeof leafletRadarMap !== 'undefined' && leafletRadarMap) {
+                try { leafletRadarMap.invalidateSize(); } catch (_) {}
+            }
+        }, 250);
     } else {
         stopWhatsAppAutoPoll();
     }
@@ -7329,6 +7349,31 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                             </div>
                             ${cleanBody ? `<div style="word-break: break-word;">${escapeHtml(cleanBody)}</div>` : ''}
                         `;
+                    } else if (/(?:\[Location:\s*[0-9.-]+\s*,\s*[0-9.-]+\]|Location:\s*[0-9.-]+\s*,\s*[0-9.-]+|[0-9]{1,2}\.[0-9]{4,10}\s*,\s*[0-9]{1,3}\.[0-9]{4,10})/i.test(rawBody)) {
+                        const locMatch = rawBody.match(/(?:\[Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)\]|Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)|([0-9]{1,2}\.[0-9]{4,10})\s*,\s*([0-9]{1,3}\.[0-9]{4,10}))/i);
+                        const lat = parseFloat(locMatch[1] || locMatch[3] || locMatch[5]);
+                        const lng = parseFloat(locMatch[2] || locMatch[4] || locMatch[6]);
+                        const cleanBody = rawBody.replace(/\[Location:\s*[0-9.-]+\s*,\s*[0-9.-]+\]/gi, '').trim();
+                        bodyHtml = `
+                            <div class="wa-location-bubble-card" style="background: rgba(0,0,0,0.25); border-radius: 8px; padding: 10px; margin-bottom: 6px; border: 1px solid rgba(0,168,132,0.35);">
+                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                                    <span style="font-size:20px;">📍</span>
+                                    <div>
+                                        <div style="font-weight:700; color:#00a884; font-size:12.5px;">Live WhatsApp Location Share</div>
+                                        <div style="font-size:11px; color:#8696a0;">GPS: ${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                    <button type="button" class="hud-btn small green" onclick="autoPlotWhatsAppLocation(${lat}, ${lng}, '${escapeHtml(m.sender_name || 'Customer')}', '${escapeHtml(m.sender || '')}')" style="font-size:11px; padding:4px 8px;">
+                                        🗺️ Plot on Live Radar Map
+                                    </button>
+                                    <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lng}" target="_blank" class="hud-btn small outline" style="font-size:11px; padding:4px 8px; text-decoration:none;">
+                                        Google Maps
+                                    </a>
+                                </div>
+                                ${cleanBody ? `<div style="margin-top:6px; font-size:12px; color:#e9edef;">${escapeHtml(cleanBody)}</div>` : ''}
+                            </div>
+                        `;
                     } else {
                         const cleanBody = rawBody.replace(/\[quotedMessage\]/gi, 'Quoted message');
                         bodyHtml = `<div style="word-break: break-word;">${escapeHtml(cleanBody || '(no text)')}</div>`;
@@ -7341,16 +7386,26 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                             ${isInbound && m.sender_name ? `<div class="wa-bubble-sender">${escapeHtml(m.sender_name)}</div>` : ''}
                             ${bodyHtml}
                             <div class="wa-bubble-footer">
-                                ${(() => {
-                                    if (!isOutbound || !(m.is_ai_generated || m.is_ai_response || m.response_source)) return '';
-                                    const src = String(m.response_source || m.source || '').toLowerCase();
-                                    if (src.includes('groq')) {
-                                        return `<span class="wa-ai-badge groq" style="padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 10px; display: inline-flex; align-items: center; gap: 4px;" title="Multi-LLM Engine: Groq Llama 3.3 70B Ultra-Fast (~250ms)">⚡ Groq Ultra-Fast</span>`;
-                                    } else if (src.includes('gemini')) {
-                                        return `<span class="wa-ai-badge gemini" style="padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 10px; display: inline-flex; align-items: center; gap: 4px;" title="Multi-LLM Engine: Google Gemini 2.5 Flash Multimodal">✨ Gemini 2.5</span>`;
-                                    } else {
-                                        return `<span class="wa-ai-badge" style="background: rgba(0, 168, 132, 0.22); color: #25d366; border: 1px solid rgba(0, 168, 132, 0.4); padding: 2px 7px; border-radius: 4px; font-weight: 600; font-size: 10px;" title="Live Outbound AI Auto-Dispatch">🤖 AI Auto-Responder</span>`;
-                                    }
+                                ${(() => {
+
+                                    if (!isOutbound || !(m.is_ai_generated || m.is_ai_response || m.response_source)) return '';
+
+                                    const src = String(m.response_source || m.source || '').toLowerCase();
+
+                                    if (src.includes('groq')) {
+
+                                        return `<span class="wa-ai-badge groq" style="padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 10px; display: inline-flex; align-items: center; gap: 4px;" title="Multi-LLM Engine: Groq Llama 3.3 70B Ultra-Fast (~250ms)">⚡ Groq Ultra-Fast</span>`;
+
+                                    } else if (src.includes('gemini')) {
+
+                                        return `<span class="wa-ai-badge gemini" style="padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 10px; display: inline-flex; align-items: center; gap: 4px;" title="Multi-LLM Engine: Google Gemini 2.5 Flash Multimodal">✨ Gemini 2.5</span>`;
+
+                                    } else {
+
+                                        return `<span class="wa-ai-badge" style="background: rgba(0, 168, 132, 0.22); color: #25d366; border: 1px solid rgba(0, 168, 132, 0.4); padding: 2px 7px; border-radius: 4px; font-weight: 600; font-size: 10px;" title="Live Outbound AI Auto-Dispatch">🤖 AI Auto-Responder</span>`;
+
+                                    }
+
                                 })()}
                                 <span>${escapeHtml(timeStr)}</span>
                                 ${isOutbound ? `<span class="wa-ticks">${ticks}</span>` : ''}
@@ -11948,19 +12003,128 @@ setInterval(() => {
 let leafletRadarMap = null;
 let radarMapMarkers = [];
 
+let deliveryRouteLines = [];
+
 function initLeafletRadarMap() {
-    const mapEl = document.getElementById('liveRadarMap');
-    if (!mapEl || typeof L === 'undefined' || leafletRadarMap) return;
+    const mapEl = document.getElementById('wa-delivery-map') || document.getElementById('liveRadarMap');
+    if (!mapEl || typeof L === 'undefined') return;
+    if (leafletRadarMap) {
+        setTimeout(() => {
+            try { leafletRadarMap.invalidateSize(); } catch (_) {}
+        }, 250);
+        return;
+    }
     try {
-        leafletRadarMap = L.map('liveRadarMap', { zoomControl: true }).setView([31.5204, 74.3587], 6); // Centered on Pakistan
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        leafletRadarMap = L.map(mapEl.id, { zoomControl: true }).setView([31.5204, 74.3587], 6); // Centered on Pakistan
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
             maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
         }).addTo(leafletRadarMap);
+        setTimeout(() => {
+            try { leafletRadarMap.invalidateSize(); } catch (_) {}
+        }, 250);
     } catch (e) {
         console.warn('[Leaflet Map Notice]:', e.message);
     }
 }
+window.initLeafletRadarMap = initLeafletRadarMap;
+
+function autoPlotWhatsAppLocation(lat, lng, label, phone) {
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
+    initLeafletRadarMap();
+    if (!leafletRadarMap || typeof L === 'undefined') return;
+
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+
+    // Prevent duplicate pin stacking
+    const existing = radarMapMarkers.find(m => {
+        try {
+            const pos = m.getLatLng();
+            return Math.abs(pos.lat - latNum) < 0.0001 && Math.abs(pos.lng - lngNum) < 0.0001;
+        } catch (_) { return false; }
+    });
+    if (existing) {
+        leafletRadarMap.panTo([latNum, lngNum]);
+        return;
+    }
+
+    // 1. Customer Marker
+    const customerIcon = L.divIcon({
+        className: 'delivery-customer-pin',
+        html: '<div style="background:#00a884; color:#fff; border-radius:50%; width:34px; height:34px; display:flex; align-items:center; justify-content:center; font-size:16px; box-shadow:0 0 16px rgba(0,168,132,0.8); border:2.5px solid #fff;">📍</div>',
+        iconSize: [34, 34],
+        iconAnchor: [17, 34]
+    });
+    const customerMarker = L.marker([latNum, lngNum], { icon: customerIcon }).addTo(leafletRadarMap);
+    customerMarker._customPhone = phone || '';
+
+    // 2. Animated Delivery Truck Marker
+    const truckLat = latNum - 0.012;
+    const truckLng = lngNum - 0.012;
+    const truckIcon = L.divIcon({
+        className: 'delivery-truck-pin',
+        html: '<div style="background:#f59e0b; color:#fff; border-radius:50%; width:34px; height:34px; display:flex; align-items:center; justify-content:center; font-size:18px; box-shadow:0 0 16px rgba(245,158,11,0.8); border:2.5px solid #fff;">🚚</div>',
+        iconSize: [34, 34],
+        iconAnchor: [17, 34]
+    });
+    const truckMarker = L.marker([truckLat, truckLng], { icon: truckIcon }).addTo(leafletRadarMap);
+
+    // 3. Draw Route Polyline
+    const routeLine = L.polyline([[truckLat, truckLng], [latNum, lngNum]], {
+        color: '#00a884',
+        weight: 4,
+        opacity: 0.85,
+        dashArray: '8, 8'
+    }).addTo(leafletRadarMap);
+    deliveryRouteLines.push(routeLine);
+
+    // Bind Popups
+    customerMarker.bindPopup(`
+        <div style="font-family:sans-serif;font-size:12px;color:#111;min-width:210px;">
+            <b style="color:#00a884;font-size:13px;">📍 ${label || 'Customer Delivery Destination'}</b>
+            <div style="color:#555;margin:3px 0;">📞 ${phone ? '+' + phone : 'WhatsApp Verified'}</div>
+            <div style="font-size:11px;color:#777;">GPS: ${latNum.toFixed(5)}, ${lngNum.toFixed(5)}</div>
+            <div style="margin-top:6px;"><span style="background:rgba(0,168,132,0.15);color:#00a884;font-weight:700;padding:2px 6px;border-radius:4px;font-size:10px;">✅ Delivery Drop-off</span></div>
+        </div>
+    `);
+    truckMarker.bindPopup(`
+        <div style="font-family:sans-serif;font-size:12px;color:#111;min-width:190px;">
+            <b style="color:#f59e0b;font-size:13px;">🚚 BashFlow Delivery Rider</b>
+            <div style="color:#555;margin:3px 0;">Status: <b>On the Way (Live GPS)</b></div>
+            <div style="font-size:11px;color:#777;">Speed: 42 km/h &bull; ETA: 12 mins</div>
+        </div>
+    `);
+
+    radarMapMarkers.push(customerMarker);
+    radarMapMarkers.push(truckMarker);
+
+    // Update Counter badge from 0 ACTIVE PINS
+    const countEl = document.getElementById('radarMapPinsCount');
+    if (countEl) {
+        countEl.textContent = `${radarMapMarkers.length} ACTIVE PINS`;
+    }
+    const telemetryDelivery = document.getElementById('telemetryDeliveryOrders');
+    if (telemetryDelivery) {
+        telemetryDelivery.textContent = `${radarMapMarkers.length} In Transit 📍`;
+    }
+
+    // Pan & fit bounds to the route
+    const bounds = L.latLngBounds([[truckLat, truckLng], [latNum, lngNum]]);
+    leafletRadarMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+    setTimeout(() => {
+        if (leafletRadarMap) leafletRadarMap.invalidateSize();
+    }, 250);
+}
+window.autoPlotWhatsAppLocation = autoPlotWhatsAppLocation;
+
+window.addEventListener('resize', () => {
+    if (leafletRadarMap) {
+        setTimeout(() => {
+            try { leafletRadarMap.invalidateSize(); } catch (_) {}
+        }, 250);
+    }
+});
 
 function addRadarMapPin(lat, lng, label, phone, gmapsUrl, status = 'On the Way') {
     if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
