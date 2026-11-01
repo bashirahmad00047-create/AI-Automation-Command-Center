@@ -1337,32 +1337,43 @@ if (!text) text = '[Voice note]';
             }
           };
 
-          // FIFO Sequential Queue Dispatch (Zero Dropped Questions & Human Shield)
+          // FIFO Sequential Queue Dispatch (Zero Dropped Questions & Smart Fallback)
           enqueueContactTask(targetJid, async () => {
             let resData = null;
-            for (let attempt = 1; attempt <= 2; attempt++) {
-              try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 28000);
-                const resp = await fetch(PYTHON_WEBHOOK_URL, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'WhatsApp-Baileys-Bridge/1.0'
-                  },
-                  body: JSON.stringify(payload),
-                  signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-                console.log(`[Webhook Forward] Dispatched to ${PYTHON_WEBHOOK_URL} (attempt ${attempt}) -> HTTP ${resp.status}`);
-                if (resp.ok) {
-                  resData = await resp.json().catch(() => null);
-                  if (resData) break;
+            const candidateUrls = [
+              PYTHON_WEBHOOK_URL,
+              `http://127.0.0.1:${PYTHON_PORT}/api/v1/webhooks/whatsapp`,
+              `http://127.0.0.1:${PYTHON_PORT}/api/whatsapp/incoming`,
+              `http://127.0.0.1:${PYTHON_PORT}/api/v1/whatsapp/webhook`
+            ];
+            const uniqueUrls = [...new Set(candidateUrls.filter(Boolean))];
+
+            for (const webhookUrl of uniqueUrls) {
+              for (let attempt = 1; attempt <= 2; attempt++) {
+                try {
+                  const controller = new AbortController();
+                  const timeoutId = setTimeout(() => controller.abort(), 28000);
+                  const resp = await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'User-Agent': 'WhatsApp-Baileys-Bridge/1.0'
+                    },
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
+                  });
+                  clearTimeout(timeoutId);
+                  console.log(`[Webhook Forward] Dispatched to ${webhookUrl} (attempt ${attempt}) -> HTTP ${resp.status}`);
+                  if (resp.ok) {
+                    resData = await resp.json().catch(() => null);
+                    if (resData) break;
+                  }
+                } catch (e) {
+                  console.warn(`[Webhook Forward Warning] Endpoint ${webhookUrl} attempt ${attempt} failed: ${e.message}`);
+                  if (attempt < 2) await new Promise(r => setTimeout(r, 600));
                 }
-              } catch (e) {
-                console.warn(`[Webhook Forward Warning] Attempt ${attempt} failed: ${e.message}`);
-                if (attempt < 2) await new Promise(r => setTimeout(r, 1200));
               }
+              if (resData) break;
             }
 
             if (resData && (resData.reply || resData.audio_base64)) {

@@ -839,6 +839,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/webhooks/whatsapp", methods=["GET", "POST"])
     @application.route("/api/whatsapp/webhook", methods=["GET", "POST"])
+    @application.route("/api/whatsapp/incoming", methods=["GET", "POST"])
+    @application.route("/api/v1/whatsapp/incoming", methods=["GET", "POST"])
+    @application.route("/api/whatsapp/messages/incoming", methods=["GET", "POST"])
+    @application.route("/api/v1/whatsapp/messages/incoming", methods=["GET", "POST"])
+    @application.route("/api/whatsapp/baileys/incoming", methods=["GET", "POST"])
+    @application.route("/api/v1/whatsapp/baileys/incoming", methods=["GET", "POST"])
     def legacy_whatsapp_webhook():
         from api_v1 import whatsapp_webhook_ingress
         return whatsapp_webhook_ingress()
