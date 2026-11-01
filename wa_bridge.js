@@ -148,10 +148,19 @@ function triggerSessionBackup() {
   sessionBackupDebounce = setTimeout(async () => {
     sessionBackupDebounce = null;
     try {
+      let credsContent = null;
+      try {
+        const credPath = path.join(AUTH_DIR, 'creds.json');
+        if (fs.existsSync(credPath)) {
+          credsContent = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+        }
+      } catch (_) {}
+
       const backupUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-backup`;
       const res = await fetch(backupUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Internal-Bridge': '1' },
+        body: JSON.stringify({ creds: credsContent }),
         signal: AbortSignal.timeout(6000)
       });
       const data = await res.json().catch(() => null);

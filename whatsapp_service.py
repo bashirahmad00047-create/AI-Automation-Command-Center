@@ -5529,7 +5529,7 @@ class WhatsAppService:
             send_as_voice = False
             direct_bridge = bool(kwargs.get("direct_bridge") or kwargs.get("from_bridge"))
 
-            if is_voice_inbound or kwargs.get("reply_as_voice"):
+            if is_voice_inbound or kwargs.get("reply_as_voice") or kwargs.get("is_voice") or auto_conf.get("voice_reply_enabled", True):
                 try:
                     speech_text = generated.get("speech_text") or kwargs.get("tts_script") or clean_reply_text
                     detected_lang_str = str(kwargs.get("detected_lang") or "").lower()
@@ -5556,7 +5556,7 @@ class WhatsAppService:
                         send_as_voice = True
                         logger.info(f"[Voice Pipeline] Synthesized {len(audio_b)} bytes of voice reply for {real_chat_id} (direct_bridge={direct_bridge}, lang={synth_lang}).")
 
-                        if not direct_bridge:
+                        if not direct_bridge and is_voice_inbound:
                             audio_dispatch_res = cls.send_green_api_file(
                                 organization_id=org_id,
                                 to_phone=clean_phone,

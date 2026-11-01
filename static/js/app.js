@@ -6576,7 +6576,9 @@ async function sendWhatsAppReply() {
                 to: cleanRecipient,
                 chatId: cleanRecipient,
                 message: message,
-                is_voice: isVoice
+                is_voice: isVoice,
+                trigger_ai: true,
+                from_ui: true
             })
         });
         const data = await res.json();
@@ -6596,6 +6598,8 @@ async function sendWhatsAppReply() {
         if (sendBtn) sendBtn.disabled = false;
         renderWhatsAppWebUI(waAllMessagesCache, true);
         syncWhatsAppMessagesNow(true).catch(e => console.warn(e));
+        setTimeout(() => syncWhatsAppMessagesNow(true).catch(() => {}), 1500);
+        setTimeout(() => syncWhatsAppMessagesNow(true).catch(() => {}), 3200);
     }
 }
 
@@ -10379,7 +10383,7 @@ function loadProductsCatalog() {
     const stockVal = document.getElementById('productStockStatusFilter') ? document.getElementById('productStockStatusFilter').value : 'all';
     const searchVal = document.getElementById('productSearchInput') ? document.getElementById('productSearchInput').value.trim() : '';
 
-    let url = `/api/v1/ecommerce/products?limit=250&sort=${encodeURIComponent(sortVal)}`;
+    let url = `/api/v1/ecommerce/products?limit=250&sort=${encodeURIComponent(sortVal)}&org_id=org-enterprise-default`;
     if (activeVal === 'all') url += '&include_inactive=true';
     else if (activeVal === 'archived') url += '&status=archived';
     
@@ -10387,7 +10391,8 @@ function loadProductsCatalog() {
     if (stockVal && stockVal !== 'all') url += `&stock_status=${encodeURIComponent(stockVal)}`;
     if (searchVal) url += `&query=${encodeURIComponent(searchVal)}`;
 
-    fetch(url)
+    const catalogHeaders = Object.assign({ 'Accept': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {}));
+    fetch(url, { headers: catalogHeaders })
         .then(res => {
             if (!res.ok) throw new Error(`HTTP error ${res.status}`);
             return res.json();
@@ -12555,7 +12560,49 @@ async function saveActiveBusinessTemplate() {
 }
 window.saveActiveBusinessTemplate = saveActiveBusinessTemplate;
 
-// 1-Click Install Blueprint & Load Catalog directly from Templates / Products Tab
+// Function to dynamically update persistent green active badges on business blueprint cards
+function updateActiveBlueprintBadges(activeId) {
+    if (!activeId) {
+        activeId = localStorage.getItem('bashflow_active_blueprint') || 'mobile_electronics';
+    }
+    localStorage.setItem('bashflow_active_blueprint', activeId);
+
+    const bpKeys = ['mobile_electronics', 'restaurant_biryani', 'ecommerce_brand', 'real_estate', 'clinic_booking'];
+    bpKeys.forEach(k => {
+        // 1. Update button styling
+        const btns = document.querySelectorAll(`[data-bp-btn="${k}"]`);
+        btns.forEach(btn => {
+            if (k === activeId) {
+                btn.style.background = '#059669';
+                btn.style.boxShadow = '0 0 14px rgba(16, 185, 129, 0.5)';
+                btn.innerHTML = '<span style="color:#a7f3d0; margin-right:4px;">●</span> Installed &amp; Active';
+            } else {
+                btn.style.background = '#00a884';
+                btn.style.boxShadow = '0 3px 10px rgba(0,168,132,0.3)';
+                btn.innerHTML = '<span>⚡</span> Install Blueprint &amp; Load Catalog';
+            }
+        });
+
+        // 2. Update card border and glow
+        const allCards = document.querySelectorAll('.blueprint-industry-card');
+        allCards.forEach(card => {
+            if (card.querySelector(`[data-bp-btn="${k}"]`)) {
+                if (k === activeId) {
+                    card.classList.add('active-installed');
+                    card.style.borderColor = '#10b981';
+                    card.style.boxShadow = '0 0 18px rgba(16, 185, 129, 0.25)';
+                } else {
+                    card.classList.remove('active-installed');
+                    card.style.borderColor = '#334155';
+                    card.style.boxShadow = '0 4px 12px rgba(0,0,0,0.25)';
+                }
+            }
+        });
+    });
+}
+window.updateActiveBlueprintBadges = updateActiveBlueprintBadges;
+
+// 1-Click Install Blueprint & Load Catalog directly from Templates / Products Tab (upsert without deleting)
 async function installBusinessBlueprint(blueprintId) {
     const tpl = CACHED_BUSINESS_TEMPLATES[blueprintId];
     if (!tpl) {
@@ -12567,6 +12614,8 @@ async function installBusinessBlueprint(blueprintId) {
     }
     
     currentSelectedTemplateId = blueprintId;
+    updateActiveBlueprintBadges(blueprintId);
+
     const payload = {
         template_id: blueprintId,
         business_name: tpl.business_name,
@@ -12601,13 +12650,15 @@ async function installBusinessBlueprint(blueprintId) {
             } catch (_) {}
         }
 
+        updateActiveBlueprintBadges(blueprintId);
+
         if (res && res.ok && data.success) {
             if (typeof showToast === 'function') {
-                showToast(`✅ ${tpl.name} Installed! 5 Products loaded with PKR prices & AI Auto-Responder active.`, 'success');
+                showToast(`✅ ${tpl.name} Installed! 5 Products merged into Catalog with PKR prices.`, 'success');
             }
         } else {
             if (typeof showToast === 'function') {
-                showToast(`✅ ${tpl.name} Applied! 5 items loaded to catalog.`, 'success');
+                showToast(`✅ ${tpl.name} Applied! 5 items added to catalog.`, 'success');
             }
         }
         if (typeof loadProductsCatalog === 'function') {
@@ -12623,6 +12674,15 @@ async function installBusinessBlueprint(blueprintId) {
     }
 }
 window.installBusinessBlueprint = installBusinessBlueprint;
+
+// Auto-run badge check on load
+if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => updateActiveBlueprintBadges());
+    } else {
+        setTimeout(updateActiveBlueprintBadges, 100);
+    }
+}
 
 // ============================================================================
 // FEATURE 2: ORDER DELIVERY LOCATION MODAL CONTROLLER
