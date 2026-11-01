@@ -101,7 +101,7 @@ function convertAudioToOggOpus(buffer) {
 // Configuration
 const PORT = process.env.WA_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001;
 const PYTHON_PORT = process.env.PORT || 5000;
-const PYTHON_WEBHOOK_URL = process.env.PYTHON_WEBHOOK_URL || `http://127.0.0.1:${PYTHON_PORT}/api/v1/webhooks/whatsapp`;
+const PYTHON_WEBHOOK_URL = process.env.PYTHON_WEBHOOK_URL || `http://127.0.0.1:${PYTHON_PORT}/api/whatsapp/incoming`;
 
 /**
  * Resolves the Baileys multi-file authentication storage path.
@@ -142,60 +142,10 @@ function getBackendBaseUrl() {
   return `http://127.0.0.1:${PYTHON_PORT}`;
 }
 
-let sessionBackupDebounce = null;
-function triggerSessionBackup() {
-  if (sessionBackupDebounce) return;
-  sessionBackupDebounce = setTimeout(async () => {
-    sessionBackupDebounce = null;
-    try {
-      const backupUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-backup`;
-      const res = await fetch(backupUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Internal-Bridge': '1' },
-        signal: AbortSignal.timeout(6000)
-      });
-      const data = await res.json().catch(() => null);
-      if (data && data.success) {
-        console.log('[WhatsApp Bridge] Session credentials permanently saved to Database!');
-      }
-    } catch (e) {
-      console.warn('[WhatsApp Bridge] Session backup notice:', e.message);
-    }
-  }, 1500);
-}
-
-function triggerSessionClear() {
-  try {
-    const clearUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-clear`;
-    fetch(clearUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Internal-Bridge': '1' },
-      signal: AbortSignal.timeout(4000)
-    }).catch(() => {});
-  } catch (_) {}
-}
-
-async function tryRestoreFromPythonBackend() {
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    try {
-      const restoreUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-restore`;
-      const res = await fetch(restoreUrl, {
-        method: 'GET',
-        headers: { 'X-Internal-Bridge': '1' },
-        signal: AbortSignal.timeout(5000)
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        if (data && data.restored) {
-          console.log(`[WhatsApp Bridge] Permanent session restored from Database on attempt ${attempt}!`);
-          return true;
-        }
-      }
-    } catch (_) {}
-    if (attempt < 4) await new Promise(r => setTimeout(r, 1200));
-  }
-  return false;
-}
+// Clean local session handlers (DB session backup/restore purged)
+function triggerSessionBackup() {}
+function triggerSessionClear() {}
+async function tryRestoreFromPythonBackend() { return false; }
 
 // Global socket state
 let sock = null;
@@ -546,29 +496,20 @@ async function startWhatsAppBridge() {
       fs.mkdirSync(AUTH_DIR, { recursive: true });
     }
 
-    // Query DB for session credentials if local creds are absent or corrupted
+    // Clean local auth check: if existing creds.json is corrupt, purge local auth files
     const credsCheckPath = path.join(AUTH_DIR, 'creds.json');
-    let credsNeedRestore = false;
-    if (!fs.existsSync(credsCheckPath) || fs.statSync(credsCheckPath).size < 20) {
-      credsNeedRestore = true;
-    } else {
+    if (fs.existsSync(credsCheckPath)) {
       try {
         JSON.parse(fs.readFileSync(credsCheckPath, 'utf8'));
       } catch (e) {
-        console.warn('[WhatsApp Bridge] Existing creds.json is invalid JSON. Purging and re-fetching from database...');
-        try { fs.unlinkSync(credsCheckPath); } catch (_) {}
-        credsNeedRestore = true;
+        console.warn('[WhatsApp Bridge] Existing creds.json is invalid JSON. Purging auth directory...');
+        try {
+          const files = fs.readdirSync(AUTH_DIR);
+          for (const file of files) {
+            try { fs.unlinkSync(path.join(AUTH_DIR, file)); } catch (_) {}
+          }
+        } catch (_) {}
       }
-    }
-
-    if (credsNeedRestore) {
-      try {
-        console.log('[WhatsApp Bridge] Checking database for saved session credentials...');
-        const restored = await tryRestoreFromPythonBackend();
-        if (restored) {
-          console.log('[WhatsApp Bridge] Restored permanent session from Database!');
-        }
-      } catch (_) {}
     }
 
     // Load or reset multi-file auth credentials safely with automatic corrupt session recovery
@@ -1532,14 +1473,15 @@ app.use(express.json());
  */
 app.get(['/', '/status', '/health', '/api/status'], (req, res) => {
   try {
+    const isReallyConnected = Boolean(isConnected && sock?.user);
     return res.status(200).json({
       bridge: 'WhatsApp Baileys Bridge',
-      status: isConnected ? 'connected' : (currentQr ? 'qr_ready' : (isStarting ? 'initializing' : 'waiting')),
-      connected: isConnected,
-      hasQr: !!currentQr,
-      qrUrl: currentQrUrl,
-      qr: currentQr,
-      user: sock?.user || null,
+      status: isReallyConnected ? 'connected' : (currentQr ? 'qr_ready' : (isStarting ? 'initializing' : 'waiting')),
+      connected: isReallyConnected,
+      hasQr: !isReallyConnected && !!currentQr,
+      qrUrl: isReallyConnected ? null : currentQrUrl,
+      qr: isReallyConnected ? null : currentQr,
+      user: isReallyConnected ? sock?.user : null,
       target_webhook: PYTHON_WEBHOOK_URL,
       uptime_seconds: Math.floor(process.uptime()),
       timestamp: new Date().toISOString()
@@ -1561,8 +1503,9 @@ app.get(['/', '/status', '/health', '/api/status'], (req, res) => {
  */
 app.get(['/qr', '/api/qr', '/wa/qr'], async (req, res) => {
   try {
-    // GUARD: If WhatsApp is already connected, return connected status immediately without resetting
-    if (isConnected || (sock?.user && !currentQr)) {
+    const isReallyConnected = Boolean(isConnected && sock?.user);
+    // GUARD: If WhatsApp is genuinely connected with active sock.user, return connected immediately
+    if (isReallyConnected) {
       return res.status(200).json({
         status: 'connected',
         connected: true,
@@ -1699,19 +1642,17 @@ app.all(['/refresh-qr', '/qr-refresh', '/restart-socket'], async (req, res) => {
     currentQrSvg = null;
     destroyOldSocket();
 
-    // If device is not already connected, clean pending credentials to guarantee a fresh pairing QR
-    if (!sock?.user) {
-      try {
-        if (fs.existsSync(AUTH_DIR)) {
-          const files = fs.readdirSync(AUTH_DIR);
-          for (const file of files) {
-            try {
-              fs.unlinkSync(path.join(AUTH_DIR, file));
-            } catch (_) {}
-          }
+    // Clean all credentials to guarantee a brand fresh pairing QR session
+    try {
+      if (fs.existsSync(AUTH_DIR)) {
+        const files = fs.readdirSync(AUTH_DIR);
+        for (const file of files) {
+          try {
+            fs.unlinkSync(path.join(AUTH_DIR, file));
+          } catch (_) {}
         }
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
 
     isStarting = false;
     setTimeout(() => {

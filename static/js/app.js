@@ -394,7 +394,7 @@ function setGlobalConnectionStatus(status, attempt = 0) {
     }
 }
 
-function updateWhatsAppConnectionUI(status, attempt = 0) {
+function updateWhatsAppSocketTelemetryUI(status, attempt = 0) {
     const sidebarStatus = document.getElementById('waSidebarStatus');
     const connStatus = document.getElementById('waConnectionStatus');
 
@@ -5686,10 +5686,11 @@ async function fetchBridgeQrCode(forceRefresh = false) {
         if (res.ok) {
             const data = await res.json();
             
-            // Connected state check
-            if (data.connected || data.status === 'connected') {
+            // Connected state check: strictly verify data.user is present
+            const isReallyConnected = Boolean((data.connected || data.status === 'connected') && data.user);
+            if (isReallyConnected) {
                 window._waIsConnected = true;
-                const phone = data.phone || data.connected_phone || data.user_jid || '';
+                const phone = data.user?.id ? data.user.id.split(':')[0] : (data.phone || data.connected_phone || '');
                 updateWhatsAppConnectionUI(true, phone);
                 if (waBridgeQrPollTimer) {
                     clearInterval(waBridgeQrPollTimer);
@@ -5699,11 +5700,13 @@ async function fetchBridgeQrCode(forceRefresh = false) {
                 if (connectedState) {
                     connectedState.style.display = 'block';
                     if (connectedNumber) {
-                        const phone = data.phone || data.connected_phone || data.user_jid || '';
                         connectedNumber.textContent = phone ? `Your linked phone: +${String(phone).replace(/\D/g, '')} is active & permanent.` : 'Your device is active and permanently synced for unlimited free messaging & AI automation.';
                     }
                 }
                 return;
+            } else {
+                window._waIsConnected = false;
+                updateWhatsAppConnectionUI(false);
             }
 
             // Unconnected state: show main pairing body
@@ -5917,17 +5920,22 @@ window.resetPairingPhoneInput = resetPairingPhoneInput;
 async function forceResetWhatsAppSession() {
     window._waIsConnected = false;
     window._waDemoMode = false;
+    updateWhatsAppConnectionUI(false);
     if (typeof showToast === 'function') {
-        showToast('Purging desynced session & requesting fresh QR...', 'info');
+        showToast('Resetting WhatsApp session & generating fresh QR...', 'info');
     }
     try {
-        await fetch('/api/whatsapp/qr/refresh', { method: 'POST' });
-    } catch (err) {
-        console.warn('Failed to refresh QR:', err);
+        await fetch('/api/v1/whatsapp/logout-reset', { method: 'POST' });
+    } catch (_) {
+        try {
+            await fetch('/api/whatsapp/qr/refresh', { method: 'POST' });
+        } catch (err) {
+            console.warn('Failed to refresh QR:', err);
+        }
     }
     openLinkWhatsAppQrModal();
     if (typeof fetchBridgeQrCode === 'function') {
-        fetchBridgeQrCode();
+        fetchBridgeQrCode(true);
     }
 }
 window.forceResetWhatsAppSession = forceResetWhatsAppSession;
@@ -6011,7 +6019,11 @@ document.addEventListener('DOMContentLoaded', () => {
     qrButtons.forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
-            openLinkWhatsAppQrModal();
+            if (window._waIsConnected) {
+                forceResetWhatsAppSession();
+            } else {
+                openLinkWhatsAppQrModal();
+            }
         });
     });
 });
@@ -7803,10 +7815,11 @@ async function loadWhatsAppDashboard() {
         if (disconnectBtn) {
             disconnectBtn.style.display = 'inline-flex';
             disconnectBtn.style.cursor = 'pointer';
-            disconnectBtn.title = 'Link WhatsApp QR / Gateway Status';
-            disconnectBtn.onclick = function() {
-                if (window.openLinkWhatsAppQrModal) {
-                    window.openLinkWhatsAppQrModal();
+            disconnectBtn.title = 'Reset WhatsApp Session & Generate Fresh QR';
+            disconnectBtn.onclick = function(e) {
+                if (e) e.preventDefault();
+                if (window.forceResetWhatsAppSession) {
+                    window.forceResetWhatsAppSession();
                 }
             };
         }
@@ -12430,14 +12443,14 @@ function updateWhatsAppConnectionUI(isConnected, phone) {
     const qrButtons = document.querySelectorAll('.topbar-qr-btn, #dashLinkWhatsAppQrBtn, #btnLinkWhatsAppQr, #waHeaderLinkQrBtn, [data-action="link-whatsapp-qr"]');
     qrButtons.forEach(btn => {
         if (isConnected) {
-            btn.innerHTML = `🟢 WhatsApp Connected${phoneDisplay}`;
+            btn.innerHTML = `● WhatsApp Connected${phoneDisplay}`;
             btn.classList.add('connected');
             btn.style.borderColor = '#00a884';
             btn.style.color = '#fff';
             btn.style.background = '#00a884';
-            btn.title = 'WhatsApp Gateway Active & Permanent';
+            btn.title = 'WhatsApp Gateway Active & Permanent (Click to reset/re-link)';
         } else {
-            btn.innerHTML = `<span>📱</span> Link WhatsApp QR`;
+            btn.innerHTML = `<span>⚡</span> Link WhatsApp QR`;
             btn.classList.remove('connected');
             btn.style.borderColor = '';
             btn.style.color = '';
@@ -12449,8 +12462,11 @@ function updateWhatsAppConnectionUI(isConnected, phone) {
     const sidebarStatus = document.getElementById('waSidebarStatus');
     if (sidebarStatus) {
         if (isConnected) {
-            sidebarStatus.textContent = '● WhatsApp Connected';
+            sidebarStatus.textContent = `● WhatsApp Connected${phoneDisplay}`;
             sidebarStatus.style.color = '#00a884';
+        } else {
+            sidebarStatus.textContent = '● Awaiting QR Link';
+            sidebarStatus.style.color = '#f59e0b';
         }
     }
 }

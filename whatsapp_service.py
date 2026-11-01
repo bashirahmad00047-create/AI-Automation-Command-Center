@@ -1568,7 +1568,18 @@ class WhatsAppService:
     @classmethod
     @classmethod
     def roman_to_urdu_script(cls, text: str) -> str:
-        """Converts Roman Urdu text into authentic pure Urdu script (اردو رسم الخط).
+        """Converts Roman Urdu text into authentic pure Urdu script (safe failover)."""
+        if not text or not str(text).strip():
+            return ""
+        try:
+            return cls._safe_roman_to_urdu_script(text)
+        except Exception as e:
+            logger.debug(f"[roman_to_urdu_script fail-safe]: {e}")
+            return str(text).strip()
+
+    @classmethod
+    def _safe_roman_to_urdu_script(cls, text: str) -> str:
+        """Internal worker converting Roman Urdu text into authentic pure Urdu script (اردو رسم الخط).
         Guarantees that Edge-TTS (ur-PK-UzmaNeural / ur-PK-AsadNeural) delivers 100% natural,
         sweet, and human-like Pakistani speech cadence without awkward English phonetic accents.
         """
@@ -5830,17 +5841,17 @@ class WhatsAppService:
         try:
             resp = requests.get("http://127.0.0.1:3001/qr", timeout=3.0)
             data = resp.json() if resp.text else {}
-            is_conn = bool(data.get("connected") or data.get("status") == "connected")
+            is_conn = bool(data.get("user") and (data.get("connected") or data.get("status") == "connected"))
             return {
                 "success": True,
-                "status": data.get("status", "unknown"),
+                "status": "connected" if is_conn else data.get("status", "unknown"),
                 "connected": is_conn,
                 "type": "alreadyLogged" if is_conn else ("qrCode" if data.get("qr") or data.get("qrUrl") else data.get("status")),
                 "qr_data": data.get("qr"),
                 "qrUrl": data.get("qrUrl"),
                 "qrImageUrl": data.get("qrUrl") or data.get("qrImageUrl"),
                 "qrSvg": data.get("qrSvg"),
-                "message": data.get("message", "QR code ready for scanning")
+                "message": "WhatsApp is linked and connected." if is_conn else data.get("message", "QR code ready for scanning")
             }
         except Exception as e:
             return {
@@ -5858,11 +5869,12 @@ class WhatsAppService:
         try:
             resp = requests.get("http://127.0.0.1:3001/status", timeout=3.0)
             data = resp.json() if resp.text else {}
+            is_conn = bool(data.get("user") and (data.get("connected") or data.get("status") == "connected"))
             return {
-                "success": data.get("connected", False),
-                "status": data.get("status", "unknown"),
+                "success": is_conn,
+                "status": "connected" if is_conn else data.get("status", "unknown"),
                 "provider": "baileys_bridge",
-                "message": "Baileys WhatsApp bridge connected." if data.get("connected") else "Baileys bridge online, awaiting QR scan.",
+                "message": "Baileys WhatsApp bridge connected." if is_conn else "Baileys bridge online, awaiting QR scan.",
                 "user": data.get("user")
             }
         except Exception as e:
