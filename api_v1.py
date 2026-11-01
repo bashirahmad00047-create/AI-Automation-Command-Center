@@ -3681,6 +3681,23 @@ def ai_voice_chat():
         except Exception as we_err:
             logger.debug(f"[Voice Chat WorkflowExecution Notice] {we_err}")
 
+    # Dispatch live voice note stream directly to WhatsApp if requested
+    if data.get("sync_whatsapp") and data.get("phone"):
+        try:
+            target_wa_phone = str(data.get("phone")).replace("+", "").strip()
+            if target_wa_phone and len(target_wa_phone) >= 10:
+                WhatsAppService.send_message(
+                    organization_id=org_id,
+                    recipient=target_wa_phone,
+                    message_type="voice",
+                    body=clean_reply,
+                    audio_base64=audio_base64,
+                    is_voice=True
+                )
+                logger.info(f"[Voice Chat] Synced live AI voice note stream to customer WhatsApp: {target_wa_phone}")
+        except Exception as wa_sync_err:
+            logger.debug(f"[Voice Chat WhatsApp Sync Notice] {wa_sync_err}")
+
     storage = get_storage()
     stats = storage.get_stats(org_id) if storage else {}
 

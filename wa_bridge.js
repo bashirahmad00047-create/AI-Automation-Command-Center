@@ -1493,7 +1493,7 @@ if (!text) text = '[Voice note]';
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  message: `[Incoming WhatsApp Voice Call from ${callerPhone}]: The user placed a WhatsApp voice call. Generate a polite, natural 1-2 sentence Roman Urdu response explaining this is an automated AI assistance system and asking them to send a voice note or text message so we can assist immediately.`,
+                  message: `[Incoming WhatsApp Voice Call from ${callerPhone}]: Generate a polite, natural 1-2 sentence Pakistani Urdu voice response: Assalam-o-Alaikum! BashFlow AI Voice Agent bol raha hoon. Is waqt line masroof hai, baraye meharbani apna paigham voice note mein record karwayen, hum foran jawab denge. Shukriya!`,
                   language: 'ur'
                 })
               });

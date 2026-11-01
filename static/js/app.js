@@ -7529,6 +7529,10 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
         if (countBadge) countBadge.textContent = `${messages.length} messages`;
         updateNavBadge('tabWhatsAppCount', messages.length);
 
+        // Real-Time Incoming WhatsApp Call Ring Alert & Auto-Voice Playback
+        if (typeof checkIncomingCallAlert === 'function') checkIncomingCallAlert(messages);
+        if (typeof checkLiveCallVoiceAutoPlay === 'function') checkLiveCallVoiceAutoPlay(messages);
+
         // Always update WhatsApp Web Replica UI with forceRender=true so Loading conversations never gets stuck
         renderWhatsAppWebUI(messages, false, true);
 
@@ -11614,8 +11618,10 @@ async function sendVoiceChatQuery(spokenText) {
     if (statusLabel) statusLabel.textContent = 'AI Thinking...';
     if (vadStatus) vadStatus.textContent = '● Processing speech input...';
 
-    // Strictly NO chat message bubble sent during live voice call - live audio stream only!
-    const targetPhone = waActiveChatPartner ? normalizeWaPhone(waActiveChatPartner) : null;
+    const targetPhone = waActiveChatPartner 
+        ? normalizeWaPhone(waActiveChatPartner) 
+        : ((document.getElementById('voiceCallPhoneNumber') || {}).value || '').replace(/\D/g, '');
+    const syncWhatsApp = Boolean(document.getElementById('chkCallSyncWhatsApp')?.checked);
 
     try {
         const res = await fetch('/api/v1/voice/chat', {
@@ -11623,8 +11629,8 @@ async function sendVoiceChatQuery(spokenText) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 message: spokenText.trim(),
-                sync_whatsapp: false,
-                caller_name: (window.currentActiveContact && window.currentActiveContact.name) || 'Bashir bhai',
+                sync_whatsapp: syncWhatsApp,
+                caller_name: (window.currentActiveContact && window.currentActiveContact.name) || 'Customer',
                 phone: targetPhone
             })
         });
@@ -11672,27 +11678,59 @@ async function sendVoiceChatQuery(spokenText) {
     }
 }
 
-function openLiveVoiceCallModal(autoConnect = true) {
+function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customName = null) {
     const modal = document.getElementById('liveVoiceCallModal');
     if (!modal) return;
     modal.style.display = 'flex';
 
-    // Populate active contact name in calling screen
     const nameElem = document.getElementById('callContactName');
     const headerName = document.getElementById('waActiveContactName');
-    let resolvedName = 'Bashir bhai';
-    if (headerName && headerName.textContent.trim() && !headerName.textContent.includes('Select a Conversation')) {
-        resolvedName = headerName.textContent.trim();
-    } else if (window.currentActiveContact && window.currentActiveContact.name) {
-        resolvedName = window.currentActiveContact.name;
-    } else if (waActiveChatPartner) {
-        resolvedName = `+${waActiveChatPartner.replace(/\D/g, '')}`;
+    const headerPhone = document.getElementById('waActiveContactPhone');
+    const phoneInput = document.getElementById('voiceCallPhoneNumber');
+    const deepLinkBtn = document.getElementById('waDirectDeepLinkBtn');
+    const deepLinkText = document.getElementById('waDeepLinkBtnText');
+
+    let resolvedName = customName || 'Customer';
+    let resolvedPhone = customPhone || '';
+
+    if (!resolvedPhone) {
+        if (waActiveChatPartner) {
+            resolvedPhone = waActiveChatPartner.replace(/\D/g, '');
+        } else if (window.currentActiveContact && window.currentActiveContact.phone) {
+            resolvedPhone = String(window.currentActiveContact.phone).replace(/\D/g, '');
+        } else if (headerPhone && /\d{7,}/.test(headerPhone.textContent)) {
+            resolvedPhone = headerPhone.textContent.replace(/\D/g, '');
+        }
     }
+
+    if (!customName) {
+        if (headerName && headerName.textContent.trim() && !headerName.textContent.includes('Select a Conversation')) {
+            resolvedName = headerName.textContent.trim();
+        } else if (window.currentActiveContact && window.currentActiveContact.name) {
+            resolvedName = window.currentActiveContact.name;
+        } else if (resolvedPhone) {
+            resolvedName = `+${resolvedPhone}`;
+        }
+    }
+
     if (nameElem) nameElem.textContent = resolvedName;
+    if (phoneInput && resolvedPhone) phoneInput.value = `+${resolvedPhone}`;
+
+    if (deepLinkBtn) {
+        if (resolvedPhone) {
+            deepLinkBtn.href = `whatsapp://send?phone=${resolvedPhone}`;
+            deepLinkBtn.style.display = 'inline-flex';
+            if (deepLinkText) deepLinkText.textContent = `Open in WhatsApp (+${resolvedPhone})`;
+        } else {
+            deepLinkBtn.href = 'whatsapp://';
+            deepLinkBtn.style.display = 'inline-flex';
+            if (deepLinkText) deepLinkText.textContent = 'Launch WhatsApp App';
+        }
+    }
 
     // Real Two-Way Calling Agent: Auto-pick up call within 1 second without sending chat messages!
     if (autoConnect && !liveVoiceCallActive) {
-        startLiveVoiceCall(resolvedName);
+        startLiveVoiceCall(resolvedName, resolvedPhone);
     }
 }
 
@@ -13568,3 +13606,122 @@ setTimeout(() => {
     updateFiveModulePulseBar();
     refreshInterconnectedStream();
 }, 800);
+
+
+// ============================================================================
+// REAL WHATSAPP VOICE CALLING ENGINE & LIVE INCOMING CALL CONTROLLERS
+// ============================================================================
+let _lastDismissedCallId = null;
+let _currentRingingCall = null;
+const _playedVoiceNoteIds = new Set();
+
+function checkIncomingCallAlert(messages) {
+    if (!Array.isArray(messages) || messages.length === 0) return;
+    const banner = document.getElementById('waIncomingCallAlertBanner');
+    if (!banner) return;
+
+    // Find the latest inbound call event
+    const callMsg = messages.find(m => 
+        (m.message_type === 'call' || String(m.body || '').includes('Incoming WhatsApp Voice Call')) &&
+        m.direction === 'inbound'
+    );
+
+    if (!callMsg) {
+        if (!_currentRingingCall) banner.style.display = 'none';
+        return;
+    }
+
+    if (_lastDismissedCallId === callMsg.id) {
+        return;
+    }
+
+    _currentRingingCall = callMsg;
+    const callerPhone = callMsg.sender || 'Customer';
+    const phoneEl = document.getElementById('incomingCallCallerPhone');
+    if (phoneEl) {
+        phoneEl.textContent = callerPhone.startsWith('+') ? callerPhone : `+${callerPhone}`;
+    }
+
+    const deepLink = document.getElementById('incomingCallDeepLink');
+    if (deepLink) {
+        const cleanPhone = callerPhone.replace(/\D/g, '');
+        deepLink.href = cleanPhone ? `whatsapp://send?phone=${cleanPhone}` : 'whatsapp://';
+    }
+
+    banner.style.display = 'block';
+}
+window.checkIncomingCallAlert = checkIncomingCallAlert;
+
+function dismissIncomingCallAlert() {
+    const banner = document.getElementById('waIncomingCallAlertBanner');
+    if (banner) banner.style.display = 'none';
+    if (_currentRingingCall) {
+        _lastDismissedCallId = _currentRingingCall.id;
+        _currentRingingCall = null;
+    }
+}
+window.dismissIncomingCallAlert = dismissIncomingCallAlert;
+
+function answerIncomingCallWithAi() {
+    if (_currentRingingCall) {
+        const callerPhone = _currentRingingCall.sender;
+        const callerName = _currentRingingCall.sender_name || 'Caller';
+        dismissIncomingCallAlert();
+        openLiveVoiceCallModal(true, callerPhone, callerName);
+    } else {
+        openLiveVoiceCallModal(true);
+    }
+}
+window.answerIncomingCallWithAi = answerIncomingCallWithAi;
+
+function openIncomingCallChat() {
+    if (_currentRingingCall) {
+        const callerPhone = _currentRingingCall.sender;
+        dismissIncomingCallAlert();
+        selectWhatsAppChat(callerPhone);
+    }
+}
+window.openIncomingCallChat = openIncomingCallChat;
+
+function checkLiveCallVoiceAutoPlay(messages) {
+    if (!liveVoiceCallActive || !Array.isArray(messages)) return;
+    const activePhone = (document.getElementById('voiceCallPhoneNumber') || {}).value || waActiveChatPartner || '';
+    const cleanActive = String(activePhone).replace(/\D/g, '');
+    if (!cleanActive) return;
+
+    // Look for incoming audio/voice messages from this customer
+    const inboundVoice = messages.find(m => {
+        const senderClean = String(m.sender || '').replace(/\D/g, '');
+        return m.direction === 'inbound' && 
+               senderClean.includes(cleanActive) &&
+               (m.is_audio || m.message_type === 'voiceMessage' || String(m.body || '').includes('[voiceMessage]') || m.media_url) &&
+               !_playedVoiceNoteIds.has(m.id);
+    });
+
+    if (inboundVoice) {
+        _playedVoiceNoteIds.add(inboundVoice.id);
+        const statusLabel = document.getElementById('voiceCallStatusLabel');
+        const transcriptBox = document.getElementById('voiceTranscriptBox');
+
+        if (statusLabel) statusLabel.textContent = 'Customer Voice Reply Playing... 🔊';
+        if (transcriptBox) {
+            transcriptBox.innerHTML += `<div style="color: #60a5fa; margin-top: 6px;"><strong>Customer:</strong> 🎵 [Voice Note Received - Playing Audio]</div>`;
+            transcriptBox.scrollTop = transcriptBox.scrollHeight;
+        }
+
+        const audioUrl = inboundVoice.media_url || inboundVoice.audio_url || inboundVoice.download_url;
+        if (audioUrl) {
+            if (currentVoiceAudioPlayer) {
+                try { currentVoiceAudioPlayer.pause(); } catch (_) {}
+            }
+            currentVoiceAudioPlayer = new Audio(audioUrl);
+            setEqualizerActive(true);
+            currentVoiceAudioPlayer.onended = () => {
+                setEqualizerActive(false);
+                if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+            };
+            currentVoiceAudioPlayer.play().catch(e => console.warn('[Auto-Play Voice Error]', e));
+        }
+    }
+}
+window.checkLiveCallVoiceAutoPlay = checkLiveCallVoiceAutoPlay;

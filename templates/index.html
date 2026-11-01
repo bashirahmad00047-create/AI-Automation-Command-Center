@@ -899,200 +899,77 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
         </section>
 
         <!-- TAB: WHATSAPP BUSINESS & META CLOUD API -->
-        <!-- TAB: WHATSAPP BUSINESS & META CLOUD API -->
-        <section id="tab-whatsapp" class="tab-panel">
-            <div class="panel-header" style="align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
-                <div>
-                    <h2>WHATSAPP COMMAND &amp; WEB REPLICA</h2>
-                    <p style="color: var(--text-secondary); margin-top: 4px; font-size: 0.9rem;">
-                        Real-time WhatsApp Web console with voice playback, instant reply box, and message lifecycle management.
-                    </p>
-                </div>
-                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="hud-btn outline small" id="btnWaBusinessTemplates" onclick="openBusinessTemplatesModal()" style="font-weight: 600; display: inline-flex; align-items: center; gap: 6px; border-color: #00a884; color: #00a884;">
-                        <span>💼</span> Business Templates
-                    </button>
-                    <button type="button" class="hud-btn primary small" id="btnLinkWhatsAppQr" onclick="openLinkWhatsAppQrModal()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 10px rgba(16, 185, 129, 0.35); cursor: pointer;">
-                        <span>📱</span> Link WhatsApp QR
-                    </button>
-                    <div class="hud-btn-group" style="display: inline-flex; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; background: rgba(0,0,0,0.25);">
-                        <button type="button" class="hud-btn small active" id="btnViewWaWeb" onclick="setWhatsAppViewMode('web')" style="border: none; border-radius: 0; padding: 5px 12px; font-size: 11px;">💬 WhatsApp Web</button>
-                        <button type="button" class="hud-btn small" id="btnViewWaClassic" onclick="setWhatsAppViewMode('classic')" style="border: none; border-radius: 0; padding: 5px 12px; font-size: 11px;">⚙️ Gateway &amp; Audit</button>
-                    </div>
-                    <span class="status-pill green" id="whatsappModeBadge">● Live Production</span>
-                    <button class="hud-btn outline small" onclick="loadWhatsAppDashboard()">🔄 Refresh</button>
-                </div>
-            </div>
-
-            <!-- Mode Notification Banner -->
-            <div id="whatsappModeBanner" style="margin-bottom: 20px; padding: 14px 18px; border-radius: 8px; font-size: 0.88rem; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.2); flex-wrap: wrap;">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <span style="font-size: 1.4rem;">🧪</span>
-                    <div>
-                        <strong id="whatsappBannerTitle" style="color: #10b981;">Production WhatsApp Cloud Active</strong>
-                        <div id="whatsappBannerDesc" style="color: var(--text-secondary); font-size: 0.82rem; margin-top: 2px;">
-                            Operating in live production mode with Baileys Cloud Bridge on port 3001. Messages and AI replies process in real-time with zero Meta fees.
-                        </div>
-                    </div>
-                </div>
-                <div id="whatsappBannerAction" style="display: flex; gap: 8px; flex-wrap: wrap;">
-                    <button type="button" class="hud-btn primary small" onclick="openLinkWhatsAppQrModal()" style="background: #10b981; font-weight: 700; color: #fff;">
-                        <span>📱</span> Link WhatsApp QR
-                    </button>
-                </div>
-            </div>
-
-                                    <!-- 5-TECH ENTERPRISE ENGINE LIVE STATUS HUD -->
-            <div id="techEnterpriseStatusPanel" style="margin-bottom: 16px; background: #111b21; border: 1px solid #00a884; border-radius: 10px; padding: 12px 16px; box-shadow: 0 4px 20px rgba(0, 168, 132, 0.15);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #202c33; padding-bottom: 8px; flex-wrap: wrap; gap: 8px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 16px;">🚀</span>
-                        <span style="font-weight: 700; font-size: 13px; color: #e9edef; letter-spacing: 0.5px;">5-TECH ENTERPRISE ENGINE LIVE ARCHITECTURE</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span class="status-pill green" style="font-size: 11px;">● 100% Operational</span>
-                        <div style="display: inline-flex; align-items: center; gap: 4px; background: #182229; padding: 2px 4px; border-radius: 6px; border: 1px solid #2a3942;">
-                            <span style="font-size: 10.5px; color: #8696a0; margin-left: 4px; font-weight: 600;">Engine Switcher:</span>
-                            <button type="button" id="btnEngineBaileys" onclick="switchWhatsAppEngine('baileys')" class="hud-btn small green" style="font-weight: 700; font-size: 11px; padding: 4px 10px; border-radius: 6px; border: 1px solid #00a884;">
-                                🟢 Baileys Bridge
-                            </button>
-                            <button type="button" id="btnEngineMeta" onclick="switchWhatsAppEngine('meta')" class="hud-btn small outline" style="font-weight: 600; font-size: 11px; padding: 4px 10px; border-radius: 6px;">
-                                🔵 Meta Cloud API
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <!-- 5 Exact Real-Time Badges -->
-                <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-                    <span class="status-pill green" style="font-size: 11.5px; font-weight: 700; padding: 5px 10px; background: rgba(0, 168, 132, 0.15); border: 1px solid #00a884; color: #25d366; border-radius: 6px;">
-                        🟢 Session Vault: Active
-                    </span>
-                    <span class="status-pill green" style="font-size: 11.5px; font-weight: 700; padding: 5px 10px; background: rgba(0, 168, 132, 0.15); border: 1px solid #00a884; color: #25d366; border-radius: 6px;">
-                        🟢 Fluent Urdu AI Voice: +12% Natural Flow
-                    </span>
-                    <span class="status-pill green" style="font-size: 11.5px; font-weight: 700; padding: 5px 10px; background: rgba(0, 168, 132, 0.15); border: 1px solid #00a884; color: #25d366; border-radius: 6px;">
-                        🟢 Live Delivery Map: Online
-                    </span>
-                    <span class="status-pill green" style="font-size: 11.5px; font-weight: 700; padding: 5px 10px; background: rgba(0, 168, 132, 0.15); border: 1px solid #00a884; color: #25d366; border-radius: 6px;">
-                        🟢 Anti-Ban FIFO Queue: Protected
-                    </span>
-                    <span class="status-pill green" style="font-size: 11.5px; font-weight: 700; padding: 5px 10px; background: rgba(0, 168, 132, 0.15); border: 1px solid #00a884; color: #25d366; border-radius: 6px;">
-                        🟢 Engine Switcher: Baileys Bridge / Meta Cloud API
-                    </span>
-                </div>
-            </div>
-
-            <!-- WHATSAPP WEB CONNECTION CARD (DISCONNECTED / SCAN QR STATE) -->
-            <div id="waConnectState" class="wa-connect-card" style="display: none;">
-                <!-- Left Pane: Instructions & Gateway Connection Actions -->
-                <div class="wa-connect-left">
-                    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 20px;">
-                        <div style="width: 44px; height: 44px; border-radius: 50%; background: #00a884; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #fff; box-shadow: 0 4px 12px rgba(0, 168, 132, 0.35);">
-                            💬
-                        </div>
+        <section id="tab-whatsapp" class="tab-panel" style="padding-top: 2px;">
+            <!-- STREAMLINED WORLD NO. 1 GLASSMORHIC COMMAND TOPBAR -->
+            <div class="panel-header enterprise-glass-header" style="align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; padding: 12px 18px; border-radius: 12px; background: rgba(17, 27, 33, 0.92); border: 1px solid rgba(0, 168, 132, 0.35); backdrop-filter: blur(16px); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);">
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 24px;">💬</span>
                         <div>
-                            <h2 style="font-size: 20px; font-weight: 600; color: #e9edef; margin: 0;">Use WhatsApp on your computer</h2>
-                            <p style="font-size: 13px; color: #8696a0; margin: 2px 0 0 0;">Unified OpsFlow WhatsApp Web &amp; Multi-Tenant Gateway</p>
-                        </div>
-                    </div>
-
-                    <ol class="wa-connect-steps">
-                        <li>Open <strong>WhatsApp</strong> on your mobile phone.</li>
-                        <li>Tap <strong>Menu</strong> (Android ⋮) or <strong>Settings</strong> (iPhone ⚙️) and select <strong>Linked Devices</strong>.</li>
-                        <li>Tap on <strong>Link a Device</strong>.</li>
-                        <li>Point your phone to this screen to capture the QR code.</li>
-                    </ol>
-
-                    <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
-                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                            <button type="button" class="hud-btn primary" onclick="openLinkWhatsAppQrModal()" style="padding: 10px 18px; font-weight: 700; background: #10b981; color: #fff; display: inline-flex; align-items: center; gap: 8px;">
-                                <span>📱</span> Link WhatsApp (Scan Live QR)
-                            </button>
-                            <button type="button" class="hud-btn outline" onclick="enableWhatsAppDemoMode()" style="padding: 10px 16px; display: inline-flex; align-items: center; gap: 6px;">
-                                <span>🧪</span> Launch Local Sandbox (Demo)
-                            </button>
-                        </div>
-                        <div style="margin-top: 6px; font-size: 12px; color: #8696a0; display: flex; align-items: center; gap: 6px;">
-                            <span>💡</span>
-                            <span>Instant QR linking via high-speed Baileys Cloud Bridge with zero API costs.</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <h2 style="font-size: 15px; font-weight: 700; color: #e9edef; margin: 0; letter-spacing: 0.3px;">WHATSAPP CLOUD &amp; VOICE AGENT</h2>
+                                <span class="status-pill green" id="whatsappModeBadge" style="font-size: 10px; padding: 2px 7px; font-weight: 700;">● 100% Operational</span>
+                            </div>
+                            <div style="font-size: 11px; color: #8696a0; display: flex; align-items: center; gap: 6px; margin-top: 2px;">
+                                <span>Groq Llama 3.3 + Gemini 2.5 Brain</span>
+                                <span>&bull;</span>
+                                <span style="color: #25d366; font-weight: 600;">Pakistani Urdu Neural Voice Active</span>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Right Pane: Authentic QR Code Frame -->
-                <div class="wa-connect-right">
-                    <div class="wa-qr-box" id="waQrBox">
-                        <img id="waDynamicQrImg" src="" alt="WhatsApp QR Code" style="display: none; max-width: 220px; width: 220px; height: 220px; object-fit: contain; border-radius: 8px; margin: 0 auto;" />
-                        <div id="waStaticQrPlaceholder" style="width: 250px; height: 250px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative;">
-                            <!-- Authentic SVG QR Code Representation -->
-                            <svg viewBox="0 0 200 200" width="230" height="230" style="shape-rendering: crispEdges;">
-                                <rect width="200" height="200" fill="#ffffff"/>
-                                <!-- Top-left finder pattern -->
-                                <rect x="15" y="15" width="45" height="45" fill="#111b21"/>
-                                <rect x="22" y="22" width="31" height="31" fill="#ffffff"/>
-                                <rect x="29" y="29" width="17" height="17" fill="#111b21"/>
-                                <!-- Top-right finder pattern -->
-                                <rect x="140" y="15" width="45" height="45" fill="#111b21"/>
-                                <rect x="147" y="22" width="31" height="31" fill="#ffffff"/>
-                                <rect x="154" y="29" width="17" height="17" fill="#111b21"/>
-                                <!-- Bottom-left finder pattern -->
-                                <rect x="15" y="140" width="45" height="45" fill="#111b21"/>
-                                <rect x="22" y="147" width="31" height="31" fill="#ffffff"/>
-                                <rect x="29" y="154" width="17" height="17" fill="#111b21"/>
-                                <!-- Simulated authentic QR data modules -->
-                                <rect x="70" y="20" width="10" height="10" fill="#111b21"/>
-                                <rect x="90" y="20" width="15" height="10" fill="#111b21"/>
-                                <rect x="115" y="20" width="10" height="10" fill="#111b21"/>
-                                <rect x="70" y="40" width="20" height="10" fill="#111b21"/>
-                                <rect x="100" y="40" width="10" height="10" fill="#111b21"/>
-                                <rect x="120" y="40" width="10" height="10" fill="#111b21"/>
-                                <rect x="20" y="70" width="10" height="20" fill="#111b21"/>
-                                <rect x="40" y="70" width="20" height="10" fill="#111b21"/>
-                                <rect x="70" y="70" width="10" height="10" fill="#111b21"/>
-                                <rect x="90" y="70" width="20" height="10" fill="#111b21"/>
-                                <rect x="120" y="70" width="10" height="20" fill="#111b21"/>
-                                <rect x="140" y="70" width="20" height="10" fill="#111b21"/>
-                                <rect x="170" y="70" width="10" height="10" fill="#111b21"/>
-                                <rect x="20" y="100" width="20" height="10" fill="#111b21"/>
-                                <rect x="50" y="100" width="10" height="10" fill="#111b21"/>
-                                <rect x="140" y="100" width="15" height="10" fill="#111b21"/>
-                                <rect x="165" y="100" width="15" height="10" fill="#111b21"/>
-                                <rect x="20" y="120" width="10" height="10" fill="#111b21"/>
-                                <rect x="40" y="120" width="20" height="10" fill="#111b21"/>
-                                <rect x="70" y="120" width="10" height="20" fill="#111b21"/>
-                                <rect x="90" y="120" width="20" height="10" fill="#111b21"/>
-                                <rect x="120" y="120" width="10" height="10" fill="#111b21"/>
-                                <rect x="140" y="120" width="20" height="20" fill="#111b21"/>
-                                <rect x="170" y="120" width="10" height="10" fill="#111b21"/>
-                                <rect x="70" y="150" width="20" height="10" fill="#111b21"/>
-                                <rect x="100" y="150" width="10" height="20" fill="#111b21"/>
-                                <rect x="120" y="150" width="20" height="10" fill="#111b21"/>
-                                <rect x="150" y="150" width="10" height="10" fill="#111b21"/>
-                                <rect x="170" y="150" width="10" height="20" fill="#111b21"/>
-                                <rect x="70" y="170" width="10" height="10" fill="#111b21"/>
-                                <rect x="90" y="170" width="20" height="10" fill="#111b21"/>
-                                <rect x="120" y="170" width="20" height="10" fill="#111b21"/>
-                                <rect x="150" y="170" width="10" height="10" fill="#111b21"/>
-                                <!-- Center WhatsApp Emblem Badge -->
-                                <circle cx="100" cy="100" r="22" fill="#00a884" stroke="#ffffff" stroke-width="3"/>
-                                <path d="M100 86c-7.7 0-14 6.3-14 14 0 2.5.7 4.9 1.9 7L86 114l7.2-1.9c2 1.1 4.3 1.7 6.8 1.7 7.7 0 14-6.3 14-14s-6.3-13.8-14-13.8zm7.1 19.6c-.3.8-1.7 1.6-2.4 1.7-.6.1-1.4.2-4-.9-3.3-1.4-5.4-4.8-5.6-5-.2-.2-1.4-1.9-1.4-3.6 0-1.7.9-2.6 1.2-2.9.3-.3.7-.4 1-.4.2 0 .5 0 .7.1.2.1.6.2.9.8.3.7 1.1 2.7 1.2 2.9.1.2.1.4 0 .6-.1.2-.2.3-.3.5-.2.2-.3.4-.5.5-.2.2-.4.4-.2.8.2.4 1.1 1.8 2.4 3 1.6 1.5 3 1.9 3.4 2.1.4.2.7.2.9-.1.3-.3 1.1-1.3 1.4-1.8.3-.4.6-.4 1-.2.4.1 2.5 1.2 2.9 1.4.4.2.7.3.8.5.1.2.1 1.2-.2 2z" fill="#ffffff"/>
-                            </svg>
-                        </div>
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <!-- Engine Switcher -->
+                    <div style="display: inline-flex; align-items: center; gap: 3px; background: #182229; padding: 2px 4px; border-radius: 8px; border: 1px solid #2a3942;">
+                        <button type="button" id="btnEngineBaileys" onclick="switchWhatsAppEngine('baileys')" class="hud-btn small green" style="font-weight: 700; font-size: 11px; padding: 4px 10px; border-radius: 6px; border: 1px solid #00a884;">
+                            🟢 Baileys Bridge
+                        </button>
+                        <button type="button" id="btnEngineMeta" onclick="switchWhatsAppEngine('meta')" class="hud-btn small outline" style="font-weight: 600; font-size: 11px; padding: 4px 10px; border-radius: 6px;">
+                            🔵 Meta Cloud
+                        </button>
                     </div>
 
-                    <div style="margin-top: 14px; display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #aebac1; cursor: pointer; user-select: none;">
-                            <input type="checkbox" id="waStayLoggedInCheck" checked style="accent-color: #00a884; cursor: pointer;">
-                            <span>Stay logged in on this browser</span>
-                        </label>
-                        <div id="waQrStatusText" style="font-size: 11.5px; color: #00a884; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                            <span>●</span>
-                            <span>Scan with WhatsApp to link device</span>
+                    <button type="button" class="hud-btn outline small" id="btnWaBusinessTemplates" onclick="openBusinessTemplatesModal()" style="font-weight: 600; display: inline-flex; align-items: center; gap: 6px; border-color: #00a884; color: #00a884; font-size: 11.5px; padding: 5px 12px; border-radius: 6px;">
+                        <span>💼</span> Blueprints &amp; Catalog
+                    </button>
+                    <button type="button" class="hud-btn primary small" id="btnLinkWhatsAppQr" onclick="openLinkWhatsAppQrModal()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700; color: #fff; border: none; border-radius: 6px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; cursor: pointer; box-shadow: 0 2px 10px rgba(16, 185, 129, 0.35);">
+                        <span>📱</span> Link WhatsApp QR
+                    </button>
+                    <button class="hud-btn outline small" onclick="loadWhatsAppDashboard()" style="font-size: 11.5px; padding: 5px 10px; border-radius: 6px;">🔄 Sync</button>
+                </div>
+            </div>
+
+            <!-- REAL-TIME INCOMING WHATSAPP CALL RING ALERT BANNER -->
+            <div id="waIncomingCallAlertBanner" style="display: none; margin-bottom: 12px; background: linear-gradient(135deg, rgba(20, 83, 45, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1.5px solid #22c55e; border-radius: 12px; padding: 12px 18px; box-shadow: 0 8px 30px rgba(34, 197, 94, 0.3); color: #e9edef; backdrop-filter: blur(14px);">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 26px;">📞</span>
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <strong style="color: #4ade80; font-size: 13.5px; letter-spacing: 0.5px;">INCOMING WHATSAPP VOICE CALL</strong>
+                                <span class="status-pill green" style="font-size: 10px; padding: 1px 6px;">LIVE RING</span>
+                            </div>
+                            <div style="font-size: 12px; color: #cbd5e1; margin-top: 2px;">
+                                Caller: <strong id="incomingCallCallerPhone" style="color: #fff;">+92...</strong> &bull; AI Voice Agent auto-responded with natural Pakistani Urdu voice note.
+                            </div>
                         </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <button type="button" class="hud-btn primary small" onclick="answerIncomingCallWithAi()" style="background: #10b981; font-weight: 700; font-size: 11.5px; padding: 6px 14px; border-radius: 6px; box-shadow: 0 2px 10px rgba(16, 185, 129, 0.4);">
+                            🎙️ Live Voice Call
+                        </button>
+                        <a id="incomingCallDeepLink" href="whatsapp://send?phone=" target="_blank" class="hud-btn small outline" style="border-color: #22c55e; color: #4ade80; text-decoration: none; font-size: 11.5px; padding: 5px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;">
+                            <span>📱</span> WhatsApp Direct
+                        </a>
+                        <button type="button" class="hud-btn small outline" onclick="dismissIncomingCallAlert()" style="font-size: 11.5px; padding: 5px 10px; border-radius: 6px; color: #94a3b8;">
+                            ✕ Dismiss
+                        </button>
                     </div>
                 </div>
             </div>
 
+            
             <!-- VIEW 1: WHATSAPP WEB FULL REPLICA -->
             <div id="waWebViewContainer" class="wa-web-app" style="margin-bottom: 24px;">
                 <!-- SIDEBAR: CONTACTS & SEARCH -->
@@ -5216,6 +5093,12 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 <!-- Caller Name & Timer -->
                 <h3 id="callContactName" style="margin: 0 0 4px 0; font-size: 19px; font-weight: 600; color: #e9edef;">BashFlow AI Voice Agent</h3>
                 <div id="callTimer" style="font-size: 13.5px; font-weight: 600; color: #00a884; font-family: ui-monospace, monospace; margin-bottom: 6px;">00:00</div>
+                <!-- Direct WhatsApp Deep Link Action -->
+                <div style="margin-bottom: 10px;">
+                    <a id="waDirectDeepLinkBtn" href="whatsapp://send?phone=" target="_blank" class="hud-btn small outline" style="border-color: #25d366; color: #25d366; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 4px 12px; border-radius: 16px; background: rgba(37, 211, 102, 0.1); font-weight: 700; transition: all 0.2s;">
+                        <span>📱</span> <span id="waDeepLinkBtnText">Direct WhatsApp App / Audio</span>
+                    </a>
+                </div>
                 <p id="voiceCallStatusLabel" style="margin: 0 0 16px 0; font-size: 12.5px; color: #8696a0;">Voice Agent Ready</p>
 
                 <!-- Audio Waveform Visualizer -->
