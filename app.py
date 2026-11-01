@@ -871,13 +871,6 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_whatsapp_bridge_qr_refresh
         return api_whatsapp_bridge_qr_refresh()
 
-    @application.route("/api/whatsapp/logout-reset", methods=["POST", "GET"])
-    @application.route("/api/v1/whatsapp/logout-reset", methods=["POST", "GET"])
-    def route_whatsapp_logout_reset():
-        """Cleanly wipes auth directory, purges DB session store, and requests fresh QR."""
-        from api_v1 import api_whatsapp_logout_reset
-        return api_whatsapp_logout_reset()
-
     @application.route("/api/whatsapp/bridge-qr.png", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-qr.png", methods=["GET"])
     @application.route("/api/whatsapp/qr.png", methods=["GET"])

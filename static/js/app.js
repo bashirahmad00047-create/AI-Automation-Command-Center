@@ -1,3 +1,12 @@
+// Strict Reload Guard: Prevents any automated, timer-based or accidental whole-page reloads
+if (typeof window !== 'undefined') {
+    try {
+        window.location.reload = function() {
+            console.warn('[BashFlow Guard] Automatic page reload intercepted and disabled.');
+        };
+    } catch (_) {}
+}
+
 /**
  * BashFlow Cloud Enterprise Frontend Application Controller
  * Handles Multi-Tenancy, RBAC Persona switching, Visual Workflow Studio,
@@ -47,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startWhatsAppAutoPoll(3000);
     initWhatsAppChatBarListeners();
     // Auto-parse any GPS location in conversation messages and plot on Delivery Radar Map
-    if (Array.isArray(partnerMsgs)) {
+    if (typeof partnerMsgs !== 'undefined' && Array.isArray(partnerMsgs)) {
         partnerMsgs.forEach(m => {
             const raw = (m.body || m.message || '').trim();
             const locMatch = raw.match(/(?:\[Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)\]|Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)|([0-9]{1,2}\.[0-9]{4,10})\s*,\s*([0-9]{1,3}\.[0-9]{4,10}))/i);
@@ -12076,14 +12085,7 @@ window.insertTemplateReply = insertTemplateReply;
 window.toggleWhatsAppAiAutoResponder = toggleWhatsAppAiAutoResponder;
 window.toggleSidebarCollapse = toggleSidebarCollapse;
 
-// Live Chat Sync Engine: Silently sync active chat and conversation list every 3 seconds
-setInterval(() => {
-    try {
-        if (typeof document !== 'undefined' && !document.hidden && typeof loadWhatsAppMessagesOnly === 'function') {
-            loadWhatsAppMessagesOnly();
-        }
-    } catch (_) {}
-}, 3000);
+// Live Chat Sync: Driven strictly by WebSocket push notifications
 
 
 // ============================================================================

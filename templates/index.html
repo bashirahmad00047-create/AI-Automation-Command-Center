@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
+    <script>
+        // Automatic full-page reload guard: prevents accidental or timer-based full reloads
+        if (typeof window !== 'undefined') {
+            try {
+                window.location.reload = function() {
+                    console.warn('[BashFlow Guard] Automatic page reload intercepted and disabled.');
+                };
+            } catch (_) {}
+        }
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BashFlow Cloud - Enterprise Intelligent Automation</title>

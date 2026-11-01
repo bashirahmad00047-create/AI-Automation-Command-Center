@@ -2691,8 +2691,7 @@ def api_whatsapp_bridge_qr():
         sresp = requests.get(bridge_status_url, timeout=1.5)
         if sresp.status_code == 200:
             sdata = sresp.json()
-            is_conn = bool(sdata.get("user") and (sdata.get("connected") or sdata.get("status") == "connected"))
-            if is_conn:
+            if sdata.get("connected") or sdata.get("status") == "connected":
                 return jsonify({
                     "status": "connected",
                     "connected": True,
@@ -3177,12 +3176,7 @@ def api_whatsapp_bridge_status():
     try:
         resp = requests.get(bridge_url, timeout=3.0)
         if resp.status_code == 200 and resp.text:
-            data = resp.json()
-            is_conn = bool(data.get("user") and (data.get("connected") or data.get("status") == "connected"))
-            data["connected"] = is_conn
-            if not is_conn and data.get("status") == "connected":
-                data["status"] = "waiting"
-            return jsonify(data), 200
+            return jsonify(resp.json()), 200
     except Exception as e:
         logger.warning(f"[WA Bridge] status check notice: {e}")
 
@@ -3228,80 +3222,41 @@ def _is_bridge_or_authenticated():
 
 @api_v1.route("/whatsapp/session-backup", methods=["POST", "GET"])
 def api_whatsapp_session_backup():
-    """DB session backup purged: using clean local multi-file auth."""
-    return jsonify({"success": True, "message": "Local multi-file auth active"}), 200
+    """Triggers an immediate database backup of Baileys auth files to Supabase / PostgreSQL."""
+    if not _is_bridge_or_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        from wa_bridge_manager import backup_wa_session_to_db
+        success = backup_wa_session_to_db()
+        return jsonify({"success": success, "message": "WhatsApp session backed up to DB" if success else "No credentials to backup"}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @api_v1.route("/whatsapp/session-restore", methods=["POST", "GET"])
 def api_whatsapp_session_restore():
-    """DB session restore purged: using clean local multi-file auth."""
-    return jsonify({"success": True, "restored": False, "message": "Local multi-file auth active"}), 200
+    """Restores Baileys session files from DB into the auth folder on container boot."""
+    if not _is_bridge_or_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        from wa_bridge_manager import restore_wa_session_from_db
+        restored = restore_wa_session_from_db()
+        return jsonify({"success": True, "restored": restored, "message": "WhatsApp session restored from DB" if restored else "No session found in DB"}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @api_v1.route("/whatsapp/session-clear", methods=["POST", "DELETE"])
 def api_whatsapp_session_clear():
-    """DB session clear: clean local multi-file auth."""
-    return jsonify({"success": True, "message": "Session clear acknowledged"}), 200
-
-
-@api_v1.route("/whatsapp/logout-reset", methods=["POST", "GET"])
-def api_whatsapp_logout_reset():
-    """Wipes ./baileys_auth folder, purges DB session store, requests fresh QR from Baileys bridge,
-    and returns fresh QR status.
-    """
-    import shutil
-    import requests
-    # 1. Clean local auth dir
+    """Clears the session from the DB when device is explicitly logged out."""
+    if not _is_bridge_or_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
     try:
-        from wa_bridge_manager import resolve_auth_dir
-        auth_dir = resolve_auth_dir()
-    except Exception:
-        auth_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "baileys_auth"))
-
-    if os.path.exists(auth_dir):
-        try:
-            for item in os.listdir(auth_dir):
-                item_path = os.path.join(auth_dir, item)
-                if os.path.isfile(item_path):
-                    try:
-                        os.unlink(item_path)
-                    except Exception:
-                        pass
-                elif os.path.isdir(item_path):
-                    shutil.rmtree(item_path, ignore_errors=True)
-        except Exception as e:
-            logger.warning(f"[Logout-Reset] Auth wipe notice: {e}")
-
-    # 2. Clear DB session store
-    try:
-        from database import db
-        from sqlalchemy import text
-        with db.engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS wa_session_store"))
-            conn.execute(text("DELETE FROM system_settings WHERE key LIKE '%BAILEYS%' OR key LIKE '%WA_SESSION%'"))
-            conn.commit()
+        from wa_bridge_manager import clear_wa_session_in_db
+        cleared = clear_wa_session_in_db()
+        return jsonify({"success": cleared, "message": "WhatsApp session cleared from DB"}), 200
     except Exception as e:
-        logger.debug(f"[Logout-Reset] DB purge notice: {e}")
-
-    # 3. Request fresh QR from Node bridge
-    bridge_reset_url = os.environ.get("BAILEYS_BRIDGE_REFRESH_URL", "http://127.0.0.1:3001/refresh-qr")
-    try:
-        requests.post(bridge_reset_url, timeout=4.0)
-    except Exception as e:
-        logger.warning(f"[Logout-Reset] Bridge refresh notice: {e}")
-
-    # 4. Ensure bridge process is running
-    try:
-        from wa_bridge_manager import ensure_wa_bridge_running
-        ensure_wa_bridge_running(timeout_seconds=3.0)
-    except Exception:
-        pass
-
-    return jsonify({
-        "success": True,
-        "status": "reset",
-        "message": "WhatsApp session cleanly reset. Fresh QR generated."
-    }), 200
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 
