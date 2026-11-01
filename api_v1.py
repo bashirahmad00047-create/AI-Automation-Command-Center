@@ -2738,19 +2738,29 @@ def api_whatsapp_bridge_qr():
 @api_v1.route("/whatsapp/bridge-qr-refresh", methods=["POST", "GET"])
 @api_v1.route("/whatsapp/qr/refresh", methods=["POST", "GET"])
 def api_whatsapp_bridge_qr_refresh():
-    """Forces the Baileys bridge to close any stuck socket, reset un-paired credentials,
-    and generate a brand new fresh QR code immediately.
+    """Wipes any stuck or corrupted Baileys session on disk and in DB,
+    and forces the bridge to generate an authentic, fresh QR code immediately.
     """
     import requests
     try:
-        from wa_bridge_manager import ensure_wa_bridge_running
+        from wa_bridge_manager import clear_wa_session_in_db, resolve_auth_dir, ensure_wa_bridge_running
+        clear_wa_session_in_db()
+        auth_dir = resolve_auth_dir()
+        if os.path.exists(auth_dir):
+            for fname in os.listdir(auth_dir):
+                try:
+                    fpath = os.path.join(auth_dir, fname)
+                    if os.path.isfile(fpath):
+                        os.unlink(fpath)
+                except Exception:
+                    pass
         ensure_wa_bridge_running(timeout_seconds=3.0)
-    except Exception:
-        pass
+    except Exception as _clear_err:
+        logger.debug(f"Bridge session wipe notice: {_clear_err}")
 
     refresh_url = os.environ.get("BAILEYS_BRIDGE_REFRESH_URL", "http://127.0.0.1:3001/refresh-qr")
     try:
-        resp = requests.post(refresh_url, timeout=4.0)
+        resp = requests.post(refresh_url, timeout=6.0)
         data = resp.json() if resp.text else {"success": True, "status": "refreshing"}
         return jsonify(data), 200
     except Exception as e:
@@ -2806,32 +2816,11 @@ def api_whatsapp_conversations():
         # Fallback to any messages in the system across orgs to prevent 0 chats after restart
         messages = WhatsAppMessage.query.order_by(WhatsAppMessage.created_at.desc()).limit(200).all()
 
-    # If still empty, seed welcome onboarding conversation so user never sees empty broken UI
-    if not messages:
-        try:
-            from whatsapp_service import WhatsAppService
-            welcome_msg = WhatsAppService.record_message(
-                organization_id=org_id,
-                sender="923001234567",
-                recipient="system",
-                direction="inbound",
-                body="Assalam-o-Alaikum! BashFlow Cloud demo test. Order tracking aur product catalog pricing batayein.",
-                status="received",
-                message_type="text",
-                raw_payload={"sender_name": "Demo Customer (Karachi)"}
-            )
-            reply_msg = WhatsAppService.record_message(
-                organization_id=org_id,
-                sender="system",
-                recipient="923001234567",
-                direction="outbound",
-                body="Walaikum Assalam! BashFlow Cloud mein khush aamdeed. Hamara AI auto-responder aur live radar delivery map active hai.",
-                status="sent",
-                message_type="text"
-            )
-            messages = [reply_msg, welcome_msg]
-        except Exception as _seed_err:
-            pass
+    # Strictly real conversations from Baileys WhatsApp (filter out any lingering demo seeds)
+    messages = [
+        m for m in (messages or [])
+        if m.sender != "923001234567" and m.recipient != "923001234567" and "Demo Customer" not in str(m.body or "")
+    ]
 
     msg_dicts = [m.to_dict() for m in messages]
 
@@ -3255,49 +3244,33 @@ def _is_bridge_or_authenticated():
 
 @api_v1.route("/whatsapp/session-backup", methods=["POST", "GET"])
 def api_whatsapp_session_backup():
-    """Triggers an immediate database backup of Baileys auth files to Supabase / PostgreSQL."""
+    """Triggers an immediate database backup of complete Baileys auth bundle (creds + all pre-keys)."""
     if not _is_bridge_or_authenticated():
         return jsonify({"error": "Unauthorized"}), 401
     try:
-        import json as _json
         from wa_bridge_manager import backup_wa_session_to_db
         success = backup_wa_session_to_db()
-        data = request.get_json(silent=True) or {}
-        creds_json = data.get("creds")
-        if creds_json:
-            try:
-                from models import SystemSetting
-                SystemSetting.set_val("BAILEYS_CREDS_BACKUP", _json.dumps(creds_json) if isinstance(creds_json, dict) else str(creds_json))
-                success = True
-            except Exception as _ss_err:
-                logger.debug(f"SystemSetting creds backup notice: {_ss_err}")
-        return jsonify({"success": success, "message": "WhatsApp session backed up to DB" if success else "No credentials to backup"}), 200
+        return jsonify({
+            "success": success,
+            "message": "Complete Baileys auth bundle (creds + pre-keys) backed up to DB" if success else "No credentials to backup"
+        }), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @api_v1.route("/whatsapp/session-restore", methods=["POST", "GET"])
 def api_whatsapp_session_restore():
-    """Restores Baileys session files from DB into the auth folder on container boot."""
+    """Restores complete Baileys session bundle (creds + pre-keys) from DB into auth dir."""
     if not _is_bridge_or_authenticated():
         return jsonify({"error": "Unauthorized"}), 401
     try:
         from wa_bridge_manager import restore_wa_session_from_db
         restored = restore_wa_session_from_db()
-        if not restored:
-            try:
-                from models import SystemSetting
-                raw_s = SystemSetting.get_val("BAILEYS_CREDS_BACKUP")
-                if raw_s:
-                    from wa_bridge_manager import resolve_auth_dir
-                    auth_dir = resolve_auth_dir()
-                    os.makedirs(auth_dir, exist_ok=True)
-                    with open(os.path.join(auth_dir, "creds.json"), "w", encoding="utf-8") as f:
-                        f.write(raw_s)
-                    restored = True
-            except Exception as _ss_res_err:
-                logger.debug(f"SystemSetting restore error: {_ss_res_err}")
-        return jsonify({"success": True, "restored": restored, "message": "WhatsApp session restored from DB" if restored else "No session found in DB"}), 200
+        return jsonify({
+            "success": True,
+            "restored": restored,
+            "message": "Complete WhatsApp session bundle (creds + pre-keys) restored from DB" if restored else "No session found in DB"
+        }), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

@@ -5906,12 +5906,25 @@ function resetPairingPhoneInput() {
 }
 window.resetPairingPhoneInput = resetPairingPhoneInput;
 
-function openLinkWhatsAppQrModal() {
-    if (window._waIsConnected) {
-        if (typeof showNotification === 'function') {
-            showNotification('WhatsApp is already connected and active permanently!', 'success');
-        }
+async function forceResetWhatsAppSession() {
+    window._waIsConnected = false;
+    window._waDemoMode = false;
+    if (typeof showToast === 'function') {
+        showToast('Purging desynced session & requesting fresh QR...', 'info');
     }
+    try {
+        await fetch('/api/whatsapp/qr/refresh', { method: 'POST' });
+    } catch (err) {
+        console.warn('Failed to refresh QR:', err);
+    }
+    openLinkWhatsAppQrModal();
+    if (typeof fetchBridgeQrCode === 'function') {
+        fetchBridgeQrCode();
+    }
+}
+window.forceResetWhatsAppSession = forceResetWhatsAppSession;
+
+function openLinkWhatsAppQrModal() {
     const modal = document.getElementById('linkWhatsAppQrModal');
     if (!modal) {
         console.warn('linkWhatsAppQrModal element not found');
@@ -5968,6 +5981,14 @@ document.addEventListener('DOMContentLoaded', () => {
         qrModal.addEventListener('click', (e) => {
             if (e.target === qrModal) {
                 closeLinkWhatsAppQrModal();
+            }
+        });
+    }
+    const radarModal = document.getElementById('liveRadarTrackingModal');
+    if (radarModal) {
+        radarModal.addEventListener('click', (e) => {
+            if (e.target === radarModal) {
+                closeRadarMapModal();
             }
         });
     }
@@ -7730,7 +7751,7 @@ async function loadWhatsAppDashboard() {
         }
 
         // Update connection state tracking and toggle UI view
-        const isConnected = Boolean(window._waDemoMode || (isConfigured && (activeProvider === 'baileys_bridge' ? bridgeIsLive : (activeProvider === 'green_api' || activeProvider === 'meta'))));
+        const isConnected = Boolean(isConfigured && (activeProvider === 'baileys_bridge' ? bridgeIsLive : (activeProvider === 'green_api' || activeProvider === 'meta')));
         window._waIsConfigured = isConfigured;
         window._waActiveProvider = activeProvider;
         window._waIsConnected = isConnected;
@@ -12242,12 +12263,30 @@ function refreshLeafletRadarMap() {
 // ============================================================================
 // LIVE DELIVERY RADAR TRACKING & WHATSAPP CONNECTION STATUS CONTROLLER
 // ============================================================================
-function trackActiveDelivery() {
-    initLeafletRadarMap();
-    const mapSection = document.getElementById('liveRadarMapSection');
-    if (mapSection) {
-        mapSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+function openRadarMapModal() {
+    const modal = document.getElementById('liveRadarTrackingModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        initLeafletRadarMap();
+        setTimeout(() => {
+            if (leafletRadarMap) {
+                try { leafletRadarMap.invalidateSize(); } catch (_) {}
+            }
+        }, 200);
     }
+}
+window.openRadarMapModal = openRadarMapModal;
+
+function closeRadarMapModal() {
+    const modal = document.getElementById('liveRadarTrackingModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+window.closeRadarMapModal = closeRadarMapModal;
+
+function trackActiveDelivery() {
+    openRadarMapModal();
     if (leafletRadarMap) {
         try { leafletRadarMap.invalidateSize(); } catch (_) {}
     }
@@ -12726,8 +12765,7 @@ function submitSetOrderLocation() {
     addRadarMapPin(lat, lng, label, phone, null, 'On the Way');
     closeSetOrderLocationModal();
 
-    const mapSection = document.getElementById('liveRadarMapSection');
-    if (mapSection) mapSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    openRadarMapModal();
     showToast(`📍 Live moving pin set for ${label} at [${lat.toFixed(4)}, ${lng.toFixed(4)}]!`, 'success');
 }
 window.submitSetOrderLocation = submitSetOrderLocation;

@@ -148,29 +148,49 @@ function triggerSessionBackup() {
   sessionBackupDebounce = setTimeout(async () => {
     sessionBackupDebounce = null;
     try {
-      let credsContent = null;
-      try {
-        const credPath = path.join(AUTH_DIR, 'creds.json');
-        if (fs.existsSync(credPath)) {
-          credsContent = JSON.parse(fs.readFileSync(credPath, 'utf8'));
-        }
-      } catch (_) {}
-
       const backupUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-backup`;
       const res = await fetch(backupUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Internal-Bridge': '1' },
-        body: JSON.stringify({ creds: credsContent }),
-        signal: AbortSignal.timeout(6000)
+        body: JSON.stringify({ action: 'backup_full_bundle' }),
+        signal: AbortSignal.timeout(8000)
       });
       const data = await res.json().catch(() => null);
       if (data && data.success) {
-        console.log('[WhatsApp Bridge] Session credentials permanently saved to Database!');
+        console.log('[WhatsApp Bridge] Complete multi-file auth bundle (creds + pre-keys) permanently saved to Database!');
       }
     } catch (e) {
       console.warn('[WhatsApp Bridge] Session backup notice:', e.message);
     }
   }, 1500);
+}
+
+let isResettingCorruptedSession = false;
+function handleCorruptedSessionReset(reason = 'Bad MAC decryption error') {
+  if (isResettingCorruptedSession) return;
+  isResettingCorruptedSession = true;
+  console.warn(`[WhatsApp Bridge] Signal Protocol session reset triggered (${reason}). Auto-purging corrupted session & issuing fresh QR...`);
+  try {
+    destroyOldSocket();
+    if (fs.existsSync(AUTH_DIR)) {
+      const files = fs.readdirSync(AUTH_DIR);
+      for (const file of files) {
+        try { fs.unlinkSync(path.join(AUTH_DIR, file)); } catch (_) {}
+      }
+    }
+  } catch (e) {
+    console.error('[WhatsApp Bridge] Error wiping auth folder on corruption reset:', e.message);
+  }
+  triggerSessionClear();
+  isConnected = false;
+  currentQr = null;
+  currentQrUrl = null;
+  currentQrSvg = null;
+  isStarting = false;
+  setTimeout(() => {
+    isResettingCorruptedSession = false;
+    startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Socket auto-restart error:', e.message));
+  }, 1200);
 }
 
 function triggerSessionClear() {
@@ -261,12 +281,20 @@ async function acquireAntiSpamDispatchSlot() {
   }
 }
 
-// Process-wide guard against unhandled network crashes
+// Process-wide guard against unhandled network crashes with auto-reset on Bad MAC
 process.on('uncaughtException', (err) => {
   console.error('[WhatsApp Bridge] Uncaught Exception (guarded):', err);
+  const errMsg = (err?.message || String(err)).toLowerCase();
+  if (errMsg.includes('bad mac') || errMsg.includes('decrypt') || errMsg.includes('pre-key')) {
+    handleCorruptedSessionReset(err?.message || 'Bad MAC');
+  }
 });
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[WhatsApp Bridge] Unhandled Rejection (guarded):', reason);
+  const reasonMsg = (reason?.message || String(reason)).toLowerCase();
+  if (reasonMsg.includes('bad mac') || reasonMsg.includes('decrypt') || reasonMsg.includes('pre-key')) {
+    handleCorruptedSessionReset(reason?.message || 'Bad MAC');
+  }
 });
 
 /**
@@ -946,7 +974,7 @@ function enqueueContactTask(targetJid, taskFn) {
 
 sock.ev.on('messages.upsert', async ({ messages, type }) => {
       try {
-        if (type !== 'notify' || !messages || !Array.isArray(messages)) return;
+        if (!messages || !Array.isArray(messages) || (type !== 'notify' && type !== 'append')) return;
 
         for (const msg of messages) {
           const ownPhone = sock?.user?.id ? cleanPhoneNumber(sock.user.id.split(':')[0]) : '';
@@ -1710,38 +1738,14 @@ app.get('/qr.svg', async (req, res) => {
  * Force Refresh QR code endpoint
  * Resets socket, clears pending un-paired creds and immediately generates a fresh QR code.
  */
-app.all(['/refresh-qr', '/qr-refresh', '/restart-socket'], async (req, res) => {
-  console.log('[WhatsApp Bridge] Fresh QR generation requested via /refresh-qr endpoint.');
+app.all(['/refresh-qr', '/qr-refresh', '/restart-socket', '/api/refresh-qr'], async (req, res) => {
+  console.log('[WhatsApp Bridge] User requested complete session wipe & fresh authentic QR code.');
   try {
-    isConnected = false;
-    currentQr = null;
-    currentQrUrl = null;
-    currentQrSvg = null;
-    destroyOldSocket();
-
-    // If device is not already connected, clean pending credentials to guarantee a fresh pairing QR
-    if (!sock?.user) {
-      try {
-        if (fs.existsSync(AUTH_DIR)) {
-          const files = fs.readdirSync(AUTH_DIR);
-          for (const file of files) {
-            try {
-              fs.unlinkSync(path.join(AUTH_DIR, file));
-            } catch (_) {}
-          }
-        }
-      } catch (_) {}
-    }
-
-    isStarting = false;
-    setTimeout(() => {
-      startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Socket restart error:', e.message));
-    }, 200);
-
+    handleCorruptedSessionReset('User clicked QR Re-Link / Sync');
     return res.status(200).json({
       success: true,
       status: 'refreshing',
-      message: 'Generating fresh QR code...'
+      message: 'Old session wiped. Generating fresh authentic QR code...'
     });
   } catch (refreshErr) {
     console.error('[WhatsApp Bridge] Error during /refresh-qr:', refreshErr.message);
