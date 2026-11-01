@@ -1566,51 +1566,76 @@ class WhatsAppService:
     _force_test_edge_tts: bool = False
 
     @classmethod
-    @classmethod
     def roman_to_urdu_script(cls, text: str) -> str:
-        """Converts Roman Urdu text into authentic pure Urdu script (اردو رسم الخط).
+        """Converts Roman Urdu and Pakistani English text into authentic pure Urdu script (اردو رسم الخط).
         Guarantees that Edge-TTS (ur-PK-UzmaNeural / ur-PK-AsadNeural) delivers 100% natural,
-        sweet, and human-like Pakistani speech cadence without awkward English phonetic accents.
+        sweet, and human-like Pakistani speech cadence with natural breathing pauses (Urdu commas ،).
+        All English commercial terms are transliterated into pure Urdu Nastaliq haroof.
         """
         if not text or not str(text).strip():
             return ""
         import re
         t = str(text).strip()
 
-        # If already predominantly Urdu / Arabic script, preserve directly
+        # If already predominantly Urdu / Arabic script, normalize commas and return
         arabic_chars = sum(1 for ch in t if '\u0600' <= ch <= '\u06FF')
         if arabic_chars > len(t) * 0.4:
+            t = re.sub(r'[,]', '،', t)
+            t = re.sub(r'[،\s]{2,}', '، ', t)
             return t
 
         # Clean emojis and markdown artifacts
         t = re.sub(r'[*_~`#>•\-\[\]\(\)]', ' ', t)
         t = re.sub(r'[\U00010000-\U0010ffff]', '', t)
+        t = re.sub(r'[,]', '،', t)
 
-        # Multi-word conversational phrase substitutions
+        # Multi-word conversational phrase substitutions with natural Urdu pauses (،)
         phrases = [
-            (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|as-salamu alaykum|slam)\b", "السلام علیکم"),
-            (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*|wa alaykum as-salam)\b", "وعلیکم السلام"),
-            (r"(?i)\b(jee\s*bilkul|ji\s*bilkul|ji\s*haan|jee\s*haan)\b", "جی بالکل"),
-            (r"(?i)\b(bohot\s*shukriya|boht\s*shukriya|shukriya|thank\s*you|thanks)\b", "بہت شکریہ"),
-            (r"(?i)\b(acha\s*dekhein|achha\s*dekhein|dekhein)\b", "اچھا دیکھیں"),
-            (r"(?i)\b(kya\s*haal\s*hai|kaise\s*hain|kaisi\s*hain|kese\s*hain)\b", "کیسے ہیں"),
-            (r"(?i)\b(main\s*theek\s*hoon|mai\s*theek\s*hu|theek\s*hoon)\b", "میں ٹھیک ہوں"),
-            (r"(?i)\b(aap\s*sunayein|ap\s*sunayein|aap\s*sunao)\b", "آپ سنائیں"),
+            (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|as-salamu alaykum|slam)\b[,\،]?", "السلام علیکم، "),
+            (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*|wa alaykum as-salam)\b[,\،]?", "وعلیکم السلام، "),
+            (r"(?i)\b(jee\s*bilkul|ji\s*bilkul|ji\s*haan|jee\s*haan)\b[,\،]?", "جی بالکل، "),
+            (r"(?i)\b(bohot\s*shukriya|boht\s*shukriya|shukriya|thank\s*you|thanks)\b[,\،]?", "بہت شکریہ، "),
+            (r"(?i)\b(khush\s*aamdeed|welcome|you'?re\s*welcome)\b[,\،]?", "خوش آمدید، "),
+            (r"(?i)\b(acha\s*dekhein|achha\s*dekhein|dekhein)\b[,\،]?", "اچھا دیکھیں، "),
+            (r"(?i)\b(kya\s*haal\s*hai|kaise\s*hain|kaisi\s*hain|kese\s*hain)\b[,\،]?", "کیسے ہیں؟ "),
+            (r"(?i)\b(main\s*theek\s*hoon|mai\s*theek\s*hu|theek\s*hoon)\b[,\،]?", "میں ٹھیک ہوں، "),
+            (r"(?i)\b(aap\s*sunayein|ap\s*sunayein|aap\s*sunao)\b[,\،]?", "آپ سنائیں، "),
             (r"(?i)\b(kya\s*madad\s*kar\s*sakta\s*hoon|madad\s*kar\s*sakta\s*hoon)\b", "کیا مدد کر سکتا ہوں"),
-            (r"(?i)\b(befikar\s*rahein|tension\s*na\s*lein|pareshan\s*na\s*hon)\b", "بے فکر رہیں"),
-            (r"(?i)\b(in\s*sha\s*allah|inshallah)\b", "انشاءاللہ"),
-            (r"(?i)\b(alhamdulillah|al-hamdu\s*lillah)\b", "الحمدللہ"),
-            (r"(?i)\b(jazakallah|jazak\s*allah)\b", "جزاک اللہ"),
+            (r"(?i)\b(befikar\s*rahein|tension\s*na\s*lein|pareshan\s*na\s*hon)\b[,\،]?", "آپ بے فکر رہیں، "),
+            (r"(?i)\b(in\s*sha\s*allah|inshallah)\b[,\،]?", "انشاءاللہ، "),
+            (r"(?i)\b(alhamdulillah|al-hamdu\s*lillah)\b[,\،]?", "الحمدللہ، "),
+            (r"(?i)\b(jazakallah|jazak\s*allah)\b[,\،]?", "جزاک اللہ، "),
+            (r"(?i)\b(online\s*shop|online\s*shopping)\b", "آن لائن شاپ"),
+            (r"(?i)\b(online\s*store)\b", "آن لائن اسٹور"),
             (r"(?i)\b(order\s*tracking|track\s*order|track\s*delivery)\b", "آرڈر ٹریکنگ"),
             (r"(?i)\b(live\s*tracking|live\s*location)\b", "لائیو ٹریکنگ"),
             (r"(?i)\b(pin\s*location|maps?\s*location)\b", "لوکیشن لنک"),
             (r"(?i)\b(customer\s*support|support\s*team)\b", "کسٹمر سپورٹ"),
-            (r"(?i)\b(online\s*store|online\s*shop)\b", "آن لائن اسٹور"),
+            (r"(?i)\b(sales\s*assistant|sales\s*rep)\b", "سیلز اسسٹنٹ"),
+            (r"(?i)\b(star\s*mobile)\b", "اسٹار موبائل"),
+            (r"(?i)\b(urban\s*trendz)\b", "اربن ٹرینڈز"),
+            (r"(?i)\b(al-bake|al\s*bake)\b", "ال بیک"),
+            (r"(?i)\b(al-shifa|al\s*shifa)\b", "الشفاء"),
+            (r"(?i)\b(apex\s*prime)\b", "ایپکس پرائم"),
             (r"(?i)\b(cash\s*on\s*delivery|cod)\b", "کیش آن ڈیلیوری"),
+            (r"(?i)\b(fast\s*delivery)\b", "فاسٹ ڈیلیوری"),
             (r"(?i)\b(jazzcash|jazz\s*cash)\b", "جاز کیش"),
             (r"(?i)\b(easypaisa|easy\s*paisa)\b", "ایزی پیسہ"),
             (r"(?i)\b(voice\s*note|voice\s*message)\b", "وائس نوٹ"),
             (r"(?i)\b(bashflow\s*cloud|bashflow\s*ai|bashflow)\b", "بیش فلو کلاؤڈ"),
+            (r"(?i)\b(pta\s*approved)\b", "پی ٹی اے اپرووڈ"),
+            (r"(?i)\b(brand\s*warranty)\b", "برانڈ وارنٹی"),
+            (r"(?i)\b(iphone\s*16\s*pro\s*max)\b", "آئی فون 16 پرو میکس"),
+            (r"(?i)\b(iphone\s*15\s*pro\s*max)\b", "آئی فون 15 پرو میکس"),
+            (r"(?i)\b(samsung\s*s24\s*ultra|s24\s*ultra)\b", "سام سنگ ایس 24 الٹرا"),
+            (r"(?i)\b(redmi\s*note\s*13\s*pro|redmi\s*note\s*13)\b", "ریڈمی نوٹ 13 پرو"),
+            (r"(?i)\b(airpods\s*pro\s*2|airpods)\b", "ایئر پوڈز پرو 2"),
+            (r"(?i)\b(fast\s*charger|gan\s*charger)\b", "فاسٹ چارجر"),
+            (r"(?i)\b(chicken\s*dum\s*biryani|chicken\s*biryani)\b", "چکن دم بریانی"),
+            (r"(?i)\b(shinwari\s*karahi|mutton\s*karahi)\b", "شینواری کڑاہی"),
+            (r"(?i)\b(smash\s*burger|beef\s*burger)\b", "اسمیش برگر"),
+            (r"(?i)\b(zinger\s*burger|crispy\s*zinger)\b", "کرسپی زنگر برگر"),
+            (r"(?i)\b(mint\s*margarita)\b", "منٹ مارگریٹا"),
         ]
         for pat, rep in phrases:
             t = re.sub(pat, rep, t)
@@ -1636,23 +1661,30 @@ class WhatsAppService:
             "bhai": "بھائی", "dost": "دوست", "yar": "یار", "sahab": "صاحب", "janab": "جناب",
             "bohot": "بہت", "boht": "بہت", "bahut": "بہت", "zyada": "زیادہ", "kam": "کم",
             "koi": "کوئی", "kuch": "کچھ", "sab": "سب", "tamam": "تمام",
-            "masla": "مسئلہ", "sawal": "سوال", "jawab": "جواب", "baat": "بات", "kam": "کام",
-            "order": "آرڈر", "price": "قیمت", "rate": "ریٹ", "rates": "ریٹس",
+            "masla": "مسئلہ", "sawal": "سوال", "jawab": "جواب", "baat": "بات",
+            "order": "آرڈر", "orders": "آرڈرز", "price": "پرائس", "prices": "پرائسز", "rate": "ریٹ", "rates": "ریٹس",
             "tracking": "ٹریکنگ", "track": "ٹریک", "service": "سروس", "services": "سروسز",
             "rider": "رائیڈر", "address": "ایڈریس", "location": "لوکیشن", "support": "سپورٹ",
-            "customer": "کسٹمر", "online": "آن لائن", "urgent": "ارجنٹ", "status": "اسٹیٹس",
-            "item": "آئٹم", "items": "آئٹمز", "product": "پروڈکٹ", "products": "پروڈکٹس",
-            "catalog": "کیٹلاگ", "store": "اسٹور", "fast": "فاسٹ", "active": "ایکٹیو",
+            "customer": "کسٹمر", "customers": "کسٹمرز", "online": "آن لائن", "urgent": "ارجنٹ", "status": "اسٹیٹس",
+            "item": "آئٹم", "items": "آئٹمز", "product": "پروڈکٹ", "products": "پراڈکٹس",
+            "catalog": "کیٹلاگ", "store": "اسٹور", "shop": "شاپ", "fast": "فاسٹ", "active": "ایکٹیو",
             "system": "سسٹم", "software": "سافٹ ویئر", "message": "میسج", "messages": "میسجز",
-            "discount": "ڈسکاؤنٹ", "confirm": "کنفرم", "delivery": "ڈیلیوری", "stock": "اسٹاک",
+            "discount": "ڈسکاؤنٹ", "confirm": "کنفرم", "delivery": "ڈیلیوری", "deliver": "ڈیلیور", "stock": "اسٹاک",
             "package": "پیکج", "packages": "پیکجز", "plan": "پلان", "plans": "پلانز",
-            "chahiye": "چاہیے", "chahye": "چاہیے",
+            "chahiye": "چاہیے", "chahye": "چاہیے", "available": "دستیاب", "check": "چیک",
             "shukriya": "شکریہ", "meherbani": "مہربانی", "zaroor": "ضرور", "zaroori": "ضروری",
             "ab": "اب", "abhi": "ابھی", "pehle": "پہلے", "baad": "بعد",
             "din": "دن", "raat": "رات", "waqt": "وقت", "aaj": "آج", "kal": "کل",
             "ek": "ایک", "aik": "ایک", "do": "دو", "teen": "تین", "chaar": "چار", "paanch": "پانچ",
-            "rupay": "روپے", "rupee": "روپیہ", "rupees": "روپے", "hazar": "ہزار", "lakh": "لاکھ",
-            "phone": "فون", "number": "نمبر", "call": "کال", "link": "لنک", "code": "کوڈ"
+            "rupay": "روپے", "rupee": "روپیہ", "rupees": "روپے", "rs": "روپے", "pkr": "روپے",
+            "hazar": "ہزار", "lakh": "لاکھ", "crore": "کروڑ",
+            "phone": "فون", "number": "نمبر", "call": "کال", "link": "لنک", "code": "کوڈ",
+            "iphone": "آئی فون", "samsung": "سام سنگ", "xiaomi": "شاومی", "redmi": "ریڈمی", "charger": "چارجر", "airpods": "ایئر پوڈز",
+            "burger": "برگر", "biryani": "بریانی", "karahi": "کڑاہی", "shinwari": "شینواری", "margarita": "مارگریٹا",
+            "jeans": "جینز", "shirt": "شرٹ", "tee": "ٹی شرٹ", "sneakers": "اسنیکرز", "watch": "گھڑی",
+            "plot": "پلاٹ", "villa": "ولا", "farmhouse": "فارم ہاؤس", "commercial": "کمرشل", "office": "آفس",
+            "clinic": "کلینک", "doctor": "ڈاکٹر", "appointment": "اپوائنٹمنٹ", "ultrasound": "الٹرا ساؤنڈ", "test": "ٹیسٹ",
+            "with": "ساتھ", "paas": "پاس", "pass": "پاس"
         }
 
         tokens = re.split(r'(\s+|[،,.\!؟?]+)', t)
@@ -1661,15 +1693,19 @@ class WhatsAppService:
             clean_tok = tok.lower().strip()
             if clean_tok in words_map:
                 out_tokens.append(words_map[clean_tok])
+            elif tok == ',':
+                out_tokens.append('،')
             else:
                 out_tokens.append(tok)
 
         res = "".join(out_tokens)
-        # Remove artificial pauses and word chunking commas for fluent single-breath Pakistani Urdu flow
-        res = re.sub(r"[\.]{2,}|\u2026|[-]{2,}", " ", res)
-        res = re.sub(r"[,\،]{2,}", "،", res)
-        res = re.sub(r"\s+([,\،\.\!\؟])", r"\1", res)
-        res = re.sub(r"\s+", " ", res).strip()
+        # Convert all English commas to Urdu commas (،) and clean multiple pauses
+        res = re.sub(r'[,]', '،', res)
+        res = re.sub(r'[\.]{2,}|\u2026|[-]{2,}', ' ', res)
+        res = re.sub(r'[،\s]{2,}', '، ', res)
+        res = re.sub(r'،\s*([!؟\.])', r'\1', res)
+        res = re.sub(r'\s+([،\.\!\؟])', r'\1', res)
+        res = re.sub(r'\s+', ' ', res).strip()
         return res
 
     @classmethod
@@ -1819,9 +1855,10 @@ class WhatsAppService:
                 speech_for_tts = clean_speech
 
             if is_urdu:
-                # 100% Smooth Single-Breath Cadence: Strip intra-sentence commas and pause markers that cause Edge-TTS to hesitate
+                # 100% Natural Pakistani Human Prosody: Retain Urdu commas (،) for single-breath cadence, strip dashes & ellipses
                 speech_for_tts = re.sub(r'[\.]{2,}|\u2026|[-]{2,}', ' ', speech_for_tts)
-                speech_for_tts = re.sub(r'[,\،]', ' ', speech_for_tts)
+                speech_for_tts = re.sub(r',', '،', speech_for_tts)
+                speech_for_tts = re.sub(r'[،\s]{2,}', '، ', speech_for_tts)
                 speech_for_tts = re.sub(r'\s+', ' ', speech_for_tts).strip()
 
             async def _run():
