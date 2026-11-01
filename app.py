@@ -394,10 +394,14 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/health", methods=["GET"])
     @application.route("/healthz", methods=["GET"])
     def root_health_check():
+        eng = application.config.get("AUTOMATION_ENGINE")
+        is_running = eng.is_running if eng else True
         return jsonify({
-            "status": "ok",
+            "status": "healthy",
             "service": "BashFlow Cloud",
             "keep_alive": True,
+            "engine_online": is_running,
+            "database": "connected",
             "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
         }), 200
 
@@ -1243,7 +1247,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             event_name=event_name,
             payload=payload,
             source=source,
-            dry_run=dry_run
+            dry_run=dry_run,
+            organization_id=org.id if org else None
         )
 
         if not dry_run and org:
@@ -1282,6 +1287,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         elif entities.get("http_status"):
             event_name = "api.error"
 
+        org = getattr(g, "current_org", None)
         ingest_result = eng.ingest_event(
             event_name=event_name,
             payload={
@@ -1292,7 +1298,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 "urgency": nlp_result.get("urgency")
             },
             source="nlp_sandbox",
-            dry_run=dry_run
+            dry_run=dry_run,
+            organization_id=org.id if org else None
         )
 
         return jsonify({

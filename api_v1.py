@@ -7447,6 +7447,16 @@ def api_business_template_save():
         }
     )
 
+    # Pillar 1 & 3 Interconnection: Update AI auto-responder prompt and voice greeting
+    try:
+        WhatsAppService.save_auto_responder_config(
+            organization_id=org_id,
+            system_prompt=combined_instructions,
+            fallback_greeting=greeting
+        )
+    except Exception as _ar_err:
+        logger.debug(f"Auto-responder prompt sync notice: {_ar_err}")
+
     return jsonify({
         "success": True,
         "message": f"Business Template applied successfully for '{b_name}'!",

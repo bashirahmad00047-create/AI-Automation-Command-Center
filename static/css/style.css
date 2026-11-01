@@ -7355,3 +7355,402 @@ html.dark .dark\:hover\:bg-slate-800:hover, .dark .dark\:hover\:bg-slate-800:hov
     border-radius: 2px;
     transform-origin: bottom;
 }
+
+/* ==========================================================================
+   BASHFLOW CLOUD: WORLD-CLASS ENTERPRISE SAAS UI/UX & 5-MODULE INTERCONNECTIONS
+   ========================================================================== */
+
+/* 1. INTERCOM-STYLE REAL-TIME CUSTOMER & CRM DOSSIER (3RD COLUMN) */
+.wa-customer-dossier {
+    width: 320px;
+    min-width: 280px;
+    max-width: 380px;
+    display: flex;
+    flex-direction: column;
+    background-color: #111b21;
+    border-left: 1px solid #222d34;
+    flex-shrink: 0;
+    transition: width 0.25s ease, opacity 0.25s ease, padding 0.25s ease;
+    overflow-y: auto;
+    position: relative;
+    z-index: 5;
+}
+
+.wa-customer-dossier.collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    border-left: none !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+.wa-dossier-header {
+    height: 60px;
+    background-color: #202c33;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #222d34;
+    flex-shrink: 0;
+}
+
+.wa-dossier-body {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.wa-dossier-card {
+    background: #182229;
+    border: 1px solid #2a3942;
+    border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+}
+
+/* 2. LINEAR-STYLE 5-MODULE PULSE COMMAND STRIP (EXECUTIVE OVERVIEW) */
+.module-pulse-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.module-pulse-card {
+    background: #111b21;
+    border: 1px solid #202c33;
+    border-radius: 10px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.module-pulse-card:hover {
+    border-color: #00a884;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 168, 132, 0.18);
+}
+
+.module-pulse-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 3.5px;
+    height: 100%;
+    background: #00a884;
+    opacity: 0.8;
+}
+
+.module-pulse-card.cyan::before { background: #00f0ff; }
+.module-pulse-card.emerald::before { background: #10b981; }
+.module-pulse-card.purple::before { background: #8b5cf6; }
+.module-pulse-card.amber::before { background: #f59e0b; }
+.module-pulse-card.blue::before { background: #3b82f6; }
+
+.module-pulse-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    background: rgba(255, 255, 255, 0.05);
+    flex-shrink: 0;
+}
+
+.module-pulse-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.module-pulse-meta .title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #8696a0;
+    letter-spacing: 0.5px;
+}
+
+.module-pulse-meta .value {
+    font-size: 15px;
+    font-weight: 700;
+    color: #e9edef;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.module-pulse-meta .sub {
+    font-size: 10.5px;
+    color: #00a884;
+    margin-top: 1px;
+}
+
+/* 3. UNIFIED CROSS-MODULE ACTIVITY STREAM (DASHBOARD) */
+.interconnect-stream-panel {
+    background: #111b21;
+    border: 1px solid #202c33;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+}
+
+.interconnect-stream-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+    border-bottom: 1px solid #202c33;
+    padding-bottom: 10px;
+}
+
+.interconnect-stream-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+    cursor: pointer;
+}
+
+.interconnect-stream-item:hover {
+    background: #182229;
+    border-color: #2a3942;
+}
+
+.interconnect-badge {
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+.interconnect-badge.whatsapp { background: rgba(0, 168, 132, 0.2); color: #25d366; border: 1px solid rgba(0,168,132,0.4); }
+.interconnect-badge.leads { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16,185,129,0.4); }
+.interconnect-badge.products { background: rgba(139, 92, 246, 0.2); color: #a78bfa; border: 1px solid rgba(139,92,246,0.4); }
+.interconnect-badge.rules { background: rgba(0, 240, 255, 0.2); color: #38bdf8; border: 1px solid rgba(0,240,255,0.4); }
+.interconnect-badge.campaigns { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245,158,11,0.4); }
+
+/* Quick Interconnection Drawer & Modal Grids */
+.interconnect-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+    max-height: 420px;
+    overflow-y: auto;
+    padding: 4px;
+}
+
+.interconnect-picker-card {
+    background: #182229;
+    border: 1px solid #2a3942;
+    border-radius: 8px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.interconnect-picker-card:hover {
+    border-color: #00a884;
+    background: #202c33;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+}
+
+@media (max-width: 1024px) {
+    .wa-customer-dossier {
+        position: absolute;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        z-index: 30;
+        box-shadow: -10px 0 30px rgba(0,0,0,0.5);
+    }
+}
+
+/* ==========================================================================
+   ENTERPRISE UI/UX POLISH: WHATSAPP CLOUD HEADER & WAVEFORM AUDIO
+   ========================================================================== */
+.wa-chat-header {
+    min-height: 64px !important;
+    height: auto !important;
+    background: rgba(32, 44, 51, 0.92) !important;
+    backdrop-filter: blur(14px) !important;
+    -webkit-backdrop-filter: blur(14px) !important;
+    padding: 10px 18px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-wrap: wrap !important;
+    gap: 10px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    z-index: 2;
+}
+
+.wa-sidebar-header {
+    min-height: 64px !important;
+    height: auto !important;
+    background: rgba(32, 44, 51, 0.92) !important;
+    backdrop-filter: blur(14px) !important;
+    -webkit-backdrop-filter: blur(14px) !important;
+    padding: 10px 16px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.wa-header-actions-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+}
+
+.wa-header-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    background: rgba(32, 44, 51, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #e9edef;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    white-space: nowrap;
+    text-decoration: none;
+    user-select: none;
+}
+
+.wa-header-btn:hover {
+    background: rgba(0, 168, 132, 0.2);
+    border-color: rgba(0, 168, 132, 0.5);
+    color: #00a884;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+.wa-header-btn.primary {
+    background: rgba(0, 168, 132, 0.2);
+    border-color: rgba(0, 168, 132, 0.45);
+    color: #25d366;
+}
+
+.wa-header-btn.primary:hover {
+    background: #00a884;
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(0, 168, 132, 0.4);
+}
+
+/* AI Engine Provider Badges */
+.wa-ai-badge.groq {
+    background: rgba(249, 115, 22, 0.18) !important;
+    color: #fb923c !important;
+    border: 1px solid rgba(249, 115, 22, 0.45) !important;
+    box-shadow: 0 0 8px rgba(249, 115, 22, 0.2);
+}
+
+.wa-ai-badge.gemini {
+    background: rgba(59, 130, 246, 0.18) !important;
+    color: #60a5fa !important;
+    border: 1px solid rgba(59, 130, 246, 0.45) !important;
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.2);
+}
+
+/* WhatsApp Audio Waveform Visualizer */
+.wa-waveform-player {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(17, 27, 33, 0.75);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    padding: 8px 14px;
+    border-radius: 26px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    min-width: 250px;
+    max-width: 320px;
+}
+
+.wa-waveform-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #00a884;
+    border: none;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    flex-shrink: 0;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 2px 6px rgba(0, 168, 132, 0.35);
+}
+
+.wa-waveform-btn:hover {
+    transform: scale(1.08);
+    background: #06cf9c;
+}
+
+.wa-waveform-bars-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 2.5px;
+    height: 26px;
+    cursor: pointer;
+    padding: 2px 0;
+}
+
+.wa-waveform-bar {
+    flex: 1;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.26);
+    transition: background-color 0.12s ease, transform 0.15s ease;
+}
+
+.wa-waveform-bar.played {
+    background: #00a884;
+}
+
+.wa-waveform-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10.5px;
+    color: #8696a0;
+    font-family: var(--font-mono, monospace);
+    margin-top: 3px;
+}

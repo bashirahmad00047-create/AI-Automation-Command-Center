@@ -179,11 +179,10 @@ def require_auth(f: Callable) -> Callable:
         if not user:
             # Auto-refresh session for /api/* and /whatsapp/* polling routes from active dashboard
             is_polling = request.path.startswith(("/api/", "/whatsapp/", "/api/v1/"))
-            has_auth_indicator = bool(
+            has_auth_indicator = (not session.get("logged_out")) and bool(
                 session.get("user_id") or
                 session.get("is_super_admin") or
-                session.get("user_email") or
-                request.cookies.get("opsflow_session")
+                session.get("user_email")
             )
             if is_polling and has_auth_indicator:
                 session.permanent = True
