@@ -104,7 +104,7 @@ class WhatsAppService:
 
         thousands, n = divmod(n, 1000)
         if thousands > 0:
-            parts.append(cls.number_to_roman_urdu(thousands) + " hazar")
+            parts.append(cls.number_to_roman_urdu(thousands) + " hazaar")
 
         hundreds, n = divmod(n, 100)
         if hundreds > 0:
@@ -161,13 +161,15 @@ class WhatsAppService:
         lang_str = str(language or "").lower()
         use_urdu_script = is_arabic_script or lang_str in ("ur", "urdu")
 
+        # 1. Number commas: 2,060 -> 2060
+        t = re.sub(r'(\d+),(\d+)', r'\g<1>\g<2>', t)
         if use_urdu_script:
             # Urdu Script Flow (or tests explicitly requesting language='ur')
             t = re.sub(r"https?://\S+", "ہماری ویب سائٹ", t)
             t = re.sub(r"www\.\S+", "ہماری ویب سائٹ", t)
 
             # Clean rigid bullet structures and colons into fluid spoken phrasing with pauses
-            t = re.sub(r"^\s*[\d\.\-\*,\•]+\s*", "", t, flags=re.MULTILINE)
+            t = re.sub(r"^\s*(?:\d+[\.\-\)\:]\s*|[-*•]\s*)", "", t, flags=re.MULTILINE)
             t = re.sub(r"\n+\s*[\d\.\-\*,\•]+\s*", "، ", t)
             t = re.sub(r"\n+", "، ", t)
             t = re.sub(r"\s*[:;]\s*", "، ", t)
@@ -227,16 +229,37 @@ class WhatsAppService:
             t = re.sub(r"([,\،])\s*", r"\1 ", t)
             t = re.sub(r"\s+", " ", t).strip()
         else:
-            # Roman Urdu / Spoken Pakistani English Flow
+            # Spoken English / Roman Urdu Flow
+            # 1. Quantities: 1x, 2x, 3x -> one, two, three
+            qty_words = {
+                '1': 'one', '2': 'two', '3': 'three', '4': 'four', '5': 'five',
+                '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine', '10': 'ten',
+                '11': 'eleven', '12': 'twelve'
+            }
+            t = re.sub(r'\b(\d+)\s*[xX]\b', lambda m: qty_words.get(m.group(1), f'{m.group(1)} items'), t)
+
+            # 2. Currency formatting: (Rs 650), Rs 650, PKR 650 -> 650 rupees
+            if lang_str != "roman_urdu":
+                t = re.sub(r'[\(\[\{]?\s*(?:rs\.?|pkr)\s*(\d+)\s*[\)\]\}]?', r' \1 rupees ', t, flags=re.IGNORECASE)
+                t = re.sub(r'[\(\[\{]?\s*(\d+)\s*(?:rs\.?|pkr|rupees|rupay)\s*[\)\]\}]?', r' \1 rupees ', t, flags=re.IGNORECASE)
+                t = re.sub(r'\b(?:rs\.?|pkr)\b', ' rupees ', t, flags=re.IGNORECASE)
+                t = re.sub(r'[\(\[\]\{\)]', ' ', t)
+                t = re.sub(r'[-–—]{2,}', ' ', t)
+                t = re.sub(r'(?<=\s)[-–—](?=\s)', ' ', t)
             # Maintains pure Latin script so ElevenLabs Multilingual V2 does not glitch on script switching
             t = re.sub(r"https?://\S+", "hamari website", t)
             t = re.sub(r"www\.\S+", "hamari website", t)
 
             # Clean rigid bullet structures into fluid spoken pauses
-            t = re.sub(r"^\s*[\d\.\-\*,\•]+\s*", "", t, flags=re.MULTILINE)
+            t = re.sub(r"^\s*(?:\d+[\.\-\)\:]\s*|[-*•]\s*)", "", t, flags=re.MULTILINE)
             t = re.sub(r"\n+\s*[\d\.\-\*,\•]+\s*", ", ", t)
             t = re.sub(r"\n+", ", ", t)
             t = re.sub(r"\s*[:;]\s*", ", ", t)
+
+            # Magnitude & currency normalization without duplicates: '25 thousand', '25 hazar', '25k hazar'
+            if lang_str == "roman_urdu":
+                t = re.sub(r'(?i)\b(\d+)\s*(?:thousand|hazar|k\s*hazar)\b', lambda m: cls.number_to_roman_urdu(int(m.group(1)) * 1000), t)
+                t = re.sub(r'OpsFlow', 'Opsflow', t)
 
             # 1. Spoken expansions of logistics and corporate jargon
             t = re.sub(r"\b24/7\b", "chobees ghante", t)
@@ -294,7 +317,6 @@ class WhatsAppService:
                 t = re.sub(pattern, replacement, t, count=1)
 
             # 5. Natural sentence pauses using ellipses (...) for relaxed delivery
-            t = re.sub(r'\.\s+', '... ', t)
             t = re.sub(r'\s*([\.]{2,})\s*', '... ', t)
             t = re.sub(r'\s*,\s*\.\.\.\s*', ', ... ', t)
             t = re.sub(r"[,]{2,}", ",", t)
@@ -1731,9 +1753,14 @@ class WhatsAppService:
 
         # Fallback: Plain text response
         clean_disp = re.sub(r"[*_~`#>]", "", cleaned_raw).strip()
-        clean_speech = cls.roman_to_urdu_script(clean_disp)
+        lang_s = str(language or "").lower()
+        if "urdu" in lang_s or lang_s == "ur":
+            clean_speech = cls.roman_to_urdu_script(clean_disp)
+        else:
+            clean_speech = clean_disp
         return (clean_disp, clean_speech)
 
+    @classmethod
     def _synthesize_edge_tts(
         cls,
         text: str,
@@ -1811,7 +1838,7 @@ class WhatsAppService:
             elif "french" in lang_str or lang_str == "fr":
                 active_voice = "fr-FR-DeniseNeural"
             else:
-                active_voice = "en-US-AriaNeural"
+                active_voice = "en-US-AndrewMultilingualNeural" if ("andrew" in str(voice or "").lower() or "male" in str(voice or "").lower()) else "en-US-AvaMultilingualNeural"
 
             if configured_rate:
                 active_rate = configured_rate.strip()
@@ -1910,9 +1937,9 @@ class WhatsAppService:
                 "text": text[:1000],
                 "model_id": "eleven_multilingual_v2" if "multilingual" in active_model else active_model,
                 "voice_settings": {
-                    "stability": 0.32,
-                    "similarity_boost": 0.80,
-                    "style": 0.65,
+                    "stability": 0.50,
+                    "similarity_boost": 0.75,
+                    "style": 0.25,
                     "use_speaker_boost": True
                 }
             }
@@ -3714,6 +3741,25 @@ class WhatsAppService:
             sys_instruct += f"\n\n{catalog_ctx}"
         if system_prompt and len(system_prompt.strip()) > 3:
             sys_instruct += f"\n\nOrganization-Specific Context / Instructions:\n{system_prompt.strip()}"
+
+        # Location awareness detection
+        has_shared_loc = False
+        if conversation_history:
+            for item in conversation_history:
+                msg_c = (item.get("content") or "").lower()
+                if "[location:" in msg_c or "location:" in msg_c or "google.com/maps" in msg_c or "maps.google.com" in msg_c or "live whatsapp location" in msg_c:
+                    has_shared_loc = True
+                    break
+        if "[location:" in clean_text.lower() or "location:" in clean_text.lower() or "google.com/maps" in clean_text.lower() or "maps.google.com" in clean_text.lower():
+            has_shared_loc = True
+
+        if has_shared_loc:
+            sys_instruct += (
+                "\n\nCRITICAL LOCATION PROTOCOL:\n"
+                "The customer has ALREADY sent their live GPS location / pin in this chat (recorded on our Live Delivery Radar Map). "
+                "DO NOT ask the customer to share their location, address coordinates, or live pin again under any circumstances. "
+                "Instead, warmly acknowledge that their GPS location pin is received and active on our radar tracking map for delivery."
+            )
 
         history_section = ""
         if conversation_history:
@@ -6046,7 +6092,7 @@ class WhatsAppService:
             send_as_voice = False
             direct_bridge = bool(kwargs.get("direct_bridge") or kwargs.get("from_bridge"))
 
-            if is_voice_inbound or kwargs.get("reply_as_voice"):
+            if is_voice_inbound or kwargs.get("reply_as_voice") or (intent == "order_intent" and ("order" in str(message_body or "").lower() or "confirm" in str(message_body or "").lower())):
                 try:
                     speech_text = generated.get("speech_text") or kwargs.get("tts_script") or clean_reply_text
                     detected_lang_str = str(kwargs.get("detected_lang") or "").lower()
@@ -6057,7 +6103,7 @@ class WhatsAppService:
                         or has_arabic_script
                         or any(word in (clean_reply_text or "").lower() for word in ["salam", "aap", "madad", "shukriya", "jee", "hain", "kya", "kar"])
                     )
-                    synth_lang = kwargs.get("detected_lang") or ("ur" if is_urdu_context else "en")
+                    synth_lang = kwargs.get("detected_lang") or "en" 
                     audio_res = cls.generate_spoken_audio(
                         text=speech_text,
                         language=synth_lang,
@@ -6129,9 +6175,8 @@ class WhatsAppService:
                 except Exception as emerg_err:
                     logger.error(f"[Emergency Voice Dispatch Error] {emerg_err}")
 
-            # If voice dispatch was not executed or failed, and not direct bridge, deliver text message
-            if not direct_bridge and not dispatch_res:
-                logger.info(f"[Delivery Fallback] Audio delivery was not completed for {real_chat_id}; delivering as text reply to WhatsApp...")
+            # Send text reply unless this was an incoming voice note (inbound voice gets voice-only reply)
+            if not is_voice_inbound and not direct_bridge:
                 green_dispatch_res = cls.send_green_api_message(
                     organization_id=org_id,
                     to_phone=clean_phone,
@@ -6335,6 +6380,10 @@ class WhatsAppService:
         raw = str(phone or "").strip()
         if not raw or raw.upper() in ("N/A", "NONE", "NULL"):
             return ""
+        if raw.lower().endswith("@c.us"):
+            raw = raw[:-5]
+        elif raw.lower().endswith("@s.whatsapp.net"):
+            raw = raw[:-15]
         if any(c.isalpha() for c in raw):
             return raw
         if raw.lower().endswith("@lid"):

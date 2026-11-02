@@ -3275,7 +3275,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
         </section>
 
             <!-- TAB: LIVE DELIVERY RADAR MAP (SEPARATE DEDICATED SIDEBAR TAB) -->
-        <section id="tab-delivery-map" data-tab="map" class="tab-panel">
+        <section id="tab-map" data-tab="map" class="tab-panel">
             <div class="panel-header" style="align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; background: rgba(17, 27, 33, 0.9); border: 1px solid rgba(0, 168, 132, 0.35); border-radius: 12px; padding: 12px 18px; backdrop-filter: blur(14px);">
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <span style="font-size: 26px;">🗺️</span>
@@ -3304,8 +3304,8 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
             </div>
 
             <!-- Full Viewport Leaflet Delivery Map Box -->
-            <div style="background: #0f172a; border: 1px solid rgba(0, 168, 132, 0.3); border-radius: 14px; overflow: hidden; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45); height: calc(100vh - 170px); min-height: 580px; width: 100%; position: relative;">
-                <div id="wa-delivery-map" class="liveRadarMap wa-delivery-map-container" style="height: 100%; width: 100%; background: #0f172a; position: relative; z-index: 1;"></div>
+            <div style="background: #0f172a; border: 1px solid rgba(0, 168, 132, 0.3); border-radius: 14px; overflow: hidden; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45); height: 550px; min-height: 550px; width: 100%; position: relative;">
+                <div id="liveRadarMap" class="liveRadarMap wa-delivery-map-container" style="height: 550px; width: 100%; position: relative; z-index: 1; background: #0f172a;"></div>
             </div>
         </section>
 
