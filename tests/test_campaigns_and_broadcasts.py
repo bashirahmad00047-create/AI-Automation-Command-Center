@@ -50,6 +50,7 @@ class TestCampaignsAndBroadcasts(unittest.TestCase):
     def setUpClass(cls):
         cls.app = create_app()
         cls.app.config["TESTING"] = True
+        cls.app.config["RATELIMIT_ENABLED"] = False
         cls.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
         cls.client = cls.app.test_client()
 
@@ -59,6 +60,10 @@ class TestCampaignsAndBroadcasts(unittest.TestCase):
     def setUp(self):
         self.app_context = self.app.app_context()
         self.app_context.push()
+
+        from limiter import limiter, login_limiter
+        limiter.reset()
+        login_limiter.reset()
 
         # Clean tables for fresh test isolation
         CampaignRecipient.query.delete()

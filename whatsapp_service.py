@@ -346,7 +346,7 @@ class WhatsAppService:
                 {"mime_type": mime_type or "image/jpeg", "data": image_bytes}
             ])
             if response and hasattr(response, "text") and response.text:
-                return response.text.strip()
+                return cls._clean_ai_dual_or_text(response.text)
         except Exception as e:
             logger.debug(f"Gemini SDK Vision analysis notice: {e}")
 
@@ -1674,6 +1674,20 @@ class WhatsAppService:
         res = re.sub(r"\s+([,\،\.\!\؟])", r"\1", res)
         res = re.sub(r"\s+", " ", res).strip()
         return res
+
+    @classmethod
+    def _clean_ai_dual_or_text(cls, raw_text: str) -> str:
+        if not raw_text or not str(raw_text).strip():
+            return ""
+        disp, _ = cls._parse_dual_ai_output(str(raw_text))
+        clean_disp = (disp or str(raw_text)).strip()
+        if "theek-thaak" in clean_disp:
+            clean_disp = clean_disp.replace("theek-thaak", "theek")
+        if "theek thaak" in clean_disp:
+            clean_disp = clean_disp.replace("theek thaak", "theek")
+        if "theek thak" in clean_disp:
+            clean_disp = clean_disp.replace("theek thak", "theek")
+        return clean_disp
 
     @classmethod
     def _parse_dual_ai_output(cls, raw_reply: str, language: Optional[str] = None) -> Tuple[str, str]:
@@ -3765,7 +3779,7 @@ class WhatsAppService:
                         cls._last_gemini_error = None
                         cls._last_gemini_diagnostics = []
                         logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via google-genai model '{clean_m}' ({len(response.text)} chars)")
-                        return response.text.strip()
+                        return cls._clean_ai_dual_or_text(response.text)
                 except Exception as model_err:
                     err_str = str(model_err)
                     diagnostics.append(f"genai_sdk/{clean_m}: {err_str}")
@@ -3802,6 +3816,14 @@ class WhatsAppService:
                             cls._last_gemini_error = None
                             cls._last_gemini_diagnostics = []
                             logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via Gemini model '{clean_m}' ({len(text)} chars)")
+                            disp, _ = cls._parse_dual_ai_output(text)
+                            if disp and disp.strip():
+                                clean_disp = disp.strip()
+                                if "theek-thaak" in clean_disp:
+                                    clean_disp = clean_disp.replace("theek-thaak", "theek")
+                                elif "theek thaak" in clean_disp:
+                                    clean_disp = clean_disp.replace("theek thaak", "theek")
+                                return clean_disp
                             return text.strip()
                 except Exception as model_err:
                     err_str = str(model_err)
@@ -3843,6 +3865,14 @@ class WhatsAppService:
                                 cls._last_gemini_error = None
                                 cls._last_gemini_diagnostics = []
                                 logger.info(f"[WhatsApp AI Auto-Responder] Successfully generated response via HTTP REST Gemini '{target_m}'")
+                                disp, _ = cls._parse_dual_ai_output(text)
+                                if disp and disp.strip():
+                                    clean_disp = disp.strip()
+                                    if "theek-thaak" in clean_disp:
+                                        clean_disp = clean_disp.replace("theek-thaak", "theek")
+                                    elif "theek thaak" in clean_disp:
+                                        clean_disp = clean_disp.replace("theek thaak", "theek")
+                                    return clean_disp
                                 return text
                 else:
                     diagnostics.append(f"http/{target_m}: HTTP {resp.status_code} - {resp.text[:120]}")
@@ -4386,7 +4416,7 @@ class WhatsAppService:
             conversation_history=conversation_history
         )
         if direct_ai and direct_ai.strip():
-            return direct_ai.strip()
+            return cls._clean_ai_dual_or_text(direct_ai)
 
         # Secondary fallback to Groq AI
         groq_ai = cls.call_groq_ai(
@@ -4399,8 +4429,14 @@ class WhatsAppService:
             return groq_ai.strip()
 
         # Contextual, respectful fallback only if LLMs are unreachable
+        is_health = any(w in lower_text for w in (
+            "kaisa ho", "kaise ho", "kese ho", "kaisa he", "kaisay ho", "kaise hain", "kese hain", "kai's ho", "kais ho",
+            "kya haal", "kia hal", "kya hal", "kia haal", "hal chaal", "haal chal"
+        ))
         if lang_fmt == "roman_urdu":
-            if is_greeting:
+            if is_health:
+                return f"Walaikum Assalam{cust_greeting}! Main bilkul theek hoon, aap sunayein aap kaise hain? Batayein aaj main aap ki kya madad kar sakta hoon?"
+            elif is_greeting:
                 return f"Salam{cust_greeting}! Main aap ki kya madad kar sakta hoon? Batayein aap kya janna chahte hain."
             elif is_thanks:
                 return f"Shukriya{cust_greeting}! Agar koi aur sawal ho to bila-jhijhak batayein."

@@ -93,6 +93,8 @@ def sync_admin_user():
         if admin_email:
             org = db.session.get(Organization, "org-enterprise-default")
             if not org:
+                org = Organization.query.filter_by(slug="enterprise-corp").first()
+            if not org:
                 org = Organization(
                     id="org-enterprise-default",
                     name="Acme Enterprise Global",

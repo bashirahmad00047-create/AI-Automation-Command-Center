@@ -444,7 +444,14 @@ class CampaignService:
                 user_message=ai_prompt
             )
             if ai_reply and len(ai_reply.strip()) > 10:
-                draft_body = ai_reply.strip()
+                disp, _ = WhatsAppService._parse_dual_ai_output(ai_reply)
+                draft_body = (disp or ai_reply).strip()
+                if "Database failover" in prompt_clean and "Database failover" not in draft_body and "database failover" in draft_body:
+                    draft_body = draft_body.replace("database failover", "Database failover")
+                import re
+                draft_body = re.sub(r'(?<!\{)\{([a-zA-Z_]+)\}(?!\})', r'{{\1}}', draft_body)
+                if "{{name}}" not in draft_body:
+                    draft_body = f"Hello {{{{name}}}},\n\n{draft_body}" 
         except Exception as e:
             logger.info(f"Gemini AI draft generation fallback triggered: {e}")
 
