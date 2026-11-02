@@ -270,16 +270,51 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                                 _prd_cols = {c["name"] for c in _insp.get_columns("products")}
                                 if "image_url" not in _prd_cols:
                                     _c_conn.execute(_sa_text("ALTER TABLE products ADD COLUMN image_url VARCHAR(512);"))
+                            if "organizations" in _insp.get_table_names():
+                                _org_cols = {c["name"] for c in _insp.get_columns("organizations")}
+                                if "stripe_customer_id" not in _org_cols:
+                                    try:
+                                        _c_conn.execute(_sa_text("ALTER TABLE organizations ADD COLUMN stripe_customer_id VARCHAR(128);"))
+                                    except Exception:
+                                        pass
+                                if "stripe_subscription_id" not in _org_cols:
+                                    try:
+                                        _c_conn.execute(_sa_text("ALTER TABLE organizations ADD COLUMN stripe_subscription_id VARCHAR(128);"))
+                                    except Exception:
+                                        pass
                             if "whatsapp_messages" in _insp.get_table_names():
                                 _wam_cols = {c["name"] for c in _insp.get_columns("whatsapp_messages")}
                                 if "parent_message_id" not in _wam_cols:
-                                    _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN parent_message_id VARCHAR(128);"))
+                                    try:
+                                        _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN parent_message_id VARCHAR(128);"))
+                                    except Exception:
+                                        pass
                                 if "media_url" not in _wam_cols:
-                                    _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN media_url TEXT;"))
+                                    try:
+                                        _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN media_url TEXT;"))
+                                    except Exception:
+                                        pass
                                 if "audio_data" not in _wam_cols:
                                     try:
                                         _col_type = "BYTEA" if getattr(db.engine.dialect, "name", "") == "postgresql" else "BLOB"
                                         _c_conn.execute(_sa_text(f"ALTER TABLE whatsapp_messages ADD COLUMN audio_data {_col_type};"))
+                                    except Exception:
+                                        pass
+                            if "leads" in _insp.get_table_names():
+                                _lead_cols = {c["name"] for c in _insp.get_columns("leads")}
+                                if "is_sample" not in _lead_cols:
+                                    try:
+                                        _c_conn.execute(_sa_text("ALTER TABLE leads ADD COLUMN is_sample BOOLEAN DEFAULT 0;"))
+                                    except Exception:
+                                        pass
+                                if "route_department" not in _lead_cols:
+                                    try:
+                                        _c_conn.execute(_sa_text("ALTER TABLE leads ADD COLUMN route_department VARCHAR(64) DEFAULT 'General Queue';"))
+                                    except Exception:
+                                        pass
+                                if "draft_response" not in _lead_cols:
+                                    try:
+                                        _c_conn.execute(_sa_text("ALTER TABLE leads ADD COLUMN draft_response TEXT;"))
                                     except Exception:
                                         pass
                             _c_conn.commit()

@@ -4091,11 +4091,18 @@ def whatsapp_webhook_ingress():
             # Acknowledging delivery reports, read receipts, or non-message events
             return jsonify({"status": "acknowledged", "provider": provider_name, "processed": 0}), 200
 
-        # Resolve target tenant
+        # Resolve target tenant safely
         target_org = None
         target_org_id = request.args.get("org_id")
         if target_org_id:
-            target_org = db.session.get(Organization, target_org_id)
+            try:
+                target_org = db.session.get(Organization, target_org_id)
+            except Exception:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                target_org = None
 
         # Resolve via instance ID or phone ID if not provided via query parameter
         if not target_org:
@@ -4116,9 +4123,16 @@ def whatsapp_webhook_ingress():
                 incoming_instance_id = messages[0].get("recipient_phone_id")
 
             if incoming_instance_id:
-                resolved_org_id = WhatsAppService.resolve_organization_by_instance(incoming_instance_id)
-                if resolved_org_id:
-                    target_org = db.session.get(Organization, resolved_org_id)
+                try:
+                    resolved_org_id = WhatsAppService.resolve_organization_by_instance(incoming_instance_id)
+                    if resolved_org_id:
+                        target_org = db.session.get(Organization, resolved_org_id)
+                except Exception:
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+                    target_org = None
 
         if not target_org:
             try:
