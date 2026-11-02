@@ -425,3 +425,57 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app
         else:
             logger.warning(f"[WA Bridge] Port {port} did not respond within {timeout_seconds}s timeout.")
         return online
+
+
+def get_wa_bridge_health(root_dir: str = None, app=None) -> dict:
+    """Returns a diagnostic summary of the WhatsApp Baileys bridge process,
+    multi-file auth directory, and database persistence status.
+    Additive-only observability helper; guarantees no mutation or side effects.
+    """
+    if root_dir is None:
+        root_dir = os.path.dirname(os.path.abspath(__file__))
+    auth_dir = resolve_auth_dir(root_dir)
+    creds_file = os.path.join(auth_dir, "creds.json")
+
+    has_local_creds = False
+    if os.path.exists(creds_file) and os.path.getsize(creds_file) > 20:
+        try:
+            with open(creds_file, "r", encoding="utf-8") as f:
+                json.load(f)
+            has_local_creds = True
+        except Exception:
+            has_local_creds = False
+
+    files = [f for f in os.listdir(auth_dir)] if os.path.exists(auth_dir) else []
+
+    db_session_saved = False
+    db_file_count = 0
+    db_updated_at = None
+    try:
+        with safe_app_context(app):
+            from database import db
+            from sqlalchemy import text
+            with db.engine.connect() as conn:
+                row = conn.execute(text("SELECT file_count, updated_at FROM wa_session_store WHERE id = 1")).fetchone()
+                if row:
+                    db_session_saved = True
+                    db_file_count = int(row[0] or 0)
+                    db_updated_at = str(row[1]) if row[1] else None
+    except Exception:
+        pass
+
+    online = is_port_reachable("127.0.0.1", 3001, timeout=0.25)
+    pid = _bridge_proc.pid if _bridge_proc and _bridge_proc.poll() is None else None
+
+    return {
+        "bridge_online": online,
+        "bridge_pid": pid,
+        "auth_dir": auth_dir,
+        "has_local_creds": has_local_creds,
+        "local_file_count": len(files),
+        "db_session_saved": db_session_saved,
+        "db_file_count": db_file_count,
+        "db_last_backup": db_updated_at,
+        "auto_heal_active": _auto_heal_started,
+        "backup_daemon_active": _backup_loop_started,
+    }

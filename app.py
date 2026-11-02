@@ -923,6 +923,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_whatsapp_session_restore
         return api_whatsapp_session_restore()
 
+    @application.route("/api/whatsapp/pipeline-health", methods=["GET"])
+    @application.route("/api/v1/whatsapp/pipeline-health", methods=["GET"])
+    def route_whatsapp_pipeline_health():
+        from api_v1 import api_whatsapp_pipeline_health
+        return api_whatsapp_pipeline_health()
+
     @application.route("/api/whatsapp/business-templates", methods=["GET"])
     @application.route("/api/v1/whatsapp/business-templates", methods=["GET"])
     def route_whatsapp_business_templates():

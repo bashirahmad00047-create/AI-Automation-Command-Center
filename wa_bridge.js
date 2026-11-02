@@ -136,10 +136,11 @@ const AUTH_DIR = resolveAuthDir();
 
 function getBackendBaseUrl() {
   const envUrl = process.env.PYTHON_WEBHOOK_URL;
-  if (envUrl && envUrl.includes('/api/v1/webhooks')) {
-    return envUrl.split('/api/v1/webhooks')[0];
+  if (envUrl && envUrl.includes('/api/')) {
+    return envUrl.split('/api/')[0];
   }
-  return `http://127.0.0.1:${PYTHON_PORT}`;
+  const pythonPort = (process.env.PYTHON_PORT || (process.env.PORT && String(process.env.PORT) !== String(PORT) ? process.env.PORT : 5000));
+  return `http://127.0.0.1:${pythonPort}`;
 }
 
 let sessionBackupDebounce = null;
@@ -1272,8 +1273,9 @@ if (!text) text = '[Voice note]';
 
           // Function to deliver response with presence and jitter delay
           const deliverAiResponse = async (resData, finalTargetJid) => {
-            if (!resData || (!resData.reply && !resData.audio_base64)) return;
+            if (!resData || (!resData.reply && !resData.audio_base64 && !resData.image_url && !resData.image_base64)) return;
             const shouldSendVoice = Boolean(resData.audio_base64 && (resData.send_as_voice || resData.is_voice));
+            const shouldSendImage = Boolean(resData.image_url || resData.image_base64);
             // Safe async human delay: 3 to 5 seconds
             const replyTextForDelay = resData.reply || resData.tts_text || resData.text || '';
             const jitterMs = Math.floor(Math.random() * 2000) + 3000; // 3.0s - 5.0s range
@@ -1281,7 +1283,33 @@ if (!text) text = '[Voice note]';
             await acquireAntiSpamDispatchSlot();
 
             let sentMsg = null;
-            if (shouldSendVoice && resData.audio_base64) {
+            if (shouldSendImage) {
+              try {
+                await sock.sendPresenceUpdate('composing', finalTargetJid);
+              } catch (_) {}
+              await new Promise(r => setTimeout(r, jitterMs));
+              const caption = resData.reply ? String(resData.reply) : '';
+              try {
+                if (resData.image_base64) {
+                  const cleanBase64 = String(resData.image_base64).replace(/^data:[^;]+;base64,/, '').trim();
+                  const imgBuf = Buffer.from(cleanBase64, 'base64');
+                  sentMsg = await sock.sendMessage(finalTargetJid, { image: imgBuf, caption });
+                } else if (resData.image_url) {
+                  sentMsg = await sock.sendMessage(finalTargetJid, { image: { url: resData.image_url }, caption });
+                }
+                console.log(`[Direct Bridge Image Dispatch] Image card delivered to ${finalTargetJid}: ID=${sentMsg?.key?.id}`);
+                if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
+              } catch (imgErr) {
+                console.warn('[Direct Bridge Image Error, falling back to text]:', imgErr.message);
+                if (resData.reply) {
+                  try {
+                    sentMsg = await sock.sendMessage(finalTargetJid, { text: String(resData.reply) });
+                  } catch (_) {}
+                }
+              } finally {
+                try { await sock.sendPresenceUpdate('paused', finalTargetJid); } catch (_) {}
+              }
+            } else if (shouldSendVoice && resData.audio_base64) {
               try {
                 await sock.sendPresenceUpdate('recording', finalTargetJid);
                 console.log(`[Anti-Ban Shield] Presence 'recording' active for ${finalTargetJid} during ${jitterMs}ms jitter delay...`);
@@ -1365,7 +1393,7 @@ if (!text) text = '[Voice note]';
               }
             }
 
-            if (resData && (resData.reply || resData.audio_base64)) {
+            if (resData && (resData.reply || resData.audio_base64 || resData.image_url || resData.image_base64)) {
               await deliverAiResponse(resData, targetJid);
             }
           });
@@ -1914,7 +1942,7 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
     const audioRaw = req.body?.audioBase64 || req.body?.audio_base64 || req.body?.audio || req.body?.fileBase64 || req.body?.file_base64 || req.body?.dataUri || (typeof req.body?.mediaUrl === 'string' && req.body.mediaUrl.startsWith('data:audio') ? req.body.mediaUrl : null) || (typeof req.body?.media_url === 'string' && req.body.media_url.startsWith('data:audio') ? req.body.media_url : null) || (typeof req.body?.audioUrl === 'string' && req.body.audioUrl.startsWith('data:audio') ? req.body.audioUrl : null);
     const audioUrl = req.body?.audioUrl || req.body?.audio_url || req.body?.mediaUrl || req.body?.media_url || req.body?.urlFile || req.body?.url;
     const hasAudio = Boolean(audioRaw || audioUrl);
-    const hasImage = Boolean(req.body?.imageBase64 || req.body?.image || req.body?.imageUrl);
+    const hasImage = Boolean(req.body?.imageBase64 || req.body?.image_base64 || req.body?.image || req.body?.imageUrl || req.body?.image_url);
     const hasText = message !== undefined && message !== null && String(message).trim().length > 0;
 
     if (!chatId || (!hasAudio && !hasImage && !hasText)) {
@@ -2100,22 +2128,47 @@ app.post(['/send-message', '/send'], async (req, res, next) => {
           }
         }
       } else if (hasImage) {
-        const imageRaw = req.body?.imageBase64 || req.body?.image;
-        const imageUrl = req.body?.imageUrl;
-        const caption = message ? String(message) : '';
+        let imageRaw = req.body?.imageBase64 || req.body?.image_base64;
+        let imageUrl = req.body?.imageUrl || req.body?.image_url;
+        if (!imageRaw && !imageUrl && req.body?.image) {
+          if (typeof req.body.image === 'string') {
+            if (req.body.image.startsWith('http://') || req.body.image.startsWith('https://')) {
+              imageUrl = req.body.image;
+            } else {
+              imageRaw = req.body.image;
+            }
+          } else if (req.body.image && typeof req.body.image.url === 'string') {
+            imageUrl = req.body.image.url;
+          }
+        }
+        const caption = message !== undefined && message !== null ? String(message) : (req.body?.caption ? String(req.body.caption) : '');
 
         if (imageRaw) {
           const cleanBase64 = String(imageRaw).replace(/^data:[^;]+;base64,/, '').trim();
           const imageBuffer = Buffer.from(cleanBase64, 'base64');
-          sent = await sock.sendMessage(jid, {
-            image: imageBuffer,
-            caption
-          }, sendOptions);
+          try {
+            sent = await sock.sendMessage(jid, {
+              image: imageBuffer,
+              caption
+            }, sendOptions);
+          } catch (firstImgErr) {
+            sent = await sock.sendMessage(jid, {
+              image: imageBuffer,
+              caption
+            });
+          }
         } else if (imageUrl) {
-          sent = await sock.sendMessage(jid, {
-            image: { url: imageUrl },
-            caption
-          }, sendOptions);
+          try {
+            sent = await sock.sendMessage(jid, {
+              image: { url: imageUrl },
+              caption
+            }, sendOptions);
+          } catch (firstImgErr) {
+            sent = await sock.sendMessage(jid, {
+              image: { url: imageUrl },
+              caption
+            });
+          }
         }
         try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {}
       } else {

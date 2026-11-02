@@ -151,9 +151,10 @@ class WhatsAppService:
         import re
         t = str(text).strip()
 
-        # 1. Strip bracketed placeholders and markdown symbols
+        # 1. Strip bracketed placeholders, bullet points, and markdown symbols
         t = re.sub(r"\[.*?\]", "", t)
         t = re.sub(r"[*_~`#>]", "", t)
+        t = re.sub(r"^\s*[-*\xe2\x80\xa2]\s*", "", t, flags=re.MULTILINE)
 
         # Detect script
         is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in (t or ""))
@@ -187,6 +188,9 @@ class WhatsAppService:
             greetings_map = [
                 (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|salam|slam)\b[,.]?", "السلام علیکم،"),
                 (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*)\b[,.]?", "وعلیکم السلام،"),
+                (r"(?i)\b(dekhein|dekho)\b[,.]?", "دیکھیں،"),
+                (r"(?i)\b(haan ji|han ji)\b[,.]?", "ہاں جی،"),
+                (r"(?i)\b(acha dekhein|acha dekho)\b[,.]?", "اچھا دیکھیں،"),
                 (r"(?i)\b(ji bilkul|ji haan|ji han)\b[,.]?", "جی بالکل،"),
                 (r"(?i)\b(shukriya|bohot shukriya|dera manana|thank you|thanks)\b[,.]?", "بہت شکریہ،"),
                 (r"(?i)\b(khush[\s\-]?[a-z]*|welcome|you'?re welcome)\b[,.]?", "خوش آمدید،"),
@@ -1565,7 +1569,6 @@ class WhatsAppService:
 
     _force_test_edge_tts: bool = False
 
-    @classmethod
     @classmethod
     def roman_to_urdu_script(cls, text: str) -> str:
         """Converts Roman Urdu text into authentic pure Urdu script (اردو رسم الخط).
@@ -2980,7 +2983,7 @@ class WhatsAppService:
         b_name = profile_data.get("business_name") or cls._get_tenant_or_global_setting("BUSINESS_NAME", org_id)
         if not b_name and has_app_context():
             try:
-                org = Organization.query.get(org_id)
+                org = db.session.get(Organization, org_id) if hasattr(db.session, 'get') else Organization.query.get(org_id)
                 if org and org.name:
                     b_name = org.name
             except Exception:
@@ -3688,7 +3691,13 @@ class WhatsAppService:
             return None
 
         verified_kb = cls.get_verified_business_knowledge_base(organization_id=organization_id)
+        catalog_ctx = cls.get_product_catalog_context(organization_id=organization_id, search_term=clean_text)
+        if not catalog_ctx:
+            catalog_ctx = cls.get_product_catalog_context(organization_id=organization_id, search_term=None, limit=8)
+
         sys_instruct = f"\nBusiness Knowledge Base & Grounding Rules:\n{verified_kb}"
+        if catalog_ctx:
+            sys_instruct += f"\n\n{catalog_ctx}"
         if system_prompt and len(system_prompt.strip()) > 3:
             sys_instruct += f"\n\nOrganization-Specific Context / Instructions:\n{system_prompt.strip()}"
 
@@ -4816,6 +4825,503 @@ class WhatsAppService:
             logger.error(f"Error setting group AI permission: {e}")
             return False
 
+
+
+    @classmethod
+
+    def _extract_catalog_product_from_text(cls, text: str, organization_id: Optional[str] = None):
+
+        """Extracts product name or SKU from a catalog card or formatted message and finds the matching Product."""
+
+        if not text or not has_app_context():
+
+            return None
+
+        org_id = organization_id or "org-enterprise-default"
+
+        try:
+
+            from models import Product
+
+            # 1. Match bold title e.g. *Product Name* or Product Name
+
+            title_match = re.search(r'(?:🛍️?\s*)?\*([^\*\n]+)\*', text)
+
+            if title_match:
+
+                candidate_name = title_match.group(1).strip()
+
+                prod = Product.query.filter(
+
+                    Product.organization_id == org_id,
+
+                    Product.name.ilike(candidate_name),
+
+                    Product.is_active == True
+
+                ).first()
+
+                if prod:
+
+                    return prod
+
+
+
+            # 2. Match SKU: `SKU-123` or SKU: SKU-123
+
+            sku_match = re.search(r'SKU:\s*`?([a-zA-Z0-9_\-]+)`?', text, re.IGNORECASE)
+
+            if sku_match:
+
+                candidate_sku = sku_match.group(1).strip()
+
+                prod = Product.query.filter(
+
+                    Product.organization_id == org_id,
+
+                    Product.sku == candidate_sku,
+
+                    Product.is_active == True
+
+                ).first()
+
+                if prod:
+
+                    return prod
+
+        except Exception:
+
+            pass
+
+        return None
+
+
+
+    @classmethod
+
+    def is_catalog_command(cls, text: str) -> bool:
+
+        """Checks if a message text is a catalog addition/update command."""
+
+        if not text:
+
+            return False
+
+        cleaned = text.strip().lower()
+
+        return (
+
+            cleaned.startswith("#add")
+
+            or cleaned.startswith("#product")
+
+            or cleaned.startswith("#item")
+
+            or cleaned.startswith("add product:")
+
+            or cleaned.startswith("add item:")
+
+            or cleaned.startswith("new product:")
+
+            or cleaned.startswith("create product:")
+
+        )
+
+
+
+    @classmethod
+
+    def find_catalog_product_by_inquiry(cls, organization_id: str, query_text: str):
+
+        """Finds an active product from the catalog that matches a customer inquiry."""
+
+        if not query_text or not has_app_context():
+
+            return None
+
+        org_id = organization_id or "org-enterprise-default"
+
+        try:
+
+            from models import Product
+
+            clean_q = query_text.strip().lower()
+
+            if len(clean_q) < 3 or clean_q in ("salam", "hi", "hello", "hey", "theek", "kaise ho", "[voice note]"):
+
+                return None
+
+
+
+            active_products = Product.query.filter(
+
+                Product.organization_id == org_id,
+
+                Product.is_active == True
+
+            ).all()
+
+
+
+            for p in active_products:
+
+                p_name_lower = (p.name or "").lower()
+
+                p_sku_lower = (p.sku or "").lower()
+
+                if p_name_lower and (p_name_lower in clean_q or any(word in clean_q for word in p_name_lower.split() if len(word) >= 4)):
+
+                    return p
+
+                if p_sku_lower and p_sku_lower in clean_q:
+
+                    return p
+
+        except Exception:
+
+            pass
+
+        return None
+
+
+
+    @classmethod
+
+    def handle_whatsapp_catalog_command(
+
+        cls,
+
+        organization_id: str,
+
+        sender_phone: str,
+
+        message_body: str,
+
+        chat_id: Optional[str] = None,
+
+        media_url: Optional[str] = None,
+
+        download_url: Optional[str] = None,
+
+        image_base64: Optional[str] = None,
+
+        raw_payload: Optional[Dict[str, Any]] = None
+
+    ) -> Optional[Dict[str, Any]]:
+
+        """Parses an incoming WhatsApp catalog management command (#add ... or Add product: ...),
+
+        persists the item directly into the active database catalog (Product table), and confirms
+
+        back to WhatsApp with full details and image preview.
+
+        """
+
+        if not cls.is_catalog_command(message_body):
+
+            return None
+
+
+
+        clean_text = message_body.strip()
+
+        for prefix in ["#add", "#product", "#item", "add product:", "add item:", "new product:", "create product:"]:
+
+            if clean_text.lower().startswith(prefix):
+
+                clean_text = clean_text[len(prefix):].strip()
+
+                break
+
+
+
+        if not clean_text:
+
+            return None
+
+
+
+        org_id = organization_id or "org-enterprise-default"
+
+
+
+        name = ""
+
+        price = 0.0
+
+        stock = 10
+
+        category = "General"
+
+        description = ""
+
+
+
+        if "|" in clean_text:
+
+            parts = [p.strip() for p in clean_text.split("|")]
+
+            if len(parts) >= 1:
+
+                name = parts[0]
+
+            if len(parts) >= 2:
+
+                p_digits = re.findall(r'[\d\.]+', parts[1].replace(",", ""))
+
+                if p_digits:
+
+                    try:
+
+                        price = float(p_digits[0])
+
+                    except ValueError:
+
+                        price = 0.0
+
+            if len(parts) >= 3:
+
+                s_digits = re.findall(r'\d+', parts[2])
+
+                if s_digits:
+
+                    try:
+
+                        stock = int(s_digits[0])
+
+                    except ValueError:
+
+                        stock = 10
+
+            if len(parts) >= 4 and parts[3]:
+
+                category = parts[3]
+
+            if len(parts) >= 5 and parts[4]:
+
+                description = parts[4]
+
+        else:
+
+            m = re.search(r'^(.*?)\s+((?:PKR|Rs\.?)?\s*[\d,]+(?:\.\d+)?)(.*)$', clean_text, re.IGNORECASE)
+
+            if m:
+
+                name = m.group(1).strip()
+
+                p_raw = m.group(2).replace("PKR", "").replace("Rs.", "").replace("Rs", "").replace(",", "").strip()
+
+                try:
+
+                    price = float(p_raw)
+
+                except ValueError:
+
+                    price = 0.0
+
+                remainder = m.group(3).strip()
+
+                if remainder:
+
+                    rem_parts = remainder.split()
+
+                    if rem_parts and rem_parts[0].isdigit():
+
+                        stock = int(rem_parts[0])
+
+                        category = " ".join(rem_parts[1:]) if len(rem_parts) > 1 else "General"
+
+                    else:
+
+                        category = remainder
+
+            else:
+
+                name = clean_text
+
+                price = 0.0
+
+
+
+        if not name:
+
+            name = "New Product"
+
+
+
+        img_url = media_url or download_url
+
+        if not img_url and image_base64:
+
+            clean_b64 = str(image_base64).split("base64,")[-1].strip()
+
+            img_url = f"data:image/jpeg;base64,{clean_b64}"
+
+
+
+        product = None
+
+        if has_app_context():
+
+            from models import Product
+
+            try:
+
+                product = Product.query.filter(
+
+                    Product.organization_id == org_id,
+
+                    Product.name.ilike(name.strip())
+
+                ).first()
+
+
+
+                if not product:
+
+                    product = Product(
+
+                        organization_id=org_id,
+
+                        name=name.strip(),
+
+                        price=price,
+
+                        stock_quantity=stock,
+
+                        category=category.strip() or "General",
+
+                        description=description.strip() or f"{name.strip()} available in catalog.",
+
+                        image_url=img_url,
+
+                        currency="PKR",
+
+                        stock_status="out_of_stock" if stock <= 0 else ("low_stock" if stock <= 5 else "in_stock"),
+
+                        is_active=True
+
+                    )
+
+                    db.session.add(product)
+
+                else:
+
+                    if price > 0:
+
+                        product.price = price
+
+                    if stock != 10:
+
+                        product.stock_quantity = stock
+
+                    if category and category != "General":
+
+                        product.category = category.strip()
+
+                    if description:
+
+                        product.description = description.strip()
+
+                    if img_url:
+
+                        product.image_url = img_url
+
+                    product.stock_status = "out_of_stock" if product.stock_quantity <= 0 else ("low_stock" if product.stock_quantity <= 5 else "in_stock")
+
+                    product.is_active = True
+
+
+
+                db.session.commit()
+
+                logger.info(f"[WhatsApp Catalog Command] Successfully saved product '{name}' (Price: PKR {price}) to catalog for org {org_id}.")
+
+            except Exception as db_err:
+
+                logger.error(f"[WhatsApp Catalog Command Error] Failed to persist product: {db_err}")
+
+                try:
+
+                    db.session.rollback()
+
+                except Exception:
+
+                    pass
+
+
+
+        stock_disp = f"{stock} units" if stock > 0 else "Out of stock"
+
+        confirm_text = (
+
+            f"✅ *Product Successfully Added to Live Catalog!*\n\n"
+
+            f"🛍️ *{name}*\n"
+
+            f"💰 Price: *PKR {price:,.2f}*\n"
+
+            f"📦 Stock: *{stock_disp}*\n"
+
+            f"🏷️ Category: *{category}*\n"
+
+            + (f"📝 Details: {description}\n" if description else "")
+
+            + f"\n_Yeh product dashboard 'Products & Blueprints' table aur WhatsApp AI auto-responder mein live active ho gaya hai._"
+
+        )
+
+
+
+        clean_p = cls.format_phone_number(sender_phone)
+
+        target_chat = chat_id or (f"{clean_p}@s.whatsapp.net" if clean_p else sender_phone)
+
+
+
+        dispatch_res = None
+
+        try:
+
+            dispatch_res = cls.send_message(
+
+                organization_id=org_id,
+
+                to_phone=sender_phone,
+
+                chat_id=target_chat,
+
+                message_text=confirm_text,
+
+                image_url=product.image_url if (product and product.image_url) else img_url
+
+            )
+
+        except Exception as send_err:
+
+            logger.warning(f"[WhatsApp Catalog Command] Could not dispatch confirmation to WhatsApp: {send_err}")
+
+
+
+        return {
+
+            "success": True,
+
+            "action": "catalog_updated",
+
+            "reply_body": confirm_text,
+
+            "reply": confirm_text,
+
+            "image_url": product.image_url if (product and product.image_url) else img_url,
+
+            "product": product.to_dict() if (product and hasattr(product, "to_dict")) else {"name": name, "price": price, "stock": stock},
+
+            "dispatch": dispatch_res
+
+        }
+
+
     @classmethod
     def handle_inbound_auto_response(
         cls,
@@ -4989,6 +5495,19 @@ class WhatsAppService:
             logger.info("Direct Groq AI auto-responder enabled for inbound WhatsApp message.")
         elif has_openai:
             logger.info("Direct OpenAI auto-responder enabled for inbound WhatsApp message.")
+
+        # 0a. Check for WhatsApp Direct Catalog Management Commands (#add, Add product:, etc.)
+        cat_cmd_res = cls.handle_whatsapp_catalog_command(
+            organization_id=org_id,
+            sender_phone=clean_phone,
+            message_body=clean_body,
+            chat_id=real_chat_id,
+            media_url=kwargs.get("media_url") or download_url,
+            download_url=download_url,
+            image_base64=kwargs.get("audio_base64") if kwargs.get("is_image") else None
+        )
+        if cat_cmd_res:
+            return cat_cmd_res
 
         # 0. Check if user asks to generate / create an image
         lower_msg = str(message_body or "").strip().lower()
@@ -5401,6 +5920,10 @@ class WhatsAppService:
             intent = generated.get("intent") or "general_chat"
             lead_score = generated.get("lead_score", 0)
 
+        # Check if customer inquiry specifically targets an active product in the catalog with an image
+        inquiry_matched_product = cls.find_catalog_product_by_inquiry(org_id, message_body)
+        matched_image_url = inquiry_matched_product.image_url if (inquiry_matched_product and inquiry_matched_product.image_url) else None
+
         # Pillar 2 -> Pillar 4 Interconnection: Auto-capture and live-update CRM Lead & Pipeline on every customer interaction
         if has_app_context() and clean_phone:
             try:
@@ -5594,6 +6117,7 @@ class WhatsAppService:
                         chat_id=real_chat_id,
                         message_text=clean_reply_text,
                         quoted_message_id=message_id,
+                        image_url=matched_image_url,
                         is_ai_response=True
                     )
                 except Exception as send_err:
@@ -5714,6 +6238,7 @@ class WhatsAppService:
                 "success": True,
                 "reply_body": clean_reply_text,
                 "reply": clean_reply_text,
+                "image_url": matched_image_url,
                 "intent": intent,
                 "lead_score": lead_score,
                 "mode": generated.get("mode"),
@@ -8092,13 +8617,24 @@ class WhatsAppService:
             bridge_payload["ptt"] = bool(kwargs.get("ptt", True) or kwargs.get("is_voice", False))
             bridge_payload["mimetype"] = kwargs.get("mime_type") or kwargs.get("mimetype") or "audio/ogg; codecs=opus"
             out_msg_type = "voiceMessage" if bridge_payload["ptt"] else "audioMessage"
-        elif kwargs.get("image_bytes") or kwargs.get("imageBase64"):
+        # Automatic Product Image Attachment for Catalog cards
+        if not kwargs.get("image_url") and not kwargs.get("imageUrl") and not kwargs.get("image_bytes") and not kwargs.get("imageBase64") and not f_bytes:
+            extracted_prod = cls._extract_catalog_product_from_text(bridge_message, organization_id=organization_id)
+            if extracted_prod and extracted_prod.image_url:
+                kwargs["image_url"] = extracted_prod.image_url
+
+        if kwargs.get("image_bytes") or kwargs.get("imageBase64") or kwargs.get("image_url") or kwargs.get("imageUrl"):
             import base64
             img_b = kwargs.get("image_bytes")
             if img_b:
                 bridge_payload["imageBase64"] = base64.b64encode(img_b).decode("ascii")
-            else:
+            elif kwargs.get("imageBase64"):
                 bridge_payload["imageBase64"] = kwargs.get("imageBase64")
+            elif kwargs.get("imageUrl") or kwargs.get("image_url"):
+                img_u = kwargs.get("imageUrl") or kwargs.get("image_url")
+                bridge_payload["imageUrl"] = img_u
+                bridge_payload["image_url"] = img_u
+                bridge_payload["image"] = {"url": img_u}
             out_msg_type = "imageMessage"
 
         is_testing = False
@@ -8381,6 +8917,12 @@ class WhatsAppService:
             search_query=search_term,
             limit=limit
         )
+        if not items and search_term:
+            items = cls.query_product_catalog(
+                organization_id=organization_id,
+                search_query=None,
+                limit=limit
+            )
         if not items:
             return ""
 
@@ -8395,9 +8937,11 @@ class WhatsAppService:
             p_stock = p.get("stock_quantity", 0)
             p_status = p.get("stock_status", "in_stock")
             p_sku = p.get("sku") or "N/A"
+            p_desc = p.get("description") or ""
+            desc_part = f" | Description: {p_desc[:80]}" if p_desc else ""
             summary_lines.append(
                 f"- Product: '{p_name}' | SKU: {p_sku} | Price: {p_curr} {p_price:,.2f} | "
-                f"Available Stock: {p_stock} units ({p_status})"
+                f"Available Stock: {p_stock} units ({p_status}){desc_part}"
             )
         return "\n".join(summary_lines)
 
