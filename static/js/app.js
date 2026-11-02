@@ -277,6 +277,7 @@ function refreshAllData() {
 
 function switchTab(tabId) {
     if (tabId === 'studio') tabId = 'rules';
+    if (tabId === 'map') tabId = 'delivery-map';
     state.currentTab = tabId;
     updateBreadcrumb(tabId);
 
@@ -285,12 +286,16 @@ function switchTab(tabId) {
 
     const tabButtons = document.querySelectorAll('.hud-tab');
     tabButtons.forEach(btn => {
-        if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(tabId)) {
+        const oc = btn.getAttribute('onclick') || '';
+        if (oc.includes(tabId) || (tabId === 'delivery-map' && (oc.includes('map') || oc.includes('delivery-map')))) {
             btn.classList.add('active');
         }
     });
 
-    const activePanel = document.getElementById(`tab-${tabId}`);
+    let activePanel = document.getElementById(`tab-${tabId}`);
+    if (!activePanel && (tabId === 'delivery-map' || tabId === 'map')) {
+        activePanel = document.getElementById('tab-delivery-map') || document.getElementById('tab-map');
+    }
     if (activePanel) {
         activePanel.classList.add('active');
     }
@@ -323,13 +328,21 @@ function switchTab(tabId) {
     if (tabId === 'campaigns') {
         if (typeof loadCampaignsDashboard === 'function') loadCampaignsDashboard();
     }
-    if (tabId === 'delivery-map') {
+    if (tabId === 'delivery-map' || tabId === 'map') {
         setTimeout(() => {
             if (typeof initLeafletRadarMap === 'function') initLeafletRadarMap();
-            if (typeof leafletRadarMap !== 'undefined' && leafletRadarMap) {
-                try { leafletRadarMap.invalidateSize(); } catch (_) {}
+            if (typeof loadCustomerLocationsFromChatHistory === 'function') loadCustomerLocationsFromChatHistory();
+            const activeMap = window.radarMap || leafletRadarMap;
+            if (activeMap) {
+                try { activeMap.invalidateSize(); } catch (_) {}
             }
         }, 150);
+        setTimeout(() => {
+            const activeMap = window.radarMap || leafletRadarMap;
+            if (activeMap) {
+                try { activeMap.invalidateSize(); } catch (_) {}
+            }
+        }, 400);
     }
     if (tabId === 'company-messaging') {
         if (typeof loadCompanyMessagingDashboard === 'function') loadCompanyMessagingDashboard();
@@ -4007,6 +4020,11 @@ function renderLeads(leads) {
         else if (dept.includes('Security')) deptColor = '#ef4444';
 
         const previewMsg = escapeHtml((l.message || '').length > 60 ? (l.message || '').slice(0, 60) + '...' : l.message || 'No inquiry text');
+        const rawMsg = l.message || '';
+        const locMatch = rawMsg.match(/(?:\[Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)\]|Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)|([0-9]{1,2}\.[0-9]{4,10})\s*,\s*([0-9]{1,3}\.[0-9]{4,10})|google\.com\/maps\?q=([0-9.-]+),([0-9.-]+))/i);
+        const leadLat = l.latitude ? parseFloat(l.latitude) : (locMatch ? parseFloat(locMatch[1] || locMatch[3] || locMatch[5] || locMatch[7]) : null);
+        const leadLng = l.longitude ? parseFloat(l.longitude) : (locMatch ? parseFloat(locMatch[2] || locMatch[4] || locMatch[6] || locMatch[8]) : null);
+        const hasLocation = leadLat && leadLng && !isNaN(leadLat) && !isNaN(leadLng);
 
         const contactName = l.name && l.name !== 'N/A' && l.name !== 'Anonymous' ? l.name : (l.phone || 'Inbound Lead');
         const phoneDisplay = l.phone && l.phone !== 'N/A' ? l.phone : '';
@@ -4052,6 +4070,7 @@ function renderLeads(leads) {
                     ${escapeHtml(l.created_at || 'Just now')}
                 </td>
                 <td style="white-space: nowrap;">
+                    ${hasLocation ? `<button class="action-btn" style="padding: 4px 8px; font-size: 0.75rem; background: rgba(0, 168, 132, 0.2); color: #00a884; border: 1px solid #00a884; font-weight: 700; border-radius: 4px; cursor: pointer; margin-right: 4px;" onclick="openLocationOnRadarMap(${leadLat}, ${leadLng}, '${escapeHtml(contactName)}', '${escapeHtml(phoneDisplay)}', '${escapeHtml(previewMsg)}')" title="View on Internal Radar Map">🗺️ Map</button>` : ''}
                     <button class="action-btn green-btn" style="padding: 4px 8px; font-size: 0.75rem; background: #00a884; color: #111b21; font-weight: 700; border: none; border-radius: 4px; cursor: pointer; margin-right: 4px;" onclick="openWhatsAppChatForLead('${escapeHtml(l.phone || '')}')" title="Open in WhatsApp Cloud">💬 Chat</button>
                     <button class="action-btn purple-btn" style="padding: 4px 8px; font-size: 0.75rem; background: #8b5cf6; color: #fff; font-weight: 600; border: none; border-radius: 4px; cursor: pointer; margin-right: 4px;" onclick="openWorkflowForLead('${l.id}')" title="Trigger Automated Workflow on Lead">⚡ Flow</button>
                     <button class="action-btn cyan-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="viewLeadDetail('${l.id}')">Inspect</button>
@@ -7406,29 +7425,35 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                             </div>
                             ${cleanBody ? `<div style="word-break: break-word;">${escapeHtml(cleanBody)}</div>` : ''}
                         `;
-                    } else if (/(?:\[Location:\s*[0-9.-]+\s*,\s*[0-9.-]+\]|Location:\s*[0-9.-]+\s*,\s*[0-9.-]+|[0-9]{1,2}\.[0-9]{4,10}\s*,\s*[0-9]{1,3}\.[0-9]{4,10})/i.test(rawBody)) {
-                        const locMatch = rawBody.match(/(?:\[Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)\]|Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)|([0-9]{1,2}\.[0-9]{4,10})\s*,\s*([0-9]{1,3}\.[0-9]{4,10}))/i);
-                        const lat = parseFloat(locMatch[1] || locMatch[3] || locMatch[5]);
-                        const lng = parseFloat(locMatch[2] || locMatch[4] || locMatch[6]);
-                        const cleanBody = rawBody.replace(/\[Location:\s*[0-9.-]+\s*,\s*[0-9.-]+\]/gi, '').trim();
+                    } else if (/(?:\[Location:\s*[0-9.-]+\s*,\s*[0-9.-]+\]|Location:\s*[0-9.-]+\s*,\s*[0-9.-]+|[0-9]{1,2}\.[0-9]{4,10}\s*,\s*[0-9]{1,3}\.[0-9]{4,10}|google\.com\/maps\?q=([0-9.-]+),([0-9.-]+))/i.test(rawBody)) {
+                        const locMatch = rawBody.match(/(?:\[Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)\]|Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)|([0-9]{1,2}\.[0-9]{4,10})\s*,\s*([0-9]{1,3}\.[0-9]{4,10})|google\.com\/maps\?q=([0-9.-]+),([0-9.-]+))/i);
+                        const lat = parseFloat(locMatch[1] || locMatch[3] || locMatch[5] || locMatch[7]);
+                        const lng = parseFloat(locMatch[2] || locMatch[4] || locMatch[6] || locMatch[8]);
+                        const cleanBody = rawBody.replace(/\[Location:\s*[0-9.-]+\s*,\s*[0-9.-]+\]/gi, '').replace(/https?:\/\/www\.google\.com\/maps\S*/gi, '').trim();
+                        const safeMsgId = String(m.id || Math.random().toString(36).substring(2, 9)).replace(/\W/g, '_');
+                        const miniMapId = `wa-mini-map-${safeMsgId}`;
                         bodyHtml = `
-                            <div class="wa-location-bubble-card" style="background: rgba(0,0,0,0.25); border-radius: 8px; padding: 10px; margin-bottom: 6px; border: 1px solid rgba(0,168,132,0.35);">
-                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-                                    <span style="font-size:20px;">📍</span>
-                                    <div>
-                                        <div style="font-weight:700; color:#00a884; font-size:12.5px;">Live WhatsApp Location Share</div>
-                                        <div style="font-size:11px; color:#8696a0;">GPS: ${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
+                            <div class="wa-location-bubble-card" style="background: rgba(0,0,0,0.32); border-radius: 10px; padding: 10px; margin-bottom: 6px; border: 1px solid rgba(0,168,132,0.4); width: 100%; min-width: 250px; max-width: 320px;">
+                                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                                    <div style="display:flex; align-items:center; gap:6px;">
+                                        <span style="font-size:18px;">📍</span>
+                                        <div>
+                                            <div style="font-weight:700; color:#00a884; font-size:12px;">Live WhatsApp Location</div>
+                                            <div style="font-size:10px; color:#8696a0; font-family: monospace;">GPS: ${lat.toFixed(4)}, ${lng.toFixed(4)}</div>
+                                        </div>
                                     </div>
+                                    <span style="font-size:9.5px; background:rgba(0,168,132,0.15); color:#25d366; font-weight:700; padding:2px 6px; border-radius:4px;">LIVE RADAR</span>
                                 </div>
-                                <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                                    <button type="button" class="hud-btn small green" onclick="autoPlotWhatsAppLocation(${lat}, ${lng}, '${escapeHtml(m.sender_name || 'Customer')}', '${escapeHtml(m.sender || '')}')" style="font-size:11px; padding:4px 8px;">
-                                        🗺️ Plot on Live Radar Map
+                                
+                                <!-- Embedded Interactive Mini-Map Preview Inside Chat Bubble -->
+                                <div id="${miniMapId}" class="wa-chat-mini-map" data-lat="${lat}" data-lng="${lng}" data-name="${escapeHtml(m.sender_name || 'Customer')}" data-phone="${escapeHtml(m.sender || '')}" data-addr="${escapeHtml(cleanBody || 'Customer Delivery Destination')}" style="height: 145px; width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 8px; border: 1px solid rgba(255,255,255,0.12); background: #0f172a; position: relative; z-index: 1;"></div>
+                                
+                                <div style="display:flex; gap:6px;">
+                                    <button type="button" class="hud-btn small green" onclick="openLocationOnRadarMap(${lat}, ${lng}, '${escapeHtml(m.sender_name || 'Customer')}', '${escapeHtml(m.sender || '')}', '${escapeHtml(cleanBody || 'Customer Delivery Destination')}')" style="width: 100%; font-size:11.5px; padding:7px 10px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; background: #00a884; color: #fff; border: none; border-radius: 6px;" title="Open in Radar Control Map">
+                                        🗺️ Open in Radar Control Map
                                     </button>
-                                    <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lng}" target="_blank" class="hud-btn small outline" style="font-size:11px; padding:4px 8px; text-decoration:none;">
-                                        Google Maps
-                                    </a>
                                 </div>
-                                ${cleanBody ? `<div style="margin-top:6px; font-size:12px; color:#e9edef;">${escapeHtml(cleanBody)}</div>` : ''}
+                                ${cleanBody ? `<div style="margin-top:6px; font-size:11.5px; color:#e9edef;">${escapeHtml(cleanBody)}</div>` : ''}
                             </div>
                         `;
                     } else {
@@ -7502,6 +7527,9 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
         }, 50);
     }
     initWhatsAppChatBarListeners();
+    if (typeof initChatBubbleMiniMaps === 'function') {
+        setTimeout(initChatBubbleMiniMaps, 100);
+    }
 }
 
 async function loadWhatsAppMessagesOnly(isConfigured) {
@@ -12093,37 +12121,157 @@ window.toggleSidebarCollapse = toggleSidebarCollapse;
 // ============================================================================
 let leafletRadarMap = null;
 let radarMapMarkers = [];
-
 let deliveryRouteLines = [];
+
+// Helper: Calculate distance from store/hub (Lahore Hub default: 31.5204, 74.3587)
+function calculateDistanceFromStore(lat, lng) {
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) return 'N/A';
+    const storeLat = 31.5204;
+    const storeLng = 74.3587;
+    const R = 6371; // km
+    const dLat = (Number(lat) - storeLat) * Math.PI / 180;
+    const dLon = (Number(lng) - storeLng) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(storeLat * Math.PI / 180) * Math.cos(Number(lat) * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const d = R * c;
+    if (d < 1) {
+        return `${Math.round(d * 1000)} m`;
+    }
+    return `${d.toFixed(1)} km`;
+}
+window.calculateDistanceFromStore = calculateDistanceFromStore;
+
+// Status selector update on map pin
+function updateDeliveryPinStatus(selectEl, lat, lng) {
+    const val = selectEl ? selectEl.value : 'Preparing';
+    const latKey = Number(lat).toFixed(4).replace('.', '_');
+    const lngKey = Number(lng).toFixed(4).replace('.', '_');
+    const pill = document.getElementById(`pin_status_pill_${latKey}_${lngKey}`);
+    if (pill) {
+        pill.textContent = val;
+        if (val === 'Delivered') {
+            pill.style.background = 'rgba(16, 185, 129, 0.2)';
+            pill.style.color = '#10b981';
+        } else if (val === 'Out for Delivery') {
+            pill.style.background = 'rgba(245, 158, 11, 0.2)';
+            pill.style.color = '#d97706';
+        } else {
+            pill.style.background = 'rgba(0, 168, 132, 0.15)';
+            pill.style.color = '#00a884';
+        }
+    }
+    if (typeof showNotification === 'function') {
+        showNotification(`Delivery status updated to: ${val}`, 'info');
+    }
+}
+window.updateDeliveryPinStatus = updateDeliveryPinStatus;
+
+// Rich popup card generator
+function createRichRadarPopupHtml(lat, lng, customerName, phone, address, status = 'Preparing') {
+    const safeName = escapeHtml(customerName || 'Customer');
+    const safePhone = phone ? String(phone).replace(/\D/g, '') : '';
+    const safeAddress = escapeHtml(address || 'Delivery Destination');
+    const distStr = calculateDistanceFromStore(Number(lat), Number(lng));
+    const latKey = Number(lat).toFixed(4).replace('.', '_');
+    const lngKey = Number(lng).toFixed(4).replace('.', '_');
+
+    let badgeBg = 'rgba(0, 168, 132, 0.15)';
+    let badgeColor = '#00a884';
+    if (status === 'Delivered') {
+        badgeBg = 'rgba(16, 185, 129, 0.2)';
+        badgeColor = '#10b981';
+    } else if (status === 'Out for Delivery') {
+        badgeBg = 'rgba(245, 158, 11, 0.2)';
+        badgeColor = '#d97706';
+    }
+
+    return `
+        <div class="radar-rich-popup" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12.5px; color: #1e293b; min-width: 250px; padding: 4px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
+                <b style="color: #00a884; font-size: 13.5px; display:flex; align-items:center; gap:4px;">📍 ${safeName}</b>
+                <span id="pin_status_pill_${latKey}_${lngKey}" style="background: ${badgeBg}; color: ${badgeColor}; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px;">${status}</span>
+            </div>
+            ${safePhone ? `<div style="color: #334155; margin-bottom: 4px; font-size:11.5px; display:flex; align-items:center; gap:5px;"><span>📞</span> <b>+${safePhone}</b></div>` : ''}
+            <div style="color: #64748b; font-size: 11px; margin-bottom: 4px; display:flex; align-items:flex-start; gap:5px;">
+                <span>📦</span> <span><b>Order/Address:</b> ${safeAddress}</span>
+            </div>
+            <div style="color: #64748b; font-size: 11px; margin-bottom: 8px; display:flex; align-items:center; gap:5px;">
+                <span>📏</span> <span>Distance from Store: <b style="color:#0f172a;">${distStr}</b></span>
+            </div>
+            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0;">
+                <label style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; display: block; margin-bottom: 3px;">Status Selector:</label>
+                <select onchange="updateDeliveryPinStatus(this, ${Number(lat)}, ${Number(lng)})" style="width: 100%; padding: 4px 8px; font-size: 11.5px; border-radius: 5px; border: 1px solid #cbd5e1; background: #fff; color: #1e293b; font-weight: 600; cursor: pointer;">
+                    <option value="Preparing" ${status === 'Preparing' ? 'selected' : ''}>⏳ Preparing</option>
+                    <option value="Out for Delivery" ${status === 'Out for Delivery' ? 'selected' : ''}>🚚 Out for Delivery</option>
+                    <option value="Delivered" ${status === 'Delivered' ? 'selected' : ''}>✅ Delivered</option>
+                </select>
+            </div>
+            <div style="margin-top: 8px; display: flex; gap: 6px;">
+                <button type="button" onclick="switchTab('whatsapp')" style="flex:1; background: rgba(0, 168, 132, 0.12); color: #00a884; border: 1px solid #00a884; border-radius: 4px; padding: 5px 8px; font-size: 11px; font-weight: 700; cursor: pointer;">💬 Chat</button>
+                <button type="button" onclick="sendLiveTrackingLinkToCustomer('${safePhone}', ${lat}, ${lng})" style="flex:1; background: #00a884; color: #fff; border: none; border-radius: 4px; padding: 5px 8px; font-size: 11px; font-weight: 700; cursor: pointer;">🚀 Send Link</button>
+            </div>
+        </div>
+    `;
+}
+window.createRichRadarPopupHtml = createRichRadarPopupHtml;
 
 function initLeafletRadarMap() {
     const mapEl = document.getElementById('wa-delivery-map') || document.getElementById('liveRadarMap');
     if (!mapEl || typeof L === 'undefined') return;
     if (leafletRadarMap) {
+        window.radarMap = leafletRadarMap;
         setTimeout(() => {
             try { leafletRadarMap.invalidateSize(); } catch (_) {}
-        }, 250);
+        }, 200);
         return;
     }
     try {
         leafletRadarMap = L.map(mapEl.id, { zoomControl: true }).setView([31.5204, 74.3587], 6); // Centered on Pakistan
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        window.radarMap = leafletRadarMap;
+
+        // Street Tile Layer (OpenStreetMap - high visibility & reliability)
+        const streetTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+            attribution: '&copy; OpenStreetMap contributors'
         }).addTo(leafletRadarMap);
+
+        // Dark Matter Tile Layer (Carto Dark)
+        const darkTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            subdomains: 'abcd',
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        });
+
+        // Layer Switcher: Street / Dark View
+        L.control.layers({
+            "🗺️ Street View": streetTiles,
+            "🌙 Dark Radar": darkTiles
+        }, null, { position: 'topright' }).addTo(leafletRadarMap);
+
         setTimeout(() => {
             try { leafletRadarMap.invalidateSize(); } catch (_) {}
         }, 250);
+        setTimeout(() => {
+            try { leafletRadarMap.invalidateSize(); } catch (_) {}
+        }, 600);
+
+        // Load existing customer location pins from chat history
+        if (typeof loadCustomerLocationsFromChatHistory === 'function') {
+            loadCustomerLocationsFromChatHistory();
+        }
     } catch (e) {
         console.warn('[Leaflet Map Notice]:', e.message);
     }
 }
 window.initLeafletRadarMap = initLeafletRadarMap;
 
-function autoPlotWhatsAppLocation(lat, lng, label, phone) {
-    if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
+function autoPlotWhatsAppLocation(lat, lng, label, phone, address, status = 'Preparing') {
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) return null;
     initLeafletRadarMap();
-    if (!leafletRadarMap || typeof L === 'undefined') return;
+    const map = window.radarMap || leafletRadarMap;
+    if (!map || typeof L === 'undefined') return null;
 
     const latNum = Number(lat);
     const lngNum = Number(lng);
@@ -12136,19 +12284,21 @@ function autoPlotWhatsAppLocation(lat, lng, label, phone) {
         } catch (_) { return false; }
     });
     if (existing) {
-        leafletRadarMap.panTo([latNum, lngNum]);
-        return;
+        try {
+            existing.setPopupContent(createRichRadarPopupHtml(latNum, lngNum, label, phone, address || 'WhatsApp Location', status));
+        } catch (_) {}
+        return existing;
     }
 
     // 1. Customer Marker
     const customerIcon = L.divIcon({
         className: 'delivery-customer-pin',
-        html: '<div style="background:#00a884; color:#fff; border-radius:50%; width:34px; height:34px; display:flex; align-items:center; justify-content:center; font-size:16px; box-shadow:0 0 16px rgba(0,168,132,0.8); border:2.5px solid #fff;">📍</div>',
+        html: '<div style="background:#00a884; color:#fff; border-radius:50%; width:34px; height:34px; display:flex; align-items:center; justify-content:center; font-size:16px; box-shadow:0 0 16px rgba(0,168,132,0.8); border:2.5px solid #fff; cursor:pointer;">📍</div>',
         iconSize: [34, 34],
         iconAnchor: [17, 34]
     });
-    const customerMarker = L.marker([latNum, lngNum], { icon: customerIcon }).addTo(leafletRadarMap);
-    customerMarker._customPhone = phone || '';
+    const customerMarker = L.marker([latNum, lngNum], { icon: customerIcon }).addTo(map);
+    customerMarker._customPhone = phone ? String(phone).replace(/\D/g, '') : '';
 
     // 2. Animated Delivery Truck Marker
     const truckLat = latNum - 0.012;
@@ -12159,7 +12309,7 @@ function autoPlotWhatsAppLocation(lat, lng, label, phone) {
         iconSize: [34, 34],
         iconAnchor: [17, 34]
     });
-    const truckMarker = L.marker([truckLat, truckLng], { icon: truckIcon }).addTo(leafletRadarMap);
+    const truckMarker = L.marker([truckLat, truckLng], { icon: truckIcon }).addTo(map);
 
     // 3. Draw Route Polyline
     const routeLine = L.polyline([[truckLat, truckLng], [latNum, lngNum]], {
@@ -12167,18 +12317,13 @@ function autoPlotWhatsAppLocation(lat, lng, label, phone) {
         weight: 4,
         opacity: 0.85,
         dashArray: '8, 8'
-    }).addTo(leafletRadarMap);
+    }).addTo(map);
     deliveryRouteLines.push(routeLine);
 
-    // Bind Popups
-    customerMarker.bindPopup(`
-        <div style="font-family:sans-serif;font-size:12px;color:#111;min-width:210px;">
-            <b style="color:#00a884;font-size:13px;">📍 ${label || 'Customer Delivery Destination'}</b>
-            <div style="color:#555;margin:3px 0;">📞 ${phone ? '+' + phone : 'WhatsApp Verified'}</div>
-            <div style="font-size:11px;color:#777;">GPS: ${latNum.toFixed(5)}, ${lngNum.toFixed(5)}</div>
-            <div style="margin-top:6px;"><span style="background:rgba(0,168,132,0.15);color:#00a884;font-weight:700;padding:2px 6px;border-radius:4px;font-size:10px;">✅ Delivery Drop-off</span></div>
-        </div>
-    `);
+    // Bind Rich Popups
+    const popupHtml = createRichRadarPopupHtml(latNum, lngNum, label, phone, address || 'Customer Delivery Destination', status);
+    customerMarker.bindPopup(popupHtml, { minWidth: 250 });
+
     truckMarker.bindPopup(`
         <div style="font-family:sans-serif;font-size:12px;color:#111;min-width:190px;">
             <b style="color:#f59e0b;font-size:13px;">🚚 BashFlow Delivery Rider</b>
@@ -12190,67 +12335,211 @@ function autoPlotWhatsAppLocation(lat, lng, label, phone) {
     radarMapMarkers.push(customerMarker);
     radarMapMarkers.push(truckMarker);
 
-    // Update Counter badge from 0 ACTIVE PINS
+    // Update Counter badge
     const countEl = document.getElementById('radarMapPinsCount');
     if (countEl) {
-        countEl.textContent = `${radarMapMarkers.length} ACTIVE PINS`;
+        countEl.textContent = `${radarMapMarkers.length} Active Pins`;
     }
     const telemetryDelivery = document.getElementById('telemetryDeliveryOrders');
     if (telemetryDelivery) {
         telemetryDelivery.textContent = `${radarMapMarkers.length} In Transit 📍`;
     }
 
-    // Pan & fit bounds to the route
-    const bounds = L.latLngBounds([[truckLat, truckLng], [latNum, lngNum]]);
-    leafletRadarMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
-    setTimeout(() => {
-        if (leafletRadarMap) leafletRadarMap.invalidateSize();
-    }, 250);
+    return customerMarker;
 }
 window.autoPlotWhatsAppLocation = autoPlotWhatsAppLocation;
 
-window.addEventListener('resize', () => {
-    if (leafletRadarMap) {
-        setTimeout(() => {
-            try { leafletRadarMap.invalidateSize(); } catch (_) {}
-        }, 250);
-    }
-});
+// Main Internal Navigation Action: openLocationOnRadarMap
+function openLocationOnRadarMap(lat, lng, customerName, phone, address) {
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+    const safeName = customerName || 'Customer';
+    const safePhone = phone || '';
+    const safeAddress = address || 'Delivery Destination';
 
-function addRadarMapPin(lat, lng, label, phone, gmapsUrl, status = 'On the Way') {
+    // 1. Automatically switch the dashboard to the "Live Delivery Map" tab (#tab-map / #tab-delivery-map)
+    switchTab('delivery-map');
+
+    // 2. Initialize radar map and invalidate size
+    initLeafletRadarMap();
+
+    // 3. Drop / highlight customer's pin on internal Leaflet map
+    const marker = autoPlotWhatsAppLocation(latNum, lngNum, safeName, safePhone, safeAddress);
+
+    // 4. Smoothly zoom to coordinates using flyTo
+    setTimeout(() => {
+        const map = window.radarMap || leafletRadarMap;
+        if (map) {
+            try {
+                map.invalidateSize();
+                map.flyTo([latNum, lngNum], 16, {
+                    animate: true,
+                    duration: 1.2
+                });
+            } catch (_) {
+                try { map.setView([latNum, lngNum], 16); } catch (_) {}
+            }
+        }
+    }, 200);
+
+    // 5. Open rich popup card on the map
+    setTimeout(() => {
+        if (marker && typeof marker.openPopup === 'function') {
+            marker.openPopup();
+        } else if (Array.isArray(radarMapMarkers)) {
+            const found = radarMapMarkers.find(m => {
+                try {
+                    const pos = m.getLatLng();
+                    return Math.abs(pos.lat - latNum) < 0.0005 && Math.abs(pos.lng - lngNum) < 0.0005;
+                } catch (_) { return false; }
+            });
+            if (found && typeof found.openPopup === 'function') {
+                found.openPopup();
+            }
+        }
+    }, 600);
+
+    if (typeof showNotification === 'function') {
+        showNotification(`📍 Tracking ${safeName} on Live Delivery Radar Map`, 'success');
+    }
+}
+window.openLocationOnRadarMap = openLocationOnRadarMap;
+window.viewLocationInApp = openLocationOnRadarMap; // Backward-compatible alias
+
+function focusRadarPin(lat, lng) {
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
+    if (typeof initLeafletRadarMap === 'function') initLeafletRadarMap();
+    const map = window.radarMap || leafletRadarMap;
+    if (map) {
+        map.setView([Number(lat), Number(lng)], 17, { animate: true });
+        try { map.invalidateSize(); } catch (_) {}
+    }
+}
+window.focusRadarPin = focusRadarPin;
+
+// Embedded Interactive Mini-Map Initializer for WhatsApp Chat Bubbles
+function initChatBubbleMiniMaps() {
+    if (typeof L === 'undefined') return;
+    const containers = document.querySelectorAll('.wa-chat-mini-map');
+    if (!containers || containers.length === 0) return;
+
+    containers.forEach(el => {
+        if (el._leaflet_id || el.dataset.rendered === 'true') return;
+        const lat = parseFloat(el.dataset.lat);
+        const lng = parseFloat(el.dataset.lng);
+        const name = el.dataset.name || 'Customer';
+        const phone = el.dataset.phone || '';
+        const addr = el.dataset.addr || 'Delivery Drop-off';
+        if (isNaN(lat) || isNaN(lng)) return;
+
+        el.dataset.rendered = 'true';
+        try {
+            const miniMap = L.map(el.id, {
+                zoomControl: false,
+                attributionControl: false,
+                scrollWheelZoom: false,
+                touchZoom: true,
+                dragging: true,
+                doubleClickZoom: true
+            }).setView([lat, lng], 14);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 18
+            }).addTo(miniMap);
+
+            const miniPin = L.divIcon({
+                className: 'chat-pin-icon',
+                html: '<div style="background:#00a884; color:#fff; border-radius:50%; width:26px; height:26px; display:flex; align-items:center; justify-content:center; font-size:13px; box-shadow:0 0 10px rgba(0,168,132,0.9); border:2px solid #fff; cursor:pointer;">📍</div>',
+                iconSize: [26, 26],
+                iconAnchor: [13, 26]
+            });
+            const marker = L.marker([lat, lng], { icon: miniPin }).addTo(miniMap);
+            marker.bindPopup(`<div style="font-family:sans-serif;font-size:11px;color:#111;"><b>📍 ${escapeHtml(name)}</b><br><span style="color:#666;">GPS: ${lat.toFixed(4)}, ${lng.toFixed(4)}</span></div>`);
+
+            // Double clicking on the mini-map opens the radar control map
+            el.addEventListener('dblclick', () => {
+                openLocationOnRadarMap(lat, lng, name, phone, addr);
+            });
+
+            setTimeout(() => {
+                try { miniMap.invalidateSize(); } catch (_) {}
+            }, 200);
+            setTimeout(() => {
+                try { miniMap.invalidateSize(); } catch (_) {}
+            }, 600);
+        } catch (err) {
+            console.debug('[MiniMap init notice]:', err.message);
+        }
+    });
+}
+window.initChatBubbleMiniMaps = initChatBubbleMiniMaps;
+
+// Auto-load all customer location pins from chat history & CRM leads
+async function loadCustomerLocationsFromChatHistory() {
+    let msgs = [];
+    if (typeof waAllMessagesCache !== 'undefined' && Array.isArray(waAllMessagesCache) && waAllMessagesCache.length > 0) {
+        msgs = waAllMessagesCache;
+    } else {
+        try {
+            const res = await fetch('/api/v1/whatsapp/messages?limit=250');
+            if (res.ok) {
+                const data = await res.json();
+                msgs = data.messages || [];
+                if (typeof waAllMessagesCache !== 'undefined') waAllMessagesCache = msgs;
+            }
+        } catch (e) {
+            console.debug('[Location History Load Notice]:', e.message);
+        }
+    }
+
+    if (Array.isArray(msgs)) {
+        msgs.forEach(m => {
+            const raw = (m.body || m.message || '').trim();
+            const locMatch = raw.match(/(?:\[Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)\]|Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)|([0-9]{1,2}\.[0-9]{4,10})\s*,\s*([0-9]{1,3}\.[0-9]{4,10})|google\.com\/maps\?q=([0-9.-]+),([0-9.-]+))/i);
+            if (locMatch) {
+                const lat = parseFloat(locMatch[1] || locMatch[3] || locMatch[5] || locMatch[7]);
+                const lng = parseFloat(locMatch[2] || locMatch[4] || locMatch[6] || locMatch[8]);
+                if (!isNaN(lat) && !isNaN(lng)) {
+                    const name = m.sender_name || (m.direction === 'inbound' ? m.sender : m.recipient) || 'Customer';
+                    const phone = (m.direction === 'inbound' ? m.sender : m.recipient) || '';
+                    const addr = raw.replace(/\[Location:\s*[0-9.-]+\s*,\s*[0-9.-]+\]/gi, '').trim() || 'WhatsApp Location';
+                    autoPlotWhatsAppLocation(lat, lng, name, phone, addr);
+                }
+            }
+        });
+    }
+
+    // Also auto-plot any leads with location from CRM cache
+    if (typeof leadsCache !== 'undefined' && Array.isArray(leadsCache)) {
+        leadsCache.forEach(lead => {
+            const raw = (lead.message || '').trim();
+            const locMatch = raw.match(/(?:\[Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)\]|Location:\s*([0-9.-]+)\s*,\s*([0-9.-]+)|([0-9]{1,2}\.[0-9]{4,10})\s*,\s*([0-9]{1,3}\.[0-9]{4,10})|google\.com\/maps\?q=([0-9.-]+),([0-9.-]+))/i);
+            const lat = lead.latitude ? parseFloat(lead.latitude) : (locMatch ? parseFloat(locMatch[1] || locMatch[3] || locMatch[5] || locMatch[7]) : null);
+            const lng = lead.longitude ? parseFloat(lead.longitude) : (locMatch ? parseFloat(locMatch[2] || locMatch[4] || locMatch[6] || locMatch[8]) : null);
+            if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+                autoPlotWhatsAppLocation(lat, lng, lead.name || 'CRM Lead', lead.phone || '', lead.message || 'CRM Lead Location');
+            }
+        });
+    }
+
+    const countEl = document.getElementById('radarMapPinsCount');
+    if (countEl) {
+        countEl.textContent = `${radarMapMarkers.length} Active Pins`;
+    }
+}
+window.loadCustomerLocationsFromChatHistory = loadCustomerLocationsFromChatHistory;
+
+function addRadarMapPin(lat, lng, label, phone, gmapsUrl, status = 'Preparing') {
     if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
     initLeafletRadarMap();
-    if (!leafletRadarMap || typeof L === 'undefined') return;
+    const map = window.radarMap || leafletRadarMap;
+    if (!map || typeof L === 'undefined') return;
     try {
-        const marker = L.marker([Number(lat), Number(lng)]).addTo(leafletRadarMap);
-        marker._customPhone = phone ? String(phone).replace(/\D/g, '') : '';
-        const cleanGmaps = gmapsUrl || `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-        const isDelivered = String(status).toLowerCase().includes('delivered');
-        const statusBadge = isDelivered
-            ? '<span style="background: rgba(0, 168, 132, 0.2); color: #00a884; font-weight: 700; padding: 2px 6px; border-radius: 4px; font-size: 10.5px;">✅ Delivered</span>'
-            : '<span style="background: rgba(245, 158, 11, 0.2); color: #d97706; font-weight: 700; padding: 2px 6px; border-radius: 4px; font-size: 10.5px;">🚚 On the Way</span>';
-
-        const popupHtml = `
-            <div style="font-family: sans-serif; font-size: 12px; color: #111; min-width: 200px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                    <b style="color: #00a884; font-size: 13px;">📍 ${label || 'Customer'}</b>
-                    ${statusBadge}
-                </div>
-                ${phone ? `<div style="color:#555; margin-bottom: 2px;">📞 +${String(phone).replace(/\D/g, '')}</div>` : ''}
-                <div style="color:#777; font-size:10px; margin-bottom: 6px;">Lat: ${Number(lat).toFixed(4)}, Lng: ${Number(lng).toFixed(4)}</div>
-                <div style="display: flex; flex-direction: column; gap: 5px;">
-                    <a href="${cleanGmaps}" target="_blank" style="color: #00a884; font-weight: bold; text-decoration: underline; font-size: 11px;">🗺️ Open in Google Maps</a>
-                    <button type="button" onclick="sendLiveTrackingLinkToCustomer('${phone || ''}', ${lat}, ${lng})" style="background: #00a884; color: #fff; border: none; border-radius: 4px; padding: 5px 8px; font-size: 11px; font-weight: 700; cursor: pointer;">
-                        🚀 Send Live Tracking Link to Customer
-                    </button>
-                </div>
-            </div>
-        `;
-        marker.bindPopup(popupHtml);
-        radarMapMarkers.push(marker);
-        leafletRadarMap.setView([Number(lat), Number(lng)], 13);
+        const marker = autoPlotWhatsAppLocation(Number(lat), Number(lng), label, phone, 'Order Location Pin', status);
         const countEl = document.getElementById('radarMapPinsCount');
-        if (countEl) countEl.textContent = `${radarMapMarkers.length} Active Location Pins`;
+        if (countEl) countEl.textContent = `${radarMapMarkers.length} Active Pins`;
+        return marker;
     } catch (err) {
         console.debug('[Radar Marker Notice]:', err.message);
     }
@@ -12261,66 +12550,6 @@ window.addRadarMapPin = addRadarMapPin;
 window.addEventListener('load', () => {
     setTimeout(initLeafletRadarMap, 1500);
 });
-
-// ============================================================================
-// MODULE 5: HYBRID ENGINE SWITCHER (BAILEYS BRIDGE VS OFFICIAL META CLOUD API)
-// ============================================================================
-async function switchWhatsAppEngine(mode) {
-    try {
-        const res = await fetch('/api/v1/whatsapp/engine-switch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ engine: mode })
-        });
-        const data = await res.json();
-        if (data.success) {
-            updateEngineSwitcherUI(mode);
-            showNotification(`WhatsApp Engine switched to ${mode.toUpperCase()}`, 'success');
-        } else {
-            showNotification(data.error || 'Failed to switch engine', 'error');
-        }
-    } catch (e) {
-        showNotification('Engine switch error: ' + e.message, 'error');
-    }
-}
-
-function updateEngineSwitcherUI(mode) {
-    const btnBaileys = document.getElementById('btnEngineBaileys');
-    const btnMeta = document.getElementById('btnEngineMeta');
-    if (!btnBaileys || !btnMeta) return;
-
-    if (mode === 'meta') {
-        btnMeta.className = 'hud-btn small blue';
-        btnMeta.textContent = '🔵 Meta Cloud API (Active)';
-        btnBaileys.className = 'hud-btn small outline';
-        btnBaileys.textContent = '⚪ Baileys Cloud Bridge';
-    } else {
-        btnBaileys.className = 'hud-btn small green';
-        btnBaileys.textContent = '🟢 Baileys Cloud Bridge (Active)';
-        btnMeta.className = 'hud-btn small outline';
-        btnMeta.textContent = '⚪ Meta Cloud API (Official)';
-    }
-}
-
-
-function centerRadarMapPakistan() {
-    initLeafletRadarMap();
-    if (leafletRadarMap) {
-        leafletRadarMap.setView([30.3753, 69.3451], 6);
-        leafletRadarMap.invalidateSize();
-    }
-}
-
-// Invalidate Leaflet Map Size whenever tab view changes
-function refreshLeafletRadarMap() {
-    initLeafletRadarMap();
-    if (leafletRadarMap) {
-        setTimeout(() => {
-            try { leafletRadarMap.invalidateSize(); } catch (_) {}
-        }, 200);
-    }
-}
-
 
 // ============================================================================
 // LIVE DELIVERY RADAR TRACKING & WHATSAPP CONNECTION STATUS CONTROLLER
@@ -12335,6 +12564,8 @@ function openRadarMapModal() {
                 try { leafletRadarMap.invalidateSize(); } catch (_) {}
             }
         }, 200);
+    } else {
+        switchTab('delivery-map');
     }
 }
 window.openRadarMapModal = openRadarMapModal;
@@ -12371,8 +12602,15 @@ function trackActiveDelivery() {
     }
 
     if (found) {
-        leafletRadarMap.setView(found.getLatLng(), 15);
-        found.openPopup();
+        const map = window.radarMap || leafletRadarMap;
+        if (map) {
+            try {
+                map.flyTo(found.getLatLng(), 16, { animate: true, duration: 1.2 });
+            } catch (_) {
+                map.setView(found.getLatLng(), 15);
+            }
+        }
+        setTimeout(() => { if (found.openPopup) found.openPopup(); }, 300);
         if (typeof showNotification === 'function') {
             showNotification(`Tracking delivery for ${activeName} on live radar map!`, 'info');
         }

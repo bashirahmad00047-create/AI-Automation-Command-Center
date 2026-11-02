@@ -1271,7 +1271,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                                 </div>
                                 <button type="button" class="hud-btn outline small" onclick="trackActiveDelivery()" style="font-size: 10px; padding: 2px 6px;">Set Pin</button>
                             </div>
-                            <div id="waDossierDeliveryLocation" style="font-size: 11.5px; color: #cbd5e1; background: #0c1317; border: 1px solid #202c33; border-radius: 6px; padding: 8px 10px;">
+                            <div id="waDossierDeliveryLocation" onclick="trackActiveDelivery()" style="font-size: 11.5px; color: #cbd5e1; background: #0c1317; border: 1px solid #202c33; border-radius: 6px; padding: 8px 10px; cursor: pointer;" title="Click to view delivery destination on Live Radar Map">
                                 <div style="display: flex; align-items: center; gap: 6px; color: #10b981; font-weight: 600;">
                                     <span>●</span> <span id="waDossierCityText">Lahore Hub Active</span>
                                 </div>
@@ -3271,6 +3271,41 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                     </div>
                     <p style="color: #94a3b8; margin-bottom: 12px;">Cloud health probe returning database connectivity, engine online status, and service uptime. Used by Render and Kubernetes liveness probes.</p>
                 </div>
+            </div>
+        </section>
+
+            <!-- TAB: LIVE DELIVERY RADAR MAP (SEPARATE DEDICATED SIDEBAR TAB) -->
+        <section id="tab-delivery-map" data-tab="map" class="tab-panel">
+            <div class="panel-header" style="align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; background: rgba(17, 27, 33, 0.9); border: 1px solid rgba(0, 168, 132, 0.35); border-radius: 12px; padding: 12px 18px; backdrop-filter: blur(14px);">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 26px;">🗺️</span>
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <h2 style="font-size: 15px; font-weight: 700; color: #e9edef; margin: 0; letter-spacing: 0.3px;">LIVE DELIVERY RADAR MAP</h2>
+                            <span class="status-pill green" id="radarMapPinsCount" style="font-size: 11px; font-weight: 600;">0 Active Pins</span>
+                        </div>
+                        <p style="color: #8696a0; margin: 2px 0 0 0; font-size: 11.5px;">
+                            Real-time GPS tracking from customer WhatsApp location pins &amp; live delivery route bounds.
+                        </p>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <button type="button" class="hud-btn small" onclick="openSetOrderLocationModal()" style="background: rgba(0, 168, 132, 0.2); border: 1px solid #00a884; color: #25d366; padding: 6px 14px; font-size: 11.5px; border-radius: 6px; font-weight: 700;" title="Set Order Delivery Coordinates">
+                        📍 + Set Location Pin
+                    </button>
+                    <button type="button" class="hud-btn small" onclick="sendLiveTrackingLinkToCustomer()" style="background: rgba(0, 168, 132, 0.2); border: 1px solid #00a884; color: #25d366; padding: 6px 14px; font-size: 11.5px; border-radius: 6px; font-weight: 700;" title="Send Live Tracking Link via WhatsApp">
+                        🚀 Send Link to Customer
+                    </button>
+                    <button type="button" class="hud-btn small outline" onclick="centerRadarMapPakistan()" style="padding: 6px 12px; font-size: 11.5px; border-radius: 6px;">🇵🇰 Center Pakistan</button>
+                    <button type="button" class="hud-btn small outline" onclick="switchTab('whatsapp')" style="padding: 6px 14px; font-size: 11.5px; border-radius: 6px; border-color: rgba(0, 168, 132, 0.4); color: #00a884; display: inline-flex; align-items: center; gap: 5px; font-weight: 600;" title="Return to WhatsApp Chats">
+                        💬 Return to WhatsApp
+                    </button>
+                </div>
+            </div>
+
+            <!-- Full Viewport Leaflet Delivery Map Box -->
+            <div style="background: #0f172a; border: 1px solid rgba(0, 168, 132, 0.3); border-radius: 14px; overflow: hidden; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45); height: calc(100vh - 170px); min-height: 580px; width: 100%; position: relative;">
+                <div id="wa-delivery-map" class="liveRadarMap wa-delivery-map-container" style="height: 100%; width: 100%; background: #0f172a; position: relative; z-index: 1;"></div>
             </div>
         </section>
 
@@ -5519,37 +5554,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
 
     <!-- SET ORDER LOCATION MODAL (FEATURE 2) -->
         
-        <!-- TAB: LIVE DELIVERY RADAR MAP (SEPARATE DEDICATED SIDEBAR TAB) -->
-        <section id="tab-delivery-map" class="tab-panel">
-            <div class="panel-header" style="align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; background: rgba(17, 27, 33, 0.9); border: 1px solid rgba(0, 168, 132, 0.35); border-radius: 12px; padding: 12px 18px; backdrop-filter: blur(14px);">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <span style="font-size: 26px;">🗺️</span>
-                    <div>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <h2 style="font-size: 15px; font-weight: 700; color: #e9edef; margin: 0; letter-spacing: 0.3px;">LIVE DELIVERY RADAR MAP</h2>
-                            <span class="status-pill green" id="radarMapPinsCount" style="font-size: 11px; font-weight: 600;">0 Active Pins</span>
-                        </div>
-                        <p style="color: #8696a0; margin: 2px 0 0 0; font-size: 11.5px;">
-                            Real-time GPS tracking from customer WhatsApp location pins &amp; live delivery route bounds.
-                        </p>
-                    </div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                    <button type="button" class="hud-btn small" onclick="openSetOrderLocationModal()" style="background: rgba(0, 168, 132, 0.2); border: 1px solid #00a884; color: #25d366; padding: 6px 14px; font-size: 11.5px; border-radius: 6px; font-weight: 700;" title="Set Order Delivery Coordinates">
-                        📍 + Set Location Pin
-                    </button>
-                    <button type="button" class="hud-btn small" onclick="sendLiveTrackingLinkToCustomer()" style="background: rgba(0, 168, 132, 0.2); border: 1px solid #00a884; color: #25d366; padding: 6px 14px; font-size: 11.5px; border-radius: 6px; font-weight: 700;" title="Send Live Google Maps Tracking Link">
-                        🚀 Send Link to Customer
-                    </button>
-                    <button type="button" class="hud-btn small outline" onclick="centerRadarMapPakistan()" style="padding: 6px 12px; font-size: 11.5px; border-radius: 6px;">🇵🇰 Center Pakistan</button>
-                </div>
-            </div>
-
-            <!-- Full Viewport Leaflet Delivery Map Box -->
-            <div style="background: #0f172a; border: 1px solid rgba(0, 168, 132, 0.3); border-radius: 14px; overflow: hidden; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45); height: calc(100vh - 170px); min-height: 580px; position: relative;">
-                <div id="wa-delivery-map" class="liveRadarMap wa-delivery-map-container" style="height: 100%; width: 100%; background: #0f172a; position: relative; z-index: 1;"></div>
-            </div>
-        </section>
+        
 
 <div class="hud-modal-backdrop" id="setOrderLocationModal" style="display: none; position: fixed; inset: 0; background: rgba(5, 10, 14, 0.88); backdrop-filter: blur(10px); z-index: 10075; align-items: center; justify-content: center;">
         <div class="hud-modal-content" style="background: #111b21; border: 1px solid #00a884; border-radius: 14px; width: 92%; max-width: 440px; padding: 20px; color: #e9edef;">
