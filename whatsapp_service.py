@@ -5511,19 +5511,25 @@ class WhatsAppService:
                     logger.info(f"AI Auto-Reply already generated for message {message_id} (in-memory deduplication), skipping duplicate webhook.")
                     return {"success": True, "duplicate": True, "message_id": message_id}
             if has_app_context():
-                already_replied = WhatsAppMessage.query.filter(
-                    WhatsAppMessage.organization_id == org_id,
-                    WhatsAppMessage.direction == "outbound",
-                    WhatsAppMessage.raw_payload_json.like(f'%"triggered_by_message_id": "{message_id}"%')
-                ).first()
-                if already_replied:
-                    logger.info(f"AI Auto-Reply already recorded in DB for message {message_id}, skipping duplicate webhook.")
-                    return {
-                        "success": True,
-                        "duplicate": True,
-                        "message_id": message_id,
-                        "reply_body": already_replied.body
-                    }
+                try:
+                    already_replied = WhatsAppMessage.query.filter(
+                        WhatsAppMessage.organization_id == org_id,
+                        WhatsAppMessage.direction == "outbound",
+                        WhatsAppMessage.raw_payload_json.like(f'%"triggered_by_message_id": "{message_id}"%')
+                    ).first()
+                    if already_replied:
+                        logger.info(f"AI Auto-Reply already recorded in DB for message {message_id}, skipping duplicate webhook.")
+                        return {
+                            "success": True,
+                            "duplicate": True,
+                            "message_id": message_id,
+                            "reply_body": already_replied.body
+                        }
+                except Exception:
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
 
         # Prevent self-reply loops if webhook echoes our own sent messages or instance WID
         conf = cls.get_config(organization_id=org_id)
@@ -6277,7 +6283,13 @@ class WhatsAppService:
                         pass
                 existing_payload.update(meta)
                 msg_rec.raw_payload_json = json.dumps(existing_payload)
-                db.session.commit()
+                try:
+                    db.session.commit()
+                except Exception:
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
 
             # Also ensure companion voice dispatch message record has AI metadata
             if isinstance(audio_dispatch_res, dict) and audio_dispatch_res.get("message_record_id") and has_app_context():
@@ -8116,14 +8128,22 @@ class WhatsAppService:
         org_id = organization_id or "org-enterprise-default"
 
         # Check if lead already exists for this phone number in this tenant
-        phone_suffix = clean_phone[-9:] if len(clean_phone) >= 9 else clean_phone
-        existing_lead = Lead.query.filter(
-            Lead.organization_id == org_id,
-            db.or_(
-                Lead.phone == clean_phone,
-                Lead.phone.like(f"%{phone_suffix}%")
-            )
-        ).first()
+        existing_lead = None
+        try:
+            phone_suffix = clean_phone[-9:] if len(clean_phone) >= 9 else clean_phone
+            existing_lead = Lead.query.filter(
+                Lead.organization_id == org_id,
+                db.or_(
+                    Lead.phone == clean_phone,
+                    Lead.phone.like(f"%{phone_suffix}%")
+                )
+            ).first()
+        except Exception as q_err:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            logger.debug(f"Lead lookup notice: {q_err}")
 
         # Extract or construct Google Maps link
         maps_url = None

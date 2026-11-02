@@ -277,7 +277,11 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                                 if "media_url" not in _wam_cols:
                                     _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN media_url TEXT;"))
                                 if "audio_data" not in _wam_cols:
-                                    _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN audio_data BLOB;"))
+                                    try:
+                                        _col_type = "BYTEA" if getattr(db.engine.dialect, "name", "") == "postgresql" else "BLOB"
+                                        _c_conn.execute(_sa_text(f"ALTER TABLE whatsapp_messages ADD COLUMN audio_data {_col_type};"))
+                                    except Exception:
+                                        pass
                             _c_conn.commit()
                 except Exception as _col_err:
                     app_ref.logger.warning(f"Runtime column sync notice: {_col_err}")

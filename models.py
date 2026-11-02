@@ -880,9 +880,12 @@ class WhatsAppMessage(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
 
     def to_dict(self) -> Dict[str, Any]:
-        media_url = getattr(self, "media_url", None)
-        if not media_url and getattr(self, "audio_data", None):
-            media_url = f"/api/whatsapp/media/{self.id}"
+        try:
+            media_url = getattr(self, "media_url", None)
+            if not media_url and getattr(self, "audio_data", None):
+                media_url = f"/api/whatsapp/media/{self.id}"
+        except Exception:
+            media_url = None
         sender_name = None
         chat_name = None
         duration = None

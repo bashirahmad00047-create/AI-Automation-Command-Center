@@ -4067,211 +4067,229 @@ def whatsapp_webhook_ingress():
     Normalizes payloads, deduplicates message IDs for idempotency, persists records,
     and dispatches to the automation engine for rule execution.
     """
-    payload = request.get_json(silent=True) or {}
+    try:
+        payload = request.get_json(silent=True) or {}
 
-    # Detect Green-API Webhook format (typeWebhook or instanceData)
-    is_green_api = bool(payload.get("typeWebhook") or payload.get("instanceData"))
+        # Detect Green-API Webhook format (typeWebhook or instanceData)
+        is_green_api = bool(payload.get("typeWebhook") or payload.get("instanceData"))
 
-    if is_green_api:
-        messages = WhatsAppService.parse_green_api_payload(payload)
-        provider_name = "green_api"
-    else:
-        # Meta Cloud API signature verification
-        raw_body = request.get_data()
-        sig = request.headers.get("X-Hub-Signature-256")
-        target_org_hint = request.args.get("org_id")
-        if not WhatsAppService.verify_signature(raw_body, sig, organization_id=target_org_hint):
-            logger.warning("WhatsApp Meta webhook rejected: HMAC signature verification failed.")
-            return jsonify({"error": "Invalid signature", "code": "UNAUTHORIZED"}), 401
-        messages = WhatsAppService.parse_webhook_payload(payload)
-        provider_name = "meta"
-
-    if not messages:
-        # Acknowledging delivery reports, read receipts, or non-message events
-        return jsonify({"status": "acknowledged", "provider": provider_name, "processed": 0}), 200
-
-    # Resolve target tenant
-    target_org = None
-    target_org_id = request.args.get("org_id")
-    if target_org_id:
-        target_org = db.session.get(Organization, target_org_id)
-
-    # Resolve via instance ID or phone ID if not provided via query parameter
-    if not target_org:
-        incoming_instance_id = None
         if is_green_api:
-            incoming_instance_id = (
-                payload.get("instanceData", {}).get("idInstance")
-                or payload.get("idInstance")
-            )
+            messages = WhatsAppService.parse_green_api_payload(payload)
+            provider_name = "green_api"
         else:
-            entries = payload.get("entry", [])
-            if entries and isinstance(entries, list):
-                changes = entries[0].get("changes", [])
-                if changes and isinstance(changes, list):
-                    incoming_instance_id = changes[0].get("value", {}).get("metadata", {}).get("phone_number_id")
+            # Meta Cloud API signature verification
+            raw_body = request.get_data()
+            sig = request.headers.get("X-Hub-Signature-256")
+            target_org_hint = request.args.get("org_id")
+            if not WhatsAppService.verify_signature(raw_body, sig, organization_id=target_org_hint):
+                logger.warning("WhatsApp Meta webhook rejected: HMAC signature verification failed.")
+                return jsonify({"error": "Invalid signature", "code": "UNAUTHORIZED"}), 401
+            messages = WhatsAppService.parse_webhook_payload(payload)
+            provider_name = "meta"
 
-        if not incoming_instance_id and messages:
-            incoming_instance_id = messages[0].get("recipient_phone_id")
+        if not messages:
+            # Acknowledging delivery reports, read receipts, or non-message events
+            return jsonify({"status": "acknowledged", "provider": provider_name, "processed": 0}), 200
 
-        if incoming_instance_id:
-            resolved_org_id = WhatsAppService.resolve_organization_by_instance(incoming_instance_id)
-            if resolved_org_id:
-                target_org = db.session.get(Organization, resolved_org_id)
+        # Resolve target tenant
+        target_org = None
+        target_org_id = request.args.get("org_id")
+        if target_org_id:
+            target_org = db.session.get(Organization, target_org_id)
 
-    if not target_org:
-        target_org = Organization.query.filter_by(id="org-enterprise-default").first() or Organization.query.filter_by(is_active=True).first()
+        # Resolve via instance ID or phone ID if not provided via query parameter
+        if not target_org:
+            incoming_instance_id = None
+            if is_green_api:
+                incoming_instance_id = (
+                    payload.get("instanceData", {}).get("idInstance")
+                    or payload.get("idInstance")
+                )
+            else:
+                entries = payload.get("entry", [])
+                if entries and isinstance(entries, list):
+                    changes = entries[0].get("changes", [])
+                    if changes and isinstance(changes, list):
+                        incoming_instance_id = changes[0].get("value", {}).get("metadata", {}).get("phone_number_id")
 
-    if not target_org:
-        return jsonify({"error": "No active organization found to receive WhatsApp message", "code": "NOT_FOUND"}), 404
+            if not incoming_instance_id and messages:
+                incoming_instance_id = messages[0].get("recipient_phone_id")
 
-    engine = get_engine()
-    processed_count = 0
+            if incoming_instance_id:
+                resolved_org_id = WhatsAppService.resolve_organization_by_instance(incoming_instance_id)
+                if resolved_org_id:
+                    target_org = db.session.get(Organization, resolved_org_id)
 
-    for msg in messages:
-        msg_id = msg.get("message_id")
-        if msg_id and WhatsAppService.is_duplicate_message(msg_id):
-            logger.info(f"Duplicate WhatsApp message ignored: {msg_id}")
-            continue
+        if not target_org:
+            try:
+                target_org = Organization.query.filter_by(id="org-enterprise-default").first() or Organization.query.filter_by(is_active=True).first()
+            except Exception:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                target_org = None
+        target_org_id = target_org.id if target_org else (target_org_id or "org-enterprise-default")
 
-        media_candidate = (
-            msg.get("media_url")
-            or msg.get("download_url")
-            or msg.get("audio_url")
-            or msg.get("mediaUrl")
-            or msg.get("downloadUrl")
-        )
-        record = WhatsAppService.record_message(
-            organization_id=target_org.id,
-            sender=msg.get("from_phone", "unknown"),
-            recipient=msg.get("recipient_phone_id", "system"),
-            direction="inbound",
-            body=msg.get("body", ""),
-            media_url=media_candidate,
-            status="received",
-            whatsapp_message_id=msg_id,
-            message_type=msg.get("message_type", "text"),
-            raw_payload=msg
-        )
+        engine = get_engine()
+        processed_count = 0
 
-        ai_reply = None
-        try:
-            WhatsAppService.auto_ingest_crm_lead(
-                organization_id=target_org.id,
-                from_phone=msg.get("from_phone"),
-                sender_name=msg.get("sender_name"),
-                message_body=msg.get("body"),
-                location_data=msg.get("location"),
+        for msg in messages:
+            msg_id = msg.get("message_id")
+            if msg_id and WhatsAppService.is_duplicate_message(msg_id):
+                logger.info(f"Duplicate WhatsApp message ignored: {msg_id}")
+                continue
+
+            media_candidate = (
+                msg.get("media_url")
+                or msg.get("download_url")
+                or msg.get("audio_url")
+                or msg.get("mediaUrl")
+                or msg.get("downloadUrl")
+            )
+            record = WhatsAppService.record_message(
+                organization_id=target_org_id,
+                sender=msg.get("from_phone", "unknown"),
+                recipient=msg.get("recipient_phone_id", "system"),
+                direction="inbound",
+                body=msg.get("body", ""),
+                media_url=media_candidate,
+                status="received",
+                whatsapp_message_id=msg_id,
+                message_type=msg.get("message_type", "text"),
                 raw_payload=msg
             )
-        except Exception as lead_err:
-            logger.warning(f"Error auto-ingesting CRM lead in webhook: {lead_err}")
 
-        # 2. Consent & Opt-Out handling
-        inbound_body_clean = (msg.get("body") or "").strip().lower()
-        if inbound_body_clean in ("stop", "unsubscribe", "opt out", "optout", "cancel", "halt"):
+            ai_reply = None
             try:
-                from campaign_service import CampaignService
-                CampaignService.handle_opt_out(
-                    organization_id=target_org.id,
-                    phone=msg.get("from_phone", ""),
-                    channel="whatsapp",
-                    reason=f"Inbound trigger: {inbound_body_clean.upper()}"
+                WhatsAppService.auto_ingest_crm_lead(
+                    organization_id=target_org_id,
+                    from_phone=msg.get("from_phone"),
+                    sender_name=msg.get("sender_name"),
+                    message_body=msg.get("body"),
+                    location_data=msg.get("location"),
+                    raw_payload=msg
                 )
-            except Exception as opt_err:
-                logger.warning(f"Failed to record automatic opt-out: {opt_err}")
-        elif inbound_body_clean in ("start", "unstop", "resume"):
-            try:
-                from campaign_service import CampaignService
-                CampaignService.handle_opt_in(
-                    organization_id=target_org.id,
-                    phone=msg.get("from_phone", ""),
-                    channel="whatsapp"
-                )
-            except Exception as opt_err:
-                logger.warning(f"Failed to record automatic opt-in: {opt_err}")
+            except Exception as lead_err:
+                logger.warning(f"Error auto-ingesting CRM lead in webhook: {lead_err}")
 
-        rule_replied = False
-        if engine:
-            event_data = {
-                "from": msg.get("from_phone"),
-                "sender_name": msg.get("sender_name", ""),
-                "message": msg.get("body", ""),
-                "text": msg.get("body", ""),
-                "whatsapp_message_id": msg_id,
-                "recipient_phone_id": msg.get("recipient_phone_id", ""),
-                "direction": "inbound",
-                "record_id": record.id if record else None,
-                "provider": provider_name
-            }
-            try:
-                engine_res = engine.ingest_event(
-                    event_name="whatsapp.message",
-                    payload=event_data,
-                    source=f"whatsapp_{provider_name}_webhook",
-                    dry_run=False,
-                    organization_id=target_org.id
-                )
-                if WhatsAppService.engine_dispatched_reply(engine_res):
-                    rule_replied = True
-                    logger.info(f"Automation rule already dispatched WhatsApp reply for message {msg_id}; skipping auto-responder.")
-            except Exception as e:
-                logger.error(f"Error triggering engine for WhatsApp message {msg_id}: {e}")
+            # 2. Consent & Opt-Out handling
+            inbound_body_clean = (msg.get("body") or "").strip().lower()
+            if inbound_body_clean in ("stop", "unsubscribe", "opt out", "optout", "cancel", "halt"):
+                try:
+                    from campaign_service import CampaignService
+                    CampaignService.handle_opt_out(
+                        organization_id=target_org_id,
+                        phone=msg.get("from_phone", ""),
+                        channel="whatsapp",
+                        reason=f"Inbound trigger: {inbound_body_clean.upper()}"
+                    )
+                except Exception as opt_err:
+                    logger.warning(f"Failed to record automatic opt-out: {opt_err}")
+            elif inbound_body_clean in ("start", "unstop", "resume"):
+                try:
+                    from campaign_service import CampaignService
+                    CampaignService.handle_opt_in(
+                        organization_id=target_org.id,
+                        phone=msg.get("from_phone", ""),
+                        channel="whatsapp"
+                    )
+                except Exception as opt_err:
+                    logger.warning(f"Failed to record automatic opt-in: {opt_err}")
 
-        # 4. AI Auto-Responder if not replied by rule
-        if not rule_replied:
-            is_v = WhatsAppService.is_audio_message(
-                message_type=msg.get("message_type"),
-                body=msg.get("body"),
-                download_url=msg.get("download_url"),
-                audio_base64=msg.get("audio_base64")
-            )
-            try:
-                ai_reply = WhatsAppService.handle_inbound_auto_response(
-                    organization_id=target_org.id,
-                    sender_phone=msg.get("from_phone", "unknown"),
-                    chat_id=msg.get("chat_id") or msg.get("from_phone"),
-                    message_body=msg.get("body", ""),
-                    sender_name=msg.get("sender_name", ""),
-                    message_id=msg_id,
-                    message_timestamp=msg.get("timestamp"),
-                    is_voice=is_v,
+            rule_replied = False
+            if engine:
+                event_data = {
+                    "from": msg.get("from_phone"),
+                    "sender_name": msg.get("sender_name", ""),
+                    "message": msg.get("body", ""),
+                    "text": msg.get("body", ""),
+                    "whatsapp_message_id": msg_id,
+                    "recipient_phone_id": msg.get("recipient_phone_id", ""),
+                    "direction": "inbound",
+                    "record_id": record.id if record else None,
+                    "provider": provider_name
+                }
+                try:
+                    engine_res = engine.ingest_event(
+                        event_name="whatsapp.message",
+                        payload=event_data,
+                        source=f"whatsapp_{provider_name}_webhook",
+                        dry_run=False,
+                        organization_id=target_org_id
+                    )
+                    if WhatsAppService.engine_dispatched_reply(engine_res):
+                        rule_replied = True
+                        logger.info(f"Automation rule already dispatched WhatsApp reply for message {msg_id}; skipping auto-responder.")
+                except Exception as e:
+                    logger.error(f"Error triggering engine for WhatsApp message {msg_id}: {e}")
+
+            # 4. AI Auto-Responder if not replied by rule
+            if not rule_replied:
+                is_v = WhatsAppService.is_audio_message(
+                    message_type=msg.get("message_type"),
+                    body=msg.get("body"),
                     download_url=msg.get("download_url"),
-                    audio_base64=msg.get("audio_base64"),
-                    media_url=msg.get("media_url") or msg.get("download_url"),
-                    direct_bridge=True
+                    audio_base64=msg.get("audio_base64")
                 )
-            except Exception as auto_err:
-                logger.error(f"AI Auto-Responder error in webhook: {auto_err}")
+                try:
+                    ai_reply = WhatsAppService.handle_inbound_auto_response(
+                        organization_id=target_org_id,
+                        sender_phone=msg.get("from_phone", "unknown"),
+                        chat_id=msg.get("chat_id") or msg.get("from_phone"),
+                        message_body=msg.get("body", ""),
+                        sender_name=msg.get("sender_name", ""),
+                        message_id=msg_id,
+                        message_timestamp=msg.get("timestamp"),
+                        is_voice=is_v,
+                        download_url=msg.get("download_url"),
+                        audio_base64=msg.get("audio_base64"),
+                        media_url=msg.get("media_url") or msg.get("download_url"),
+                        direct_bridge=True
+                    )
+                except Exception as auto_err:
+                    logger.error(f"AI Auto-Responder error in webhook: {auto_err}")
 
-        processed_count += 1
+            processed_count += 1
 
-    reply_text = None
-    audio_b64 = None
-    image_url_val = None
-    image_b64_val = None
-    is_voice_flag = False
-    send_as_voice_flag = False
+        reply_text = None
+        audio_b64 = None
+        image_url_val = None
+        image_b64_val = None
+        is_voice_flag = False
+        send_as_voice_flag = False
 
-    if ai_reply and isinstance(ai_reply, dict):
-        reply_text = ai_reply.get("reply_body") or ai_reply.get("reply")
-        audio_b64 = ai_reply.get("audio_base64")
-        image_url_val = ai_reply.get("image_url") or ai_reply.get("imageUrl")
-        image_b64_val = ai_reply.get("image_base64") or ai_reply.get("imageBase64")
-        is_voice_flag = bool(ai_reply.get("is_voice"))
-        send_as_voice_flag = bool(ai_reply.get("send_as_voice") or (is_voice_flag and audio_b64))
+        if ai_reply and isinstance(ai_reply, dict):
+            reply_text = ai_reply.get("reply_body") or ai_reply.get("reply")
+            audio_b64 = ai_reply.get("audio_base64")
+            image_url_val = ai_reply.get("image_url") or ai_reply.get("imageUrl")
+            image_b64_val = ai_reply.get("image_base64") or ai_reply.get("imageBase64")
+            is_voice_flag = bool(ai_reply.get("is_voice"))
+            send_as_voice_flag = bool(ai_reply.get("send_as_voice") or (is_voice_flag and audio_b64))
 
-    return jsonify({
-        "status": "ok",
-        "provider": provider_name,
-        "processed": processed_count,
-        "reply": reply_text,
-        "audio_base64": audio_b64,
-        "image_url": image_url_val,
-        "image_base64": image_b64_val,
-        "is_voice": is_voice_flag,
-        "send_as_voice": send_as_voice_flag
-    }), 200
+        return jsonify({
+            "status": "ok",
+            "provider": provider_name,
+            "processed": processed_count,
+            "reply": reply_text,
+            "audio_base64": audio_b64,
+            "image_url": image_url_val,
+            "image_base64": image_b64_val,
+            "is_voice": is_voice_flag,
+            "send_as_voice": send_as_voice_flag
+        }), 200
+    except Exception as ingress_err:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        logger.error(f"WhatsApp webhook ingress error: {ingress_err}", exc_info=True)
+        return jsonify({
+            "status": "acknowledged",
+            "provider": "green_api",
+            "processed": 0,
+            "error": str(ingress_err)
+        }), 200
 
 
 @api_v1.route("/webhooks/whatsapp/calls", methods=["GET", "POST"])
