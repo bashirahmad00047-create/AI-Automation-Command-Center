@@ -48,20 +48,44 @@ def get_current_user() -> Optional[User]:
     """Retrieves current authenticated user from session or request context."""
     user_id = session.get("user_id")
     if hasattr(g, "current_user") and g.current_user is not None:
-        if user_id and g.current_user.id == user_id:
+        if user_id and str(g.current_user.id) == str(user_id):
             return g.current_user
         elif not user_id and getattr(g, "is_api_key_auth", False):
             return g.current_user
         g.current_user = None
 
     if user_id:
-        user = db.session.get(User, user_id)
-        if user and user.is_active:
-            g.current_user = user
-            return user
+        try:
+            user = db.session.get(User, str(user_id))
+            if user and user.is_active:
+                g.current_user = user
+                return user
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
         if session.get("is_super_admin") or session.get("user_email"):
+            try:
+                admin_email = session.get("user_email", "").strip().lower()
+                user = User.query.filter(db.func.lower(User.email) == admin_email).first() if admin_email else None
+                if not user:
+                    user = User.query.filter(User.is_superuser == True).first()
+                if user and user.is_active:
+                    session["user_id"] = user.id
+                    session.permanent = True
+                    g.current_user = user
+                    return user
+            except Exception:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+    elif session.get("is_super_admin") or session.get("user_email"):
+        try:
             admin_email = session.get("user_email", "").strip().lower()
-            user = User.query.filter_by(email=admin_email).first() if admin_email else None
+            user = User.query.filter(db.func.lower(User.email) == admin_email).first() if admin_email else None
             if not user:
                 user = User.query.filter(User.is_superuser == True).first()
             if user and user.is_active:
@@ -69,16 +93,11 @@ def get_current_user() -> Optional[User]:
                 session.permanent = True
                 g.current_user = user
                 return user
-    elif session.get("is_super_admin") or session.get("user_email"):
-        admin_email = session.get("user_email", "").strip().lower()
-        user = User.query.filter_by(email=admin_email).first() if admin_email else None
-        if not user:
-            user = User.query.filter(User.is_superuser == True).first()
-        if user and user.is_active:
-            session["user_id"] = user.id
-            session.permanent = True
-            g.current_user = user
-            return user
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
     return None
 
 
@@ -144,11 +163,18 @@ def get_current_org() -> Optional[Organization]:
 
 def get_user_role(user_id: str, org_id: str) -> Optional[str]:
     """Gets the user's role in the specified organization."""
-    user = db.session.get(User, user_id)
-    if user and user.is_superuser:
-        return "owner"
-    membership = Membership.query.filter_by(user_id=user_id, organization_id=org_id).first()
-    return membership.role if membership else None
+    try:
+        user = db.session.get(User, str(user_id))
+        if user and user.is_superuser:
+            return "owner"
+        membership = Membership.query.filter_by(user_id=str(user_id), organization_id=str(org_id)).first()
+        return membership.role if membership else None
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return None
 
 
 def require_auth(f: Callable) -> Callable:

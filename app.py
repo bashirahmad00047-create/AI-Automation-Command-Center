@@ -107,7 +107,9 @@ def sync_admin_user():
                 db.session.add(org)
                 db.session.flush()
 
-            user = User.query.filter_by(email=admin_email.lower()).first()
+            user = User.query.filter(
+                (User.id == "usr-master-admin") | (db.func.lower(User.email) == admin_email.lower())
+            ).first()
             if not user:
                 user = User(
                     id="usr-master-admin",
@@ -134,7 +136,9 @@ def sync_admin_user():
                 db.session.add(mem)
 
             # Also ensure demo admin user exists for 'Use Demo Admin' button
-            demo_user = User.query.filter_by(email="admin@opsflow.io").first()
+            demo_user = User.query.filter(
+                (User.id == "usr-admin-primary") | (db.func.lower(User.email) == "admin@opsflow.io")
+            ).first()
             if not demo_user:
                 demo_user = User(
                     id="usr-admin-primary",
@@ -157,6 +161,10 @@ def sync_admin_user():
             db.session.commit()
             print('Admin user auto-synced from environment variables.')
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         print('Admin sync note:', e)
 
 
@@ -241,6 +249,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     db.create_all()
                 except Exception as _create_err:
                     app_ref.logger.warning(f"db.create_all() notice: {_create_err}")
+
+                try:
+                    from models import LoginAttempt
+                    LoginAttempt.__table__.create(db.engine, checkfirst=True)
+                except Exception as _la_err:
+                    app_ref.logger.warning(f"LoginAttempt table ensure notice: {_la_err}")
 
                 try:
                     from sqlalchemy import inspect as _sa_inspect, text as _sa_text
@@ -360,12 +374,15 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         user_email = session.get("user_email") or session.get("email")
         if not user_email and session.get("user_id"):
             try:
-                u = db.session.get(User, session.get("user_id"))
+                u = db.session.get(User, str(session.get("user_id")))
                 if u:
                     user_email = u.email
                     session["user_email"] = u.email
             except Exception:
-                pass
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
         if user_email and user_email.lower() == MASTER_ADMIN_EMAIL.lower():
             session["is_enterprise_bypass"] = True
             session["plan"] = "enterprise"
@@ -502,55 +519,134 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     def top_level_login():
         from auth import get_current_user
         if request.method == "GET":
-            user = get_current_user()
-            if user or session.get("user_id") or session.get("is_super_admin"):
-                return redirect(url_for("index"))
+            try:
+                user = get_current_user()
+                if user or session.get("user_id") or session.get("is_super_admin"):
+                    return redirect(url_for("index"))
+            except Exception:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
             return render_template("login.html")
 
         if request.method == "POST":
-            import os
-            from limiter import login_limiter, get_client_ip
-            client_ip = get_client_ip()
-            user_agent = request.headers.get("User-Agent", "")[:250]
-            data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
-            email = (data.get("email") or "").strip()
-            password = (data.get("password") or "").strip()
+            try:
+                import os
+                from limiter import login_limiter, get_client_ip
+                client_ip = get_client_ip()
+                user_agent = request.headers.get("User-Agent", "")[:250]
+                data = request.get_json(silent=True) or (request.form.to_dict() if request.form else {})
+                email = (data.get("email") or "").strip()
+                password = (data.get("password") or "").strip()
 
-            is_limited, retry_after, lock_msg = login_limiter.is_rate_limited(client_ip, email)
-            if is_limited:
+                if not email or not password:
+                    if request.is_json:
+                        return jsonify({"error": "Email and password are required.", "code": "VALIDATION_ERROR"}), 400
+                    return render_template("login.html", error="Email and password are required."), 400
+
+                is_limited, retry_after, lock_msg = login_limiter.is_rate_limited(client_ip, email)
+                if is_limited:
+                    if request.is_json:
+                        resp = jsonify({
+                            "error": lock_msg,
+                            "code": "TOO_MANY_REQUESTS",
+                            "retry_after": retry_after
+                        })
+                        resp.headers["Retry-After"] = str(retry_after)
+                        return resp, 429
+                    return render_template("login.html", error=lock_msg), 429
+
+                admin_email_env = os.environ.get('ADMIN_EMAIL', 'Bashirahmad00047@gmail.com').strip().lower()
+                admin_pass_env = os.environ.get('ADMIN_PASSWORD', 'bashir@12.').strip()
+                if email.lower() == admin_email_env and password == admin_pass_env:
+                    login_limiter.record_success(client_ip, email)
+                    login_limiter.record_attempt(client_ip, email, success=True, user_agent=user_agent)
+                    session.permanent = True
+                    session.pop("logged_out", None)
+                    session['user_id'] = "usr-master-admin"
+                    session['user_email'] = admin_email_env
+                    session['role'] = 'admin'
+                    session['is_super_admin'] = True
+                    session['is_enterprise_bypass'] = True
+                    session['plan'] = 'enterprise'
+                    session['last_activity'] = time.time()
+
+                    # Bootstrap admin user & org safely
+                    try:
+                        org = db.session.get(Organization, "org-enterprise-default") or Organization.query.first()
+                        if not org:
+                            org = Organization(
+                                id="org-enterprise-default",
+                                name="Acme Enterprise Global",
+                                slug="enterprise-corp",
+                                plan_tier="enterprise",
+                                is_active=True,
+                                max_rules=250,
+                                max_monthly_events=1000000
+                            )
+                            db.session.add(org)
+                            db.session.flush()
+
+                        user = User.query.filter(
+                            (User.id == "usr-master-admin") | (db.func.lower(User.email) == admin_email_env)
+                        ).first()
+                        if not user:
+                            user = User(
+                                id="usr-master-admin",
+                                email=admin_email_env,
+                                full_name="System Administrator",
+                                is_superuser=True,
+                                is_active=True
+                            )
+                            user.set_password(admin_pass_env)
+                            db.session.add(user)
+                            db.session.flush()
+                        else:
+                            user.is_superuser = True
+                            user.is_active = True
+
+                        mem = Membership.query.filter_by(user_id=user.id, organization_id=org.id).first()
+                        if not mem:
+                            mem = Membership(
+                                id=generate_uuid("mem"),
+                                user_id=user.id,
+                                organization_id=org.id,
+                                role="owner"
+                            )
+                            db.session.add(mem)
+
+                        db.session.commit()
+                        session['active_org_id'] = org.id
+                        session['org_id'] = org.id
+                    except Exception as _b_err:
+                        db.session.rollback()
+                        application.logger.warning(f"Master admin setup notice: {_b_err}")
+
+                    if request.is_json:
+                        return jsonify({'status': 'success', 'success': True, 'redirect': url_for('index')})
+                    return redirect(url_for('index'))
+
+                from api_v1 import auth_login
+                resp = auth_login()
+                if not request.is_json:
+                    if isinstance(resp, tuple):
+                        if resp[1] == 200:
+                            return redirect(url_for('index'))
+                        data_err = resp[0].get_json() if hasattr(resp[0], 'get_json') else {}
+                        return render_template("login.html", error=data_err.get("error", "Invalid credentials")), resp[1]
+                    elif hasattr(resp, "status_code"):
+                        if resp.status_code == 200:
+                            return redirect(url_for('index'))
+                        data_err = resp.get_json() if hasattr(resp, 'get_json') else {}
+                        return render_template("login.html", error=data_err.get("error", "Invalid credentials")), resp.status_code
+                return resp
+            except Exception as e:
+                db.session.rollback()
+                application.logger.error(f"Error during top-level login: {e}", exc_info=True)
                 if request.is_json:
-                    resp = jsonify({
-                        "error": lock_msg,
-                        "code": "TOO_MANY_REQUESTS",
-                        "retry_after": retry_after
-                    })
-                    resp.headers["Retry-After"] = str(retry_after)
-                    return resp, 429
-                return render_template("login.html", error=lock_msg), 429
-
-            admin_email_env = os.environ.get('ADMIN_EMAIL', 'Bashirahmad00047@gmail.com')
-            admin_pass_env = os.environ.get('ADMIN_PASSWORD', 'bashir@12.')
-            if email.lower() == admin_email_env.lower() and password == admin_pass_env:
-                login_limiter.record_success(client_ip, email)
-                login_limiter.record_attempt(client_ip, email, success=True, user_agent=user_agent)
-                session.permanent = True
-                session.pop("logged_out", None)
-                session['user_id'] = 99999
-                session['user_email'] = admin_email_env
-                session['role'] = 'admin'
-                session['is_super_admin'] = True
-                session['is_enterprise_bypass'] = True
-                session['plan'] = 'enterprise'
-                session['last_activity'] = time.time()
-                if request.is_json:
-                    return jsonify({'status': 'success', 'redirect': url_for('index')})
-                return redirect(url_for('index'))
-
-            from api_v1 import auth_login
-            resp = auth_login()
-            if not request.is_json and isinstance(resp, tuple) and resp[1] == 200:
-                return redirect(url_for('index'))
-            return resp
+                    return jsonify({"error": "Authentication service error. Please try again.", "code": "AUTH_ERROR"}), 500
+                return render_template("login.html", error="An error occurred during authentication. Please try again."), 500
 
     @application.route("/register", methods=["GET", "POST"])
     def top_level_register():

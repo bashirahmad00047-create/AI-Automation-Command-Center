@@ -158,7 +158,11 @@ class LoginRateLimiter:
                 )
                 return True, retry_after, msg
         except Exception:
-            pass
+            try:
+                from models import db
+                db.session.rollback()
+            except Exception:
+                pass
 
         return False, 0, ""
 

@@ -367,9 +367,9 @@ def auth_login():
 
     # Direct Master Admin Login Override
     import os
-    admin_email_env = os.environ.get('ADMIN_EMAIL', 'Bashirahmad00047@gmail.com')
-    admin_pass_env = os.environ.get('ADMIN_PASSWORD', 'bashir@12.')
-    if email == admin_email_env.lower() and password == admin_pass_env:
+    admin_email_env = os.environ.get('ADMIN_EMAIL', 'Bashirahmad00047@gmail.com').strip().lower()
+    admin_pass_env = os.environ.get('ADMIN_PASSWORD', 'bashir@12.').strip()
+    if email == admin_email_env and password == admin_pass_env:
         login_limiter.record_success(client_ip, email)
         login_limiter.record_attempt(client_ip, email, success=True, user_agent=user_agent)
         session.permanent = True
@@ -380,57 +380,79 @@ def auth_login():
         session['plan'] = 'enterprise'
         session['user_email'] = admin_email_env
 
-        # 1. Resolve or create canonical enterprise organization for workflows
-        org = Organization.query.filter_by(id="org-enterprise-default").first() or Organization.query.first()
-        if not org:
-            org = Organization(
-                id="org-enterprise-default",
-                name="Acme Enterprise Global",
-                slug="enterprise-corp",
-                plan_tier="enterprise",
-                is_active=True,
-                max_rules=250,
-                max_monthly_events=1000000
-            )
-            db.session.add(org)
-            db.session.flush()
+        # 1. Resolve or create canonical enterprise organization for workflows safely
+        user_id = "usr-master-admin"
+        org_id = "org-enterprise-default"
+        user_payload = {
+            "id": user_id,
+            "email": admin_email_env,
+            "full_name": "System Administrator",
+            "is_superuser": True,
+            "is_active": True
+        }
+        org_payload = {
+            "id": org_id,
+            "name": "Acme Enterprise Global",
+            "slug": "enterprise-corp",
+            "plan_tier": "enterprise",
+            "is_active": True
+        }
 
-        # 2. Resolve or create persistent Master Admin user
-        user = User.query.filter_by(email=admin_email_env.lower()).first()
-        if not user:
-            user = User(
-                id="usr-master-admin",
-                email=admin_email_env.lower(),
-                full_name="System Administrator",
-                is_superuser=True,
-                is_active=True
-            )
-            user.set_password(admin_pass_env)
-            db.session.add(user)
-            db.session.flush()
-        else:
-            if not user.is_superuser or not user.is_active:
+        try:
+            org = db.session.get(Organization, "org-enterprise-default") or Organization.query.first()
+            if not org:
+                org = Organization(
+                    id="org-enterprise-default",
+                    name="Acme Enterprise Global",
+                    slug="enterprise-corp",
+                    plan_tier="enterprise",
+                    is_active=True,
+                    max_rules=250,
+                    max_monthly_events=1000000
+                )
+                db.session.add(org)
+                db.session.flush()
+
+            user = User.query.filter(
+                (User.id == "usr-master-admin") | (db.func.lower(User.email) == admin_email_env)
+            ).first()
+            if not user:
+                user = User(
+                    id="usr-master-admin",
+                    email=admin_email_env,
+                    full_name="System Administrator",
+                    is_superuser=True,
+                    is_active=True
+                )
+                user.set_password(admin_pass_env)
+                db.session.add(user)
+                db.session.flush()
+            else:
                 user.is_superuser = True
                 user.is_active = True
 
-        # 3. Ensure active membership in this organization
-        mem = Membership.query.filter_by(user_id=user.id, organization_id=org.id).first()
-        if not mem:
-            mem = Membership(
-                id=f"mem-admin-{org.id[:12]}",
-                user_id=user.id,
-                organization_id=org.id,
-                role="owner"
-            )
-            db.session.add(mem)
+            mem = Membership.query.filter_by(user_id=user.id, organization_id=org.id).first()
+            if not mem:
+                mem = Membership(
+                    id=generate_uuid("mem"),
+                    user_id=user.id,
+                    organization_id=org.id,
+                    role="owner"
+                )
+                db.session.add(mem)
 
-        db.session.commit()
+            db.session.commit()
+            org_id = org.id
+            user_id = user.id
+            user_payload = user.to_dict()
+            org_payload = org.to_dict()
+        except Exception as _sync_err:
+            db.session.rollback()
+            current_app.logger.warning(f"Admin login bootstrap fallback: {_sync_err}")
 
-        org_id = org.id
-        session["user_id"] = user.id
+        session["user_id"] = user_id
         session["active_org_id"] = org_id
         session["org_id"] = org_id
-        user_payload = user.to_dict()
 
         redirect_url = url_for('dashboard') if 'dashboard' in current_app.view_functions else '/'
         return jsonify({
@@ -441,46 +463,70 @@ def auth_login():
             'user': user_payload,
             'role': 'admin',
             'active_org_id': org_id,
-            'organization': org.to_dict() if org else None
+            'organization': org_payload
         })
 
-    user = User.query.filter_by(email=email).first()
-    if not user or not user.check_password(password):
-        login_limiter.record_attempt(client_ip, email, success=False, user_agent=user_agent)
+    try:
+        user = User.query.filter(db.func.lower(User.email) == email).first()
+        if not user or not user.check_password(password):
+            login_limiter.record_attempt(client_ip, email, success=False, user_agent=user_agent)
+            return jsonify({"error": "Invalid email or password credentials.", "code": "UNAUTHORIZED"}), 401
+
+        login_limiter.record_success(client_ip, email)
+        login_limiter.record_attempt(client_ip, email, success=True, user_agent=user_agent)
+
+        if not user.is_active:
+            return jsonify({"error": "This account is inactive. Please contact support.", "code": "ACCOUNT_DISABLED"}), 403
+
+        try:
+            user.last_login_at = datetime.datetime.utcnow()
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        # Find primary organization
+        membership = None
+        try:
+            membership = Membership.query.filter_by(user_id=user.id).first()
+        except Exception:
+            db.session.rollback()
+
+        org_id = membership.organization_id if membership else None
+        active_org = None
+        if org_id:
+            try:
+                active_org = db.session.get(Organization, str(org_id))
+            except Exception:
+                db.session.rollback()
+
+        session.permanent = True
+        session.pop("logged_out", None)
+        session["user_id"] = user.id
+        session["user_email"] = user.email
+        if org_id:
+            session["active_org_id"] = org_id
+            session["org_id"] = org_id
+
+        try:
+            log_audit_event("auth.login", "user", user.id, {"email": email})
+        except Exception:
+            pass
+
+        redirect_url = url_for('dashboard') if 'dashboard' in current_app.view_functions else '/'
+        return jsonify({
+            "status": "success",
+            "success": True,
+            "message": "Login successful.",
+            "redirect": redirect_url,
+            "user": user.to_dict(),
+            "role": membership.role if membership else "viewer",
+            "active_org_id": org_id,
+            "organization": active_org.to_dict() if active_org else None
+        })
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.error(f"Login error for {email}: {exc}", exc_info=True)
         return jsonify({"error": "Invalid email or password credentials.", "code": "UNAUTHORIZED"}), 401
-
-    login_limiter.record_success(client_ip, email)
-    login_limiter.record_attempt(client_ip, email, success=True, user_agent=user_agent)
-
-    if not user.is_active:
-        return jsonify({"error": "This account is inactive. Please contact support.", "code": "ACCOUNT_DISABLED"}), 403
-
-    user.last_login_at = datetime.datetime.utcnow()
-    db.session.commit()
-
-    # Find primary organization
-    membership = Membership.query.filter_by(user_id=user.id).first()
-    org_id = membership.organization_id if membership else None
-    active_org = db.session.get(Organization, org_id) if org_id else None
-
-    session.permanent = True
-    session.pop("logged_out", None)
-    session["user_id"] = user.id
-    session["user_email"] = user.email
-    if org_id:
-        session["active_org_id"] = org_id
-        session["org_id"] = org_id
-
-    log_audit_event("auth.login", "user", user.id, {"email": email})
-
-    return jsonify({
-        "success": True,
-        "message": "Login successful.",
-        "user": user.to_dict(),
-        "role": membership.role if membership else "viewer",
-        "active_org_id": org_id,
-        "organization": active_org.to_dict() if active_org else None
-    })
 
 
 @api_v1.route("/auth/logout", methods=["POST", "GET"])
