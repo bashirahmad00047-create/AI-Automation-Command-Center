@@ -11765,6 +11765,8 @@ async function triggerDirectNumberCall() {
 }
 
 let liveVoiceCallHistory = [];
+let lastSpokenQuerySent = '';
+let lastSpokenQueryTime = 0;
 
 function getActiveLiveVoicePersona() {
     const sel = document.getElementById('voicePersonaSelector');
@@ -11789,19 +11791,34 @@ function getActiveLiveVoicePitch() {
 }
 
 function getPersonaFriendlyName(personaKey) {
+    const sel = document.getElementById('voicePersonaSelector');
+    if (sel && sel.options && sel.selectedIndex >= 0 && (!personaKey || personaKey === sel.value)) {
+        const text = sel.options[sel.selectedIndex].text;
+        if (text) {
+            return text.replace(/^\d+\)\s*/, '').trim();
+        }
+    }
     if (!personaKey) personaKey = getActiveLiveVoicePersona();
     const p = String(personaKey).toLowerCase();
-    if (p.includes('puck') || p.includes('gemini')) return 'Puck (Gemini 2.5 Native)';
-    if (p.includes('uzma')) return 'Uzma (Pakistani Female)';
-    if (p.includes('asad')) return 'Asad (Pakistani Male)';
-    if (p.includes('andrew')) return 'Andrew (Multilingual Male)';
-    if (p.includes('ava')) return 'Ava (Multilingual Female)';
-    if (p.includes('brian')) return 'Brian (Natural English)';
+    if (p.includes('puck') || p.includes('gemini')) return 'Gemini 2.5 Native Male (Puck - Ultra Human)';
+    if (p.includes('uzma')) return 'Pakistani Urdu Female (ur-PK-UzmaNeural)';
+    if (p.includes('asad')) return 'Pakistani Urdu Male (ur-PK-AsadNeural - Calm & Respectful)';
+    if (p.includes('andrew')) return 'English Natural Male (en-US-AndrewMultilingualNeural)';
+    if (p.includes('ava')) return 'English Natural Female (en-US-AvaMultilingualNeural)';
+    if (p.includes('brian')) return 'English Multilingual (en-US-BrianMultilingualNeural)';
     return 'AI Voice Assistant';
 }
 
 async function sendVoiceChatQuery(spokenText) {
     if (!spokenText || !spokenText.trim() || !liveVoiceCallActive) return;
+    const cleanInput = spokenText.trim();
+    const now = Date.now();
+    if (cleanInput === lastSpokenQuerySent && (now - lastSpokenQueryTime) < 1400) {
+        return; // Prevent duplicate dispatch within 1.4 seconds
+    }
+    lastSpokenQuerySent = cleanInput;
+    lastSpokenQueryTime = now;
+
     const transcriptBox = document.getElementById('voiceTranscriptBox');
     const statusLabel = document.getElementById('voiceCallStatusLabel');
     const vadStatus = document.getElementById('callVADStatus');
@@ -11809,7 +11826,6 @@ async function sendVoiceChatQuery(spokenText) {
     if (statusLabel) statusLabel.textContent = 'Thinking...';
     if (vadStatus) vadStatus.textContent = '● Processing speech input...';
 
-    const cleanInput = spokenText.trim();
     liveVoiceCallHistory.push({ role: 'user', text: cleanInput });
 
     if (transcriptBox) {
@@ -11858,27 +11874,27 @@ async function sendVoiceChatQuery(spokenText) {
 
                 currentVoiceAudioPlayer.onended = function() {
                     setEqualizerActive(false);
-                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening...';
                     if (vadStatus && liveVoiceCallActive) vadStatus.textContent = '● Continuous VAD active';
                 };
 
                 currentVoiceAudioPlayer.play().catch(e => {
                     console.warn('[Live Voice Audio Play Notice]', e);
                     setEqualizerActive(false);
-                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening...';
                 });
             } else {
                 setEqualizerActive(false);
-                if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+                if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening...';
             }
         } else {
             setEqualizerActive(false);
-            if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+            if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening...';
         }
     } catch (err) {
         console.warn('[Voice Chat Query Error]', err);
         setEqualizerActive(false);
-        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening...';
     }
 }
 
@@ -12016,18 +12032,18 @@ async function startLiveVoiceCall(callerName = '') {
 
                     currentVoiceAudioPlayer.onended = function() {
                         setEqualizerActive(false);
-                        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+                        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening...';
                     };
                     currentVoiceAudioPlayer.play().catch(e => {
                         console.warn('[Greeting Audio Play Notice]', e);
                         setEqualizerActive(false);
-                        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+                        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening...';
                     });
                 }
             }
         } catch (greetErr) {
             console.warn('[Live Voice Greeting Notice]', greetErr);
-            if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+            if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening...';
         }
 
         // Start continuous microphone VAD & SpeechRecognition
@@ -12063,7 +12079,8 @@ function startContinuousVoiceVAD() {
             liveVoiceRecognition = new SpeechRecognition();
             liveVoiceRecognition.continuous = true;
             liveVoiceRecognition.interimResults = true;
-            liveVoiceRecognition.lang = 'ur-PK, en-US';
+            const pKey = getActiveLiveVoicePersona().toLowerCase();
+            liveVoiceRecognition.lang = (pKey.includes('en-us') || pKey.includes('andrew') || pKey.includes('ava') || pKey.includes('brian')) ? 'en-US' : 'ur-PK';
 
             liveVoiceRecognition.onresult = function(event) {
                 // INSTANT BARGE-IN (INTERRUPTION): If user speaks while AI audio is playing, stop AI immediately!
@@ -12071,9 +12088,9 @@ function startContinuousVoiceVAD() {
                     try {
                         currentVoiceAudioPlayer.pause();
                         currentVoiceAudioPlayer.currentTime = 0;
-                        setEqualizerActive(false);
-                        if (statusLabel) statusLabel.textContent = 'Listening... (Interrupted Assistant)';
                     } catch (_) {}
+                    setEqualizerActive(false);
+                    if (statusLabel) statusLabel.textContent = 'Listening...';
                 }
 
                 let interimTranscript = '';
@@ -12091,11 +12108,16 @@ function startContinuousVoiceVAD() {
                 }
 
                 clearTimeout(voiceSpeechDebounceTimer);
-                const textToSend = (finalTranscript || interimTranscript).trim();
-                if (textToSend.length > 2) {
-                    // Turnaround silence detection: 650ms for snappy natural exchange
+                const finalClean = finalTranscript.trim();
+                const interimClean = interimTranscript.trim();
+
+                // Continuous Turn-Taking: on isFinal sentence completion, automatically send immediately
+                if (finalClean.length > 1) {
+                    sendVoiceChatQuery(finalClean);
+                } else if (interimClean.length > 2) {
+                    // Turnaround silence pause fallback (650ms)
                     voiceSpeechDebounceTimer = setTimeout(() => {
-                        sendVoiceChatQuery(textToSend);
+                        sendVoiceChatQuery(interimClean);
                     }, 650);
                 }
             };
