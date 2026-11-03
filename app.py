@@ -204,9 +204,36 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     """Application factory for OpsFlow SaaS."""
     application = Flask(__name__)
     try:
-        from flask_socketio import SocketIO
+        from flask_socketio import SocketIO, join_room, emit
         socketio = SocketIO(application, cors_allowed_origins="*", async_mode="threading")
         application.config["SOCKETIO"] = socketio
+
+        @socketio.on("join-call-room")
+        def handle_join_call_room(data):
+            try:
+                raw_room = str((data or {}).get("roomId") or "")
+                clean_room = re.sub(r"\D", "", raw_room)
+                role = str((data or {}).get("role") or "customer")
+                if clean_room:
+                    join_room(clean_room)
+                    from api_v1 import _ACTIVE_CALL_SESSIONS, _ACTIVE_CALL_SESSIONS_LOCK
+                    with _ACTIVE_CALL_SESSIONS_LOCK:
+                        now_iso = datetime.datetime.utcnow().isoformat() + "Z"
+                        sess = _ACTIVE_CALL_SESSIONS.get(clean_room)
+                        if not sess:
+                            _ACTIVE_CALL_SESSIONS[clean_room] = {
+                                "phone": clean_room,
+                                "name": "Customer",
+                                "status": "CUSTOMER_JOINED",
+                                "initiated_at": now_iso,
+                                "joined_at": now_iso
+                            }
+                        else:
+                            sess["status"] = "CUSTOMER_JOINED"
+                            sess["joined_at"] = now_iso
+                    emit("customer-joined", {"roomId": clean_room, "role": role}, room=clean_room)
+            except Exception as _e:
+                logger.debug(f"Socket join-call-room notice: {_e}")
     except Exception as _sock_init_err:
         application.config["SOCKETIO"] = None
 

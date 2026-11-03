@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Live AI Voice Call | BashFlow</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <link rel="icon" type="image/svg+xml" href="/static/img/opsflow-icon.svg">
     <style>
         * {
@@ -326,9 +327,9 @@
             <p style="font-size: 13px; color: #94a3b8; max-width: 260px; line-height: 1.5; margin-bottom: 24px;">
                 Connecting you to our 100% Free Live AI Voice Assistant.
             </p>
-            <button type="button" class="btn-start-call" onclick="startCallFromOverlay()">
+            <button type="button" class="btn-start-call" id="joinCallBtn" onclick="startCallFromOverlay()">
                 <span>📞</span>
-                <span>Tap to Join Call</span>
+                <span id="joinCallBtnText">Tap to Join Call</span>
             </button>
             <div style="font-size: 11px; color: #64748b; margin-top: 20px;">
                 Instant Two-Way Voice • Pakistani Urdu &amp; English
@@ -407,10 +408,17 @@
 
     <script>
         // Room ID is kept strictly clean (digits only) on both mobile and dashboard
-        const rawPhone = "{{ phone }}";
-        const phone = String(rawPhone || window.location.pathname.split('/').filter(Boolean).pop() || '').replace(/\D/g, '');
-        const roomId = phone;
+        const rawPhone = window.location.pathname.split('/call/')[1] || '{{ phone }}' || '';
+        const roomId = String(rawPhone).replace(/\D/g, ''); // '+923209350858' aur '923209350858' dono '923209350858' ban jayenge
+        const phone = roomId;
         window.roomId = roomId;
+
+        let socket = null;
+        try {
+            if (typeof io !== 'undefined') {
+                socket = io();
+            }
+        } catch (_) {}
         let isCallActive = false;
         let isMuted = false;
         let isAiSpeaking = false;
@@ -491,34 +499,11 @@
         }
 
         // ===================================================================
-        // 1. UNLOCK BROWSER AUDIO & JOIN CALL
+        // 1. UNLOCK BROWSER AUDIO & JOIN CALL (MOBILE TOUCH & CLICK HANDLER)
         // ===================================================================
-        function startCallFromOverlay() {
+        function startCustomerListening(stream) {
             const overlay = document.getElementById('connectOverlay');
             if (overlay) overlay.style.display = 'none';
-
-            // Requirement 1: Unlock browser AudioContext inside the click handler itself!
-            try {
-                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                audioCtx = new AudioContextClass();
-                if (audioCtx.state === 'suspended') {
-                    audioCtx.resume();
-                }
-                // Play tiny silent buffer
-                const silentBuffer = audioCtx.createBuffer(1, 1, 22050);
-                const s = audioCtx.createBufferSource();
-                s.buffer = silentBuffer;
-                s.connect(audioCtx.destination);
-                s.start(0);
-            } catch (ctxErr) {
-                console.warn('[AudioContext Unlock Notice]', ctxErr);
-            }
-
-            // Also unlock HTML5 Audio element
-            if (audioPlayer) {
-                audioPlayer.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-                audioPlayer.play().then(() => audioPlayer.pause()).catch(() => {});
-            }
 
             isCallActive = true;
             startTimer();
@@ -529,18 +514,81 @@
                 tb.innerHTML = '<div style="color: #10b981; font-weight: 600;">🟢 Call Connected. Say "Salam" or speak your question.</div>';
             }
 
-            // Report join to backend so admin dashboard immediately knows!
-            if (phone) {
-                fetch('/api/call/' + encodeURIComponent(phone) + '/join', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone: phone })
-                }).catch(err => console.warn('Join report notice:', err));
+            if (stream) {
+                micStream = stream;
+                setupMicAnalyser(stream);
+                setupMediaRecorderVAD(stream);
+                startPrimarySpeechRecognition();
+            } else {
+                setupDualMicPipeline();
             }
-
-            // Setup Dual-Mic System (SpeechRecognition + MediaRecorder Fallback + Volume Meter)
-            setupDualMicPipeline();
         }
+        window.startCustomerListening = startCustomerListening;
+
+        async function executeJoinFlow() {
+            const joinBtn = document.getElementById('joinCallBtn');
+            const txt = document.getElementById('joinCallBtnText') || joinBtn;
+            if (joinBtn) joinBtn.disabled = true;
+            if (txt) txt.innerText = 'Connecting...';
+
+            try {
+                // Mobile browser ke liye AudioContext unlock karna zaroori hai
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!audioCtx) audioCtx = new AudioCtx();
+                if (audioCtx.state === 'suspended') {
+                    await audioCtx.resume();
+                }
+                const silentBuffer = audioCtx.createBuffer(1, 1, 22050);
+                const s = audioCtx.createBufferSource();
+                s.buffer = silentBuffer;
+                s.connect(audioCtx.destination);
+                s.start(0);
+
+                if (audioPlayer) {
+                    audioPlayer.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+                    audioPlayer.play().then(() => audioPlayer.pause()).catch(() => {});
+                }
+
+                // Mic permission mangna
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                // Server ko batana ki customer join ho gaya hai
+                if (socket && socket.emit) {
+                    socket.emit('join-call-room', { roomId: roomId, role: 'customer' });
+                }
+                if (phone) {
+                    fetch('/api/call/' + encodeURIComponent(phone) + '/join', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phone: phone, roomId: roomId })
+                    }).catch(err => console.warn('Join report notice:', err));
+                }
+
+                // Mic listening start karein
+                startCustomerListening(stream);
+            } catch (err) {
+                console.error('[Mic Permission Error]', err);
+                alert('Mic allow karein taake baat ho sake: ' + (err.message || err.name));
+                if (joinBtn) joinBtn.disabled = false;
+                if (txt) txt.innerText = 'Tap to Join Call';
+            }
+        }
+
+        function startCallFromOverlay() {
+            executeJoinFlow();
+        }
+        window.startCallFromOverlay = startCallFromOverlay;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const joinBtn = document.getElementById('joinCallBtn');
+            if (joinBtn) {
+                // Mobile touch aur click dono handle karein
+                joinBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    executeJoinFlow();
+                });
+            }
+        });
 
         // ===================================================================
         // 2. AUDIO PLAYBACK WITH ZERO CORS/AUTOPLAY ISSUES & SPEECH SYNTHESIS FALLBACK
