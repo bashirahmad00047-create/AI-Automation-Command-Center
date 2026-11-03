@@ -14122,6 +14122,85 @@ function shareStoreLink() {
 }
 window.shareStoreLink = shareStoreLink;
 
+function openStoreBrandingModal() {
+    let modal = document.getElementById('storeBrandingModal');
+    if (!modal) {
+        const div = document.createElement('div');
+        div.id = 'storeBrandingModal';
+        div.className = 'modal-backdrop';
+        div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        div.innerHTML = `
+            <div style="background:#0f172a;border:1px solid #334155;border-radius:14px;padding:24px;width:100%;max-width:520px;color:#f8fafc;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;border-bottom:1px solid #334155;padding-bottom:12px;">
+                    <h3 style="margin:0;font-size:1.2rem;display:flex;align-items:center;gap:8px;">🎨 Storefront Branding &amp; Settings</h3>
+                    <button type="button" onclick="document.getElementById('storeBrandingModal').remove()" style="background:none;border:none;color:#94a3b8;font-size:1.5rem;cursor:pointer;">&times;</button>
+                </div>
+                <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:12.5px;color:#cbd5e1;margin-bottom:5px;font-weight:600;">Store Name</label>
+                    <input type="text" id="adminStoreName" style="width:100%;padding:10px 12px;background:#1e293b;border:1px solid #475569;border-radius:8px;color:#fff;outline:none;" placeholder="Chitral &amp; Global Bazar">
+                </div>
+                <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:12.5px;color:#cbd5e1;margin-bottom:5px;font-weight:600;">Store Subtitle / Tagline</label>
+                    <input type="text" id="adminStoreTagline" style="width:100%;padding:10px 12px;background:#1e293b;border:1px solid #475569;border-radius:8px;color:#fff;outline:none;" placeholder="Pure Mountain Treasures, Handcrafted Heritage &amp; Essentials">
+                </div>
+                <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:12.5px;color:#cbd5e1;margin-bottom:5px;font-weight:600;">WhatsApp Support / Contact Phone</label>
+                    <input type="tel" id="adminStorePhone" style="width:100%;padding:10px 12px;background:#1e293b;border:1px solid #475569;border-radius:8px;color:#fff;outline:none;" placeholder="0320 9350858">
+                </div>
+                <div style="margin-bottom:18px;">
+                    <label style="display:block;font-size:12.5px;color:#cbd5e1;margin-bottom:5px;font-weight:600;">Delivery Fee (PKR - 0 for Free Delivery)</label>
+                    <input type="number" id="adminStoreDeliveryFee" style="width:100%;padding:10px 12px;background:#1e293b;border:1px solid #475569;border-radius:8px;color:#fff;outline:none;" placeholder="0" min="0">
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:10px;">
+                    <button type="button" class="hud-btn outline small" onclick="document.getElementById('storeBrandingModal').remove()">Cancel</button>
+                    <button type="button" class="hud-btn primary small" onclick="saveStoreBrandingSettings()">💾 Save Settings</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(div);
+    }
+    fetch('/api/v1/store/settings').then(r => r.json()).then(d => {
+        if (d.settings) {
+            if (d.settings.store_name) document.getElementById('adminStoreName').value = d.settings.store_name;
+            if (d.settings.store_tagline) document.getElementById('adminStoreTagline').value = d.settings.store_tagline;
+            if (d.settings.store_phone) document.getElementById('adminStorePhone').value = d.settings.store_phone;
+            if (d.settings.delivery_fee !== undefined) document.getElementById('adminStoreDeliveryFee').value = d.settings.delivery_fee;
+        }
+    }).catch(() => {});
+}
+window.openStoreBrandingModal = openStoreBrandingModal;
+
+async function saveStoreBrandingSettings() {
+    const payload = {
+        store_name: document.getElementById('adminStoreName').value.trim(),
+        store_tagline: document.getElementById('adminStoreTagline').value.trim(),
+        store_phone: document.getElementById('adminStorePhone').value.trim(),
+        delivery_fee: document.getElementById('adminStoreDeliveryFee').value.trim()
+    };
+    try {
+        const res = await fetch('/api/v1/store/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            if (typeof showHudToast === 'function') {
+                showHudToast('✓ Storefront branding updated successfully!', 'success');
+            } else {
+                alert('Storefront branding updated successfully!');
+            }
+            const modal = document.getElementById('storeBrandingModal');
+            if (modal) modal.remove();
+        } else {
+            alert('Failed to update: ' + (data.error || 'Server error'));
+        }
+    } catch (e) {
+        alert('Network error: ' + e.message);
+    }
+}
+window.saveStoreBrandingSettings = saveStoreBrandingSettings;
+
 
 // ==============================================================================
 // MODULE 2: AI VOICE STUDIO & LIVE VOICE TEST CONTROLS

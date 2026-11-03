@@ -8026,6 +8026,180 @@ def api_store_order_status(order_id: str):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@api_v1.route("/store/settings", methods=["GET", "POST"])
+def api_store_settings():
+    """Gets or updates store branding and checkout configuration."""
+    try:
+        from models import SystemSetting
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            if "store_name" in data:
+                SystemSetting.set_val("STORE_NAME", str(data["store_name"]).strip(), description="Storefront Brand Name")
+            if "store_tagline" in data:
+                SystemSetting.set_val("STORE_TAGLINE", str(data["store_tagline"]).strip(), description="Storefront Subtitle/Tagline")
+            if "store_phone" in data:
+                SystemSetting.set_val("STORE_PHONE", str(data["store_phone"]).strip(), description="Storefront WhatsApp Phone")
+            if "delivery_fee" in data:
+                SystemSetting.set_val("STORE_DELIVERY_FEE", str(data["delivery_fee"]).strip(), description="Storefront Delivery Fee")
+            if "banner_image" in data:
+                SystemSetting.set_val("STORE_BANNER_IMAGE", str(data["banner_image"]).strip(), description="Storefront Hero Banner Image URL")
+
+            db.session.commit()
+            return jsonify({
+                "success": True,
+                "message": "Storefront settings updated successfully!",
+                "settings": {
+                    "store_name": SystemSetting.get_val("STORE_NAME", "Chitral & Global Bazar"),
+                    "store_tagline": SystemSetting.get_val("STORE_TAGLINE", "Pure Mountain Treasures, Handcrafted Heritage & Essentials"),
+                    "store_phone": SystemSetting.get_val("STORE_PHONE", os.environ.get("JAZZCASH_NUMBER", "03209350858")),
+                    "delivery_fee": SystemSetting.get_val("STORE_DELIVERY_FEE", "0"),
+                    "banner_image": SystemSetting.get_val("STORE_BANNER_IMAGE", "")
+                }
+            }), 200
+
+        # GET
+        jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
+        return jsonify({
+            "success": True,
+            "settings": {
+                "store_name": SystemSetting.get_val("STORE_NAME", "Chitral & Global Bazar"),
+                "store_tagline": SystemSetting.get_val("STORE_TAGLINE", "Pure Mountain Treasures, Handcrafted Heritage & Essentials"),
+                "store_phone": SystemSetting.get_val("STORE_PHONE", jc_num),
+                "delivery_fee": SystemSetting.get_val("STORE_DELIVERY_FEE", "0"),
+                "banner_image": SystemSetting.get_val("STORE_BANNER_IMAGE", "")
+            }
+        }), 200
+    except Exception as e:
+        logger.error(f"Store settings error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/store/products/create", methods=["POST"])
+def api_store_product_create():
+    """Adds a new custom product to the store and database catalog."""
+    try:
+        from models import Product, generate_uuid
+        data = request.get_json(silent=True) or {}
+        name = str(data.get("name") or "").strip()
+        category = str(data.get("category") or "General").strip()
+        price = float(data.get("price") or 0.0)
+        desc = str(data.get("description") or "").strip()
+        img = str(data.get("image_url") or "").strip()
+        stock_qty = int(data.get("stock_quantity") or 50)
+        stock_stat = str(data.get("stock_status") or "in_stock").strip()
+        org_id = str(data.get("organization_id") or "org-enterprise-default").strip()
+
+        if not name:
+            return jsonify({"success": False, "error": "Product name is required."}), 400
+
+        prod = Product(
+            id=generate_uuid("prd"),
+            organization_id=org_id,
+            name=name,
+            category=category,
+            price=price,
+            currency="PKR",
+            description=desc,
+            image_url=img,
+            stock_quantity=stock_qty,
+            stock_status=stock_stat,
+            is_active=True
+        )
+        db.session.add(prod)
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "message": f"Product '{name}' created successfully!",
+            "product": {
+                "id": prod.id,
+                "name": prod.name,
+                "category": prod.category,
+                "price": prod.price,
+                "currency": prod.currency,
+                "description": prod.description,
+                "image_url": prod.image_url,
+                "stock_status": prod.stock_status
+            }
+        }), 201
+    except Exception as e:
+        logger.error(f"Product creation error: {e}", exc_info=True)
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/store/products/<product_id>/edit", methods=["POST", "PUT"])
+def api_store_product_edit(product_id: str):
+    """Updates an existing store product."""
+    try:
+        from models import Product
+        prod = db.session.get(Product, product_id)
+        if not prod:
+            return jsonify({"success": False, "error": "Product not found."}), 404
+
+        data = request.get_json(silent=True) or {}
+        if "name" in data and str(data["name"]).strip():
+            prod.name = str(data["name"]).strip()
+        if "category" in data:
+            prod.category = str(data["category"]).strip()
+        if "price" in data:
+            try: prod.price = float(data["price"])
+            except Exception: pass
+        if "description" in data:
+            prod.description = str(data["description"]).strip()
+        if "image_url" in data:
+            prod.image_url = str(data["image_url"]).strip()
+        if "stock_quantity" in data:
+            try: prod.stock_quantity = int(data["stock_quantity"])
+            except Exception: pass
+        if "stock_status" in data:
+            prod.stock_status = str(data["stock_status"]).strip()
+        if "is_active" in data:
+            prod.is_active = bool(data["is_active"])
+
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "message": f"Product '{prod.name}' updated successfully!",
+            "product": {
+                "id": prod.id,
+                "name": prod.name,
+                "category": prod.category,
+                "price": prod.price,
+                "currency": prod.currency,
+                "description": prod.description,
+                "image_url": prod.image_url,
+                "stock_status": prod.stock_status
+            }
+        }), 200
+    except Exception as e:
+        logger.error(f"Product edit error: {e}", exc_info=True)
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/store/products/<product_id>/delete", methods=["POST", "DELETE"])
+def api_store_product_delete(product_id: str):
+    """Deletes or archives a store product."""
+    try:
+        from models import Product
+        prod = db.session.get(Product, product_id)
+        if not prod:
+            return jsonify({"success": False, "error": "Product not found."}), 404
+
+        # Hard delete or deactivate
+        db.session.delete(prod)
+        db.session.commit()
+        return jsonify({"success": True, "message": "Product removed successfully."}), 200
+    except Exception as e:
+        logger.error(f"Product delete error: {e}", exc_info=True)
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ==============================================================================
 # MODULE 2: AI VOICE STUDIO & LIVE VOICE TEST APIS
 # ==============================================================================

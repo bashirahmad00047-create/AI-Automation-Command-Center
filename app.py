@@ -416,7 +416,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.socket.io https://unpkg.com https://cdnjs.cloudflare.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com https://cdnjs.cloudflare.com; "
             "font-src 'self' https://fonts.gstatic.com data:; "
-            "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.basemaps.cartocdn.com https://basemaps.cartocdn.com https://unpkg.com https://cdnjs.cloudflare.com https://raw.githubusercontent.com; "
+            "img-src 'self' data: blob: https: http:; "
             "frame-src 'self' https://www.openstreetmap.org https://*.openstreetmap.org; "
             "media-src 'self' data: blob:; "
             "connect-src 'self' ws: wss: https://cdn.socket.io https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.basemaps.cartocdn.com https://basemaps.cartocdn.com;"
@@ -1698,6 +1698,26 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     def top_store_order_status(order_id: str):
         from api_v1 import api_store_order_status
         return api_store_order_status(order_id)
+
+    @application.route("/api/store/settings", methods=["GET", "POST"])
+    def top_store_settings():
+        from api_v1 import api_store_settings
+        return api_store_settings()
+
+    @application.route("/api/store/products/create", methods=["POST"])
+    def top_store_product_create():
+        from api_v1 import api_store_product_create
+        return api_store_product_create()
+
+    @application.route("/api/store/products/<product_id>/edit", methods=["POST", "PUT"])
+    def top_store_product_edit(product_id: str):
+        from api_v1 import api_store_product_edit
+        return api_store_product_edit(product_id)
+
+    @application.route("/api/store/products/<product_id>/delete", methods=["POST", "DELETE"])
+    def top_store_product_delete(product_id: str):
+        from api_v1 import api_store_product_delete
+        return api_store_product_delete(product_id)
 
     # =========================================================================
     # MODULE 2: AI VOICE STUDIO LIVE TEST & SETTINGS ROUTES

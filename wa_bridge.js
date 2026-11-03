@@ -355,6 +355,7 @@ const userMessageQueues = new Map(); // Per-User Smart Queue: remoteJid -> { tim
 const phoneToLidMap = new Map();
 const lastSendTimeMap = new Map();
 const lidToPhoneMap = new Map(); // Keep persisted in memory/DB
+const phoneToReplyJidMap = new Map(); // Persistent phone -> exact incoming replyJid mapping
 
 /**
  * Estimates audio duration in seconds from buffer headers (OGG Opus granule position or MP3 frame sync).
@@ -460,6 +461,12 @@ async function resolveSender(msg, activeSock) {
   const bestName = msg.pushName || cachedContactName;
 
   if (phone) {
+    if (remoteJid) {
+      phoneToReplyJidMap.set(phone, remoteJid);
+      phoneToReplyJidMap.set(`+${phone}`, remoteJid);
+      phoneToReplyJidMap.set(`${phone}@s.whatsapp.net`, remoteJid);
+      phoneToReplyJidMap.set(remoteJid, remoteJid);
+    }
     return {
       phone: `+${phone}`,
       displayName: bestName || `+${phone}`,
@@ -487,6 +494,14 @@ async function resolveSender(msg, activeSock) {
 function normalizeJid(chatId) {
   if (!chatId) return '';
   let jid = String(chatId).trim();
+
+  if (phoneToReplyJidMap.has(jid)) {
+    return phoneToReplyJidMap.get(jid);
+  }
+  const preClean = cleanPhoneNumber(jid);
+  if (preClean && phoneToReplyJidMap.has(preClean)) {
+    return phoneToReplyJidMap.get(preClean);
+  }
 
   if (jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.endsWith('@lid')) {
     return jid;
@@ -1365,6 +1380,23 @@ if (!text) text = '[Voice note]';
               await new Promise(r => setTimeout(r, jitterMs));
 
               let audioBuf = Buffer.from(resData.audio_base64, 'base64');
+              if (!audioBuf || audioBuf.length <= 1024) {
+                console.warn(`[Direct Bridge Audio Buffer Invalid] Size=${audioBuf ? audioBuf.length : 0} bytes <= 1024. Bypassing voice and delivering text reply to ${finalTargetJid}.`);
+                if (resData.reply) {
+                  try {
+                    await sock.sendPresenceUpdate('composing', finalTargetJid);
+                    sentMsg = await sock.sendMessage(finalTargetJid, { text: String(resData.reply) });
+                    console.log(`[Direct Bridge Text Delivery] Successfully delivered text to ${finalTargetJid}: ID=${sentMsg?.key?.id}`);
+                    if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
+                  } catch (tErr) {
+                    console.error('[Direct Bridge Text Delivery Error]:', tErr.message);
+                  } finally {
+                    try { await sock.sendPresenceUpdate('paused', finalTargetJid); } catch (_) {}
+                  }
+                }
+                return;
+              }
+
               let outMime = 'audio/ogg; codecs=opus';
               let outPtt = true;
 
@@ -1388,7 +1420,16 @@ if (!text) text = '[Voice note]';
                 console.log(`[Direct Bridge Dispatch Success] Outbound PTT voice note delivered to ${finalTargetJid}: ID=${sentMsg?.key?.id}`);
                 if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
               } catch (aErr) {
-                console.warn('[Direct Bridge Audio Error]:', aErr.message);
+                console.warn('[Direct Bridge Audio Error, falling back to text delivery]:', aErr.message);
+                if (resData.reply) {
+                  try {
+                    sentMsg = await sock.sendMessage(finalTargetJid, { text: String(resData.reply) });
+                    console.log(`[Direct Bridge Fallback Text Success] Delivered text reply to ${finalTargetJid}: ID=${sentMsg?.key?.id}`);
+                    if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
+                  } catch (fErr) {
+                    console.error('[Direct Bridge Fallback Text Failed]:', fErr.message);
+                  }
+                }
               } finally {
                 try { await sock.sendPresenceUpdate('paused', finalTargetJid); } catch (_) {}
               }
@@ -2001,7 +2042,7 @@ app.post(['/disconnect', '/logout'], async (req, res) => {
   });
 });
 
-app.post(['/send-message', '/send'], async (req, res, next) => {
+app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
   try {
     let chatId = null;
     let message = null;

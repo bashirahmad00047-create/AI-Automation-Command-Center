@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Chitral &amp; Global Bazar | Authentic Northern Pakistan Treasures &amp; Store</title>
+    <title id="pageTitle">Chitral &amp; Global Bazar | Authentic Northern Pakistan Treasures &amp; Store</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -98,7 +98,6 @@
             font-weight: 800;
             color: var(--dark);
             letter-spacing: -0.02em;
-            line-height: 1.2;
         }
 
         .brand-text span {
@@ -106,29 +105,48 @@
             color: var(--primary);
             font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
+            letter-spacing: 0.05em;
         }
 
         .header-actions {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
+        }
+
+        .admin-trigger-btn {
+            background: #0f172a;
+            color: #ffffff;
+            border: 1px solid #334155;
+            border-radius: var(--radius-full);
+            padding: 8px 16px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .admin-trigger-btn:hover {
+            background: #1e293b;
+            transform: translateY(-1px);
         }
 
         .cart-trigger-btn {
-            position: relative;
             background: var(--primary);
             color: #ffffff;
             border: none;
-            padding: 10px 18px;
             border-radius: var(--radius-full);
+            padding: 8px 18px;
+            font-size: 0.9rem;
             font-weight: 700;
-            font-size: 0.92rem;
             cursor: pointer;
             display: flex;
             align-items: center;
             gap: 8px;
-            transition: all 0.2s ease;
+            transition: all 0.2s;
             box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
         }
 
@@ -138,46 +156,37 @@
         }
 
         .cart-badge {
-            background: #ef4444;
-            color: #fff;
+            background: #ffffff;
+            color: var(--primary);
+            border-radius: 9999px;
             font-size: 0.75rem;
             font-weight: 800;
             padding: 2px 7px;
-            border-radius: var(--radius-full);
-            display: inline-block;
+            line-height: 1;
         }
 
         /* Hero Banner */
         .hero-section {
-            background: linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%);
-            color: #ffffff;
-            padding: 40px 20px;
+            background: radial-gradient(circle at top right, #ecfdf5 0%, #f0fdf4 40%, #ffffff 100%);
+            border-bottom: 1px solid var(--gray-200);
+            padding: 40px 20px 32px;
             text-align: center;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .hero-section::after {
-            content: "";
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: radial-gradient(circle at center, rgba(255,255,255,0.08) 0%, transparent 70%);
-            pointer-events: none;
         }
 
         .hero-title {
             font-size: 2.2rem;
             font-weight: 800;
-            margin-bottom: 10px;
-            letter-spacing: -0.02em;
+            color: var(--gray-900);
+            letter-spacing: -0.03em;
+            margin-bottom: 12px;
         }
 
         .hero-subtitle {
             font-size: 1.05rem;
-            color: #d1fae5;
-            max-width: 650px;
+            color: var(--gray-600);
+            max-width: 640px;
             margin: 0 auto 24px;
-            line-height: 1.5;
+            line-height: 1.6;
         }
 
         .search-wrapper {
@@ -188,43 +197,39 @@
 
         .search-input {
             width: 100%;
-            padding: 14px 20px 14px 48px;
+            padding: 14px 20px 14px 46px;
+            border: 2px solid var(--gray-200);
             border-radius: var(--radius-full);
-            border: 2px solid rgba(255,255,255,0.25);
-            background: rgba(255,255,255,0.95);
-            color: var(--gray-900);
-            font-size: 1rem;
+            font-size: 0.95rem;
             outline: none;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-            transition: all 0.2s ease;
+            transition: all 0.2s;
+            box-shadow: var(--shadow-sm);
         }
 
         .search-input:focus {
-            background: #ffffff;
-            border-color: #ffffff;
-            box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15);
         }
 
         .search-icon {
             position: absolute;
-            left: 18px;
+            left: 16px;
             top: 50%;
             transform: translateY(-50%);
-            font-size: 1.1rem;
             color: var(--gray-500);
-            pointer-events: none;
+            font-size: 1.1rem;
         }
 
-        /* Category Filter Pills */
+        /* Category Filter Nav */
         .category-nav {
             max-width: 1200px;
-            margin: 24px auto 0;
+            margin: 20px auto 0;
             padding: 0 20px;
             display: flex;
             gap: 10px;
             overflow-x: auto;
             scrollbar-width: none;
-            -webkit-overflow-scrolling: touch;
+            -ms-overflow-style: none;
         }
 
         .category-nav::-webkit-scrollbar {
@@ -232,57 +237,60 @@
         }
 
         .category-pill {
-            background: #ffffff;
-            color: var(--gray-700);
+            background: var(--white);
             border: 1px solid var(--gray-200);
-            padding: 8px 18px;
+            color: var(--gray-700);
+            padding: 8px 16px;
             border-radius: var(--radius-full);
             font-size: 0.88rem;
             font-weight: 600;
             white-space: nowrap;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.15s;
         }
 
-        .category-pill:hover, .category-pill.active {
+        .category-pill:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .category-pill.active {
             background: var(--primary);
             color: #ffffff;
             border-color: var(--primary);
-            box-shadow: 0 2px 8px rgba(5, 150, 105, 0.25);
         }
 
         /* Products Grid */
         .main-container {
             max-width: 1200px;
-            margin: 24px auto 60px;
+            margin: 30px auto;
             padding: 0 20px;
             flex: 1;
-            width: 100%;
         }
 
         .grid-header {
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            justify-content: space-between;
             margin-bottom: 20px;
         }
 
         .grid-title {
-            font-size: 1.3rem;
-            font-weight: 800;
+            font-size: 1.25rem;
+            font-weight: 700;
             color: var(--gray-900);
         }
 
         .products-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-            gap: 22px;
+            gap: 20px;
         }
 
         .product-card {
-            background: #ffffff;
-            border-radius: var(--radius-lg);
+            background: var(--white);
             border: 1px solid var(--gray-200);
+            border-radius: var(--radius-lg);
             overflow: hidden;
             display: flex;
             flex-direction: column;
@@ -299,7 +307,7 @@
         .product-img-wrapper {
             position: relative;
             width: 100%;
-            height: 200px;
+            height: 190px;
             background: #f1f5f9;
             overflow: hidden;
             display: flex;
@@ -311,43 +319,38 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
-            transition: transform 0.3s ease;
+            transition: transform 0.4s ease;
         }
 
         .product-card:hover .product-img {
-            transform: scale(1.05);
-        }
-
-        .product-placeholder-icon {
-            font-size: 3.5rem;
-            color: #94a3b8;
+            transform: scale(1.04);
         }
 
         .category-tag {
             position: absolute;
-            top: 12px;
-            left: 12px;
+            top: 10px;
+            left: 10px;
             background: rgba(15, 23, 42, 0.75);
             backdrop-filter: blur(4px);
             color: #ffffff;
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             font-weight: 700;
-            padding: 4px 10px;
-            border-radius: var(--radius-full);
+            padding: 4px 8px;
+            border-radius: 6px;
             text-transform: uppercase;
             letter-spacing: 0.04em;
         }
 
         .stock-badge {
             position: absolute;
-            top: 12px;
-            right: 12px;
+            top: 10px;
+            right: 10px;
             background: #ecfdf5;
             color: #065f46;
             font-size: 0.72rem;
             font-weight: 700;
-            padding: 4px 8px;
-            border-radius: var(--radius-full);
+            padding: 3px 8px;
+            border-radius: 6px;
             border: 1px solid #a7f3d0;
         }
 
@@ -365,7 +368,7 @@
         }
 
         .product-name {
-            font-size: 1.05rem;
+            font-size: 1rem;
             font-weight: 700;
             color: var(--gray-900);
             margin-bottom: 6px;
@@ -373,8 +376,8 @@
         }
 
         .product-desc {
-            font-size: 0.85rem;
-            color: var(--gray-600);
+            font-size: 0.82rem;
+            color: var(--gray-500);
             line-height: 1.45;
             margin-bottom: 14px;
             flex: 1;
@@ -388,36 +391,36 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding-top: 12px;
+            gap: 10px;
+            padding-top: 10px;
             border-top: 1px solid var(--gray-100);
         }
 
         .product-price {
-            font-size: 1.25rem;
+            font-size: 1.15rem;
             font-weight: 800;
-            color: var(--primary);
+            color: var(--gray-900);
         }
 
         .product-price span {
-            font-size: 0.85rem;
+            font-size: 0.75rem;
             font-weight: 600;
             color: var(--gray-500);
-            margin-left: 2px;
         }
 
         .add-cart-btn {
             background: var(--primary-light);
             color: var(--primary);
             border: 1px solid #a7f3d0;
-            padding: 8px 14px;
-            border-radius: var(--radius-md);
+            border-radius: var(--radius-full);
+            padding: 6px 14px;
+            font-size: 0.85rem;
             font-weight: 700;
-            font-size: 0.88rem;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.15s;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
         }
 
         .add-cart-btn:hover {
@@ -426,25 +429,16 @@
             border-color: var(--primary);
         }
 
-        /* Empty State */
-        .empty-grid-msg {
-            text-align: center;
-            padding: 60px 20px;
-            background: #ffffff;
-            border-radius: var(--radius-lg);
-            border: 1px dashed var(--gray-200);
-        }
-
         /* Cart Drawer */
         .drawer-overlay {
             position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
+            inset: 0;
             background: rgba(0, 0, 0, 0.5);
             backdrop-filter: blur(4px);
             z-index: 50;
             display: none;
             opacity: 0;
-            transition: opacity 0.3s ease;
+            transition: opacity 0.25s ease;
         }
 
         .drawer-overlay.active {
@@ -458,14 +452,14 @@
             right: 0;
             bottom: 0;
             width: 100%;
-            max-width: 440px;
-            background: #ffffff;
+            max-width: 420px;
+            background: var(--white);
             box-shadow: var(--shadow-xl);
-            z-index: 60;
-            transform: translateX(100%);
-            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
             display: flex;
             flex-direction: column;
+            transform: translateX(100%);
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 51;
         }
 
         .drawer-overlay.active .cart-drawer {
@@ -473,7 +467,7 @@
         }
 
         .drawer-header {
-            padding: 20px;
+            padding: 18px 20px;
             border-bottom: 1px solid var(--gray-200);
             display: flex;
             align-items: center;
@@ -481,34 +475,24 @@
         }
 
         .drawer-header h3 {
-            font-size: 1.2rem;
-            font-weight: 800;
-            color: var(--gray-900);
+            font-size: 1.15rem;
+            font-weight: 700;
         }
 
         .close-drawer-btn {
-            background: var(--gray-100);
+            background: none;
             border: none;
-            width: 34px;
-            height: 34px;
-            border-radius: 50%;
-            font-size: 1.1rem;
+            font-size: 1.5rem;
+            line-height: 1;
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--gray-600);
-            transition: background 0.2s ease;
-        }
-
-        .close-drawer-btn:hover {
-            background: var(--gray-200);
+            color: var(--gray-500);
+            padding: 4px;
         }
 
         .drawer-items {
             flex: 1;
             overflow-y: auto;
-            padding: 20px;
+            padding: 16px 20px;
             display: flex;
             flex-direction: column;
             gap: 14px;
@@ -516,18 +500,20 @@
 
         .cart-item-row {
             display: flex;
-            gap: 12px;
             align-items: center;
-            padding-bottom: 14px;
-            border-bottom: 1px solid var(--gray-100);
+            gap: 12px;
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            padding: 10px;
         }
 
         .cart-item-img {
-            width: 60px;
-            height: 60px;
-            border-radius: var(--radius-md);
+            width: 50px;
+            height: 50px;
+            border-radius: 8px;
             object-fit: cover;
-            background: var(--gray-100);
+            background: #e2e8f0;
         }
 
         .cart-item-info {
@@ -535,44 +521,41 @@
         }
 
         .cart-item-title {
-            font-size: 0.95rem;
+            font-size: 0.88rem;
             font-weight: 700;
             color: var(--gray-900);
             line-height: 1.25;
-            margin-bottom: 4px;
+            margin-bottom: 3px;
         }
 
         .cart-item-price {
-            font-size: 0.9rem;
+            font-size: 0.85rem;
+            font-weight: 600;
             color: var(--primary);
-            font-weight: 700;
         }
 
-        .cart-qty-ctrl {
+        .cart-qty-ctrls {
             display: flex;
             align-items: center;
             gap: 6px;
-            background: var(--gray-100);
-            border-radius: var(--radius-md);
-            padding: 2px 6px;
         }
 
         .qty-btn {
-            background: none;
-            border: none;
+            background: var(--white);
+            border: 1px solid var(--gray-200);
             width: 24px;
             height: 24px;
-            font-weight: 800;
-            font-size: 1rem;
-            cursor: pointer;
-            color: var(--gray-700);
+            border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.8rem;
         }
 
-        .qty-count {
-            font-size: 0.9rem;
+        .qty-number {
+            font-size: 0.85rem;
             font-weight: 700;
             min-width: 18px;
             text-align: center;
@@ -580,25 +563,25 @@
 
         .drawer-footer {
             padding: 20px;
-            background: var(--gray-50);
             border-top: 1px solid var(--gray-200);
+            background: var(--gray-50);
         }
 
         .summary-line {
             display: flex;
             justify-content: space-between;
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             color: var(--gray-600);
             margin-bottom: 8px;
         }
 
         .summary-line.total {
-            font-size: 1.2rem;
+            font-size: 1.15rem;
             font-weight: 800;
             color: var(--gray-900);
-            padding-top: 8px;
+            margin-top: 10px;
+            padding-top: 10px;
             border-top: 1px dashed var(--gray-200);
-            margin-top: 8px;
         }
 
         .checkout-btn {
@@ -606,18 +589,18 @@
             background: var(--primary);
             color: #ffffff;
             border: none;
+            border-radius: var(--radius-lg);
             padding: 14px;
-            border-radius: var(--radius-md);
             font-size: 1rem;
-            font-weight: 800;
+            font-weight: 700;
             cursor: pointer;
-            margin-top: 16px;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
+            margin-top: 14px;
+            transition: all 0.2s;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
+            box-shadow: 0 4px 14px rgba(5, 150, 105, 0.3);
         }
 
         .checkout-btn:hover {
@@ -626,33 +609,24 @@
 
         /* Checkout Modal */
         .checkout-modal-card {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 92%;
-            max-width: 540px;
-            max-height: 90vh;
-            background: #ffffff;
+            background: var(--white);
             border-radius: var(--radius-lg);
-            box-shadow: var(--shadow-xl);
-            z-index: 70;
-            overflow-y: auto;
-            display: none;
+            width: 100%;
+            max-width: 520px;
+            margin: 40px auto;
             padding: 24px;
-        }
-
-        .checkout-modal-card.active {
-            display: block;
+            box-shadow: var(--shadow-xl);
+            max-height: 90vh;
+            overflow-y: auto;
         }
 
         .form-group {
-            margin-bottom: 16px;
+            margin-bottom: 14px;
         }
 
         .form-label {
             display: block;
-            font-size: 0.88rem;
+            font-size: 0.85rem;
             font-weight: 700;
             color: var(--gray-700);
             margin-bottom: 6px;
@@ -663,98 +637,140 @@
             padding: 10px 14px;
             border: 1px solid var(--gray-200);
             border-radius: var(--radius-md);
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             outline: none;
-            transition: border-color 0.2s ease;
+            transition: border-color 0.15s;
         }
 
         .form-input:focus, .form-textarea:focus, .form-select:focus {
             border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15);
         }
 
         .gps-detect-btn {
-            background: #f0fdf4;
-            color: #15803d;
-            border: 1px solid #bbf7d0;
-            padding: 8px 14px;
+            background: #eff6ff;
+            color: #2563eb;
+            border: 1px solid #bfdbfe;
             border-radius: var(--radius-md);
-            font-size: 0.85rem;
-            font-weight: 700;
+            padding: 7px 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             gap: 6px;
             margin-top: 6px;
-            transition: all 0.2s ease;
-        }
-
-        .gps-detect-btn:hover {
-            background: #dcfce7;
         }
 
         .gps-badge {
-            display: inline-block;
-            background: #ecfdf5;
-            color: #065f46;
-            font-size: 0.8rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.75rem;
             font-weight: 700;
-            padding: 4px 10px;
-            border-radius: var(--radius-full);
-            border: 1px solid #6ee7b7;
+            color: #059669;
+            background: #ecfdf5;
+            padding: 3px 8px;
+            border-radius: 6px;
             margin-top: 6px;
         }
 
         .payment-pill-group {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-top: 6px;
+            gap: 8px;
         }
 
         .payment-pill {
-            border: 2px solid var(--gray-200);
+            border: 1px solid var(--gray-200);
+            padding: 10px 12px;
             border-radius: var(--radius-md);
-            padding: 12px;
-            text-align: center;
             cursor: pointer;
-            font-weight: 700;
-            font-size: 0.9rem;
-            transition: all 0.2s ease;
+            text-align: center;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--gray-700);
+            transition: all 0.15s;
         }
 
         .payment-pill.selected {
+            background: #f0fdf4;
             border-color: var(--primary);
-            background: var(--primary-light);
             color: var(--primary);
+            font-weight: 700;
         }
 
         .payment-info-box {
             background: #f8fafc;
-            border: 1px solid var(--gray-200);
+            border: 1px solid #e2e8f0;
             border-radius: var(--radius-md);
-            padding: 14px;
-            margin-top: 12px;
-            font-size: 0.88rem;
+            padding: 12px;
+            margin-top: 10px;
+            font-size: 0.83rem;
+            color: var(--gray-700);
             line-height: 1.5;
         }
 
-        /* Order Success Modal */
-        .success-modal {
-            text-align: center;
-            padding: 30px 20px;
+        /* Store Manager Modal Styling */
+        .modal-tabs {
+            display: flex;
+            gap: 8px;
+            border-bottom: 2px solid var(--gray-200);
+            margin-bottom: 18px;
         }
 
-        .success-icon {
-            font-size: 3.5rem;
-            margin-bottom: 12px;
+        .modal-tab-btn {
+            background: none;
+            border: none;
+            padding: 8px 16px;
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: var(--gray-500);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+        }
+
+        .modal-tab-btn.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .product-mgmt-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+            margin-top: 14px;
+        }
+
+        .product-mgmt-table th, .product-mgmt-table td {
+            padding: 8px 10px;
+            text-align: left;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .product-mgmt-table th {
+            background: #f1f5f9;
+            color: var(--gray-700);
+            font-weight: 700;
+        }
+
+        .action-link {
+            color: var(--primary);
+            font-weight: 700;
+            cursor: pointer;
+            margin-right: 8px;
+            text-decoration: none;
+        }
+
+        .action-link.delete {
+            color: #ef4444;
         }
 
         /* Footer */
         .store-footer {
             background: var(--gray-900);
             color: var(--gray-500);
-            padding: 40px 20px;
+            padding: 35px 20px;
             font-size: 0.88rem;
             text-align: center;
             margin-top: auto;
@@ -778,8 +794,8 @@
 <body>
 
     <!-- Announcement Bar -->
-    <div class="announcement-bar">
-        🏔️ Pure Chitrali Handicrafts, Dry Fruits &amp; Global Essentials • Free Delivery on Orders Above PKR 2,000!
+    <div class="announcement-bar" id="announcementBar">
+        🏔️ Pure Chitrali Handicrafts, Dry Fruits &amp; Global Essentials • Fast Courier Dispatch Across Pakistan!
     </div>
 
     <!-- Store Header -->
@@ -788,12 +804,15 @@
             <a href="/store" class="brand-logo">
                 <span class="brand-icon">🏔️</span>
                 <div class="brand-text">
-                    <h1>Chitral &amp; Global Bazar</h1>
-                    <span>Official Online Store</span>
+                    <h1 id="storeBrandTitle">Chitral &amp; Global Bazar</h1>
+                    <span id="storeBadgeSubtitle">Official Online Store</span>
                 </div>
             </a>
             <div class="header-actions">
-                <button class="cart-trigger-btn" onclick="openCartDrawer()">
+                <button type="button" class="admin-trigger-btn" onclick="openStoreManagerModal()">
+                    <span>⚙️ Store Manager</span>
+                </button>
+                <button type="button" class="cart-trigger-btn" onclick="openCartDrawer()">
                     <span>🛒 Cart</span>
                     <span class="cart-badge" id="cartCountBadge">0</span>
                 </button>
@@ -803,22 +822,17 @@
 
     <!-- Hero Section -->
     <section class="hero-section">
-        <h2 class="hero-title">Treasures of the Hindukush &amp; Beyond</h2>
-        <p class="hero-subtitle">Authentic Chitrali Shawls, Pattu Caps, Pure Organic Honey, Walnuts, Gemstones &amp; Daily Essentials direct to your doorstep.</p>
+        <h2 class="hero-title" id="heroStoreTitle">Treasures of the Hindukush &amp; Beyond</h2>
+        <p class="hero-subtitle" id="heroStoreSubtitle">Authentic Chitrali Shawls, Pattu Caps, Pure Organic Honey, Walnuts, Gemstones &amp; Daily Essentials direct to your doorstep.</p>
         <div class="search-wrapper">
             <span class="search-icon">🔍</span>
-            <input type="text" id="searchInput" class="search-input" placeholder="Search dry fruits, shawls, caps, honey, electronics..." oninput="handleSearch(this.value)">
+            <input type="text" id="searchInput" class="search-input" placeholder="Search dry fruits, shawls, honey, kurta, shoes..." oninput="handleSearch(this.value)">
         </div>
     </section>
 
     <!-- Category Nav Pills -->
     <div class="category-nav" id="categoryNav">
         <button class="category-pill active" onclick="filterCategory('All')">🌟 All Products</button>
-        <button class="category-pill" onclick="filterCategory('Dry Fruits')">🥜 Dry Fruits &amp; Nuts</button>
-        <button class="category-pill" onclick="filterCategory('Handicrafts')">🧣 Chitrali Shawls &amp; Caps</button>
-        <button class="category-pill" onclick="filterCategory('Honey')">🍯 Pure Mountain Honey</button>
-        <button class="category-pill" onclick="filterCategory('Gemstones')">💎 Minerals &amp; Gems</button>
-        <button class="category-pill" onclick="filterCategory('Electronics')">⚡ Electronics &amp; Accessories</button>
     </div>
 
     <!-- Main Products Grid -->
@@ -829,13 +843,13 @@
         </div>
 
         <div class="products-grid" id="productsGrid">
-            <!-- Dynamically populated or server-rendered items -->
+            <!-- Dynamically populated items with zero broken images -->
         </div>
 
-        <div class="empty-grid-msg" id="emptyState" style="display:none;">
+        <div class="empty-grid-msg" id="emptyState" style="display:none; text-align: center; padding: 40px 20px;">
             <div style="font-size: 3rem; margin-bottom: 10px;">🔍</div>
             <h4 style="font-size: 1.2rem; color: var(--gray-800); margin-bottom: 6px;">No products match your search</h4>
-            <p style="color: var(--gray-500); font-size: 0.9rem;">Try searching for walnuts, shawl, cap, or honey.</p>
+            <p style="color: var(--gray-500); font-size: 0.9rem;">Try searching for walnuts, honey, kurta, or shoes.</p>
         </div>
     </main>
 
@@ -856,7 +870,7 @@
                 </div>
                 <div class="summary-line">
                     <span>Delivery (Pakistan)</span>
-                    <span style="color: var(--primary); font-weight: 700;">FREE</span>
+                    <span id="drawerDeliveryFee" style="color: var(--primary); font-weight: 700;">FREE</span>
                 </div>
                 <div class="summary-line total">
                     <span>Total Amount</span>
@@ -943,10 +957,120 @@
         </div>
     </div>
 
+    <!-- Store & Catalog Manager Modal -->
+    <div class="drawer-overlay" id="storeManagerOverlay" style="z-index: 70;" onclick="closeStoreManagerModal(event)">
+        <div class="checkout-modal-card" style="max-width: 650px;" onclick="event.stopPropagation()">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; border-bottom: 1px solid var(--gray-200); padding-bottom: 10px;">
+                <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--gray-900);">⚙️ Store &amp; Catalog Manager</h3>
+                <button class="close-drawer-btn" onclick="closeStoreManagerModal()">&times;</button>
+            </div>
+
+            <div class="modal-tabs">
+                <button class="modal-tab-btn active" id="tabBtnProducts" onclick="switchManagerTab('products')">📦 Manage Products</button>
+                <button class="modal-tab-btn" id="tabBtnBranding" onclick="switchManagerTab('branding')">🎨 Store Branding</button>
+            </div>
+
+            <!-- Tab 1: Products CRUD -->
+            <div id="managerTabProducts">
+                <form id="productForm" onsubmit="handleSaveProduct(event)">
+                    <input type="hidden" id="editProductId" value="">
+                    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
+                        <div class="form-group">
+                            <label class="form-label">Product Name *</label>
+                            <input type="text" id="prodName" class="form-input" placeholder="e.g. Pure Chitrali Honey" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Price (PKR) *</label>
+                            <input type="number" id="prodPrice" class="form-input" placeholder="2800" min="0" required>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div class="form-group">
+                            <label class="form-label">Category</label>
+                            <input type="text" id="prodCategory" class="form-input" placeholder="e.g. Dry Fruits, Honey, Apparel">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Stock Status</label>
+                            <select id="prodStockStatus" class="form-select">
+                                <option value="in_stock">In Stock</option>
+                                <option value="low_stock">Low Stock</option>
+                                <option value="out_of_stock">Out of Stock</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Image URL</label>
+                        <input type="url" id="prodImageUrl" class="form-input" placeholder="https://images.unsplash.com/... (Leave empty for dynamic colorful card)">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Description</label>
+                        <textarea id="prodDesc" class="form-textarea" rows="2" placeholder="Brief quality and origin description..."></textarea>
+                    </div>
+
+                    <div style="display: flex; gap: 10px;">
+                        <button type="submit" class="checkout-btn" id="saveProdBtn" style="margin-top: 4px; padding: 10px;">
+                            <span>+ Save Product</span>
+                        </button>
+                        <button type="button" class="add-cart-btn" id="cancelEditBtn" style="display: none; padding: 10px 16px;" onclick="cancelProductEdit()">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+
+                <div style="margin-top: 20px;">
+                    <h4 style="font-size: 0.95rem; font-weight: 700; color: var(--gray-800); margin-bottom: 8px;">Active Store Products (<span id="mgmtProdCount">0</span>)</h4>
+                    <div style="max-height: 240px; overflow-y: auto; border: 1px solid var(--gray-200); border-radius: 8px;">
+                        <table class="product-mgmt-table">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th>Category</th>
+                                    <th>Price</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mgmtProductRows">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 2: Store Branding -->
+            <div id="managerTabBranding" style="display: none;">
+                <form id="brandingForm" onsubmit="handleSaveBranding(event)">
+                    <div class="form-group">
+                        <label class="form-label">Store Brand Name</label>
+                        <input type="text" id="settingStoreName" class="form-input" placeholder="Chitral & Global Bazar">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Tagline / Subtitle</label>
+                        <input type="text" id="settingStoreTagline" class="form-input" placeholder="Pure Mountain Treasures, Handcrafted Heritage & Essentials">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">WhatsApp Contact Number</label>
+                        <input type="tel" id="settingStorePhone" class="form-input" placeholder="0320 9350858">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Standard Delivery Fee (PKR - 0 for Free Delivery)</label>
+                        <input type="number" id="settingDeliveryFee" class="form-input" placeholder="0" min="0">
+                    </div>
+                    <button type="submit" class="checkout-btn" style="margin-top: 10px; padding: 12px;">
+                        <span>💾 Save Store Branding</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Order Success Modal -->
     <div class="drawer-overlay" id="orderSuccessOverlay" style="z-index: 80;">
         <div class="checkout-modal-card active" style="max-width: 480px; text-align: center;">
-            <div class="success-icon">🎉</div>
+            <div style="font-size: 3.5rem; margin-bottom: 12px;">🎉</div>
             <h3 style="font-size: 1.4rem; font-weight: 800; color: var(--gray-900); margin-bottom: 8px;">Order Confirmed!</h3>
             <p style="color: var(--gray-600); font-size: 0.95rem; margin-bottom: 16px;">
                 Shukriya! Your order <strong id="successOrderNum">ORD-XXXX</strong> has been placed successfully.
@@ -968,76 +1092,12 @@
 
     <!-- Store Footer -->
     <footer class="store-footer">
-        <p>&copy; 2026 <strong>Chitral &amp; Global Bazar</strong> • Powered by OpsFlow Automation &amp; BashFlow Cloud</p>
-        <p style="margin-top: 6px; font-size: 0.8rem;">Direct Courier Dispatch from Chitral, Khyber Pakhtunkhwa &amp; Islamabad, Pakistan.</p>
+        <p>&copy; 2026 <strong id="footerStoreBrand">Chitral &amp; Global Bazar</strong> • Powered by OpsFlow Automation &amp; BashFlow Cloud</p>
+        <p style="margin-top: 6px; font-size: 0.8rem;">Direct Courier Dispatch Across Pakistan with Instant WhatsApp Status &amp; Live GPS Radar Tracking.</p>
     </footer>
 
     <!-- Storefront Logic -->
     <script>
-        // Initial Default Catalog in case database catalog is initially loading
-        const DEFAULT_CATALOG = [
-            {
-                id: 'prd-honey-01',
-                name: 'Pure Chitrali Cedar & Wild Flora Honey (1 Kg)',
-                category: 'Honey',
-                price: 2800,
-                currency: 'PKR',
-                description: '100% Raw, unfiltered mountain honey harvested from high-altitude wild cedar forests of Chitral valley.',
-                image_url: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=600&q=80',
-                stock_status: 'in_stock'
-            },
-            {
-                id: 'prd-walnut-02',
-                name: 'Kaghazi Thin-Shelled Mountain Walnuts (1 Kg)',
-                category: 'Dry Fruits',
-                price: 1950,
-                currency: 'PKR',
-                description: 'Super thin-shelled fresh Kaghazi Akhrot from Chitral. Easy to crack by hand, high omega-3 oil content.',
-                image_url: 'https://images.unsplash.com/photo-1596701062351-8c2c14d1fdd0?auto=format&fit=crop&w=600&q=80',
-                stock_status: 'in_stock'
-            },
-            {
-                id: 'prd-shawl-03',
-                name: 'Pure Sheep Wool Handwoven Chitrali Shawl (Pattu)',
-                category: 'Handicrafts',
-                price: 6500,
-                currency: 'PKR',
-                description: 'Authentic pure warm wool shawl handwoven on traditional Chitrali wooden looms. Elegant natural earthy tone.',
-                image_url: 'https://images.unsplash.com/photo-1607344645866-009c320c5ab8?auto=format&fit=crop&w=600&q=80',
-                stock_status: 'in_stock'
-            },
-            {
-                id: 'prd-cap-04',
-                name: 'Traditional Chitrali Pakol Cap with Feather Crest',
-                category: 'Handicrafts',
-                price: 1650,
-                currency: 'PKR',
-                description: 'Traditional round rolled-brim wool hat crafted by Chitrali artisans with historic brass pin insignia.',
-                image_url: 'https://images.unsplash.com/photo-1576871337632-b9aef4c17ab9?auto=format&fit=crop&w=600&q=80',
-                stock_status: 'in_stock'
-            },
-            {
-                id: 'prd-almond-05',
-                name: 'Organic Chitral Mountain Sweet Almonds (1 Kg)',
-                category: 'Dry Fruits',
-                price: 2400,
-                currency: 'PKR',
-                description: 'Naturally sun-dried sweet almonds cultivated in pure snow-fed mountain orchards of Northern Chitral.',
-                image_url: 'https://images.unsplash.com/photo-1508061252445-5350f3ab0a55?auto=format&fit=crop&w=600&q=80',
-                stock_status: 'in_stock'
-            },
-            {
-                id: 'prd-gem-06',
-                name: 'Natural Natural Sky Blue Aquamarine Specimen',
-                category: 'Gemstones',
-                price: 14500,
-                currency: 'PKR',
-                description: '100% natural, unheated sky-blue crystal mined from high-altitude pegmatites of Chitral Hindu Kush.',
-                image_url: 'https://images.unsplash.com/photo-1600003014755-ba31aa59c4b6?auto=format&fit=crop&w=600&q=80',
-                stock_status: 'in_stock'
-            }
-        ];
-
         let catalogProducts = [];
         let currentFilter = 'All';
         let searchQuery = '';
@@ -1045,27 +1105,117 @@
         let selectedPayment = 'cod';
         let customerGPS = null;
         let receiptBase64 = null;
-        const JAZZCASH_NUMBER = '{{ jazzcash_number or "03209350858" }}';
+        let storeDeliveryFee = 0;
+        let storeWhatsAppPhone = '{{ jazzcash_number or "03209350858" }}';
 
-        // Load Products from Backend API with fallback to DEFAULT_CATALOG
+        // Robust Zero-Broken-Image Inline SVG Generator
+        function generateProductSvg(name, category) {
+            const cat = (category || 'Item').toUpperCase();
+            const title = (name || 'Product').slice(0, 24);
+            const palettes = {
+                'HONEY': ['#d97706', '#fbbf24', '🍯'],
+                'DRY FRUITS': ['#b45309', '#f59e0b', '🥜'],
+                'HANDICRAFTS': ['#047857', '#10b981', '🧣'],
+                'GEMSTONES': ['#4338ca', '#6366f1', '💎'],
+                'APPAREL': ['#0284c7', '#38bdf8', '👔'],
+                'FOOTWEAR': ['#7c2d12', '#ea580c', '👞'],
+                'ELECTRONICS': ['#4f46e5', '#818cf8', '🎧'],
+                'GROCERY': ['#15803d', '#22c55e', '🍯'],
+                'FASHION': ['#be185d', '#ec4899', '👗']
+            };
+            let matchedKey = Object.keys(palettes).find(k => cat.includes(k)) || 'HANDICRAFTS';
+            const [c1, c2, icon] = palettes[matchedKey] || ['#0f766e', '#14b8a6', '🛍️'];
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+                <defs>
+                    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="${c1}" />
+                        <stop offset="100%" stop-color="${c2}" />
+                    </linearGradient>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#g)" />
+                <circle cx="200" cy="115" r="50" fill="rgba(255,255,255,0.18)" />
+                <text x="50%" y="42%" text-anchor="middle" font-size="52" font-family="-apple-system, sans-serif">${icon}</text>
+                <text x="50%" y="68%" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="bold" font-family="-apple-system, sans-serif">${title}</text>
+                <text x="50%" y="82%" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="12" font-weight="600" font-family="-apple-system, sans-serif">${cat}</text>
+            </svg>`;
+            return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        }
+
+        // Fetch Store Branding & Settings
+        async function fetchStoreSettings() {
+            try {
+                const res = await fetch('/api/v1/store/settings');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.settings) {
+                        const s = data.settings;
+                        if (s.store_name) {
+                            document.getElementById('pageTitle').textContent = `${s.store_name} | Authentic Online Store`;
+                            document.getElementById('storeBrandTitle').textContent = s.store_name;
+                            document.getElementById('heroStoreTitle').textContent = s.store_name;
+                            document.getElementById('footerStoreBrand').textContent = s.store_name;
+                            document.getElementById('settingStoreName').value = s.store_name;
+                        }
+                        if (s.store_tagline) {
+                            document.getElementById('heroStoreSubtitle').textContent = s.store_tagline;
+                            document.getElementById('announcementBar').textContent = `🏔️ ${s.store_name || 'Our Bazar'} • ${s.store_tagline}`;
+                            document.getElementById('settingStoreTagline').value = s.store_tagline;
+                        }
+                        if (s.store_phone) {
+                            storeWhatsAppPhone = s.store_phone;
+                            document.getElementById('settingStorePhone').value = s.store_phone;
+                        }
+                        if (s.delivery_fee !== undefined) {
+                            storeDeliveryFee = Number(s.delivery_fee) || 0;
+                            document.getElementById('settingDeliveryFee').value = storeDeliveryFee;
+                            document.getElementById('drawerDeliveryFee').textContent = storeDeliveryFee > 0 ? `PKR ${storeDeliveryFee}` : 'FREE';
+                        }
+                    }
+                }
+            } catch (err) {
+                console.debug('Store settings notice:', err);
+            }
+        }
+
+        // Load Products from Backend API
         async function fetchProducts() {
             try {
                 const res = await fetch('/api/v1/store/products');
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.products && data.products.length > 0) {
+                    if (data.products && Array.isArray(data.products) && data.products.length > 0) {
                         catalogProducts = data.products;
                     } else {
-                        catalogProducts = DEFAULT_CATALOG;
+                        catalogProducts = [];
                     }
-                } else {
-                    catalogProducts = DEFAULT_CATALOG;
                 }
             } catch (e) {
                 console.debug('Store API fallback:', e);
-                catalogProducts = DEFAULT_CATALOG;
             }
+            renderCategoryNav();
             renderProducts();
+            renderManagementTable();
+        }
+
+        // Dynamically build category pills from active loaded products
+        function renderCategoryNav() {
+            const nav = document.getElementById('categoryNav');
+            const distinct = [...new Set(catalogProducts.map(p => p.category).filter(Boolean))];
+            
+            const icons = {
+                'HONEY': '🍯', 'DRY FRUITS': '🥜', 'HANDICRAFTS': '🧣',
+                'GEMSTONES': '💎', 'APPAREL': '👔', 'FOOTWEAR': '👞',
+                'ELECTRONICS': '⚡', 'GROCERY': '🛒', 'FASHION': '👗'
+            };
+
+            let html = `<button class="category-pill ${currentFilter === 'All' ? 'active' : ''}" onclick="filterCategory('All')">🌟 All Products</button>`;
+            distinct.forEach(cat => {
+                let u = cat.toUpperCase();
+                let iconKey = Object.keys(icons).find(k => u.includes(k));
+                let icon = iconKey ? icons[iconKey] : '📦';
+                html += `<button class="category-pill ${currentFilter === cat ? 'active' : ''}" onclick="filterCategory('${cat.replace(/'/g, "\'")}')">${icon} ${cat}</button>`;
+            });
+            nav.innerHTML = html;
         }
 
         function renderProducts() {
@@ -1093,14 +1243,15 @@
 
             empty.style.display = 'none';
             grid.innerHTML = filtered.map(p => {
-                const imgHtml = p.image_url 
-                    ? `<img src="${p.image_url}" alt="${p.name}" class="product-img" onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=600&q=80';">`
-                    : `<span class="product-placeholder-icon">🛍️</span>`;
+                const safeName = (p.name || 'Product').replace(/'/g, "\'");
+                const safeCat = (p.category || 'General').replace(/'/g, "\'");
+                const fallbackDataUri = generateProductSvg(p.name, p.category);
+                const imgSrc = p.image_url && p.image_url.trim() ? p.image_url : fallbackDataUri;
 
                 return `
                     <div class="product-card">
                         <div class="product-img-wrapper">
-                            ${imgHtml}
+                            <img src="${imgSrc}" alt="${p.name}" class="product-img" onerror="this.onerror=null;this.src=generateProductSvg('${safeName}', '${safeCat}');">
                             <span class="category-tag">${p.category || 'General'}</span>
                             <span class="stock-badge ${p.stock_status === 'out_of_stock' ? 'out-of-stock' : ''}">
                                 ${p.stock_status === 'out_of_stock' ? 'Out of Stock' : 'In Stock'}
@@ -1108,12 +1259,12 @@
                         </div>
                         <div class="product-body">
                             <h4 class="product-name">${p.name}</h4>
-                            <p class="product-desc">${p.description || 'Authentic quality product from Chitral & Global Bazar.'}</p>
+                            <p class="product-desc">${p.description || 'Authentic quality product from our verified catalog.'}</p>
                             <div class="product-footer">
                                 <div class="product-price">
                                     PKR ${Number(p.price).toLocaleString()}<span>/${p.unit || 'item'}</span>
                                 </div>
-                                <button class="add-cart-btn" onclick="addToCart('${p.id}')">
+                                <button type="button" class="add-cart-btn" onclick="addToCart('${p.id}')">
                                     <span>+ Add</span>
                                 </button>
                             </div>
@@ -1155,60 +1306,60 @@
                     name: prod.name,
                     price: Number(prod.price),
                     image_url: prod.image_url,
-                    quantity: 1,
-                    sku: prod.sku || ''
+                    category: prod.category || 'Item',
+                    quantity: 1
                 });
             }
             updateCartUI();
             openCartDrawer();
         }
 
-        function changeQty(productId, delta) {
-            const item = cart.find(it => it.id === productId);
-            if (!item) return;
-            item.quantity += delta;
-            if (item.quantity <= 0) {
-                cart = cart.filter(it => it.id !== productId);
+        function changeCartQty(id, delta) {
+            const it = cart.find(x => x.id === id);
+            if (!it) return;
+            it.quantity += delta;
+            if (it.quantity <= 0) {
+                cart = cart.filter(x => x.id !== id);
             }
             updateCartUI();
         }
 
         function updateCartUI() {
-            const totalCount = cart.reduce((sum, it) => sum + it.quantity, 0);
-            const totalAmount = cart.reduce((sum, it) => sum + (it.price * it.quantity), 0);
+            const count = cart.reduce((acc, it) => acc + it.quantity, 0);
+            const subtotal = cart.reduce((acc, it) => acc + (it.price * it.quantity), 0);
+            const total = subtotal + storeDeliveryFee;
 
-            document.getElementById('cartCountBadge').textContent = totalCount;
-            document.getElementById('drawerCount').textContent = totalCount;
-            document.getElementById('drawerSubtotal').textContent = `PKR ${totalAmount.toLocaleString()}`;
-            document.getElementById('drawerTotal').textContent = `PKR ${totalAmount.toLocaleString()}`;
-            document.getElementById('checkoutTotalAmount').textContent = `PKR ${totalAmount.toLocaleString()}`;
+            document.getElementById('cartCountBadge').textContent = count;
+            document.getElementById('drawerCount').textContent = count;
+            document.getElementById('drawerSubtotal').textContent = `PKR ${subtotal.toLocaleString()}`;
+            document.getElementById('drawerTotal').textContent = `PKR ${total.toLocaleString()}`;
+            document.getElementById('checkoutTotalAmount').textContent = `PKR ${total.toLocaleString()}`;
 
             const list = document.getElementById('drawerItemsList');
             if (cart.length === 0) {
-                list.innerHTML = `
-                    <div style="text-align:center; padding: 40px 10px; color: var(--gray-500);">
-                        <div style="font-size: 2.5rem; margin-bottom: 8px;">🛒</div>
-                        <p style="font-weight: 700; color: var(--gray-700);">Your cart is empty</p>
-                        <p style="font-size: 0.85rem; margin-top: 4px;">Explore items and add them to cart.</p>
-                    </div>
-                `;
+                list.innerHTML = `<div style="text-align:center; padding: 40px 0; color: var(--gray-500);">🛒 Your cart is empty.<br>Explore our products and add items to begin!</div>`;
                 return;
             }
 
-            list.innerHTML = cart.map(it => `
-                <div class="cart-item-row">
-                    <img src="${it.image_url || 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=200&q=80'}" class="cart-item-img" alt="${it.name}">
-                    <div class="cart-item-info">
-                        <div class="cart-item-title">${it.name}</div>
-                        <div class="cart-item-price">PKR ${(it.price * it.quantity).toLocaleString()}</div>
+            list.innerHTML = cart.map(it => {
+                const safeName = (it.name || 'Product').replace(/'/g, "\'");
+                const fallbackUri = generateProductSvg(it.name, it.category || 'Item');
+                const src = it.image_url && it.image_url.trim() ? it.image_url : fallbackUri;
+                return `
+                    <div class="cart-item-row">
+                        <img src="${src}" alt="${it.name}" class="cart-item-img" onerror="this.onerror=null;this.src=generateProductSvg('${safeName}','Item');">
+                        <div class="cart-item-info">
+                            <div class="cart-item-title">${it.name}</div>
+                            <div class="cart-item-price">PKR ${(it.price * it.quantity).toLocaleString()}</div>
+                        </div>
+                        <div class="cart-qty-ctrls">
+                            <button type="button" class="qty-btn" onclick="changeCartQty('${it.id}', -1)">-</button>
+                            <span class="qty-number">${it.quantity}</span>
+                            <button type="button" class="qty-btn" onclick="changeCartQty('${it.id}', 1)">+</button>
+                        </div>
                     </div>
-                    <div class="cart-qty-ctrl">
-                        <button type="button" class="qty-btn" onclick="changeQty('${it.id}', -1)">-</button>
-                        <span class="qty-count">${it.quantity}</span>
-                        <button type="button" class="qty-btn" onclick="changeQty('${it.id}', 1)">+</button>
-                    </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         }
 
         function openCartDrawer() {
@@ -1223,70 +1374,67 @@
         // Checkout Modal Management
         function openCheckoutModal() {
             if (cart.length === 0) {
-                alert('Please add items to cart before proceeding to checkout.');
+                alert('Your cart is empty. Please add items to checkout.');
                 return;
             }
             closeCartDrawer();
             document.getElementById('checkoutOverlay').classList.add('active');
-            document.getElementById('checkoutModalCard').classList.add('active');
         }
 
         function closeCheckoutModal(e) {
             if (e && e.target !== e.currentTarget && !e.target.classList.contains('close-drawer-btn')) return;
             document.getElementById('checkoutOverlay').classList.remove('active');
-            document.getElementById('checkoutModalCard').classList.remove('active');
         }
 
         function selectPaymentMethod(method) {
             selectedPayment = method;
-            document.querySelectorAll('.payment-pill').forEach(p => p.classList.remove('selected'));
+            ['cod', 'easypaisa', 'jazzcash', 'bank'].forEach(m => {
+                const pill = document.getElementById('payPill' + m.charAt(0).toUpperCase() + m.slice(1));
+                if (pill) {
+                    if (m === method || (m === 'bank' && method === 'bank_transfer')) {
+                        pill.classList.add('selected');
+                    } else {
+                        pill.classList.remove('selected');
+                    }
+                }
+            });
+
             const box = document.getElementById('paymentInstructionsBox');
             const details = document.getElementById('paymentAccountDetails');
-
             if (method === 'cod') {
-                document.getElementById('payPillCod').classList.add('selected');
                 box.style.display = 'none';
-            } else if (method === 'easypaisa') {
-                document.getElementById('payPillEasypaisa').classList.add('selected');
-                box.style.display = 'block';
-                details.innerHTML = `
-                    <strong>📱 EasyPaisa Account:</strong><br>
-                    • Title: <strong>Bashir Ahmad (Chitral Bazar)</strong><br>
-                    • Mobile / Account Number: <strong>${JAZZCASH_NUMBER}</strong><br>
-                    <em>Please transfer the total amount and attach screenshot below for instant verification.</em>
-                `;
             } else if (method === 'jazzcash') {
-                document.getElementById('payPillJazzcash').classList.add('selected');
                 box.style.display = 'block';
-                details.innerHTML = `
-                    <strong>💳 JazzCash Mobile Account:</strong><br>
-                    • Title: <strong>Bashir Ahmad (Chitral Bazar)</strong><br>
-                    • Mobile / Account Number: <strong>${JAZZCASH_NUMBER}</strong><br>
-                    <em>Send via JazzCash app or *786# and attach screenshot below.</em>
-                `;
+                details.innerHTML = `<strong>💳 JazzCash Payment Instructions:</strong><br>Transfer total to Account: <strong>${storeWhatsAppPhone}</strong> (Title: Bashir Uddin). Take a screenshot of the receipt and upload below.`;
+            } else if (method === 'easypaisa') {
+                box.style.display = 'block';
+                details.innerHTML = `<strong>📱 EasyPaisa Payment Instructions:</strong><br>Transfer total to Account: <strong>${storeWhatsAppPhone}</strong> (Title: Bashir Uddin). Take a screenshot of the receipt and upload below.`;
             } else if (method === 'bank_transfer') {
-                document.getElementById('payPillBank').classList.add('selected');
                 box.style.display = 'block';
-                details.innerHTML = `
-                    <strong>🏦 Direct Bank Transfer (Meezan / HBL / UBL):</strong><br>
-                    • Bank: <strong>Meezan Bank Ltd</strong><br>
-                    • Account Title: <strong>Bashir Ahmad</strong><br>
-                    • IBAN: <strong>PK54MEZN0001000103209350</strong><br>
-                    <em>Transfer via Raast ID: ${JAZZCASH_NUMBER} or IBAN.</em>
-                `;
+                details.innerHTML = `<strong>🏦 Bank Transfer Instructions:</strong><br>Bank: Meezan Bank Ltd.<br>Title: Bashir Uddin<br>Account: 01020304050607<br>IBAN: PK65MEZN0001020304050607`;
             }
+        }
+
+        function handleReceiptFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                receiptBase64 = evt.target.result;
+                document.getElementById('receiptPreviewNote').style.display = 'block';
+            };
+            reader.readAsDataURL(file);
         }
 
         // GPS Location Detection
         function detectGPSLocation() {
-            const badge = document.getElementById('gpsLocationBadge');
-            badge.style.display = 'inline-block';
-            badge.textContent = '📍 Locking GPS satellites...';
-
             if (!navigator.geolocation) {
-                badge.textContent = '⚠️ Geolocation not supported by your browser.';
+                alert('Geolocation is not supported by your browser.');
                 return;
             }
+            const badge = document.getElementById('gpsLocationBadge');
+            badge.style.display = 'inline-flex';
+            badge.textContent = '📡 Detecting GPS pin...';
 
             navigator.geolocation.getCurrentPosition(
                 (pos) => {
@@ -1294,56 +1442,38 @@
                         latitude: pos.coords.latitude,
                         longitude: pos.coords.longitude
                     };
-                    badge.innerHTML = `✓ GPS Locked: ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)} (Live Radar Pin Assigned)`;
-                    const addrField = document.getElementById('custAddress');
-                    if (!addrField.value.trim()) {
-                        addrField.value = `Chitral / Verified Location (GPS: ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)})`;
-                    }
+                    badge.innerHTML = `✓ GPS Pin Locked: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)} (Plotted on Live Delivery Radar)`;
                 },
                 (err) => {
-                    badge.textContent = `Notice: GPS detection optional (${err.message}). Enter address manually.`;
+                    badge.textContent = '⚠️ Location access denied. Manual address will be used.';
                 },
-                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                { enableHighAccuracy: true, timeout: 8000 }
             );
         }
 
-        // Payment Receipt File Reader
-        function handleReceiptFile(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                receiptBase64 = e.target.result;
-                document.getElementById('receiptPreviewNote').style.display = 'block';
-            };
-            reader.readAsDataURL(file);
-        }
-
         // Place Order Submission
-        async function handlePlaceOrder(event) {
-            event.preventDefault();
+        async function handlePlaceOrder(e) {
+            e.preventDefault();
+            if (cart.length === 0) return;
+
             const submitBtn = document.getElementById('placeOrderSubmitBtn');
-            const name = document.getElementById('custName').value.trim();
-            const phone = document.getElementById('custPhone').value.trim();
-            const address = document.getElementById('custAddress').value.trim();
-
-            if (!name || !phone || !address) {
-                alert('Please fill out all required fields.');
-                return;
-            }
-
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<span>⏳ Confirming &amp; Dispatching...</span>';
 
             const payload = {
-                name: name,
-                phone: phone,
-                address: address,
+                name: document.getElementById('custName').value.trim(),
+                phone: document.getElementById('custPhone').value.trim(),
+                address: document.getElementById('custAddress').value.trim(),
                 latitude: customerGPS ? customerGPS.latitude : null,
                 longitude: customerGPS ? customerGPS.longitude : null,
                 payment_method: selectedPayment,
-                items: cart,
-                receipt_base64: receiptBase64
+                items: cart.map(it => ({
+                    id: it.id,
+                    name: it.name,
+                    price: it.price,
+                    quantity: it.quantity
+                })),
+                receipt_image_base64: receiptBase64
             };
 
             try {
@@ -1356,11 +1486,9 @@
                 const data = await res.json();
                 if (res.ok && data.success) {
                     closeCheckoutModal();
-                    // Show success modal
                     document.getElementById('successOrderNum').textContent = data.order_number;
                     document.getElementById('successTrackingBtn').href = data.tracking_url || `/track/${data.order_id}`;
                     document.getElementById('orderSuccessOverlay').classList.add('active');
-                    // Clear cart
                     cart = [];
                     updateCartUI();
                 } else {
@@ -1378,8 +1506,158 @@
             document.getElementById('orderSuccessOverlay').classList.remove('active');
         }
 
-        // Auto-fetch on DOM loaded
+        // =========================================================================
+        // STORE & CATALOG MANAGER MODAL LOGIC
+        // =========================================================================
+        function openStoreManagerModal() {
+            document.getElementById('storeManagerOverlay').classList.add('active');
+            renderManagementTable();
+        }
+
+        function closeStoreManagerModal(e) {
+            if (e && e.target !== e.currentTarget && !e.target.classList.contains('close-drawer-btn')) return;
+            document.getElementById('storeManagerOverlay').classList.remove('active');
+            cancelProductEdit();
+        }
+
+        function switchManagerTab(tab) {
+            if (tab === 'products') {
+                document.getElementById('tabBtnProducts').classList.add('active');
+                document.getElementById('tabBtnBranding').classList.remove('active');
+                document.getElementById('managerTabProducts').style.display = 'block';
+                document.getElementById('managerTabBranding').style.display = 'none';
+            } else {
+                document.getElementById('tabBtnBranding').classList.add('active');
+                document.getElementById('tabBtnProducts').classList.remove('active');
+                document.getElementById('managerTabBranding').style.display = 'block';
+                document.getElementById('managerTabProducts').style.display = 'none';
+            }
+        }
+
+        function renderManagementTable() {
+            const tbody = document.getElementById('mgmtProductRows');
+            document.getElementById('mgmtProdCount').textContent = catalogProducts.length;
+            if (!tbody) return;
+
+            if (catalogProducts.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--gray-500); padding: 16px;">No products yet. Use the form above to add your first product.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = catalogProducts.map(p => `
+                <tr>
+                    <td><strong>${p.name}</strong></td>
+                    <td>${p.category || 'General'}</td>
+                    <td>PKR ${Number(p.price).toLocaleString()}</td>
+                    <td>
+                        <span class="action-link" onclick="editProduct('${p.id}')">Edit</span>
+                        <span class="action-link delete" onclick="deleteProduct('${p.id}')">Delete</span>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function editProduct(id) {
+            const p = catalogProducts.find(x => x.id === id);
+            if (!p) return;
+            document.getElementById('editProductId').value = p.id;
+            document.getElementById('prodName').value = p.name;
+            document.getElementById('prodPrice').value = p.price;
+            document.getElementById('prodCategory').value = p.category || '';
+            document.getElementById('prodStockStatus').value = p.stock_status || 'in_stock';
+            document.getElementById('prodImageUrl').value = p.image_url || '';
+            document.getElementById('prodDesc').value = p.description || '';
+            document.getElementById('saveProdBtn').innerHTML = '<span>✓ Update Product</span>';
+            document.getElementById('cancelEditBtn').style.display = 'inline-flex';
+            document.getElementById('prodName').focus();
+        }
+
+        function cancelProductEdit() {
+            document.getElementById('editProductId').value = '';
+            document.getElementById('productForm').reset();
+            document.getElementById('saveProdBtn').innerHTML = '<span>+ Save Product</span>';
+            document.getElementById('cancelEditBtn').style.display = 'none';
+        }
+
+        async function handleSaveProduct(e) {
+            e.preventDefault();
+            const editId = document.getElementById('editProductId').value;
+            const payload = {
+                name: document.getElementById('prodName').value.trim(),
+                price: parseFloat(document.getElementById('prodPrice').value) || 0,
+                category: document.getElementById('prodCategory').value.trim() || 'General',
+                stock_status: document.getElementById('prodStockStatus').value,
+                image_url: document.getElementById('prodImageUrl').value.trim(),
+                description: document.getElementById('prodDesc').value.trim()
+            };
+
+            const url = editId ? `/api/v1/store/products/${editId}/edit` : `/api/v1/store/products/create`;
+            try {
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    cancelProductEdit();
+                    await fetchProducts();
+                    alert(data.message || 'Product saved successfully!');
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to save product.'));
+                }
+            } catch (err) {
+                alert('Connection error: ' + err.message);
+            }
+        }
+
+        async function deleteProduct(id) {
+            if (!confirm('Are you sure you want to remove this product from the store?')) return;
+            try {
+                const res = await fetch(`/api/v1/store/products/${id}/delete`, {
+                    method: 'POST'
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    await fetchProducts();
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to delete.'));
+                }
+            } catch (err) {
+                alert('Connection error: ' + err.message);
+            }
+        }
+
+        async function handleSaveBranding(e) {
+            e.preventDefault();
+            const payload = {
+                store_name: document.getElementById('settingStoreName').value.trim(),
+                store_tagline: document.getElementById('settingStoreTagline').value.trim(),
+                store_phone: document.getElementById('settingStorePhone').value.trim(),
+                delivery_fee: document.getElementById('settingDeliveryFee').value.trim()
+            };
+
+            try {
+                const res = await fetch('/api/v1/store/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    await fetchStoreSettings();
+                    alert('Store branding updated successfully!');
+                } else {
+                    alert('Error updating branding: ' + (data.error || 'Unknown error'));
+                }
+            } catch (err) {
+                alert('Connection error: ' + err.message);
+            }
+        }
+
+        // Initialize on DOM load
         document.addEventListener('DOMContentLoaded', () => {
+            fetchStoreSettings();
             fetchProducts();
         });
     </script>

@@ -2138,13 +2138,22 @@ class WhatsAppService:
                 speech_for_tts = re.sub(r'[,\،]', ' ', speech_for_tts)
                 speech_for_tts = re.sub(r'\s+', ' ', speech_for_tts).strip()
 
+            # Omit rate/pitch/volume if 0 to guarantee SSML validation success
+            comm_rate = active_rate if active_rate and active_rate not in ("+0%", "0%", "-0%") else None
+            comm_pitch = active_pitch if active_pitch and active_pitch not in ("+0Hz", "0Hz", "-0Hz") else None
+            comm_vol = active_volume if active_volume and active_volume not in ("+0%", "0%", "-0%") else None
+
             async def _run():
-                comm = edge_tts.Communicate(speech_for_tts, active_voice, rate=active_rate, pitch=active_pitch, volume=active_volume)
+                comm = edge_tts.Communicate(speech_for_tts, active_voice, rate=comm_rate, pitch=comm_pitch, volume=comm_vol)
                 chunks = []
                 async for chunk in comm.stream():
                     if chunk.get("type") == "audio":
                         chunks.append(chunk.get("data", b""))
-                return b"".join(chunks)
+                out_b = b"".join(chunks)
+                if out_b and len(out_b) > 1024:
+                    return out_b
+                logger.warning(f"[Edge-TTS Validation] Audio output buffer too small ({len(out_b) if out_b else 0} bytes <= 1024), rejecting.")
+                return None
 
             try:
                 loop = asyncio.get_event_loop()
@@ -2260,7 +2269,7 @@ class WhatsAppService:
         # Always tried first: instant, completely free, ultra-natural human tone without robotic sound.
         try:
             edge_bytes = cls._synthesize_edge_tts(clean_text[:1200], language=language, organization_id=organization_id)
-            if edge_bytes and len(edge_bytes) > 100:
+            if edge_bytes and len(edge_bytes) > 1024:
                 logger.info(f"[TTS Pipeline] Edge-TTS successfully synthesized {len(edge_bytes)} bytes (lang={language}).")
                 return (edge_bytes, audio_fn, audio_mt)
         except Exception as e_err:
@@ -2268,7 +2277,7 @@ class WhatsAppService:
 
         # 2. Secondary fallback: ElevenLabs Multilingual Neural TTS
         eleven_bytes = cls._synthesize_elevenlabs_tts(clean_text[:1000], organization_id=organization_id)
-        if eleven_bytes and len(eleven_bytes) > 100:
+        if eleven_bytes and len(eleven_bytes) > 1024:
             return (eleven_bytes, audio_fn, audio_mt)
 
         # 3. Tertiary fallback: OpenAI HD Audio Speech API (model 'tts-1-hd')
@@ -2323,7 +2332,7 @@ class WhatsAppService:
                         except Exception:
                             pass
                     audio_bytes = b"".join(chunks) if chunks else getattr(resp, "content", b"")
-                    if audio_bytes and len(audio_bytes) > 0:
+                    if audio_bytes and len(audio_bytes) > 1024:
                         logger.info(f"OpenAI tts-1-hd voice '{voice_choice}' successfully synthesized {len(audio_bytes)} streaming bytes of natural Urdu audio.")
                         return (audio_bytes, audio_fn, audio_mt)
             except Exception as e:
@@ -3456,11 +3465,23 @@ class WhatsAppService:
 
             jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "03209350858"
             jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "Bashir Uddin"
+
+            # Live DB Active Catalog Grounding
+            live_catalog_str = ""
+            try:
+                if has_app_context():
+                    from models import Product
+                    prods = Product.query.filter_by(is_active=True).all()
+                    if prods:
+                        p_items = [f"- {p.name} ({p.category or 'General'}): PKR {p.price:,.0f} | Stock: {p.stock_quantity or 20} | {p.description or 'Authentic quality'}" for p in prods]
+                        live_catalog_str = "CURRENT VERIFIED STORE CATALOG & LIVE PRODUCTS (PRICES IN PKR):\n" + "\n".join(p_items) + "\n\n"
+            except Exception as _p_err:
+                pass
             kb = (
-                f"Business Name: {b_name or 'BashFlow AI'}\n\n"
+                f"Business Name: {b_name or 'BashFlow AI'}\n\n" f"{live_catalog_str}"
                 "ASSISTANT IDENTITY & CONVERSATIONAL GUIDELINES (ULTRA-HUMAN PAKISTANI URDU VOICE ENGINE):\n"
                 "1. ULTRA-HUMAN FRIENDLY LEHJA: Speak like an authentic, educated, friendly Pakistani friend in everyday natural spoken Urdu. Mukammal ban on archaic/bookish Urdu words ('mutaddid', 'faraham', 'tashreef', 'marhoon-e-minnat').\n"
-                "2. MANDATORY NATURAL FILLERS: Start or intersperse sentences with natural Pakistani fillers: 'Jee bilkul...', 'Acha dekhein...', 'Haan ji, main batata hoon...', 'Beshak, aap befikar rahein...', 'Sahi baat hai...'.\n"
+                "2. CONVERSATIONAL TONE & HONEST GUIDANCE: Be warm, courteous, and directly informative. Do NOT waste time with repetitive empty fillers like 'Acha dekhein, aap batayein'. Give clear answers and concrete options immediately.\n"
                 "3. PRESERVE EVERYDAY ENGLISH TERMS: Keep common English words natural as used in Pakistan: 'price', 'order', 'message', 'system', 'discount', 'confirm', 'delivery', 'stock'.\n"
                 "4. CONVERSATIONAL MEMORY & NO REPETITION: Inspect recent conversation history turns. If a discussion is already underway, NEVER repeat robotic greeting formulas ('Main aapki kya madad kar sakta hoon'). Seamlessly continue the flow.\n"
                 "5. STRICT LANGUAGE MATCHING: Urdu/Roman Urdu -> 100% natural Pakistani Urdu; English -> 100% fluent English.\n"
@@ -3474,6 +3495,7 @@ class WhatsAppService:
         b_name = tenant_kb.get("business_name") or "Our Organization"
         jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "03209350858"
         jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "Bashir Uddin"
+
         return (
             f"Business Name: {b_name}\n\n"
             "STATUS: Business knowledge catalog has not yet been populated by organization administrators.\n\n"
@@ -4063,6 +4085,22 @@ class WhatsAppService:
             f"   If JSON is not possible, deliver clean text directly without asterisks or hashtags."
         )
 
+        # Anti-filler and catalog recitation for short follow-ups
+        clean_lower = clean_text.lower()
+        is_short_followup = len(clean_text.split()) <= 7 or any(
+            w in clean_lower for w in [
+                "tell", "explain", "english", "urdu", "batao", "products", "items", "kya hai", "store",
+                "catalog", "bazar", "price", "rate", "hello", "hi", "so please", "details", "options"
+            ]
+        )
+        if is_short_followup:
+            prompt += (
+                f"\n\nCRITICAL SHORT INQUIRY / CATALOG GROUNDING DIRECTIVE:\n"
+                f"The customer is asking for information or options ('{clean_text}'). "
+                f"DO NOT give vague filler phrases like 'Acha dekhein, aap batayein' or ask what they need without giving real info. "
+                f"Directly present our active store products and their prices in PKR in the customer's requested language ({lang_info.get('language', 'urdu')})."
+            )
+
         configured_model = cls.get_gemini_model_name(organization_id=organization_id)
         # Direct, ultra-fast candidate models eliminating list_models() overhead and invalid models
         primary_candidates = [
@@ -4325,6 +4363,22 @@ class WhatsAppService:
             f"   {{\"display_text\": \"<Conversational Roman Urdu / English for chat bubble transcript without markdown artifacts>\", \"speech_text\": \"<Pure Urdu Nastaliq script (اردو) with English technical terms transliterated into Urdu script e.g. آرڈر ٹریکنگ, سروس, ڈیلیوری, بیش فلو for Microsoft Edge Neural Pakistani TTS>\"}}\n"
             f"   If JSON is not possible, deliver clean text directly without asterisks or hashtags."
         )
+
+        # Anti-filler and catalog recitation for short follow-ups
+        clean_lower = clean_text.lower()
+        is_short_followup = len(clean_text.split()) <= 7 or any(
+            w in clean_lower for w in [
+                "tell", "explain", "english", "urdu", "batao", "products", "items", "kya hai", "store",
+                "catalog", "bazar", "price", "rate", "hello", "hi", "so please", "details", "options"
+            ]
+        )
+        if is_short_followup:
+            user_prompt += (
+                f"\n\nCRITICAL SHORT INQUIRY / CATALOG GROUNDING DIRECTIVE:\n"
+                f"The customer is asking for information or options ('{clean_text}'). "
+                f"DO NOT give vague filler phrases like 'Acha dekhein, aap batayein' or ask what they need without giving real info. "
+                f"Directly present our active store products and their prices in PKR in the customer's requested language ({lang_info.get('language', 'urdu')})."
+            )
 
         configured_groq_model = (
             cls._get_tenant_or_global_setting("GROQ_MODEL", organization_id)
@@ -6514,11 +6568,16 @@ class WhatsAppService:
                     )
                     if audio_res:
                         audio_b, audio_fn, audio_mt = audio_res
-                        import base64
-                        clean_synth_b64 = base64.b64encode(audio_b).decode("ascii")
-                        synth_data_url = f"data:audio/ogg;base64,{clean_synth_b64}"
-                        outbound_audio_b64 = clean_synth_b64
-                        send_as_voice = True
+                        if audio_b and len(audio_b) > 1024:
+                            import base64
+                            clean_synth_b64 = base64.b64encode(audio_b).decode("ascii")
+                            synth_data_url = f"data:audio/ogg;base64,{clean_synth_b64}"
+                            outbound_audio_b64 = clean_synth_b64
+                            send_as_voice = True
+                        else:
+                            logger.warning(f"[Voice Pipeline Notice] Audio buffer <= 1024 bytes ({len(audio_b) if audio_b else 0}b). Bypassing audio dispatch and ensuring text delivery.")
+                            outbound_audio_b64 = None
+                            send_as_voice = False
                         logger.info(f"[Voice Pipeline] Synthesized {len(audio_b)} bytes of voice reply for {real_chat_id} (direct_bridge={direct_bridge}, lang={synth_lang}).")
 
                         if not direct_bridge:
