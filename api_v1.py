@@ -3930,6 +3930,141 @@ def ai_voice_chat():
     }), 200
 
 
+@api_v1.route("/live-voice-call", methods=["POST"])
+@rate_limit(limit=60, window=60, message="Too many live call requests.")
+def api_live_voice_call():
+    """100% Free Real-Time Two-Way Live AI Web Call endpoint.
+    Accepts speech transcript, persona, rate, pitch, and call history.
+    Generates ultra-concise, human-like spoken response (1-2 sentences, no markdown/bullets)
+    and synthesizes natural voice audio via Edge-TTS / Gemini Native voice without paid third-party APIs.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        user_text = str(data.get("text") or data.get("message") or "").strip()
+        persona = str(data.get("persona") or data.get("voice") or "").strip()
+        rate = data.get("rate")
+        pitch = data.get("pitch")
+        call_history = data.get("callHistory") or data.get("history") or []
+        org_id = request.args.get("org_id") or "org-enterprise-default"
+
+        from models import SystemSetting
+        if not persona:
+            persona = SystemSetting.get_val("EDGE_TTS_VOICE", "ur-PK-AsadNeural") or "ur-PK-AsadNeural"
+
+        rate_str = f"{int(rate):+d}%" if (isinstance(rate, (int, float)) or (isinstance(rate, str) and str(rate).replace("+","").replace("-","").isdigit())) else (str(rate) if rate else "+0%")
+        pitch_str = f"{int(pitch):+d}Hz" if (isinstance(pitch, (int, float)) or (isinstance(pitch, str) and str(pitch).replace("+","").replace("-","").isdigit())) else (str(pitch) if pitch else "+0Hz")
+
+        is_greeting = bool(data.get("is_greeting"))
+        if is_greeting and not user_text:
+            if "uzma" in persona.lower() or "female" in persona.lower():
+                reply_text = "Assalam-o-Alaikum! Main aap ki AI assistant hoon, batayein main aap ki kya madad kar sakti hoon?"
+                voice_text = "السلام علیکم! میں آپ کی اے آئی اسسٹنٹ ہوں، بتائیں میں آپ کی کیا مدد کر سکتی ہوں؟"
+            elif "asad" in persona.lower() or "ur" in persona.lower():
+                reply_text = "Assalam-o-Alaikum! Main aap ka AI voice assistant hoon, batayein main aap ki kya madad kar sakta hoon?"
+                voice_text = "السلام علیکم! میں آپ کا اے آئی وائس اسسٹنٹ ہوں، بتائیں میں آپ کی کیا مدد کر سکتا ہوں؟"
+            else:
+                reply_text = "Hello! I am your AI voice assistant. How can I help you today?"
+                voice_text = "Hello! I am your AI voice assistant. How can I help you today?"
+        else:
+            if not user_text:
+                return jsonify({"success": False, "error": "Speech text is required"}), 400
+
+            # Conversational spoken prompt for 1-2 sentence real-time phone call exchange
+            system_prompt = (
+                "You are BashFlow AI speaking directly on a real-time telephone call.\n"
+                "CRITICAL CALL SPOKEN GUIDELINES:\n"
+                "1. Spoken Conversational Tone: Speak naturally like a real human on the phone. Never sound robotic, bookish, or formal.\n"
+                "2. Extreme Brevity: Deliver at most 1 to 2 short sentences (maximum 25-30 words total). Never use lists, bullets, asterisks, hashtags, or markdown.\n"
+                "3. Language: If the user speaks in Urdu or Roman Urdu, reply warmly in natural Pakistani conversational Urdu. If in English, reply in natural conversational English.\n"
+                "4. Catalog & Assistance: Answer their question directly and helpfully."
+            )
+
+            # Build formatted conversation history
+            conv_hist = []
+            if isinstance(call_history, list):
+                for turn in call_history[-4:]:
+                    if isinstance(turn, dict) and turn.get("text"):
+                        role = "Customer" if turn.get("role") in ("user", "customer") else "Assistant"
+                        conv_hist.append({"role": role, "content": str(turn.get("text")).strip()})
+
+            ai_raw = WhatsAppService.call_gemini_ai(
+                user_message=user_text,
+                system_prompt=system_prompt,
+                organization_id=org_id,
+                customer_name="Caller",
+                conversation_history=conv_hist
+            )
+
+            if not ai_raw:
+                try:
+                    p_res = WhatsAppService.call_pollinations_ai(
+                        user_message=user_text,
+                        system_prompt=system_prompt,
+                        organization_id=org_id,
+                        conversation_history=conv_hist
+                    )
+                    ai_raw = str(p_res) if p_res else ""
+                except Exception:
+                    ai_raw = ""
+
+            if not ai_raw:
+                det = WhatsAppService.detect_language(user_text)
+                if det.get("language") in ("urdu", "pashto") or any(w in user_text.lower() for w in ["salam", "aap", "theek", "shukriya", "kya", "hai"]):
+                    reply_text = "Jee bilkul, main ne aap ki baat samajh li hai. Mazeed tafseelat ke liye batayein."
+                    voice_text = "جی بالکل، میں نے آپ کی بات سمجھ لی ہے۔ مزید تفصیلات کے لیے بتائیں۔"
+                else:
+                    reply_text = "Got it! I understand completely. Let me know how else I can assist you."
+                    voice_text = "Got it! I understand completely. Let me know how else I can assist you."
+            else:
+                disp, spch = WhatsAppService._parse_dual_ai_output(ai_raw)
+                reply_text = disp or ai_raw
+                voice_text = spch or disp or ai_raw
+
+        # Preprocess text for natural speech
+        clean_speech = WhatsAppService.humanize_speech_text(voice_text or reply_text)
+        normalized_speech = WhatsAppService.normalize_pakistani_pronunciation(
+            text=clean_speech,
+            persona=persona,
+            organization_id=org_id
+        )
+
+        audio_bytes = WhatsAppService._synthesize_edge_tts(
+            text=normalized_speech,
+            voice=persona,
+            rate=rate_str,
+            pitch=pitch_str,
+            organization_id=org_id
+        )
+
+        if not audio_bytes:
+            fallback_voice = "ur-PK-AsadNeural" if ("ur" in persona.lower() or "asad" in persona.lower()) else "en-US-AndrewMultilingualNeural"
+            audio_bytes = WhatsAppService._synthesize_edge_tts(
+                text=normalized_speech,
+                voice=fallback_voice,
+                rate=rate_str,
+                pitch=pitch_str,
+                organization_id=org_id
+            )
+
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii") if audio_bytes else ""
+        audio_data_uri = f"data:audio/mp3;base64,{audio_b64}" if audio_b64 else ""
+
+        return jsonify({
+            "success": True,
+            "reply_text": reply_text,
+            "voice_script": normalized_speech,
+            "audio_base64": audio_b64,
+            "audio_data_uri": audio_data_uri,
+            "persona": persona,
+            "rate": rate_str,
+            "pitch": pitch_str
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Live voice call error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @api_v1.route("/voice/outbound-call", methods=["POST"])
 @api_v1.route("/whatsapp/outbound-call", methods=["POST"])
 @rate_limit(limit=30, window=60, message="Too many outbound call requests.")

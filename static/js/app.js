@@ -11569,11 +11569,27 @@ function toggleCallMute() {
     isMicMuted = !isMicMuted;
     const btn = document.getElementById('btnCallMuteMic');
     const icon = document.getElementById('callMuteIcon');
+    const statusLabel = document.getElementById('voiceCallStatusLabel');
     if (liveMediaStream) {
         liveMediaStream.getAudioTracks().forEach(t => t.enabled = !isMicMuted);
     }
-    if (btn) btn.classList.toggle('muted', isMicMuted);
-    if (icon) icon.textContent = isMicMuted ? '🔇' : '🎤';
+    if (btn) {
+        btn.classList.toggle('muted', isMicMuted);
+        btn.style.background = isMicMuted ? '#ef4444' : '#14b8a6';
+        btn.style.boxShadow = isMicMuted ? '0 4px 14px rgba(239, 68, 68, 0.35)' : '0 4px 14px rgba(20, 184, 166, 0.35)';
+    }
+    if (icon) icon.textContent = isMicMuted ? '🔇' : '🎙️';
+    if (isMicMuted) {
+        if (liveVoiceRecognition) {
+            try { liveVoiceRecognition.stop(); } catch (_) {}
+        }
+        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Microphone Muted';
+    } else {
+        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+        if (liveVoiceCallActive && liveVoiceRecognition) {
+            try { liveVoiceRecognition.start(); } catch (_) {}
+        }
+    }
     showToast(isMicMuted ? 'Microphone Muted' : 'Microphone Active', 'info');
 }
 window.toggleCallMute = toggleCallMute;
@@ -11617,7 +11633,12 @@ function stopLiveCallTimer() {
 }
 
 function setEqualizerActive(active) {
-    document.querySelectorAll('.eq-bar').forEach(b => b.classList.toggle('active', Boolean(active)));
+    const waveContainer = document.getElementById('liveCallWaveContainer');
+    if (waveContainer) {
+        waveContainer.classList.toggle('animating', Boolean(active));
+        waveContainer.classList.toggle('active', Boolean(active));
+    }
+    document.querySelectorAll('.eq-bar, .vapi-wave-bar').forEach(b => b.classList.toggle('active', Boolean(active)));
 }
 
 function applyLiveStats(stats) {
@@ -11743,57 +11764,104 @@ async function triggerDirectNumberCall() {
     }
 }
 
+let liveVoiceCallHistory = [];
+
+function getActiveLiveVoicePersona() {
+    const sel = document.getElementById('voicePersonaSelector');
+    if (sel && sel.value) return sel.value;
+    try {
+        const stored = localStorage.getItem('voice_persona');
+        if (stored) return stored;
+    } catch (_) {}
+    return 'ur-PK-AsadNeural';
+}
+
+function getActiveLiveVoiceRate() {
+    const slider = document.getElementById('voiceRateSlider');
+    if (slider && slider.value !== undefined && slider.value !== '') return parseInt(slider.value, 10);
+    return 4;
+}
+
+function getActiveLiveVoicePitch() {
+    const slider = document.getElementById('voicePitchSlider');
+    if (slider && slider.value !== undefined && slider.value !== '') return parseInt(slider.value, 10);
+    return 0;
+}
+
+function getPersonaFriendlyName(personaKey) {
+    if (!personaKey) personaKey = getActiveLiveVoicePersona();
+    const p = String(personaKey).toLowerCase();
+    if (p.includes('puck') || p.includes('gemini')) return 'Puck (Gemini 2.5 Native)';
+    if (p.includes('uzma')) return 'Uzma (Pakistani Female)';
+    if (p.includes('asad')) return 'Asad (Pakistani Male)';
+    if (p.includes('andrew')) return 'Andrew (Multilingual Male)';
+    if (p.includes('ava')) return 'Ava (Multilingual Female)';
+    if (p.includes('brian')) return 'Brian (Natural English)';
+    return 'AI Voice Assistant';
+}
+
 async function sendVoiceChatQuery(spokenText) {
-    if (!spokenText || !spokenText.trim()) return;
+    if (!spokenText || !spokenText.trim() || !liveVoiceCallActive) return;
     const transcriptBox = document.getElementById('voiceTranscriptBox');
     const statusLabel = document.getElementById('voiceCallStatusLabel');
     const vadStatus = document.getElementById('callVADStatus');
 
-    if (statusLabel) statusLabel.textContent = 'AI Thinking...';
+    if (statusLabel) statusLabel.textContent = 'Thinking...';
     if (vadStatus) vadStatus.textContent = '● Processing speech input...';
 
-    const targetPhone = waActiveChatPartner 
-        ? normalizeWaPhone(waActiveChatPartner) 
-        : ((document.getElementById('voiceCallPhoneNumber') || {}).value || '').replace(/\D/g, '');
-    const syncWhatsApp = Boolean(document.getElementById('chkCallSyncWhatsApp')?.checked);
+    const cleanInput = spokenText.trim();
+    liveVoiceCallHistory.push({ role: 'user', text: cleanInput });
+
+    if (transcriptBox) {
+        transcriptBox.innerHTML = `
+            <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(cleanInput)}</div>
+            <div style="color: #94a3b8; font-style: italic;">Thinking...</div>
+        `;
+        transcriptBox.scrollTop = transcriptBox.scrollHeight;
+    }
 
     try {
-        const res = await fetch('/api/v1/voice/chat', {
+        const res = await fetch('/api/v1/live-voice-call', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                message: spokenText.trim(),
-                sync_whatsapp: syncWhatsApp,
-                caller_name: (window.currentActiveContact && window.currentActiveContact.name) || 'Customer',
-                phone: targetPhone
+            body: JSON.stringify({
+                text: cleanInput,
+                persona: getActiveLiveVoicePersona(),
+                rate: getActiveLiveVoiceRate(),
+                pitch: getActiveLiveVoicePitch(),
+                callHistory: liveVoiceCallHistory.slice(-8)
             })
         });
+
         const data = await res.json();
-        if (res.ok && data.success) {
+        if (res.ok && data && data.success) {
+            const replyText = data.reply_text || 'Ji bilkul, batayein.';
+            liveVoiceCallHistory.push({ role: 'assistant', text: replyText });
+
             if (transcriptBox) {
                 transcriptBox.innerHTML = `
-                    <div style="margin-bottom: 6px; color: #e9edef;"><strong>You:</strong> ${escapeHtml(spokenText)}</div>
-                    <div style="color: #00a884; font-weight: 500;"><strong>AI:</strong> ${escapeHtml(data.reply_text)}</div>
+                    <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(cleanInput)}</div>
+                    <div style="color: #f8fafc;"><strong style="color: #14b8a6;">Assistant:</strong> ${escapeHtml(replyText)}</div>
                 `;
                 transcriptBox.scrollTop = transcriptBox.scrollHeight;
             }
-            if (data.stats) applyLiveStats(data.stats);
-            if (typeof pollTelemetry === 'function') pollTelemetry(true);
 
-            if (data.audio_data_uri) {
-                if (statusLabel) statusLabel.textContent = 'AI Speaking... (Interruptible)';
-                setEqualizerActive(true);
-
+            if (data.audio_data_uri && liveVoiceCallActive) {
                 if (currentVoiceAudioPlayer) {
                     try { currentVoiceAudioPlayer.pause(); } catch (_) {}
+                    currentVoiceAudioPlayer = null;
                 }
                 currentVoiceAudioPlayer = new Audio(data.audio_data_uri);
                 currentVoiceAudioPlayer.muted = isSpeakerMuted;
+                if (statusLabel) statusLabel.textContent = 'Assistant Speaking...';
+                setEqualizerActive(true);
+
                 currentVoiceAudioPlayer.onended = function() {
                     setEqualizerActive(false);
                     if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
                     if (vadStatus && liveVoiceCallActive) vadStatus.textContent = '● Continuous VAD active';
                 };
+
                 currentVoiceAudioPlayer.play().catch(e => {
                     console.warn('[Live Voice Audio Play Notice]', e);
                     setEqualizerActive(false);
@@ -11804,10 +11872,12 @@ async function sendVoiceChatQuery(spokenText) {
                 if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
             }
         } else {
+            setEqualizerActive(false);
             if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
         }
     } catch (err) {
         console.warn('[Voice Chat Query Error]', err);
+        setEqualizerActive(false);
         if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
     }
 }
@@ -11815,16 +11885,14 @@ async function sendVoiceChatQuery(spokenText) {
 function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customName = null) {
     const modal = document.getElementById('liveVoiceCallModal');
     if (!modal) return;
-    modal.style.display = 'flex';
+    modal.style.display = 'block';
 
     const nameElem = document.getElementById('callContactName');
     const headerName = document.getElementById('waActiveContactName');
     const headerPhone = document.getElementById('waActiveContactPhone');
     const phoneInput = document.getElementById('voiceCallPhoneNumber');
-    const deepLinkBtn = document.getElementById('waDirectDeepLinkBtn');
-    const deepLinkText = document.getElementById('waDeepLinkBtnText');
 
-    let resolvedName = customName || 'Customer';
+    let resolvedName = customName || '';
     let resolvedPhone = customPhone || '';
 
     if (!resolvedPhone) {
@@ -11837,32 +11905,17 @@ function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customNa
         }
     }
 
-    if (!customName) {
+    if (!resolvedName) {
         if (headerName && headerName.textContent.trim() && !headerName.textContent.includes('Select a Conversation')) {
             resolvedName = headerName.textContent.trim();
-        } else if (window.currentActiveContact && window.currentActiveContact.name) {
-            resolvedName = window.currentActiveContact.name;
-        } else if (resolvedPhone) {
-            resolvedName = `+${resolvedPhone}`;
+        } else {
+            resolvedName = getPersonaFriendlyName();
         }
     }
 
     if (nameElem) nameElem.textContent = resolvedName;
     if (phoneInput && resolvedPhone) phoneInput.value = `+${resolvedPhone}`;
 
-    if (deepLinkBtn) {
-        if (resolvedPhone) {
-            deepLinkBtn.href = `whatsapp://send?phone=${resolvedPhone}`;
-            deepLinkBtn.style.display = 'inline-flex';
-            if (deepLinkText) deepLinkText.textContent = `Open in WhatsApp (+${resolvedPhone})`;
-        } else {
-            deepLinkBtn.href = 'whatsapp://';
-            deepLinkBtn.style.display = 'inline-flex';
-            if (deepLinkText) deepLinkText.textContent = 'Launch WhatsApp App';
-        }
-    }
-
-    // Real Two-Way Calling Agent: Auto-pick up call within 1 second without sending chat messages!
     if (autoConnect && !liveVoiceCallActive) {
         startLiveVoiceCall(resolvedName, resolvedPhone);
     }
@@ -11871,93 +11924,122 @@ function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customNa
 function closeLiveVoiceCallModal() {
     const modal = document.getElementById('liveVoiceCallModal');
     if (modal) modal.style.display = 'none';
-    if (liveVoiceCallActive) toggleLiveVoiceCall();
+    if (liveVoiceCallActive) {
+        endLiveVoiceCall();
+    }
+}
+
+function endLiveVoiceCall() {
+    liveVoiceCallActive = false;
+    stopLiveCallTimer();
+    setEqualizerActive(false);
+
+    if (liveVoiceRecognition) {
+        try { liveVoiceRecognition.stop(); } catch (_) {}
+        liveVoiceRecognition = null;
+    }
+    if (liveMediaRecorder && liveMediaRecorder.state !== 'inactive') {
+        try { liveMediaRecorder.stop(); } catch (_) {}
+        liveMediaRecorder = null;
+    }
+    if (liveMediaStream) {
+        try { liveMediaStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+        liveMediaStream = null;
+    }
     if (currentVoiceAudioPlayer) {
         try { currentVoiceAudioPlayer.pause(); } catch (_) {}
         currentVoiceAudioPlayer = null;
     }
-    stopLiveCallTimer();
+
+    const statusLabel = document.getElementById('voiceCallStatusLabel');
+    if (statusLabel) statusLabel.textContent = 'Call Ended';
+
+    const modal = document.getElementById('liveVoiceCallModal');
+    if (modal) modal.style.display = 'none';
+
+    showToast('Live AI Web Call ended', 'info');
 }
 
-async function startLiveVoiceCall(callerName = 'Bashir bhai') {
-    const callBtn = document.getElementById('startVoiceCallBtn');
-    const callBtnIcon = document.getElementById('startVoiceBtnIcon');
+async function startLiveVoiceCall(callerName = '') {
     const statusLabel = document.getElementById('voiceCallStatusLabel');
     const subLabel = document.getElementById('voiceCallSubLabel');
-    const ring = document.getElementById('callPulseRing');
     const transcriptBox = document.getElementById('voiceTranscriptBox');
     const vadStatus = document.getElementById('callVADStatus');
+    const nameElem = document.getElementById('callContactName');
 
     liveVoiceCallActive = true;
+    liveVoiceCallHistory = [];
     startLiveCallTimer();
 
-    // Turn red end call button
-    if (callBtn) {
-        callBtn.style.background = '#ea4335';
-        callBtn.style.boxShadow = '0 4px 18px rgba(234, 67, 53, 0.45)';
-    }
-    if (callBtnIcon) {
-        callBtnIcon.textContent = '📞';
-        callBtnIcon.style.display = 'inline-block';
-        callBtnIcon.style.transform = 'rotate(135deg)';
+    const persona = getActiveLiveVoicePersona();
+    const personaTitle = getPersonaFriendlyName(persona);
+    if (nameElem && (!callerName || callerName.includes('AI'))) {
+        nameElem.textContent = personaTitle;
     }
 
-    if (ring) ring.classList.add('active');
-    if (statusLabel) statusLabel.textContent = 'Ringing AI Voice Agent...';
-    if (subLabel) subLabel.textContent = 'Connecting Two-Way Live Audio Stream';
+    if (statusLabel) statusLabel.textContent = 'Connecting Voice Call...';
+    if (vadStatus) vadStatus.textContent = '● Connecting Live Two-Way Voice...';
 
-    // 1-second pickup delay: AI answers with natural greeting
+    // Instant initial greeting playback from backend
     setTimeout(async () => {
         if (!liveVoiceCallActive) return;
-        if (statusLabel) statusLabel.textContent = 'Call Connected ● Live Voice Stream';
-        if (subLabel) subLabel.textContent = 'Assalam-o-Alaikum! Haan ji Bashir bhai, main sun raha hoon...';
-        if (vadStatus) vadStatus.textContent = '● Continuous VAD active (Interruptible)';
+        if (statusLabel) statusLabel.textContent = 'Call Connected';
 
-        const greetingText = `Assalam-o-Alaikum! Haan ji ${callerName}, main sun raha hoon, batayein...`;
-        if (transcriptBox) {
-            transcriptBox.innerHTML = `<div style="color: #00a884; font-weight: 600;"><strong>AI:</strong> ${escapeHtml(greetingText)}</div>`;
-        }
-
-        // Fetch synthesized voice greeting (strictly NO chat message dispatched!)
         try {
-            const res = await fetch('/api/v1/voice/chat', {
+            const res = await fetch('/api/v1/live-voice-call', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     is_greeting: true,
-                    caller_name: callerName,
-                    sync_whatsapp: false
+                    persona: persona,
+                    rate: getActiveLiveVoiceRate(),
+                    pitch: getActiveLiveVoicePitch()
                 })
             });
             const data = await res.json();
-            if (data && data.audio_data_uri && liveVoiceCallActive) {
-                if (currentVoiceAudioPlayer) {
-                    try { currentVoiceAudioPlayer.pause(); } catch (_) {}
+            if (data && data.success && liveVoiceCallActive) {
+                const greetingText = data.reply_text || 'Assalam-o-Alaikum! Main sun raha hoon, batayein.';
+                liveVoiceCallHistory.push({ role: 'assistant', text: greetingText });
+
+                if (transcriptBox) {
+                    transcriptBox.innerHTML = `<div style="color: #14b8a6; font-weight: 600;"><strong>Assistant:</strong> ${escapeHtml(greetingText)}</div>`;
                 }
-                currentVoiceAudioPlayer = new Audio(data.audio_data_uri);
-                currentVoiceAudioPlayer.muted = isSpeakerMuted;
-                setEqualizerActive(true);
-                if (statusLabel) statusLabel.textContent = 'AI Speaking... (Interruptible)';
-                currentVoiceAudioPlayer.onended = function() {
-                    setEqualizerActive(false);
-                    if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
-                };
-                currentVoiceAudioPlayer.play().catch(e => console.warn('[Greeting Audio Play Notice]', e));
+
+                if (data.audio_data_uri) {
+                    if (currentVoiceAudioPlayer) {
+                        try { currentVoiceAudioPlayer.pause(); } catch (_) {}
+                    }
+                    currentVoiceAudioPlayer = new Audio(data.audio_data_uri);
+                    currentVoiceAudioPlayer.muted = isSpeakerMuted;
+                    setEqualizerActive(true);
+                    if (statusLabel) statusLabel.textContent = 'Assistant Speaking...';
+
+                    currentVoiceAudioPlayer.onended = function() {
+                        setEqualizerActive(false);
+                        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+                    };
+                    currentVoiceAudioPlayer.play().catch(e => {
+                        console.warn('[Greeting Audio Play Notice]', e);
+                        setEqualizerActive(false);
+                        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
+                    });
+                }
             }
         } catch (greetErr) {
-            console.warn('[Voice Greeting Notice]', greetErr);
+            console.warn('[Live Voice Greeting Notice]', greetErr);
+            if (statusLabel && liveVoiceCallActive) statusLabel.textContent = 'Listening... Speak naturally';
         }
 
         // Start continuous microphone VAD & SpeechRecognition
         startContinuousVoiceVAD();
-    }, 900);
+    }, 400);
 }
 
 function startContinuousVoiceVAD() {
     const statusLabel = document.getElementById('voiceCallStatusLabel');
     const transcriptBox = document.getElementById('voiceTranscriptBox');
 
-    // Microphone capture
+    // Microphone capture for browser audio context
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
             liveMediaStream = stream;
@@ -11984,13 +12066,13 @@ function startContinuousVoiceVAD() {
             liveVoiceRecognition.lang = 'ur-PK, en-US';
 
             liveVoiceRecognition.onresult = function(event) {
-                // INSTANT INTERRUPTIBILITY (BARGE-IN): If user speaks while AI audio is playing, stop AI immediately!
+                // INSTANT BARGE-IN (INTERRUPTION): If user speaks while AI audio is playing, stop AI immediately!
                 if (currentVoiceAudioPlayer && !currentVoiceAudioPlayer.paused) {
                     try {
                         currentVoiceAudioPlayer.pause();
                         currentVoiceAudioPlayer.currentTime = 0;
                         setEqualizerActive(false);
-                        if (statusLabel) statusLabel.textContent = 'Listening... (Interrupted AI)';
+                        if (statusLabel) statusLabel.textContent = 'Listening... (Interrupted Assistant)';
                     } catch (_) {}
                 }
 
@@ -12005,12 +12087,13 @@ function startContinuousVoiceVAD() {
                 }
                 const textToDisplay = finalTranscript || interimTranscript;
                 if (transcriptBox && textToDisplay) {
-                    transcriptBox.innerHTML = '<div style="color:#e9edef;"><strong>You:</strong> ' + escapeHtml(textToDisplay) + '</div>';
+                    transcriptBox.innerHTML = '<div style="color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ' + escapeHtml(textToDisplay) + '</div>';
                 }
+
                 clearTimeout(voiceSpeechDebounceTimer);
                 const textToSend = (finalTranscript || interimTranscript).trim();
                 if (textToSend.length > 2) {
-                    // Turnaround silence detection: 650ms for snappy conversational exchange
+                    // Turnaround silence detection: 650ms for snappy natural exchange
                     voiceSpeechDebounceTimer = setTimeout(() => {
                         sendVoiceChatQuery(textToSend);
                     }, 650);
@@ -12022,7 +12105,7 @@ function startContinuousVoiceVAD() {
             };
 
             liveVoiceRecognition.onend = function() {
-                if (liveVoiceCallActive && liveVoiceRecognition) {
+                if (liveVoiceCallActive && !isMicMuted && liveVoiceRecognition) {
                     try { liveVoiceRecognition.start(); } catch (_) {}
                 }
             };
@@ -12031,156 +12114,24 @@ function startContinuousVoiceVAD() {
         } catch (recErr) {
             console.warn('[Live Voice Call] Mic init note:', recErr);
         }
+    } else {
+        if (transcriptBox) {
+            transcriptBox.innerHTML = '<span style="color: #14b8a6;">● Live audio connected. For automatic speech recognition, please use Chrome or Edge.</span>';
+        }
     }
 }
 
 function toggleLiveVoiceCall() {
-    const callBtn = document.getElementById('startVoiceCallBtn');
-    const callBtnIcon = document.getElementById('startVoiceBtnIcon');
-    const statusLabel = document.getElementById('voiceCallStatusLabel');
-    const subLabel = document.getElementById('voiceCallSubLabel');
-    const ring = document.getElementById('callPulseRing');
-    const transcriptBox = document.getElementById('voiceTranscriptBox');
-    const vadStatus = document.getElementById('callVADStatus');
-
-    if (!liveVoiceCallActive) {
-        // START CALL
-        liveVoiceCallActive = true;
-        startLiveCallTimer();
-
-        // Turn red end call button
-        if (callBtn) {
-            callBtn.style.background = '#ea4335';
-            callBtn.style.boxShadow = '0 4px 18px rgba(234, 67, 53, 0.45)';
-        }
-        if (callBtnIcon) {
-            callBtnIcon.textContent = '📞';
-            callBtnIcon.style.display = 'inline-block';
-            callBtnIcon.style.transform = 'rotate(135deg)';
-        }
-        if (statusLabel) statusLabel.textContent = 'Listening... Speak naturally';
-        if (subLabel) subLabel.textContent = 'Conversational Urdu & English Voice Agent Active';
-        if (vadStatus) vadStatus.textContent = '● Continuous VAD active';
-        if (ring) ring.classList.add('active');
-
-        // Microphone capture
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-                liveMediaStream = stream;
-                try {
-                    liveMediaRecorder = new MediaRecorder(stream);
-                    liveAudioChunks = [];
-                    liveMediaRecorder.ondataavailable = e => {
-                        if (e.data && e.data.size > 0) liveAudioChunks.push(e.data);
-                    };
-                    liveMediaRecorder.start(1000);
-                } catch (_) {}
-            }).catch(mErr => console.warn('[Live Mic Permission Notice]', mErr));
-        }
-
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRecognition) {
-            try {
-                liveVoiceRecognition = new SpeechRecognition();
-                liveVoiceRecognition.continuous = true;
-                liveVoiceRecognition.interimResults = true;
-                liveVoiceRecognition.lang = 'ur-PK, en-US';
-
-                liveVoiceRecognition.onresult = function(event) {
-                    // NATURAL INTERRUPTIBILITY: If AI audio is playing and user speaks, stop AI immediately!
-                    if (currentVoiceAudioPlayer && !currentVoiceAudioPlayer.paused) {
-                        try {
-                            currentVoiceAudioPlayer.pause();
-                            currentVoiceAudioPlayer.currentTime = 0;
-                            setEqualizerActive(false);
-                            if (statusLabel) statusLabel.textContent = 'Listening... (Interrupted AI)';
-                        } catch (_) {}
-                    }
-
-                    let interimTranscript = '';
-                    let finalTranscript = '';
-                    for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        if (event.results[i].isFinal) {
-                            finalTranscript += event.results[i][0].transcript;
-                        } else {
-                            interimTranscript += event.results[i][0].transcript;
-                        }
-                    }
-                    const textToDisplay = finalTranscript || interimTranscript;
-                    if (transcriptBox && textToDisplay) {
-                        transcriptBox.innerHTML = '<div style="color:#e9edef;"><strong>You:</strong> ' + escapeHtml(textToDisplay) + '</div>';
-                    }
-                    clearTimeout(voiceSpeechDebounceTimer);
-                    const textToSend = (finalTranscript || interimTranscript).trim();
-                    if (textToSend.length > 2) {
-                        voiceSpeechDebounceTimer = setTimeout(() => {
-                            sendVoiceChatQuery(textToSend);
-                        }, 1200);
-                    }
-                };
-
-                liveVoiceRecognition.onerror = function(err) {
-                    console.warn('[Live Voice Call] Speech recognition note:', err);
-                };
-
-                liveVoiceRecognition.onend = function() {
-                    if (liveVoiceCallActive && liveVoiceRecognition) {
-                        try { liveVoiceRecognition.start(); } catch (_) {}
-                    }
-                };
-
-                liveVoiceRecognition.start();
-            } catch (recErr) {
-                console.warn('[Live Voice Call] Mic init note:', recErr);
-            }
-        } else {
-            if (transcriptBox) {
-                transcriptBox.innerHTML = '<span style="color:#00a884;">● Two-way voice stream active. Browser Speech Recognition not supported.</span>';
-            }
-        }
-        showToast('AI Voice Call Connected! Speak naturally.', 'success');
+    if (liveVoiceCallActive) {
+        endLiveVoiceCall();
     } else {
-        // END CALL
-        liveVoiceCallActive = false;
-        stopLiveCallTimer();
-        setEqualizerActive(false);
-
-        if (callBtn) {
-            callBtn.style.background = '#00a884';
-            callBtn.style.boxShadow = '0 4px 18px rgba(0, 168, 132, 0.45)';
-        }
-        if (callBtnIcon) {
-            callBtnIcon.textContent = '📞';
-            callBtnIcon.style.transform = 'none';
-        }
-        if (statusLabel) statusLabel.textContent = 'Call Ended';
-        if (subLabel) subLabel.textContent = 'Click Call button to start a new voice session';
-        if (vadStatus) vadStatus.textContent = '● Call ended';
-        if (ring) ring.classList.remove('active');
-
-        if (liveVoiceRecognition) {
-            try { liveVoiceRecognition.stop(); } catch (_) {}
-            liveVoiceRecognition = null;
-        }
-        if (liveMediaRecorder && liveMediaRecorder.state !== 'inactive') {
-            try { liveMediaRecorder.stop(); } catch (_) {}
-            liveMediaRecorder = null;
-        }
-        if (liveMediaStream) {
-            try { liveMediaStream.getTracks().forEach(t => t.stop()); } catch (_) {}
-            liveMediaStream = null;
-        }
-        if (currentVoiceAudioPlayer) {
-            try { currentVoiceAudioPlayer.pause(); } catch (_) {}
-            currentVoiceAudioPlayer = null;
-        }
-        showToast('Voice call ended', 'info');
+        openLiveVoiceCallModal(true);
     }
 }
 window.toggleLiveVoiceCall = toggleLiveVoiceCall;
 window.openLiveVoiceCallModal = openLiveVoiceCallModal;
-
 window.closeLiveVoiceCallModal = closeLiveVoiceCallModal;
+window.endLiveVoiceCall = endLiveVoiceCall;
 window.toggleEmojiTray = toggleEmojiTray;
 window.toggleTemplatesTray = toggleTemplatesTray;
 window.insertEmojiIntoReply = insertEmojiIntoReply;

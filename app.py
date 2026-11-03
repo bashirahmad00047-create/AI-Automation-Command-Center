@@ -1119,6 +1119,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import ai_voice_chat
         return ai_voice_chat()
 
+    @application.route("/api/live-voice-call", methods=["POST"])
+    @application.route("/api/v1/live-voice-call", methods=["POST"])
+    def route_live_voice_call():
+        """Endpoint proxy for 100% free real-time two-way live AI web call."""
+        from api_v1 import api_live_voice_call
+        return api_live_voice_call()
+
     @application.route("/api/whatsapp/ai-health", methods=["GET"])
     @application.route("/api/v1/whatsapp/ai-health", methods=["GET"])
     @rate_limit(limit=30, window=60)
