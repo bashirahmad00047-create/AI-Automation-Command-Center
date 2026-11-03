@@ -330,7 +330,7 @@
             <p style="font-size: 13px; color: #94a3b8; max-width: 260px; line-height: 1.5; margin-bottom: 24px;">
                 Connecting you to our 100% Free Live AI Voice Assistant.
             </p>
-            <button type="button" class="btn-start-call" id="joinCallBtn">
+            <button type="button" class="btn-start-call" id="joinCallBtn" onclick="startCallFromOverlay()">
                 <span>📞</span>
                 <span id="joinCallBtnText">Tap to Join Call</span>
             </button>
@@ -550,21 +550,45 @@
 
         let isJoinInProgress = false;
 
-        async function executeJoinFlow() {
+        function executeJoinFlow() {
             if (isJoinInProgress || isCallActive) return;
             isJoinInProgress = true;
 
-            const joinBtn = document.getElementById('joinCallBtn');
-            const txt = document.getElementById('joinCallBtnText') || joinBtn;
-            if (joinBtn) joinBtn.disabled = true;
-            if (txt) txt.innerText = 'Connecting...';
+            // 1. IMMEDIATELY hide the join overlay and transition UI into active call room
+            const overlay = document.getElementById('connectOverlay');
+            if (overlay) overlay.style.display = 'none';
 
+            isCallActive = true;
+            startTimer();
+            setStatus('🟢 Call Connected. Listening...');
+
+            const tb = document.getElementById('transcriptBox');
+            if (tb) {
+                tb.innerHTML = '<div style="color: #10b981; font-weight: 600;">🟢 Call Connected. Say "Salam" or speak your question.</div>';
+            }
+
+            // 2. Non-blocking backend join notification (never freezes UI)
+            const targetPhone = roomId || phone;
+            if (targetPhone) {
+                fetch('/api/call/join/' + encodeURIComponent(targetPhone), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone: targetPhone, roomId: roomId })
+                }).catch(() => {});
+            }
+
+            if (socket && socket.emit) {
+                try {
+                    socket.emit('join-call-room', { roomId: roomId, role: 'customer' });
+                } catch (_) {}
+            }
+
+            // 3. AudioContext resume & audio element unlock strictly inside user gesture
             try {
-                // Mobile browser ke liye AudioContext unlock karna zaroori hai
                 const AudioCtx = window.AudioContext || window.webkitAudioContext;
                 if (!audioCtx && AudioCtx) audioCtx = new AudioCtx();
                 if (audioCtx && audioCtx.state === 'suspended') {
-                    await audioCtx.resume().catch(() => {});
+                    audioCtx.resume().catch(() => {});
                 }
                 if (audioCtx) {
                     try {
@@ -582,45 +606,33 @@
                         audioPlayer.play().then(() => audioPlayer.pause()).catch(() => {});
                     } catch (_) {}
                 }
+            } catch (_) {}
 
-                // Server ko batana ki customer join ho gaya hai
-                if (socket && socket.emit) {
-                    try {
-                        socket.emit('join-call-room', { roomId: roomId, role: 'customer' });
-                    } catch (_) {}
+            // 4. Request microphone with 3-second timeout fallback
+            const getUserMediaWithTimeout = (timeoutMs = 3000) => {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    return Promise.reject(new Error('MediaDevices not supported'));
                 }
-                const targetPhone = roomId || phone;
-                if (targetPhone) {
-                    fetch('/api/call/join/' + encodeURIComponent(targetPhone), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ phone: targetPhone, roomId: roomId })
-                    }).catch(err => console.warn('Join report notice:', err));
-                }
+                return Promise.race([
+                    navigator.mediaDevices.getUserMedia({ audio: true }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Mic request timed out')), timeoutMs))
+                ]);
+            };
 
-                // Mic permission mangna with graceful fallback
-                let stream = null;
-                try {
-                    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    }
-                } catch (micErr) {
-                    console.warn('[Microphone getUserMedia Notice]', micErr);
-                }
-
-                // Hide overlay and transition into call screen
-                const overlay = document.getElementById('connectOverlay');
-                if (overlay) overlay.style.display = 'none';
-
-                startCustomerListening(stream);
-            } catch (err) {
-                console.error('[executeJoinFlow Error]', err);
-                const overlay = document.getElementById('connectOverlay');
-                if (overlay) overlay.style.display = 'none';
-                startCustomerListening(null);
-            } finally {
-                isJoinInProgress = false;
-            }
+            getUserMediaWithTimeout(3000)
+                .then(stream => {
+                    micStream = stream;
+                    try { setupMicrophoneAnalyser(stream); } catch (_) {}
+                    try { setupMediaRecorderVAD(stream); } catch (_) {}
+                    try { startPrimarySpeechRecognition(); } catch (_) {}
+                })
+                .catch(micErr => {
+                    console.warn('[Microphone fallback notice]:', micErr);
+                    try { setupDualMicPipeline(); } catch (_) {}
+                })
+                .finally(() => {
+                    isJoinInProgress = false;
+                });
         }
 
         function startCallFromOverlay() {
@@ -631,16 +643,21 @@
         document.addEventListener('DOMContentLoaded', () => {
             const joinBtn = document.getElementById('joinCallBtn');
             if (joinBtn) {
-                // Mobile touch aur click dono handle karein
+                let touched = false;
+                joinBtn.addEventListener('touchend', (e) => {
+                    touched = true;
+                    executeJoinFlow();
+                }, { passive: true });
+
                 joinBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
+                    if (touched) {
+                        touched = false;
+                        return;
+                    }
                     executeJoinFlow();
                 });
-                joinBtn.addEventListener('touchend', (e) => {
-                    e.preventDefault();
-                    executeJoinFlow();
-                }, { passive: false });
             }
+
             // Bind customer End Call button
             const endBtn = document.getElementById('btnEndCall') || document.querySelector('.btn-end');
             if (endBtn) {

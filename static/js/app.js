@@ -12749,23 +12749,34 @@ function handleAdminEndCall() {
 }
 
 function bindAdminCallWidgetButtons() {
-    // Only bind red End Call button inside modal, NEVER touch main startVoiceCallBtn
+    // 1. Red End Call button strictly inside the modal
     const endBtn = document.getElementById('btnAdminEndVoiceCall');
     if (endBtn && !endBtn._boundEndCall) {
         endBtn._boundEndCall = true;
-        endBtn.addEventListener('click', (e) => {
-            e.preventDefault();
+        endBtn.onclick = (e) => {
+            if (e && e.preventDefault) e.preventDefault();
             handleAdminEndCall();
-        });
+        };
     }
 
+    // 2. Top-right close button inside the modal
     const closeBtn = document.getElementById('btnCloseLiveVoiceModal') || document.querySelector('#liveVoiceCallModal button[title="Close Call Widget"]');
     if (closeBtn && !closeBtn._boundCloseCall) {
         closeBtn._boundCloseCall = true;
-        closeBtn.addEventListener('click', (e) => {
-            e.preventDefault();
+        closeBtn.onclick = (e) => {
+            if (e && e.preventDefault) e.preventDefault();
             handleAdminEndCall();
-        });
+        };
+    }
+
+    // 3. Main Call Start/Toggle button: properly initiates call and streams voice to customer
+    const startCallBtn = document.getElementById('startVoiceCallBtn');
+    if (startCallBtn && !startCallBtn._boundStartToggle) {
+        startCallBtn._boundStartToggle = true;
+        startCallBtn.onclick = (e) => {
+            if (e && e.preventDefault) e.preventDefault();
+            toggleLiveVoiceCall();
+        };
     }
 }
 
