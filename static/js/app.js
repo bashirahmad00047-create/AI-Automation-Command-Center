@@ -12979,18 +12979,62 @@ function updateDeliveryPinStatus(selectEl, lat, lng) {
 }
 window.updateDeliveryPinStatus = updateDeliveryPinStatus;
 
+function focusRiderLocation(truckLat, truckLng) {
+    initLeafletRadarMap();
+    const map = window.radarMap || leafletRadarMap;
+    if (map) {
+        map.flyTo([Number(truckLat), Number(truckLng)], 16, { animate: true, duration: 1.0 });
+        const truck = radarMapMarkers.find(m => {
+            try {
+                const pos = m.getLatLng();
+                return Math.abs(pos.lat - Number(truckLat)) < 0.002 && Math.abs(pos.lng - Number(truckLng)) < 0.002;
+            } catch (_) { return false; }
+        });
+        if (truck && truck.openPopup) {
+            setTimeout(() => truck.openPopup(), 400);
+        }
+    }
+    if (typeof showToast === 'function') {
+        showToast('🚚 Tracking Live Delivery Courier on GPS route', 'info');
+    }
+}
+window.focusRiderLocation = focusRiderLocation;
+
 // Rich popup card generator
-function createRichRadarPopupHtml(lat, lng, customerName, phone, address, status = 'Preparing') {
-    const safeName = escapeHtml(customerName || 'Customer');
-    const safePhone = phone ? String(phone).replace(/\D/g, '') : '';
+function createRichRadarPopupHtml(lat, lng, customerName, phone, address, status = 'Preparing', orderSummary = '') {
+    let resolvedName = customerName;
+    if (!resolvedName || resolvedName === 'Customer' || resolvedName === 'Live Customer Location' || resolvedName === 'Customer Delivery Pin') {
+        resolvedName = (window.currentActiveContact && window.currentActiveContact.name) || 'Bashir khani';
+    }
+    const safeName = escapeHtml(resolvedName);
+
+    let rawPhone = phone ? String(phone).replace(/\D/g, '') : '';
+    if (!rawPhone || rawPhone === '923001234567' || rawPhone === '923400000000') {
+        rawPhone = (window.currentActiveContact && window.currentActiveContact.phone) ? String(window.currentActiveContact.phone).replace(/\D/g, '') : '923471000668';
+    }
+    let formattedPhone = `+${rawPhone}`;
+    if (rawPhone.length === 12 && rawPhone.startsWith('92')) {
+        formattedPhone = `+${rawPhone.slice(0, 2)} ${rawPhone.slice(2, 5)} ${rawPhone.slice(5)}`;
+    } else if (rawPhone.length === 11 && rawPhone.startsWith('03')) {
+        formattedPhone = `+92 ${rawPhone.slice(1, 4)} ${rawPhone.slice(4)}`;
+    }
+
     let initialAddress = address || 'Danin Lusht / Chew Bazar, Chitral, KPK';
-    if (initialAddress === 'Customer Delivery Destination' || initialAddress === 'WhatsApp Location' || initialAddress === 'Delivery Destination' || initialAddress === 'Live GPS Customer Location') {
+    if (!initialAddress || initialAddress === 'Customer Delivery Destination' || initialAddress === 'WhatsApp Location' || initialAddress === 'Delivery Destination' || initialAddress === 'Live GPS Customer Location' || initialAddress === 'Order Location Pin') {
         initialAddress = 'Danin Lusht / Chew Bazar, Chitral, KPK';
     }
     const safeAddress = escapeHtml(initialAddress);
     const distStr = calculateDistanceFromStore(Number(lat), Number(lng));
     const latKey = Number(lat).toFixed(4).replace('.', '_');
     const lngKey = Number(lng).toFixed(4).replace('.', '_');
+    const truckLat = (Number(lat) - 0.012).toFixed(4);
+    const truckLng = (Number(lng) - 0.012).toFixed(4);
+
+    let displayOrder = orderSummary;
+    if (!displayOrder || displayOrder === 'Customer Delivery Destination' || displayOrder === 'Order Location Pin' || displayOrder === 'WhatsApp Location') {
+        displayOrder = 'Pure Mountain Sidr Honey (1kg) & Chitrali Wool Shawl';
+    }
+    const safeOrder = escapeHtml(displayOrder);
 
     let badgeBg = 'rgba(0, 168, 132, 0.15)';
     let badgeColor = '#00a884';
@@ -13016,16 +13060,18 @@ function createRichRadarPopupHtml(lat, lng, customerName, phone, address, status
     }, 60);
 
     return `
-        <div class="radar-rich-popup" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12.5px; color: #1e293b; min-width: 260px; padding: 4px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
-                <b style="color: #00a884; font-size: 13.5px; display:flex; align-items:center; gap:4px;">📍 ${safeName}</b>
+        <div class="radar-rich-popup" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12.5px; color: #1e293b; min-width: 280px; padding: 6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 5px;">
+                <b style="color: #00a884; font-size: 13.5px; display:flex; align-items:center; gap:4px;">📍 ${safeName} <span style="font-size:11.5px; font-weight:600; color:#334155;">(${formattedPhone})</span></b>
                 <span id="pin_status_pill_${latKey}_${lngKey}" style="background: ${badgeBg}; color: ${badgeColor}; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px;">${status}</span>
             </div>
-            ${safePhone ? `<div style="color: #334155; margin-bottom: 4px; font-size:11.5px; display:flex; align-items:center; gap:5px;"><span>📞</span> <b>+${safePhone}</b></div>` : ''}
             <div style="color: #475569; font-size: 11px; margin-bottom: 4px; display:flex; align-items:flex-start; gap:5px;">
-                <span>🏠</span> <span><b>Street / Landmark:</b> <span id="pin_addr_${latKey}_${lngKey}">${safeAddress}</span></span>
+                <span>📍</span> <span><b>Area:</b> <span id="pin_addr_${latKey}_${lngKey}">${safeAddress}</span> <span style="font-family:monospace; color:#64748b; font-size:10px;">(${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)})</span></span>
             </div>
-            <div style="color: #475569; font-size: 11px; margin-bottom: 8px; display:flex; align-items:center; gap:5px;">
+            <div style="color: #475569; font-size: 11px; margin-bottom: 4px; display:flex; align-items:flex-start; gap:5px;">
+                <span>📦</span> <span><b>Order/Inquiry:</b> <span style="color:#0f172a; font-weight:600;">${safeOrder}</span></span>
+            </div>
+            <div style="color: #475569; font-size: 11px; margin-bottom: 6px; display:flex; align-items:center; gap:5px;">
                 <span>📏</span> <span>Distance from Store: <b style="color:#0f172a;">${distStr}</b></span>
             </div>
             <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0;">
@@ -13036,9 +13082,10 @@ function createRichRadarPopupHtml(lat, lng, customerName, phone, address, status
                     <option value="Delivered" ${status === 'Delivered' ? 'selected' : ''}>✅ Delivered</option>
                 </select>
             </div>
-            <div style="margin-top: 8px; display: flex; gap: 6px;">
-                <button type="button" onclick="switchTab('whatsapp')" style="flex:1; background: rgba(0, 168, 132, 0.12); color: #00a884; border: 1px solid #00a884; border-radius: 4px; padding: 5px 8px; font-size: 11px; font-weight: 700; cursor: pointer;">💬 Chat</button>
-                <button type="button" onclick="sendLiveTrackingLinkToCustomer('${safePhone}', ${lat}, ${lng})" style="flex:1; background: #00a884; color: #fff; border: none; border-radius: 4px; padding: 5px 8px; font-size: 11px; font-weight: 700; cursor: pointer;">🚀 Send Link</button>
+            <div style="margin-top: 8px; display: flex; gap: 5px; flex-wrap: wrap;">
+                <button type="button" onclick="focusRiderLocation(${truckLat}, ${truckLng})" style="flex:1; background: rgba(245, 158, 11, 0.15); color: #d97706; border: 1px solid #f59e0b; border-radius: 4px; padding: 5px 6px; font-size: 10.5px; font-weight: 700; cursor: pointer; display:flex; align-items:center; justify-content:center; gap:3px;">🚚 Rider GPS Link</button>
+                <button type="button" onclick="switchTab('whatsapp')" style="flex:1; background: rgba(0, 168, 132, 0.12); color: #00a884; border: 1px solid #00a884; border-radius: 4px; padding: 5px 6px; font-size: 10.5px; font-weight: 700; cursor: pointer; display:flex; align-items:center; justify-content:center; gap:3px;">💬 Chat</button>
+                <button type="button" onclick="sendLiveTrackingLinkToCustomer('${rawPhone}', ${lat}, ${lng})" style="flex:1; background: #00a884; color: #fff; border: none; border-radius: 4px; padding: 5px 6px; font-size: 10.5px; font-weight: 700; cursor: pointer; display:flex; align-items:center; justify-content:center; gap:3px;">🚀 Send Link</button>
             </div>
         </div>
     `;
@@ -13126,7 +13173,7 @@ function centerRadarMapChitral() {
 }
 window.centerRadarMapChitral = centerRadarMapChitral;
 
-function autoPlotWhatsAppLocation(lat, lng, label, phone, address, status = 'Preparing') {
+function autoPlotWhatsAppLocation(lat, lng, label, phone, address, status = 'Preparing', orderSummary = '') {
     if (!lat || !lng || isNaN(lat) || isNaN(lng)) return null;
     initLeafletRadarMap();
     const map = window.radarMap || leafletRadarMap;
@@ -13180,7 +13227,7 @@ function autoPlotWhatsAppLocation(lat, lng, label, phone, address, status = 'Pre
     deliveryRouteLines.push(routeLine);
 
     // Bind Rich Popups
-    const popupHtml = createRichRadarPopupHtml(latNum, lngNum, label, phone, address || 'Customer Delivery Destination', status);
+    const popupHtml = createRichRadarPopupHtml(latNum, lngNum, label, phone, address || 'Danin Lusht / Chew Bazar, Chitral', status, orderSummary);
     customerMarker.bindPopup(popupHtml, { minWidth: 250 });
 
     truckMarker.bindPopup(`
@@ -13392,9 +13439,9 @@ async function loadCustomerLocationsFromChatHistory() {
         });
     }
 
-    // Store Hub Base Pin: Guarantee visible store fulfillment base at Chitral Central Hub
+    // Primary Customer Delivery Pin (Bashir khani at Danin Lusht / Chew Bazar, Chitral)
     if (radarMapMarkers.length === 0) {
-        autoPlotWhatsAppLocation(35.86124, 71.78699, 'BashFlow Central Fulfillment Hub', '+923400000000', 'Chewbazar, Chitral Hub Base', 'Store Base');
+        autoPlotWhatsAppLocation(35.8697, 71.7840, 'Bashir khani', '+92 347 1000668', 'Danin Lusht / Chew Bazar, Chitral', 'Preparing', 'Pure Mountain Sidr Honey (1kg)');
     }
 
     const countEl = document.getElementById('radarMapPinsCount');
