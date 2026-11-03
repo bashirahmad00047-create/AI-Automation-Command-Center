@@ -411,7 +411,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "geolocation=(self), camera=(), microphone=()"
+        response.headers["Permissions-Policy"] = 'microphone=(self "*"), camera=(self "*"), geolocation=(self "*")'
         csp = (
             "default-src 'self' 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net https://cdn.socket.io https://unpkg.com https://cdnjs.cloudflare.com; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.socket.io https://unpkg.com https://cdnjs.cloudflare.com; "
@@ -420,7 +420,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "img-src 'self' data: blob: https: http:; "
             "frame-src 'self' https://www.openstreetmap.org https://*.openstreetmap.org; "
             "media-src 'self' data: blob:; "
-            "connect-src 'self' ws: wss: https://cdn.socket.io https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.basemaps.cartocdn.com https://basemaps.cartocdn.com;"
+            "connect-src 'self' ws: wss: https://cdn.socket.io https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.basemaps.cartocdn.com https://basemaps.cartocdn.com;"
         )
         response.headers["Content-Security-Policy"] = csp
         if application.config.get("SESSION_COOKIE_SECURE"):
@@ -1132,6 +1132,20 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         """Sends a shareable Live AI Voice Call link to a customer via WhatsApp."""
         from api_v1 import api_send_voice_call_link
         return api_send_voice_call_link()
+
+    @application.route("/api/voice/transcribe-and-reply", methods=["POST"])
+    @application.route("/api/v1/voice/transcribe-and-reply", methods=["POST"])
+    def route_voice_transcribe_and_reply():
+        """Dual-Engine speech transcription & voice reply endpoint using Gemini 2.5 Flash & SpeechRecognition."""
+        from api_v1 import api_voice_transcribe_and_reply
+        return api_voice_transcribe_and_reply()
+
+    @application.route("/api/reverse-geocode", methods=["GET"])
+    @application.route("/api/v1/reverse-geocode", methods=["GET"])
+    def route_reverse_geocode():
+        """Reverse geocoding proxy resolving coordinates to street & neighborhood names."""
+        from api_v1 import api_reverse_geocode
+        return api_reverse_geocode()
 
     @application.route("/call/<phone>", methods=["GET"])
     @application.route("/call/", methods=["GET"])

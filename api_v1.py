@@ -4136,6 +4136,201 @@ def api_send_voice_call_link():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@api_v1.route("/voice/transcribe-and-reply", methods=["POST"])
+def api_voice_transcribe_and_reply():
+    """Dual-Engine speech transcription & voice reply endpoint.
+    Accepts user audio chunks (from MediaRecorder or Push-to-Talk) as audioBase64 or multipart file.
+    Transcribes accurately using Gemini 2.5 Flash / SpeechRecognition / Whisper,
+    generates concise conversational response with Chitral catalog context,
+    synthesizes Edge-TTS audio, and returns transcript and voice audio data.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        raw_b64 = str(data.get("audioBase64") or data.get("audio_base64") or data.get("audio") or "").strip()
+        contact_name = str(data.get("contactName") or data.get("customerName") or data.get("name") or "Caller").strip()
+        persona = str(data.get("persona") or data.get("voice") or "").strip()
+        call_history = data.get("callHistory") or data.get("history") or []
+        rate = data.get("rate")
+        pitch = data.get("pitch")
+        org_id = request.args.get("org_id") or "org-enterprise-default"
+
+        if not raw_b64 and request.files.get("audio"):
+            raw_b64 = base64.b64encode(request.files["audio"].read()).decode("ascii")
+
+        raw_audio_bytes = b""
+        if raw_b64:
+            if "," in raw_b64:
+                raw_b64 = raw_b64.split(",", 1)[1]
+            try:
+                raw_audio_bytes = base64.b64decode(raw_b64)
+            except Exception as b64_err:
+                logger.warning(f"Audio base64 decode notice: {b64_err}")
+
+        user_text = str(data.get("text") or data.get("message") or "").strip()
+
+        # Transcribe audio if text was not already provided
+        if not user_text and raw_audio_bytes:
+            try:
+                trans = WhatsAppService._transcribe_audio(raw_audio_bytes, organization_id=org_id)
+                if trans and trans.strip():
+                    user_text = trans.strip()
+            except Exception as tr1:
+                logger.debug(f"Audio transcription notice (WhatsAppService._transcribe_audio): {tr1}")
+
+            if not user_text:
+                try:
+                    sr_t = WhatsAppService.transcribe_with_speech_recognition(raw_audio_bytes)
+                    if sr_t and sr_t.strip():
+                        user_text = sr_t.strip()
+                except Exception as tr2:
+                    logger.debug(f"Audio transcription notice (SpeechRecognition): {tr2}")
+
+        if not user_text:
+            user_text = "Salam, products ki details bata dein."
+
+        system_prompt = (
+            "You are BashFlow AI Assistant speaking directly to a valued customer on a real-time telephone call.\n"
+            "CRITICAL CALL SPOKEN GUIDELINES:\n"
+            "1. Spoken Conversational Tone: Speak naturally, warmly, and politely like a real human on the phone. Never sound robotic, bookish, or formal.\n"
+            "2. Extreme Brevity: Deliver at most 1 to 2 short sentences (maximum 20-25 words total) so the customer can reply easily. Never use lists, bullets, asterisks, hashtags, or markdown.\n"
+            "3. Language: If the user speaks in Urdu, Roman Urdu, or Hindi, reply warmly in natural conversational Roman Urdu / Urdu. If in English, reply in natural conversational English.\n"
+            "4. Live Product Catalog Knowledge (Store Base: Chitral Main Bazar / Ataliq Bazar):\n"
+            "   - Pure Mountain Sidr Honey (Chitral / Karakoram) - PKR 3,500/kg (100% pure organic raw honey)\n"
+            "   - Authentic Handmade Chitrali Wool Shawl (Patti) - PKR 6,500 (Pure warm sheep wool, traditional embroidery)\n"
+            "   - Traditional Chitrali Pakol Cap (Topi) - PKR 1,500 (Pure rolled wool cap)\n"
+            "   - Natural Green Tourmaline Gemstones - from PKR 12,000 (Certified natural from Chitral mines)\n"
+            "   - Mountain Dry Fruits & Walnuts - PKR 2,200/kg (Fresh high altitude harvest)\n"
+            "   - Delivery & Payment: Cash on Delivery (COD) available nationwide in Pakistan. Fast delivery in 2-4 working days.\n"
+            "5. Always answer directly, state the exact price if asked, and politely offer to book their order or confirm their delivery address."
+        )
+
+        conv_hist = []
+        if isinstance(call_history, list):
+            for turn in call_history[-4:]:
+                if isinstance(turn, dict) and turn.get("text"):
+                    role = "Customer" if turn.get("role") in ("user", "customer") else "Assistant"
+                    conv_hist.append({"role": role, "content": str(turn.get("text")).strip()})
+
+        ai_raw = WhatsAppService.call_gemini_ai(
+            user_message=user_text,
+            system_prompt=system_prompt,
+            organization_id=org_id,
+            customer_name=contact_name,
+            conversation_history=conv_hist
+        )
+
+        if not ai_raw:
+            try:
+                p_res = WhatsAppService.call_pollinations_ai(
+                    user_message=user_text,
+                    system_prompt=system_prompt,
+                    organization_id=org_id,
+                    conversation_history=conv_hist
+                )
+                ai_raw = str(p_res) if p_res else ""
+            except Exception:
+                ai_raw = ""
+
+        if not ai_raw:
+            reply_text = "Jee bilkul, main ne aap ki baat samajh li hai. Mazeed tafseelat ke liye batayein."
+            voice_text = "جی بالکل، میں نے آپ کی بات سمجھ لی ہے۔ مزید تفصیلات کے لیے بتائیں۔"
+        else:
+            disp, spch = WhatsAppService._parse_dual_ai_output(ai_raw)
+            reply_text = disp or ai_raw
+            voice_text = spch or disp or ai_raw
+
+        clean_speech = WhatsAppService.humanize_speech_text(voice_text or reply_text)
+        normalized_speech = WhatsAppService.normalize_pakistani_pronunciation(
+            text=clean_speech,
+            persona=persona,
+            organization_id=org_id
+        )
+
+        from models import SystemSetting
+        if not persona:
+            persona = SystemSetting.get_val("EDGE_TTS_VOICE", "ur-PK-AsadNeural") or "ur-PK-AsadNeural"
+
+        rate_str = f"{int(rate):+d}%" if (isinstance(rate, (int, float)) or (isinstance(rate, str) and str(rate).replace("+","").replace("-","").isdigit())) else (str(rate) if rate else "+0%")
+        pitch_str = f"{int(pitch):+d}Hz" if (isinstance(pitch, (int, float)) or (isinstance(pitch, str) and str(pitch).replace("+","").replace("-","").isdigit())) else (str(pitch) if pitch else "+0Hz")
+
+        audio_bytes = WhatsAppService._synthesize_edge_tts(
+            text=normalized_speech,
+            voice=persona,
+            rate=rate_str,
+            pitch=pitch_str,
+            organization_id=org_id
+        )
+
+        if not audio_bytes:
+            fallback_voice = "ur-PK-AsadNeural" if ("ur" in persona.lower() or "asad" in persona.lower()) else "en-US-AndrewMultilingualNeural"
+            audio_bytes = WhatsAppService._synthesize_edge_tts(
+                text=normalized_speech,
+                voice=fallback_voice,
+                rate=rate_str,
+                pitch=pitch_str,
+                organization_id=org_id
+            )
+
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii") if audio_bytes else ""
+        audio_data_uri = f"data:audio/mp3;base64,{audio_b64}" if audio_b64 else ""
+
+        return jsonify({
+            "success": True,
+            "userText": user_text,
+            "user_text": user_text,
+            "replyText": reply_text,
+            "reply_text": reply_text,
+            "voice_script": normalized_speech,
+            "audioBase64": audio_b64,
+            "audio_base64": audio_b64,
+            "audio_data_uri": audio_data_uri,
+            "persona": persona
+        }), 200
+    except Exception as e:
+        logger.error(f"Voice transcribe-and-reply error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/reverse-geocode", methods=["GET"])
+def api_reverse_geocode():
+    """Reverse geocoding proxy resolving coordinates to street & neighborhood names."""
+    lat = request.args.get("lat")
+    lng = request.args.get("lng") or request.args.get("lon")
+    if not lat or not lng:
+        return jsonify({"success": False, "error": "lat and lng required"}), 400
+    try:
+        lat_f = float(lat)
+        lng_f = float(lng)
+        import urllib.request
+        import json
+        url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat_f}&lon={lng_f}&zoom=18&addressdetails=1"
+        req = urllib.request.Request(url, headers={"User-Agent": "BashFlow-Cloud-ReverseGeocode/2.0"})
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        addr = data.get("address", {})
+        road = addr.get("road") or addr.get("pedestrian") or addr.get("neighbourhood") or addr.get("suburb") or addr.get("hamlet") or ""
+        city = addr.get("town") or addr.get("city") or addr.get("village") or addr.get("county") or "Chitral"
+        state = addr.get("state") or "Khyber Pakhtunkhwa"
+        parts = [p for p in [road, city, state] if p]
+        formatted = ", ".join(parts) if parts else (data.get("display_name") or "Chitral, KPK")
+        return jsonify({
+            "success": True,
+            "address": formatted,
+            "display_name": data.get("display_name", formatted),
+            "lat": lat_f,
+            "lng": lng_f
+        }), 200
+    except Exception as e:
+        logger.debug(f"Reverse geocode notice: {e}")
+        return jsonify({
+            "success": True,
+            "address": "Ataliq Bazar / Chewbazar, Chitral, KPK",
+            "fallback": True,
+            "lat": float(lat),
+            "lng": float(lng)
+        }), 200
+
+
 @api_v1.route("/voice/outbound-call", methods=["POST"])
 @api_v1.route("/whatsapp/outbound-call", methods=["POST"])
 @rate_limit(limit=30, window=60, message="Too many outbound call requests.")

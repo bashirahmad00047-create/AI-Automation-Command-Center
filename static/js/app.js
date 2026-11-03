@@ -7470,7 +7470,8 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                                         <span style="font-size:18px;">📍</span>
                                         <div>
                                             <div style="font-weight:700; color:#00a884; font-size:12px;">Live WhatsApp Location</div>
-                                            <div style="font-size:10px; color:#8696a0; font-family: monospace;">GPS: ${lat.toFixed(4)}, ${lng.toFixed(4)}</div>
+                                            <div style="font-size:11px; color:#cbd5e1; margin-top:1px;">📍 ${escapeHtml(cleanBody || 'Danin Lusht / Chew Bazar, Chitral, KPK')}</div>
+                                            <div style="font-size:10px; color:#8696a0; font-family: monospace; margin-top:2px;">GPS: ${lat.toFixed(4)}, ${lng.toFixed(4)} &bull; ${calculateDistanceFromStore(lat, lng)}</div>
                                         </div>
                                     </div>
                                     <span style="font-size:9.5px; background:rgba(0,168,132,0.2); color:#25d366; font-weight:700; padding:2px 7px; border-radius:4px; letter-spacing:0.3px;">LIVE RADAR</span>
@@ -12266,11 +12267,21 @@ async function sendVoiceChatQuery(payload) {
         }
         if (audioPayload) bodyData.audioBase64 = audioPayload;
 
-        const res = await fetch('/api/v1/live-voice-call', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(bodyData)
-        });
+        const targetEndpoint = audioPayload ? '/api/voice/transcribe-and-reply' : '/api/v1/live-voice-call';
+        let res = null;
+        try {
+            res = await fetch(targetEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bodyData)
+            });
+        } catch (_) {
+            res = await fetch('/api/v1/live-voice-call', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bodyData)
+            });
+        }
 
         const data = await res.json();
         if (res.ok && data && data.success) {
@@ -12446,7 +12457,13 @@ function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customNa
                 modalMediaRecorder.start(250);
             } catch (_) {}
         }).catch(err => {
-            console.warn('[Live Mic Click Request Notice]:', err && err.message);
+            console.warn('[Live Mic Click Request Notice]:', err && err.name, err && err.message);
+            if (err && (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError')) {
+                const statusLabel = document.getElementById('voiceCallStatusLabel');
+                if (statusLabel) statusLabel.textContent = '⚠️ No mic detected. Please plug in a mic or type below.';
+                const input = document.getElementById('liveCallTextInput');
+                if (input) input.focus();
+            }
         });
     }
 
@@ -12650,7 +12667,7 @@ function startContinuousVoiceVAD() {
                                     handleModalVadCompletion();
                                 }
                                 modalVadSilenceTimer = null;
-                            }, 1200);
+                            }, 1500);
                         }
                     }
                 }
@@ -12736,20 +12753,25 @@ function startContinuousVoiceVAD() {
             };
 
             liveVoiceRecognition.onerror = function(err) {
-                console.warn('[Live Voice Call] Speech recognition note:', err && err.error);
-                if (err && err.error === 'not-allowed') {
-                    // Graceful fallback - DO NOT crash or print scary error in transcript
+                const errType = err && err.error;
+                console.warn('[Live Voice Call] Speech recognition note:', errType);
+                if (errType === 'not-allowed' || errType === 'service-not-allowed' || errType === 'network') {
+                    // Stop infinite restart loops permanently on error
+                    liveVoiceRecognitionActive = false;
+                    try { liveVoiceRecognition.stop(); } catch (_) {}
                     if (statusLabel && liveVoiceCallActive && !isLiveAiSpeaking) {
-                        statusLabel.textContent = '💬 Tap to Speak or Type';
+                        statusLabel.textContent = '🎙️ Dual-Mic Active (Speak or Tap)';
                     }
-                } else {
-                    if (liveVoiceCallActive && !isMicMuted && !isLiveAiSpeaking && liveVoiceRecognition) {
-                        try { liveVoiceRecognition.start(); } catch (_) {}
-                    }
+                    return;
+                }
+                if (errType === 'no-speech') {
+                    return;
                 }
             };
 
             liveVoiceRecognition.onend = function() {
+                // NEVER restart in loop if speech recognition encountered fatal error
+                if (!liveVoiceRecognitionActive) return;
                 if (liveVoiceCallActive && !isMicMuted && !isLiveAiSpeaking && liveVoiceRecognition) {
                     try { liveVoiceRecognition.start(); } catch (_) {}
                 }
@@ -12807,28 +12829,130 @@ let leafletRadarMap = null;
 let radarMapMarkers = [];
 let deliveryRouteLines = [];
 
-// Helper: Calculate distance from store/hub (Chitral Central Store Hub: 35.86124, 71.78699)
-const STORE_HUB_LAT = 35.86124;
-const STORE_HUB_LNG = 71.78699;
+// Store Origin: Default set to Chitral Main Bazar / Ataliq Bazar (35.8518, 71.7864)
+const DEFAULT_STORE_LAT = 35.8518;
+const DEFAULT_STORE_LNG = 71.7864;
+const DEFAULT_STORE_NAME = "Chitral Main Bazar / Ataliq Bazar Hub";
+
+function getStoreOrigin() {
+    try {
+        const stored = localStorage.getItem('bashflow_store_base_location');
+        if (stored) {
+            const p = JSON.parse(stored);
+            if (p && p.lat && p.lng) return p;
+        }
+    } catch (_) {}
+    return {
+        lat: DEFAULT_STORE_LAT,
+        lng: DEFAULT_STORE_LNG,
+        name: DEFAULT_STORE_NAME
+    };
+}
+window.getStoreOrigin = getStoreOrigin;
+
+function setStoreOrigin(lat, lng, name) {
+    const obj = {
+        lat: Number(lat) || DEFAULT_STORE_LAT,
+        lng: Number(lng) || DEFAULT_STORE_LNG,
+        name: name || DEFAULT_STORE_NAME
+    };
+    try {
+        localStorage.setItem('bashflow_store_base_location', JSON.stringify(obj));
+    } catch (_) {}
+    if (typeof showToast === 'function') {
+        showToast(`📍 Shop Base Location set to: ${obj.name}`, 'success');
+    }
+    const dossierCoords = document.getElementById('waDossierCoordsText');
+    if (dossierCoords) dossierCoords.textContent = `${obj.lat.toFixed(4)}° N, ${obj.lng.toFixed(4)}° E`;
+    if (typeof loadCustomerLocationsFromChatHistory === 'function') {
+        loadCustomerLocationsFromChatHistory();
+    }
+}
+window.setStoreOrigin = setStoreOrigin;
+
+function setAsMyShopBaseLocation() {
+    const latIn = document.getElementById('orderLocLat');
+    const lngIn = document.getElementById('orderLocLng');
+    const lblIn = document.getElementById('orderLocLabel');
+    const lat = latIn ? parseFloat(latIn.value) : DEFAULT_STORE_LAT;
+    const lng = lngIn ? parseFloat(lngIn.value) : DEFAULT_STORE_LNG;
+    const name = (lblIn && lblIn.value.trim()) ? lblIn.value.trim() : DEFAULT_STORE_NAME;
+    setStoreOrigin(lat, lng, name);
+    closeSetOrderLocationModal();
+}
+window.setAsMyShopBaseLocation = setAsMyShopBaseLocation;
 
 function calculateDistanceFromStore(lat, lng) {
     if (!lat || !lng || isNaN(lat) || isNaN(lng)) return 'N/A';
-    const storeLat = STORE_HUB_LAT;
-    const storeLng = STORE_HUB_LNG;
+    const store = getStoreOrigin();
     const R = 6371; // km
-    const dLat = (Number(lat) - storeLat) * Math.PI / 180;
-    const dLon = (Number(lng) - storeLng) * Math.PI / 180;
+    const dLat = (Number(lat) - store.lat) * Math.PI / 180;
+    const dLon = (Number(lng) - store.lng) * Math.PI / 180;
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(storeLat * Math.PI / 180) * Math.cos(Number(lat) * Math.PI / 180) *
+              Math.cos(store.lat * Math.PI / 180) * Math.cos(Number(lat) * Math.PI / 180) *
               Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const d = R * c;
-    if (d < 1) {
-        return `${Math.round(d * 1000)} m`;
+
+    // Local road factor (~1.25x for mountain and valley roads)
+    const roadDist = d * 1.25;
+    const estMins = Math.max(3, Math.round((roadDist / 22) * 60)); // ~22 km/h local courier speed
+
+    if (d < 0.8) {
+        return `${Math.round(d * 1000)} m • Est. Time: ~3 mins`;
     }
-    return `${d.toFixed(1)} km`;
+    if (d < 25) {
+        return `${roadDist.toFixed(1)} km • Est. Time: ~${estMins} mins`;
+    }
+    return `${d.toFixed(1)} km • Inter-city Transit`;
 }
 window.calculateDistanceFromStore = calculateDistanceFromStore;
+
+// Automatic Reverse Geocoding Cache & Resolver for Street & Neighborhood
+const _addressGeoCache = {};
+
+async function resolveAddressFromCoordinates(lat, lng, callback) {
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) return 'Danin Lusht / Chew Bazar, Chitral, KPK';
+    const key = `${Number(lat).toFixed(4)}_${Number(lng).toFixed(4)}`;
+    if (_addressGeoCache[key]) {
+        if (typeof callback === 'function') callback(_addressGeoCache[key]);
+        return _addressGeoCache[key];
+    }
+
+    try {
+        const res = await fetch(`/api/v1/reverse-geocode?lat=${lat}&lng=${lng}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.address) {
+                _addressGeoCache[key] = data.address;
+                if (typeof callback === 'function') callback(data.address);
+                return data.address;
+            }
+        }
+    } catch (_) {}
+
+    try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
+        if (res.ok) {
+            const data = await res.json();
+            const addr = data.address || {};
+            const road = addr.road || addr.pedestrian || addr.neighbourhood || addr.suburb || addr.hamlet || '';
+            const city = addr.town || addr.city || addr.village || addr.county || 'Chitral';
+            const state = addr.state || 'KPK';
+            const parts = [road, city, state].filter(Boolean);
+            const formatted = parts.join(', ') || data.display_name || 'Danin Lusht / Chew Bazar, Chitral, KPK';
+            _addressGeoCache[key] = formatted;
+            if (typeof callback === 'function') callback(formatted);
+            return formatted;
+        }
+    } catch (_) {}
+
+    const fallback = 'Danin Lusht / Chew Bazar, Chitral, KPK';
+    _addressGeoCache[key] = fallback;
+    if (typeof callback === 'function') callback(fallback);
+    return fallback;
+}
+window.resolveAddressFromCoordinates = resolveAddressFromCoordinates;
 
 // Status selector update on map pin
 function updateDeliveryPinStatus(selectEl, lat, lng) {
@@ -12859,7 +12983,11 @@ window.updateDeliveryPinStatus = updateDeliveryPinStatus;
 function createRichRadarPopupHtml(lat, lng, customerName, phone, address, status = 'Preparing') {
     const safeName = escapeHtml(customerName || 'Customer');
     const safePhone = phone ? String(phone).replace(/\D/g, '') : '';
-    const safeAddress = escapeHtml(address || 'Delivery Destination');
+    let initialAddress = address || 'Danin Lusht / Chew Bazar, Chitral, KPK';
+    if (initialAddress === 'Customer Delivery Destination' || initialAddress === 'WhatsApp Location' || initialAddress === 'Delivery Destination' || initialAddress === 'Live GPS Customer Location') {
+        initialAddress = 'Danin Lusht / Chew Bazar, Chitral, KPK';
+    }
+    const safeAddress = escapeHtml(initialAddress);
     const distStr = calculateDistanceFromStore(Number(lat), Number(lng));
     const latKey = Number(lat).toFixed(4).replace('.', '_');
     const lngKey = Number(lng).toFixed(4).replace('.', '_');
@@ -12877,17 +13005,27 @@ function createRichRadarPopupHtml(lat, lng, customerName, phone, address, status
         badgeColor = '#0284c7';
     }
 
+    // Trigger async reverse geocoding to update address dynamically if generic
+    setTimeout(() => {
+        resolveAddressFromCoordinates(lat, lng, (resolved) => {
+            const addrEl = document.getElementById(`pin_addr_${latKey}_${lngKey}`);
+            if (addrEl && resolved) {
+                addrEl.textContent = resolved;
+            }
+        });
+    }, 60);
+
     return `
-        <div class="radar-rich-popup" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12.5px; color: #1e293b; min-width: 250px; padding: 4px;">
+        <div class="radar-rich-popup" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12.5px; color: #1e293b; min-width: 260px; padding: 4px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
                 <b style="color: #00a884; font-size: 13.5px; display:flex; align-items:center; gap:4px;">📍 ${safeName}</b>
                 <span id="pin_status_pill_${latKey}_${lngKey}" style="background: ${badgeBg}; color: ${badgeColor}; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px;">${status}</span>
             </div>
             ${safePhone ? `<div style="color: #334155; margin-bottom: 4px; font-size:11.5px; display:flex; align-items:center; gap:5px;"><span>📞</span> <b>+${safePhone}</b></div>` : ''}
-            <div style="color: #64748b; font-size: 11px; margin-bottom: 4px; display:flex; align-items:flex-start; gap:5px;">
-                <span>📦</span> <span><b>Order/Address:</b> ${safeAddress}</span>
+            <div style="color: #475569; font-size: 11px; margin-bottom: 4px; display:flex; align-items:flex-start; gap:5px;">
+                <span>🏠</span> <span><b>Street / Landmark:</b> <span id="pin_addr_${latKey}_${lngKey}">${safeAddress}</span></span>
             </div>
-            <div style="color: #64748b; font-size: 11px; margin-bottom: 8px; display:flex; align-items:center; gap:5px;">
+            <div style="color: #475569; font-size: 11px; margin-bottom: 8px; display:flex; align-items:center; gap:5px;">
                 <span>📏</span> <span>Distance from Store: <b style="color:#0f172a;">${distStr}</b></span>
             </div>
             <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0;">
