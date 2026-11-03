@@ -1126,6 +1126,23 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_live_voice_call
         return api_live_voice_call()
 
+    @application.route("/api/voice/send-call-link", methods=["POST"])
+    @application.route("/api/v1/voice/send-call-link", methods=["POST"])
+    def route_send_voice_call_link():
+        """Sends a shareable Live AI Voice Call link to a customer via WhatsApp."""
+        from api_v1 import api_send_voice_call_link
+        return api_send_voice_call_link()
+
+    @application.route("/call/<phone>", methods=["GET"])
+    @application.route("/call/", methods=["GET"])
+    @application.route("/call", methods=["GET"])
+    def public_live_call_page(phone=""):
+        """Public standalone live voice call room accessible by customer without login."""
+        import re, os
+        phone_clean = re.sub(r"\D", "", phone or "")
+        b_name = os.environ.get("BUSINESS_NAME", "BashFlow Voice AI")
+        return render_template("live_call_room.html", phone=phone_clean, business_name=b_name)
+
     @application.route("/api/whatsapp/ai-health", methods=["GET"])
     @application.route("/api/v1/whatsapp/ai-health", methods=["GET"])
     @rate_limit(limit=30, window=60)

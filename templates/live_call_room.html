@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Live AI Voice Call | BashFlow</title>
+    <link rel="icon" type="image/svg+xml" href="/static/img/opsflow-icon.svg">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            background-color: #0b0f19;
+            color: #f8fafc;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            overflow: hidden;
+        }
+        .call-card {
+            width: 100%;
+            max-width: 380px;
+            height: 92vh;
+            max-height: 600px;
+            background: radial-gradient(circle at 50% 15%, #131d2e 0%, #0b0f19 80%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 28px;
+            box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(20, 184, 166, 0.2);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow: hidden;
+            position: relative;
+        }
+        /* Header */
+        .call-header {
+            padding: 20px 22px 14px 22px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .caller-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .pulse-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #14b8a6;
+            box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.7);
+            animation: pulseTeal 1.8s infinite;
+        }
+        @keyframes pulseTeal {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.7); }
+            70% { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(20, 184, 166, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(20, 184, 166, 0); }
+        }
+        .caller-name {
+            font-size: 15px;
+            font-weight: 700;
+            color: #f8fafc;
+            letter-spacing: -0.2px;
+        }
+        .call-status {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-top: 2px;
+        }
+        .call-timer {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12.5px;
+            font-weight: 700;
+            color: #14b8a6;
+            background: rgba(20, 184, 166, 0.12);
+            border: 1px solid rgba(20, 184, 166, 0.25);
+            padding: 3px 8px;
+            border-radius: 8px;
+        }
+        /* Center wave visualizer */
+        .call-body {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            text-align: center;
+        }
+        .vapi-waves {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            height: 80px;
+            margin-bottom: 24px;
+        }
+        .wave-bar {
+            width: 6px;
+            height: 14px;
+            background: #14b8a6;
+            border-radius: 9999px;
+            transition: height 0.2s ease, opacity 0.2s ease;
+            opacity: 0.45;
+        }
+        .vapi-waves.animating .wave-bar:nth-child(1) { animation: wavePulse 1.0s ease-in-out infinite 0.1s; }
+        .vapi-waves.animating .wave-bar:nth-child(2) { animation: wavePulse 1.0s ease-in-out infinite 0.25s; }
+        .vapi-waves.animating .wave-bar:nth-child(3) { animation: wavePulse 1.0s ease-in-out infinite 0.0s; }
+        .vapi-waves.animating .wave-bar:nth-child(4) { animation: wavePulse 1.0s ease-in-out infinite 0.3s; }
+        .vapi-waves.animating .wave-bar:nth-child(5) { animation: wavePulse 1.0s ease-in-out infinite 0.15s; }
+        @keyframes wavePulse {
+            0%, 100% { height: 12px; opacity: 0.4; }
+            50% { height: 60px; opacity: 1; box-shadow: 0 0 16px rgba(20, 184, 166, 0.85); }
+        }
+        /* Subtitles Box */
+        .transcript-box {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 14px;
+            padding: 12px 14px;
+            min-height: 64px;
+            max-height: 100px;
+            overflow-y: auto;
+            font-size: 13px;
+            line-height: 1.45;
+            color: #cbd5e1;
+            text-align: left;
+            margin-bottom: 16px;
+        }
+        /* Text Fallback Row */
+        .text-fallback-row {
+            width: 100%;
+            display: flex;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .text-fallback-input {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 8px 12px;
+            color: #f8fafc;
+            font-size: 13px;
+            outline: none;
+        }
+        .text-fallback-btn {
+            background: #14b8a6;
+            color: #0b0f19;
+            border: none;
+            border-radius: 10px;
+            padding: 0 14px;
+            font-weight: 700;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        /* Bottom Controls */
+        .call-footer {
+            padding: 16px 20px 22px 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 18px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            background: rgba(0, 0, 0, 0.2);
+        }
+        .btn-circle {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+        }
+        .btn-mic {
+            background: #14b8a6;
+            color: #0b0f19;
+            box-shadow: 0 4px 16px rgba(20, 184, 166, 0.4);
+        }
+        .btn-mic.muted {
+            background: #ef4444;
+            color: #ffffff;
+            box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+        }
+        .btn-end {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #ef4444;
+            color: #ffffff;
+            border-radius: 9999px;
+            padding: 12px 26px;
+            font-weight: 700;
+            font-size: 14px;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 18px rgba(239, 68, 68, 0.4);
+            transition: all 0.2s ease;
+        }
+        .btn-end:active, .btn-mic:active {
+            transform: scale(0.95);
+        }
+        /* Initial Connect Overlay */
+        .connect-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(11, 15, 25, 0.94);
+            backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            text-align: center;
+            z-index: 50;
+        }
+        .btn-start-call {
+            background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
+            color: #ffffff;
+            border: none;
+            border-radius: 9999px;
+            padding: 16px 36px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 8px 24px rgba(20, 184, 166, 0.45);
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s ease;
+        }
+        .btn-start-call:active {
+            transform: scale(0.96);
+        }
+    </style>
+</head>
+<body>
+    <div class="call-card">
+        <!-- Initial Connect Overlay (Ensures browser audio permission on mobile) -->
+        <div id="connectOverlay" class="connect-overlay">
+            <div style="font-size: 56px; margin-bottom: 16px; animation: pulseTeal 2s infinite;">🎙️</div>
+            <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 6px;">BashFlow Voice Call</h2>
+            <p style="font-size: 13px; color: #94a3b8; max-width: 260px; line-height: 1.5; margin-bottom: 24px;">
+                You are connecting to our 100% Free Live AI Voice Assistant.
+            </p>
+            <button type="button" class="btn-start-call" onclick="startCallFromOverlay()">
+                <span>📞</span>
+                <span>Tap to Join Call</span>
+            </button>
+            <div style="font-size: 11px; color: #64748b; margin-top: 20px;">
+                Instant Hands-Free Voice • Pakistani Urdu &amp; English
+            </div>
+        </div>
+
+        <!-- Header -->
+        <div class="call-header">
+            <div class="caller-info">
+                <div class="pulse-dot"></div>
+                <div>
+                    <div class="caller-name" id="callerHeaderName">BashFlow AI Voice</div>
+                    <div class="call-status" id="callStatusLabel">Connecting...</div>
+                </div>
+            </div>
+            <div class="call-timer" id="callTimer">00:00</div>
+        </div>
+
+        <!-- Center: 5 Teal Wave Bars & Subtitle -->
+        <div class="call-body">
+            <div class="vapi-waves" id="waveContainer">
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+            </div>
+
+            <div class="transcript-box" id="transcriptBox">
+                <em style="color: #64748b;">Connecting two-way voice stream...</em>
+            </div>
+
+            <!-- Fallback text typing row -->
+            <div class="text-fallback-row">
+                <input type="text" id="callTextInput" class="text-fallback-input" placeholder="Type here if mic pauses..." onkeydown="if(event.key==='Enter') sendTextInput()">
+                <button type="button" class="text-fallback-btn" onclick="sendTextInput()">Send</button>
+            </div>
+        </div>
+
+        <!-- Bottom Controls -->
+        <div class="call-footer">
+            <button type="button" id="btnMicMute" class="btn-circle btn-mic" onclick="toggleMute()" title="Mute/Unmute Mic">
+                <span id="micIcon">🎤</span>
+            </button>
+            <button type="button" class="btn-end" onclick="endCall()" title="End Call">
+                <span>🔴</span>
+                <span>End Call</span>
+            </button>
+        </div>
+    </div>
+
+    <audio id="audioPlayer" preload="auto" style="display: none;"></audio>
+
+    <script>
+        const phone = "{{ phone }}";
+        let isCallActive = false;
+        let isMuted = false;
+        let callSeconds = 0;
+        let timerInterval = null;
+        let recognition = null;
+        let debounceTimer = null;
+        let callHistory = [];
+        let audioPlayer = document.getElementById('audioPlayer');
+        let lastSpokenText = '';
+        let lastSpokenTime = 0;
+
+        function setStatus(text) {
+            const el = document.getElementById('callStatusLabel');
+            if (el) el.textContent = text;
+        }
+
+        function setWaveAnimation(animating) {
+            const wc = document.getElementById('waveContainer');
+            if (wc) wc.classList.toggle('animating', Boolean(animating));
+        }
+
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            callSeconds = 0;
+            const timerEl = document.getElementById('callTimer');
+            timerInterval = setInterval(() => {
+                callSeconds++;
+                const mins = String(Math.floor(callSeconds / 60)).padStart(2, '0');
+                const secs = String(callSeconds % 60).padStart(2, '0');
+                if (timerEl) timerEl.textContent = `${mins}:${secs}`;
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = null;
+        }
+
+        function startCallFromOverlay() {
+            const overlay = document.getElementById('connectOverlay');
+            if (overlay) overlay.style.display = 'none';
+
+            // Prime browser audio context on user gesture
+            if (audioPlayer) {
+                audioPlayer.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+                audioPlayer.play().then(() => audioPlayer.pause()).catch(() => {});
+            }
+
+            isCallActive = true;
+            startTimer();
+            setStatus('Thinking...');
+
+            // Fetch and play initial greeting immediately
+            fetchGreeting();
+
+            // Start continuous microphone recognition
+            startSpeechRecognition();
+        }
+
+        async function fetchGreeting() {
+            try {
+                const res = await fetch('/api/v1/live-voice-call', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        is_greeting: true,
+                        persona: 'ur-PK-AsadNeural',
+                        phone: phone
+                    })
+                });
+                const data = await res.json();
+                if (data && data.success && isCallActive) {
+                    const greeting = data.reply_text || 'Assalam-o-Alaikum! Welcome to BashFlow, main aapki kya madad kar sakta hoon?';
+                    callHistory.push({ role: 'assistant', text: greeting });
+
+                    const tb = document.getElementById('transcriptBox');
+                    if (tb) {
+                        tb.innerHTML = `<div style="color: #14b8a6; font-weight: 600;"><strong>Assistant:</strong> ${escapeHtml(greeting)}</div>`;
+                    }
+
+                    if (data.audio_data_uri) {
+                        playAudioResponse(data.audio_data_uri);
+                    } else {
+                        setStatus('Listening...');
+                    }
+                }
+            } catch (err) {
+                console.warn('[Greeting error]', err);
+                setStatus('Listening...');
+            }
+        }
+
+        function playAudioResponse(audioUri) {
+            if (!audioPlayer) return;
+            audioPlayer.src = audioUri;
+            audioPlayer.muted = isMuted;
+            setWaveAnimation(true);
+            setStatus('Speaking...');
+
+            audioPlayer.onended = () => {
+                setWaveAnimation(false);
+                if (isCallActive) setStatus('Listening...');
+            };
+
+            audioPlayer.play().catch(err => {
+                console.warn('[Audio play blocked]', err);
+                setWaveAnimation(false);
+                if (isCallActive) setStatus('Listening...');
+            });
+        }
+
+        function startSpeechRecognition() {
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRec) {
+                const tb = document.getElementById('transcriptBox');
+                if (tb) tb.innerHTML += '<div style="color: #f59e0b; font-size: 11px; margin-top: 4px;">Speech recognition not supported in this browser. Please use the text input below.</div>';
+                return;
+            }
+
+            try {
+                if (recognition) {
+                    try { recognition.stop(); } catch (_) {}
+                }
+                recognition = new SpeechRec();
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'ur-PK';
+
+                recognition.onresult = (event) => {
+                    // Instant Barge-In: Stop AI audio if user interrupts
+                    if (audioPlayer && !audioPlayer.paused) {
+                        try {
+                            audioPlayer.pause();
+                            audioPlayer.currentTime = 0;
+                        } catch (_) {}
+                        setWaveAnimation(false);
+                        setStatus('Listening...');
+                    }
+
+                    let interim = '';
+                    let final = '';
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            final += event.results[i][0].transcript;
+                        } else {
+                            interim += event.results[i][0].transcript;
+                        }
+                    }
+
+                    const display = final || interim;
+                    const tb = document.getElementById('transcriptBox');
+                    if (tb && display) {
+                        tb.innerHTML = `<div style="color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(display)}</div>`;
+                    }
+
+                    clearTimeout(debounceTimer);
+                    const finalClean = final.trim();
+                    const interimClean = interim.trim();
+
+                    if (finalClean.length > 1) {
+                        sendSpokenText(finalClean);
+                    } else if (interimClean.length > 2) {
+                        debounceTimer = setTimeout(() => {
+                            sendSpokenText(interimClean);
+                        }, 650);
+                    }
+                };
+
+                recognition.onerror = (e) => {
+                    console.warn('[Speech recognition warning]', e);
+                };
+
+                recognition.onend = () => {
+                    if (isCallActive && !isMuted && recognition) {
+                        try { recognition.start(); } catch (_) {}
+                    }
+                };
+
+                recognition.start();
+            } catch (recErr) {
+                console.warn('[Speech init error]', recErr);
+            }
+        }
+
+        async function sendSpokenText(text) {
+            if (!text || !text.trim() || !isCallActive) return;
+            const clean = text.trim();
+            const now = Date.now();
+            if (clean === lastSpokenText && (now - lastSpokenTime) < 1400) return;
+            lastSpokenText = clean;
+            lastSpokenTime = now;
+
+            setStatus('Thinking...');
+            callHistory.push({ role: 'user', text: clean });
+
+            const tb = document.getElementById('transcriptBox');
+            if (tb) {
+                tb.innerHTML = `
+                    <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(clean)}</div>
+                    <div style="color: #94a3b8; font-style: italic;">Thinking...</div>
+                `;
+            }
+
+            try {
+                const res = await fetch('/api/v1/live-voice-call', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: clean,
+                        persona: 'ur-PK-AsadNeural',
+                        callHistory: callHistory.slice(-8)
+                    })
+                });
+                const data = await res.json();
+                if (data && data.success && isCallActive) {
+                    const reply = data.reply_text || 'Jee bilkul.';
+                    callHistory.push({ role: 'assistant', text: reply });
+
+                    if (tb) {
+                        tb.innerHTML = `
+                            <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(clean)}</div>
+                            <div style="color: #f8fafc;"><strong style="color: #14b8a6;">Assistant:</strong> ${escapeHtml(reply)}</div>
+                        `;
+                    }
+
+                    if (data.audio_data_uri) {
+                        playAudioResponse(data.audio_data_uri);
+                    } else {
+                        setStatus('Listening...');
+                    }
+                } else {
+                    setStatus('Listening...');
+                }
+            } catch (err) {
+                console.warn('[Voice exchange error]', err);
+                setStatus('Listening...');
+            }
+        }
+
+        function sendTextInput() {
+            const input = document.getElementById('callTextInput');
+            if (!input || !input.value.trim()) return;
+            const text = input.value.trim();
+            input.value = '';
+            sendSpokenText(text);
+        }
+
+        function toggleMute() {
+            isMuted = !isMuted;
+            const btn = document.getElementById('btnMicMute');
+            const icon = document.getElementById('micIcon');
+            if (btn) btn.classList.toggle('muted', isMuted);
+            if (icon) icon.textContent = isMuted ? '🔇' : '🎤';
+            if (isMuted) {
+                if (recognition) { try { recognition.stop(); } catch (_) {} }
+                setStatus('Muted');
+            } else {
+                if (isCallActive && recognition) { try { recognition.start(); } catch (_) {} }
+                setStatus('Listening...');
+            }
+        }
+
+        function endCall() {
+            isCallActive = false;
+            stopTimer();
+            setWaveAnimation(false);
+            if (recognition) { try { recognition.stop(); } catch (_) {} }
+            if (audioPlayer) { try { audioPlayer.pause(); } catch (_) {} }
+            setStatus('Call Ended');
+            const tb = document.getElementById('transcriptBox');
+            if (tb) tb.innerHTML = '<div style="color: #ef4444; font-weight: 700; text-align: center; padding-top: 10px;">Call Ended. Thank you!</div>';
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/[&<>"']/g, m => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+            }[m]));
+        }
+    </script>
+</body>
+</html>

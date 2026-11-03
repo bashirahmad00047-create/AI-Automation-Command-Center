@@ -3957,26 +3957,33 @@ def api_live_voice_call():
         is_greeting = bool(data.get("is_greeting"))
         if is_greeting and not user_text:
             if "uzma" in persona.lower() or "female" in persona.lower():
-                reply_text = "Assalam-o-Alaikum! Main aap ki AI assistant hoon, batayein main aap ki kya madad kar sakti hoon?"
-                voice_text = "السلام علیکم! میں آپ کی اے آئی اسسٹنٹ ہوں، بتائیں میں آپ کی کیا مدد کر سکتی ہوں؟"
-            elif "asad" in persona.lower() or "ur" in persona.lower():
-                reply_text = "Assalam-o-Alaikum! Main aap ka AI voice assistant hoon, batayein main aap ki kya madad kar sakta hoon?"
-                voice_text = "السلام علیکم! میں آپ کا اے آئی وائس اسسٹنٹ ہوں، بتائیں میں آپ کی کیا مدد کر سکتا ہوں؟"
+                reply_text = "Assalam-o-Alaikum! Welcome to BashFlow, main aap ki kya madad kar sakti hoon?"
+                voice_text = "السلام علیکم! ویلکم ٹو بیش فلو، میں آپ کی کیا مدد کر سکتی ہوں؟"
+            elif "asad" in persona.lower() or "ur" in persona.lower() or "puck" in persona.lower():
+                reply_text = "Assalam-o-Alaikum! Welcome to BashFlow, main aap ki kya madad kar sakta hoon?"
+                voice_text = "السلام علیکم! ویلکم ٹو بیش فلو، میں آپ کی کیا مدد کر سکتا ہوں؟"
             else:
-                reply_text = "Hello! I am your AI voice assistant. How can I help you today?"
-                voice_text = "Hello! I am your AI voice assistant. How can I help you today?"
+                reply_text = "Assalam-o-Alaikum! Welcome to BashFlow, how can I assist you today?"
+                voice_text = "Assalam-o-Alaikum! Welcome to BashFlow, how can I assist you today?"
         else:
             if not user_text:
                 return jsonify({"success": False, "error": "Speech text is required"}), 400
 
-            # Conversational spoken prompt for 1-2 sentence real-time phone call exchange
+            # Conversational spoken prompt enriched with Chitral & Pakistan store catalog
             system_prompt = (
-                "You are BashFlow AI speaking directly on a real-time telephone call.\n"
+                "You are BashFlow AI Assistant speaking directly to a valued customer on a real-time telephone call.\n"
                 "CRITICAL CALL SPOKEN GUIDELINES:\n"
-                "1. Spoken Conversational Tone: Speak naturally like a real human on the phone. Never sound robotic, bookish, or formal.\n"
-                "2. Extreme Brevity: Deliver at most 1 to 2 short sentences (maximum 25-30 words total). Never use lists, bullets, asterisks, hashtags, or markdown.\n"
-                "3. Language: If the user speaks in Urdu or Roman Urdu, reply warmly in natural Pakistani conversational Urdu. If in English, reply in natural conversational English.\n"
-                "4. Catalog & Assistance: Answer their question directly and helpfully."
+                "1. Spoken Conversational Tone: Speak naturally, warmly, and politely like a real human on the phone. Never sound robotic, bookish, or formal.\n"
+                "2. Extreme Brevity: Deliver at most 1 to 2 short sentences (maximum 20-25 words total) so the customer can reply easily. Never use lists, bullets, asterisks, hashtags, or markdown.\n"
+                "3. Language: If the user speaks in Urdu, Roman Urdu, or Hindi, reply warmly in natural conversational Roman Urdu / Urdu. If in English, reply in natural conversational English.\n"
+                "4. Live Product Catalog Knowledge:\n"
+                "   - Pure Mountain Sidr Honey (Chitral / Karakoram) - PKR 3,500/kg (100% pure organic raw honey)\n"
+                "   - Authentic Handmade Chitrali Wool Shawl (Patti) - PKR 6,500 (Pure warm sheep wool, traditional embroidery)\n"
+                "   - Traditional Chitrali Pakol Cap (Topi) - PKR 1,500 (Pure rolled wool cap)\n"
+                "   - Natural Green Tourmaline Gemstones & Minerals - from PKR 12,000 (Certified natural raw/cut from Chitral & Skardu mines)\n"
+                "   - Mountain Dry Fruits & Walnuts - PKR 2,200/kg (Fresh high altitude harvest)\n"
+                "   - Delivery & Payment: Cash on Delivery (COD) available nationwide in Pakistan. Fast delivery in 2-4 working days.\n"
+                "5. Always answer directly, state the exact price if asked, and politely offer to book their order or confirm their delivery address."
             )
 
             # Build formatted conversation history
@@ -4062,6 +4069,53 @@ def api_live_voice_call():
 
     except Exception as e:
         logger.error(f"Live voice call error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/voice/send-call-link", methods=["POST"])
+@rate_limit(limit=30, window=60, message="Too many call invitations.")
+def api_send_voice_call_link():
+    """Sends a public shareable Live Voice Call link to a customer via WhatsApp (Baileys bridge).
+    Allows customer to join a real-time two-way voice call directly in their mobile browser for 100% free.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        raw_phone = str(data.get("phone") or data.get("phone_number") or "").strip()
+        call_url = str(data.get("call_url") or "").strip()
+        customer_name = str(data.get("name") or "Valued Customer").strip()
+        org_id = request.args.get("org_id") or "org-enterprise-default"
+
+        clean_phone = re.sub(r"\D", "", raw_phone)
+        if len(clean_phone) < 7:
+            return jsonify({"success": False, "error": "A valid phone number is required"}), 400
+
+        if not call_url:
+            host = request.host_url.rstrip("/")
+            call_url = f"{host}/call/{clean_phone}"
+
+        message_text = (
+            f"Assalam-o-Alaikum {customer_name}! 📞\n\n"
+            f"BashFlow AI Voice Assistant is calling you for your live voice inquiry.\n\n"
+            f"👉 Please tap below to join the live audio call:\n"
+            f"{call_url}\n\n"
+            f"(100% Free Live Audio Call — No app installation needed. Simply tap the link and speak with our AI agent)."
+        )
+
+        res = WhatsAppService.send_message(
+            organization_id=org_id,
+            to_phone=clean_phone,
+            message_text=message_text
+        )
+
+        return jsonify({
+            "success": True,
+            "phone": clean_phone,
+            "call_url": call_url,
+            "detail": "Live voice call invitation dispatched via WhatsApp",
+            "dispatch": res
+        }), 200
+    except Exception as e:
+        logger.error(f"Send call link error: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 

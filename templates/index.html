@@ -1042,7 +1042,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                             <button type="button" class="wa-header-btn" id="waHeaderTrackDeliveryBtn" onclick="trackActiveDelivery()" title="Track Delivery on Live Radar Map">
                                 <span>📍</span> <span>Track Delivery</span>
                             </button>
-                            <button type="button" class="wa-header-btn" id="waHeaderVoiceCallBtn" onclick="openLiveVoiceCallModal()" title="Start Real WhatsApp Voice Call">
+                            <button type="button" class="wa-header-btn" id="waHeaderVoiceCallBtn" onclick="startWhatsAppHeaderCall()" title="Start Real WhatsApp Voice Call & Share Live Call Link">
                                 <span>📞</span> <span>WhatsApp Call</span>
                             </button>
                             <div class="ai-auto-responder-pill" id="waHeaderAiToggle" onclick="toggleWhatsAppAiAutoResponder()" title="Toggle AI Auto-Responder for Active Workspace">
@@ -5219,31 +5219,37 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
             position: fixed;
             bottom: 24px;
             right: 24px;
-            width: 360px;
+            width: 320px;
+            height: 440px;
             max-width: calc(100vw - 32px);
-            background: #0b0f19;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            max-height: calc(100vh - 48px);
+            z-index: 99999;
+            box-sizing: border-box;
+            background: radial-gradient(circle at 50% 15%, #131d2e 0%, #0b0f19 80%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 20px;
-            box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(20, 184, 166, 0.25);
-            z-index: 10050;
+            box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(20, 184, 166, 0.25);
             overflow: hidden;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             color: #f8fafc;
             backdrop-filter: blur(16px);
             animation: vapiWidgetSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            display: none;
+            flex-direction: column;
+            justify-content: space-between;
         }
         .vapi-wave-container {
             display: flex;
             justify-content: center;
             align-items: center;
-            gap: 6px;
-            height: 46px;
-            margin: 10px 0;
+            gap: 7px;
+            height: 56px;
+            margin: 6px 0;
         }
         .vapi-wave-bar {
             display: inline-block;
             width: 5px;
-            height: 10px;
+            height: 12px;
             background: #14b8a6;
             border-radius: 9999px;
             transition: height 0.2s ease, opacity 0.2s ease;
@@ -5265,8 +5271,8 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
         .vapi-wave-container.active .vapi-wave-bar:nth-child(5),
         .eq-bar.active:nth-child(5) { animation: vapiWavePulse 1.0s ease-in-out infinite 0.15s; }
         @keyframes vapiWavePulse {
-            0%, 100% { height: 8px; opacity: 0.4; }
-            50% { height: 38px; opacity: 1; box-shadow: 0 0 10px rgba(20, 184, 166, 0.7); }
+            0%, 100% { height: 10px; opacity: 0.4; }
+            50% { height: 44px; opacity: 1; box-shadow: 0 0 12px rgba(20, 184, 166, 0.85); }
         }
         @keyframes vapiWidgetSlideUp {
             from { opacity: 0; transform: translateY(16px) scale(0.97); }
@@ -5274,20 +5280,20 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
         }
     </style>
 
-    <div id="liveVoiceCallModal" style="display: none;">
+    <div id="liveVoiceCallModal">
         <!-- Header -->
-        <div style="padding: 14px 18px 10px 18px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.06);">
-            <div style="display: flex; align-items: center; gap: 10px;">
+        <div style="padding: 12px 16px 10px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.06); background: rgba(0, 0, 0, 0.2);">
+            <div style="display: flex; align-items: center; gap: 8px;">
                 <div style="position: relative; width: 10px; height: 10px;">
                     <span id="callPulseRing" style="position: absolute; inset: -2px; border-radius: 50%; background: #14b8a6; opacity: 0.4; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
                     <span id="callAvatar" style="position: relative; display: block; width: 10px; height: 10px; border-radius: 50%; background: #14b8a6;"></span>
                 </div>
                 <div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <h4 id="callContactName" style="margin: 0; font-size: 13.5px; font-weight: 700; color: #f8fafc; letter-spacing: -0.2px;">AI Voice Assistant</h4>
-                        <span id="callTimer" style="font-size: 11.5px; font-weight: 600; color: #14b8a6; font-family: monospace; background: rgba(20, 184, 166, 0.12); padding: 1px 6px; border-radius: 6px;">00:00</span>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <h4 id="callContactName" style="margin: 0; font-size: 13.5px; font-weight: 700; color: #f8fafc; letter-spacing: -0.2px; max-width: 155px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Bashir khani</h4>
+                        <span id="callTimer" style="font-size: 11px; font-weight: 700; color: #14b8a6; font-family: monospace; background: rgba(20, 184, 166, 0.15); border: 1px solid rgba(20, 184, 166, 0.3); padding: 1px 6px; border-radius: 6px;">00:00</span>
                     </div>
-                    <div id="voiceCallStatusLabel" style="font-size: 11.5px; color: #94a3b8; margin-top: 1px;">Listening...</div>
+                    <div id="voiceCallStatusLabel" style="font-size: 11px; color: #94a3b8; margin-top: 1px;">Listening...</div>
                 </div>
             </div>
             <div style="display: flex; align-items: center; gap: 4px;">
@@ -5296,7 +5302,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
         </div>
 
         <!-- Center Visualizer: 5 Vertical Teal Wave Bars -->
-        <div style="padding: 12px 18px 6px 18px; text-align: center;">
+        <div style="padding: 6px 16px 0 16px; text-align: center; flex: 1; display: flex; flex-direction: column; justify-content: center;">
             <div id="liveCallWaveContainer" class="vapi-wave-container">
                 <span class="vapi-wave-bar eq-bar"></span>
                 <span class="vapi-wave-bar eq-bar"></span>
@@ -5306,35 +5312,48 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
             </div>
 
             <!-- Subtle 1-2 line real-time subtitle preview box -->
-            <div id="voiceTranscriptBox" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 10px 14px; min-height: 48px; max-height: 72px; overflow-y: auto; font-size: 12px; line-height: 1.4; color: #cbd5e1; margin-bottom: 14px; text-align: left;">
+            <div id="voiceTranscriptBox" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 9px 12px; min-height: 52px; max-height: 80px; overflow-y: auto; font-size: 12px; line-height: 1.4; color: #cbd5e1; margin-bottom: 8px; text-align: left;">
                 <em style="color: #64748b;">Listening via Web Speech API... Speak in Urdu or English.</em>
             </div>
 
-            <!-- Bottom Controls: Circular Teal Mic Mute + Red Pill End Call -->
-            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; padding-bottom: 8px;">
+            <!-- Fallback text input row -->
+            <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+                <input type="text" id="liveCallTextInput" placeholder="Type here if mic pauses..." style="flex: 1; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 6px 10px; color: #f8fafc; font-size: 11.5px; outline: none;" onkeydown="if(event.key==='Enter') sendCallTextInput()">
+                <button type="button" onclick="sendCallTextInput()" style="background: #14b8a6; border: none; border-radius: 8px; color: #0b0f19; font-weight: 700; font-size: 11px; padding: 0 10px; cursor: pointer;">Send</button>
+            </div>
+        </div>
+
+        <!-- Action / Controls Area -->
+        <div style="padding: 0 14px 12px 14px;">
+            <!-- Send WhatsApp Call Link Button -->
+            <div style="margin-bottom: 8px;">
+                <button type="button" id="btnSendWaCallLink" onclick="sendActiveCallLinkToWhatsApp()" style="width: 100%; background: rgba(37, 211, 102, 0.12); border: 1px solid rgba(37, 211, 102, 0.35); color: #25d366; font-size: 11px; font-weight: 700; padding: 7px 10px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s;">
+                    <span>📱</span>
+                    <span id="btnSendWaCallLinkText">Send Call Link to WhatsApp</span>
+                </button>
+            </div>
+
+            <!-- Bottom Controls: Circular Teal Mic Mute + Red Pill End Call + Speaker -->
+            <div style="display: flex; align-items: center; justify-content: center; gap: 12px;">
                 <!-- Circular Teal Mic Mute / Unmute Button -->
-                <button type="button" id="btnCallMuteMic" onclick="toggleCallMute()" title="Mute / Unmute Microphone" style="width: 44px; height: 44px; border-radius: 50%; background: #14b8a6; border: none; color: #0b0f19; font-size: 18px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 14px rgba(20, 184, 166, 0.35);">
+                <button type="button" id="btnCallMuteMic" onclick="toggleCallMute()" title="Mute / Unmute Microphone" style="width: 42px; height: 42px; border-radius: 50%; background: #14b8a6; border: none; color: #0b0f19; font-size: 17px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 14px rgba(20, 184, 166, 0.35);">
                     <span id="callMuteIcon">🎙️</span>
                 </button>
 
                 <!-- Red Pill End Call Button -->
-                <button type="button" id="startVoiceCallBtn" onclick="toggleLiveVoiceCall()" style="display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 24px; border-radius: 9999px; background: #ef4444; border: none; color: #ffffff; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 16px rgba(239, 68, 68, 0.35);">
+                <button type="button" id="startVoiceCallBtn" onclick="toggleLiveVoiceCall()" style="display: flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 22px; border-radius: 9999px; background: #ef4444; border: none; color: #ffffff; font-size: 12.5px; font-weight: 700; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 16px rgba(239, 68, 68, 0.35);">
                     <span id="startVoiceBtnIcon">📞</span>
                     <span>End Call</span>
                 </button>
 
                 <!-- Speaker Toggle Button -->
-                <button type="button" id="btnCallSpeakerToggle" onclick="toggleCallSpeaker()" title="Toggle Speaker Mute" style="width: 38px; height: 38px; border-radius: 50%; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); color: #cbd5e1; font-size: 15px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+                <button type="button" id="btnCallSpeakerToggle" onclick="toggleCallSpeaker()" title="Toggle Speaker Mute" style="width: 36px; height: 36px; border-radius: 50%; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); color: #cbd5e1; font-size: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
                     <span id="callSpeakerIcon">🔊</span>
                 </button>
             </div>
         </div>
 
-        <!-- Compact Footer Info / Hidden Compat Elements -->
-        <div style="padding: 6px 16px 8px 16px; background: rgba(0, 0, 0, 0.25); border-top: 1px solid rgba(255, 255, 255, 0.04); display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; color: #64748b;">
-            <span id="callVADStatus">● 100% Free AI Live Web Call</span>
-            <span id="voiceCallSubLabel">Edge-TTS &amp; Web Speech</span>
-        </div>
+        <audio id="liveCallAudioPlayer" preload="auto" style="display: none;"></audio>
 
         <!-- Hidden Compatibility Anchors for Legacy Call Selectors -->
         <div style="display: none !important;">
@@ -5347,6 +5366,8 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
             <a id="waDirectDeepLinkBtn" href="#"><span id="waDeepLinkBtnText"></span></a>
             <input type="checkbox" id="chkCallSyncWhatsApp">
             <div id="callEqualizerBar"></div>
+            <span id="callVADStatus"></span>
+            <span id="voiceCallSubLabel"></span>
         </div>
     </div>
         <!-- LINK WHATSAPP QR & PHONE PAIRING MODAL (BAILEYS BRIDGE) -->
