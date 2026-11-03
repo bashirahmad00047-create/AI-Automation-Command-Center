@@ -9099,6 +9099,22 @@ class WhatsAppService:
 
 
     @classmethod
+    def send_whatsapp_message(
+        cls,
+        organization_id: str = None,
+        to_phone: str = None,
+        message_text: str = None,
+        **kwargs
+    ):
+        """Guaranteed delivery alias for send_message ensuring customer on WhatsApp never misses a message."""
+        return cls.send_message(
+            organization_id=organization_id,
+            to_phone=to_phone,
+            message_text=message_text,
+            **kwargs
+        )
+
+    @classmethod
     def send_message(
         cls,
         organization_id: Optional[str] = None,

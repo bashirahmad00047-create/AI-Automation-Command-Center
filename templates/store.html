@@ -809,8 +809,8 @@
                 </div>
             </a>
             <div class="header-actions">
-                <button type="button" class="admin-trigger-btn" onclick="openStoreManagerModal()">
-                    <span>⚙️ Store Manager</span>
+                <button type="button" class="admin-trigger-btn" onclick="openStoreManagerModal()" title="Admin: Add / Edit Store Products & Customize Branding">
+                    <span>⚙️ Admin: + Add Product / Edit Store</span>
                 </button>
                 <button type="button" class="cart-trigger-btn" onclick="openCartDrawer()">
                     <span>🛒 Cart</span>
@@ -1044,8 +1044,19 @@
             <div id="managerTabBranding" style="display: none;">
                 <form id="brandingForm" onsubmit="handleSaveBranding(event)">
                     <div class="form-group">
+                        <label class="form-label">Industry Blueprint &amp; Storefront Template</label>
+                        <select id="settingActiveBlueprint" class="form-select" onchange="applyBlueprintPreset(this.value)">
+                            <option value="custom">🏔️ Chitral &amp; Global Bazar (Heritage &amp; Mountain Store)</option>
+                            <option value="mobile_electronics">📱 Mobile &amp; Electronics (Star Mobile Hub)</option>
+                            <option value="restaurant_biryani">🍛 Restaurant &amp; Foods (Al-Rehman Royal Biryani)</option>
+                            <option value="ecommerce_clothing">👗 E-Commerce &amp; Fashion (Zehra Haute Couture)</option>
+                            <option value="real_estate">🏢 Real Estate &amp; Properties (Apex Capital)</option>
+                            <option value="clinic_medical">🩺 Clinic &amp; Medical (Shifa Specialist Healthcare)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label class="form-label">Store Brand Name</label>
-                        <input type="text" id="settingStoreName" class="form-input" placeholder="Chitral & Global Bazar">
+                        <input type="text" id="settingStoreName" class="form-input" placeholder="Chitral &amp; Global Bazar">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Tagline / Subtitle</label>
@@ -1169,6 +1180,9 @@
                             storeDeliveryFee = Number(s.delivery_fee) || 0;
                             document.getElementById('settingDeliveryFee').value = storeDeliveryFee;
                             document.getElementById('drawerDeliveryFee').textContent = storeDeliveryFee > 0 ? `PKR ${storeDeliveryFee}` : 'FREE';
+                        }
+                        if (s.active_blueprint && document.getElementById('settingActiveBlueprint')) {
+                            document.getElementById('settingActiveBlueprint').value = s.active_blueprint;
                         }
                     }
                 }
@@ -1628,13 +1642,47 @@
             }
         }
 
+        function applyBlueprintPreset(preset) {
+            const presets = {
+                'mobile_electronics': {
+                    name: 'Star Mobile & Electronics Hub',
+                    tagline: 'Latest PTA-Approved Smartphones, Fast Chargers & Audio Tech direct to your door'
+                },
+                'restaurant_biryani': {
+                    name: 'Al-Rehman Royal Biryani & Foods',
+                    tagline: 'Authentic Zafrani Biryani, Fresh Karahi, Kebabs & Traditional Desi Delicacies'
+                },
+                'ecommerce_clothing': {
+                    name: 'Zehra Lawn & Haute Fashion Store',
+                    tagline: 'Designer Stitched Lawn, Pure Silk Shawls & Premium Festive Pret Wear'
+                },
+                'real_estate': {
+                    name: 'Apex Capital Properties & Real Estate',
+                    tagline: 'Verified Plots, Luxury Apartments & High-Yield Commercial Developments'
+                },
+                'clinic_medical': {
+                    name: 'Shifa Specialist Healthcare & Clinic',
+                    tagline: 'Consultant Physicians, Diagnostic Labs, Medicines & Family Healthcare'
+                },
+                'custom': {
+                    name: 'Chitral & Global Bazar',
+                    tagline: 'Authentic Chitrali Shawls, Pattu Caps, Pure Organic Honey, Walnuts & Gems'
+                }
+            };
+            if (presets[preset]) {
+                document.getElementById('settingStoreName').value = presets[preset].name;
+                document.getElementById('settingStoreTagline').value = presets[preset].tagline;
+            }
+        }
+
         async function handleSaveBranding(e) {
             e.preventDefault();
             const payload = {
                 store_name: document.getElementById('settingStoreName').value.trim(),
                 store_tagline: document.getElementById('settingStoreTagline').value.trim(),
                 store_phone: document.getElementById('settingStorePhone').value.trim(),
-                delivery_fee: document.getElementById('settingDeliveryFee').value.trim()
+                delivery_fee: document.getElementById('settingDeliveryFee').value.trim(),
+                active_blueprint: document.getElementById('settingActiveBlueprint') ? document.getElementById('settingActiveBlueprint').value : 'custom'
             };
 
             try {

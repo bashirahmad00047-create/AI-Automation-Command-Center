@@ -8043,6 +8043,8 @@ def api_store_settings():
                 SystemSetting.set_val("STORE_DELIVERY_FEE", str(data["delivery_fee"]).strip(), description="Storefront Delivery Fee")
             if "banner_image" in data:
                 SystemSetting.set_val("STORE_BANNER_IMAGE", str(data["banner_image"]).strip(), description="Storefront Hero Banner Image URL")
+            if "active_blueprint" in data:
+                SystemSetting.set_val("ACTIVE_BLUEPRINT", str(data["active_blueprint"]).strip(), description="Active Industry Blueprint")
 
             db.session.commit()
             return jsonify({
@@ -8053,7 +8055,8 @@ def api_store_settings():
                     "store_tagline": SystemSetting.get_val("STORE_TAGLINE", "Pure Mountain Treasures, Handcrafted Heritage & Essentials"),
                     "store_phone": SystemSetting.get_val("STORE_PHONE", os.environ.get("JAZZCASH_NUMBER", "03209350858")),
                     "delivery_fee": SystemSetting.get_val("STORE_DELIVERY_FEE", "0"),
-                    "banner_image": SystemSetting.get_val("STORE_BANNER_IMAGE", "")
+                    "banner_image": SystemSetting.get_val("STORE_BANNER_IMAGE", ""),
+                    "active_blueprint": SystemSetting.get_val("ACTIVE_BLUEPRINT", "custom")
                 }
             }), 200
 
@@ -8066,7 +8069,8 @@ def api_store_settings():
                 "store_tagline": SystemSetting.get_val("STORE_TAGLINE", "Pure Mountain Treasures, Handcrafted Heritage & Essentials"),
                 "store_phone": SystemSetting.get_val("STORE_PHONE", jc_num),
                 "delivery_fee": SystemSetting.get_val("STORE_DELIVERY_FEE", "0"),
-                "banner_image": SystemSetting.get_val("STORE_BANNER_IMAGE", "")
+                "banner_image": SystemSetting.get_val("STORE_BANNER_IMAGE", ""),
+                "active_blueprint": SystemSetting.get_val("ACTIVE_BLUEPRINT", "custom")
             }
         }), 200
     except Exception as e:

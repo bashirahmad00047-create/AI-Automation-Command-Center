@@ -460,6 +460,16 @@ async function resolveSender(msg, activeSock) {
 
   const bestName = msg.pushName || cachedContactName;
 
+  if (candidateJid && remoteJid) {
+    phoneToReplyJidMap.set(candidateJid, remoteJid);
+    const cleanCand = cleanPhoneNumber(candidateJid);
+    if (cleanCand) {
+      phoneToReplyJidMap.set(cleanCand, remoteJid);
+      phoneToReplyJidMap.set(`+${cleanCand}`, remoteJid);
+      phoneToReplyJidMap.set(`${cleanCand}@s.whatsapp.net`, remoteJid);
+    }
+  }
+
   if (phone) {
     if (remoteJid) {
       phoneToReplyJidMap.set(phone, remoteJid);
