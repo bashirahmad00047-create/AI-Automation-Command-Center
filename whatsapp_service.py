@@ -398,6 +398,263 @@ class WhatsAppService:
         return None
 
     @classmethod
+    def is_tid_duplicate(cls, tid: str) -> bool:
+        """Checks if a payment Transaction ID (TID) has already been processed and verified."""
+        if not tid or len(str(tid).strip()) < 4:
+            return False
+        clean_tid = str(tid).strip()
+        try:
+            from models import SystemEvent, JazzCashTransaction, EcommerceOrder
+            def _check():
+                # Check SystemEvent table
+                ev = SystemEvent.query.filter(
+                    SystemEvent.event_name == "payment_verified_tid",
+                    SystemEvent.payload_json.ilike(f"%{clean_tid}%")
+                ).first()
+                if ev:
+                    return True
+                # Check JazzCashTransaction table
+                jc = JazzCashTransaction.query.filter(
+                    (JazzCashTransaction.pp_TxnRefNo == clean_tid) |
+                    (JazzCashTransaction.pp_RetreivalReferenceNo == clean_tid)
+                ).first()
+                if jc:
+                    return True
+                # Check EcommerceOrder notes
+                ord_chk = EcommerceOrder.query.filter(EcommerceOrder.notes.ilike(f"%{clean_tid}%")).first()
+                if ord_chk:
+                    return True
+                return False
+
+            if has_app_context():
+                return _check()
+            else:
+                from app import app
+                with app.app_context():
+                    return _check()
+        except Exception as e:
+            logger.debug(f"TID duplicate check notice: {e}")
+        return False
+
+    @classmethod
+    def record_verified_tid(cls, tid: str, amount: float = 0.0, provider: str = "Unknown", phone: str = "", order_id: str = ""):
+        """Persists a verified payment Transaction ID (TID) to prevent double-spending and fraud."""
+        clean_tid = str(tid or "").strip()
+        if not clean_tid:
+            return
+        try:
+            from models import SystemEvent, generate_uuid
+            def _record():
+                org = "org-enterprise-default"
+                ev = SystemEvent(
+                    id=generate_uuid("evt"),
+                    organization_id=org,
+                    event_name="payment_verified_tid",
+                    source="payment_verifier",
+                    payload_json=json.dumps({
+                        "tid": clean_tid,
+                        "amount": float(amount or 0.0),
+                        "provider": str(provider or "Payment Gateway"),
+                        "phone": str(phone or ""),
+                        "order_id": str(order_id or ""),
+                        "verified_at": datetime.datetime.utcnow().isoformat()
+                    })
+                )
+                db.session.add(ev)
+                db.session.commit()
+                logger.info(f"Payment TID '{clean_tid}' ({provider}, PKR {amount}) successfully recorded in SystemEvent.")
+
+            if has_app_context():
+                _record()
+            else:
+                from app import app
+                with app.app_context():
+                    _record()
+        except Exception as e:
+            logger.debug(f"Record verified TID notice: {e}")
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
+    @classmethod
+    def verify_payment_receipt(
+        cls,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg",
+        organization_id: Optional[str] = None,
+        sender_phone: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Analyzes an uploaded or inbound image using Gemini 2.5 Flash Vision to inspect if it is an
+        EasyPaisa, JazzCash, SadaPay, NayaPay, Raast, or Bank Transfer receipt.
+        Extracts Transaction ID (TID), Amount (PKR), Date/Time, Sender, and Receiver.
+        """
+        result = {
+            "is_payment_receipt": False,
+            "provider": None,
+            "transaction_id": None,
+            "amount_pkr": 0.0,
+            "date_time": None,
+            "sender": None,
+            "receiver": None,
+            "status": "UNKNOWN",
+            "is_duplicate": False,
+            "raw_text": ""
+        }
+        if not image_bytes:
+            return result
+
+        api_key = cls.get_gemini_api_key(organization_id=organization_id)
+        if not api_key:
+            logger.warning("Gemini API key unavailable for payment screenshot verification.")
+            return result
+
+        import base64
+        import requests
+        import json
+        import re
+
+        prompt = (
+            "You are an expert automated financial auditor and receipt inspector specialized in Pakistani digital payments and banking apps.\n"
+            "Analyze this uploaded image carefully. Determine whether this image is a payment confirmation screenshot, transfer receipt, or deposit slip from any of the following:\n"
+            "- EasyPaisa\n"
+            "- JazzCash\n"
+            "- SadaPay\n"
+            "- NayaPay\n"
+            "- Raast\n"
+            "- Pakistani Commercial Banks (HBL, Meezan Bank, UBL, MCB, Bank Alfalah, Allied Bank, Faysal Bank, Askari, Standard Chartered, JS Bank, Soneri, etc.)\n"
+            "- ATM Transfer slip or Bank Deposit slip.\n\n"
+            "If this image is a legitimate payment screenshot or transfer receipt, extract:\n"
+            "1. provider: (e.g. 'EasyPaisa', 'JazzCash', 'SadaPay', 'NayaPay', 'Raast', 'Meezan Bank', 'HBL', 'Bank Transfer')\n"
+            "2. transaction_id: The unique Transaction ID, TRX ID, Reference Number, or TID (alphanumeric digits without extra spaces or symbols)\n"
+            "3. amount_pkr: The paid/transferred amount as a number (e.g. 1500, 2450.50, 5000)\n"
+            "4. date_time: The date and time shown on the receipt as a clean string\n"
+            "5. sender: The sender account title or phone number if visible\n"
+            "6. receiver: The receiver account title or phone number if visible\n"
+            "7. status: 'SUCCESS' if successful, or 'PENDING' or 'FAILED'\n\n"
+            "Return ONLY a valid JSON object in this exact schema with NO extra commentary and NO markdown wrappers:\n"
+            "{\n"
+            '  "is_payment_receipt": true,\n'
+            '  "provider": "EasyPaisa",\n'
+            '  "transaction_id": "01234567890",\n'
+            '  "amount_pkr": 1500.0,\n'
+            '  "date_time": "03 Nov 2026, 14:30",\n'
+            '  "sender": "Ali Khan",\n'
+            '  "receiver": "Bashir Ahmad",\n'
+            '  "status": "SUCCESS"\n'
+            "}\n\n"
+            "If the image is NOT a payment receipt (e.g. general photo, product picture, screenshot of chat, landscape, person), return ONLY:\n"
+            '{"is_payment_receipt": false}\n'
+        )
+
+        extracted_text = ""
+        # 1. Try Gemini 2.5 Flash / 1.5 Flash via google.generativeai SDK
+        for model_name in ("gemini-2.5-flash", "gemini-1.5-flash", "gemini-flash-latest"):
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content([
+                    prompt,
+                    {"mime_type": mime_type or "image/jpeg", "data": image_bytes}
+                ])
+                if response and hasattr(response, "text") and response.text:
+                    extracted_text = response.text.strip()
+                    break
+            except Exception as e:
+                logger.debug(f"Gemini SDK ({model_name}) receipt analysis notice: {e}")
+
+        # 2. Fallback to direct REST API
+        if not extracted_text:
+            try:
+                b64_data = base64.b64encode(image_bytes).decode("utf-8")
+                for m_id in ("gemini-2.5-flash", "gemini-1.5-flash"):
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{m_id}:generateContent"
+                    payload = {
+                        "contents": [{
+                            "parts": [
+                                {"text": prompt},
+                                {"inline_data": {"mime_type": mime_type or "image/jpeg", "data": b64_data}}
+                            ]
+                        }]
+                    }
+                    resp = requests.post(url, params={"key": api_key}, json=payload, headers={"Content-Type": "application/json"}, timeout=12.0)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            if parts and "text" in parts[0]:
+                                extracted_text = parts[0]["text"].strip()
+                                break
+            except Exception as rest_err:
+                logger.debug(f"Fast REST Gemini receipt analysis notice: {rest_err}")
+
+        if not extracted_text:
+            return result
+
+        result["raw_text"] = extracted_text
+
+        # Parse JSON output from Gemini
+        try:
+            clean_json = extracted_text.strip()
+            if "```json" in clean_json:
+                clean_json = clean_json.split("```json")[-1].split("```")[0].strip()
+            elif "```" in clean_json:
+                clean_json = clean_json.split("```")[-1].split("```")[0].strip()
+
+            parsed = json.loads(clean_json)
+            if isinstance(parsed, dict):
+                is_rcpt = bool(parsed.get("is_payment_receipt"))
+                result["is_payment_receipt"] = is_rcpt
+                if is_rcpt:
+                    result["provider"] = str(parsed.get("provider") or "Online Payment").strip()
+                    result["transaction_id"] = str(parsed.get("transaction_id") or "").strip()
+                    try:
+                        amt_raw = parsed.get("amount_pkr") or parsed.get("amount") or 0.0
+                        result["amount_pkr"] = float(str(amt_raw).replace(",", "").strip())
+                    except Exception:
+                        result["amount_pkr"] = 0.0
+                    result["date_time"] = str(parsed.get("date_time") or "").strip()
+                    result["sender"] = str(parsed.get("sender") or "").strip()
+                    result["receiver"] = str(parsed.get("receiver") or "").strip()
+                    result["status"] = str(parsed.get("status") or "SUCCESS").strip().upper()
+
+                    # Check for duplicate TID
+                    tid = result["transaction_id"]
+                    if tid and cls.is_tid_duplicate(tid):
+                        result["is_duplicate"] = True
+                        logger.warning(f"Payment receipt verification detected duplicate TID: '{tid}'")
+                    else:
+                        result["is_duplicate"] = False
+                    return result
+        except Exception as parse_err:
+            logger.debug(f"JSON parse fallback for receipt text: {parse_err}")
+
+        # Fallback regex extraction if Gemini answered in conversational text
+        lower_txt = extracted_text.lower()
+        if any(w in lower_txt for w in ("easypaisa", "jazzcash", "sadapay", "nayapay", "raast", "hbl", "meezan", "trx id", "transaction id", "tid")):
+            tid_match = re.search(r'(?:transaction\s*id|trx\s*id|tid|ref(?:erence)?\s*(?:no|number)?)\s*[:#-]?\s*([A-Za-z0-9]{6,24})', extracted_text, re.IGNORECASE)
+            amt_match = re.search(r'(?:rs\.?|pkr)\s*([0-9,]+(?:\.[0-9]{1,2})?)|([0-9,]+(?:\.[0-9]{1,2})?)\s*(?:rs\.?|pkr)', extracted_text, re.IGNORECASE)
+            if tid_match or amt_match:
+                result["is_payment_receipt"] = True
+                prov = "EasyPaisa" if "easypaisa" in lower_txt else ("JazzCash" if "jazzcash" in lower_txt else ("SadaPay" if "sadapay" in lower_txt else ("NayaPay" if "nayapay" in lower_txt else ("Bank Transfer" if "bank" in lower_txt or "meezan" in lower_txt or "hbl" in lower_txt else "Digital Payment"))))
+                result["provider"] = prov
+                if tid_match:
+                    tid_val = tid_match.group(1).strip()
+                    result["transaction_id"] = tid_val
+                    result["is_duplicate"] = cls.is_tid_duplicate(tid_val)
+                if amt_match:
+                    try:
+                        amt_str = (amt_match.group(1) or amt_match.group(2) or "0").replace(",", "")
+                        result["amount_pkr"] = float(amt_str)
+                    except Exception:
+                        pass
+                result["status"] = "SUCCESS"
+
+        return result
+
+    @classmethod
     def generate_image(
         cls,
         prompt: str,
@@ -1819,6 +2076,9 @@ class WhatsAppService:
 
             if configured_voice:
                 active_voice = configured_voice.strip()
+                if active_voice in ("gemini-puck", "puck", "gemini_puck") or "puck" in active_voice.lower():
+                    # Gemini 2.5 Native Male (Puck - Ultra Human) mapping
+                    active_voice = "en-US-AndrewMultilingualNeural"
             elif is_urdu:
                 # Microsoft High-Definition Neural Pakistani Voice
                 # ur-PK-UzmaNeural (warm, polite Pakistani female) or ur-PK-AsadNeural (natural Pakistani male)
@@ -1841,18 +2101,28 @@ class WhatsAppService:
                 active_voice = "en-US-AndrewMultilingualNeural" if ("andrew" in str(voice or "").lower() or "male" in str(voice or "").lower()) else "en-US-AvaMultilingualNeural"
 
             if configured_rate:
-                active_rate = configured_rate.strip()
+                active_rate = str(configured_rate).strip()
+                if active_rate and not active_rate.endswith("%"):
+                    try:
+                        active_rate = f"{int(active_rate):+d}%"
+                    except Exception:
+                        active_rate = f"{active_rate}%"
             else:
                 # Natural Pakistani human cadence rate: +4% eliminates robotic drag while retaining natural speech rhythm
                 active_rate = "+4%" if is_urdu else "+0%"
 
             if configured_pitch:
-                active_pitch = configured_pitch.strip()
+                active_pitch = str(configured_pitch).strip()
+                if active_pitch and not active_pitch.endswith("Hz"):
+                    try:
+                        active_pitch = f"{int(active_pitch):+d}Hz"
+                    except Exception:
+                        active_pitch = f"{active_pitch}Hz"
             else:
                 active_pitch = "+0Hz"
 
             if configured_volume:
-                active_volume = configured_volume.strip()
+                active_volume = str(configured_volume).strip()
             else:
                 active_volume = "+10%" if is_urdu else "+0%"
 
@@ -5655,6 +5925,132 @@ class WhatsAppService:
                     organization_id=org_id
                 )
                 if img_bytes:
+                    # Module 3: EasyPaisa / JazzCash / Bank Screenshot AI Vision Verifier
+                    try:
+                        receipt_data = cls.verify_payment_receipt(
+                            image_bytes=img_bytes,
+                            mime_type="image/jpeg",
+                            organization_id=org_id,
+                            sender_phone=clean_phone
+                        )
+                    except Exception as _rcpt_err:
+                        logger.warning(f"Payment receipt verification check error: {_rcpt_err}")
+                        receipt_data = {"is_payment_receipt": False}
+
+                    if receipt_data.get("is_payment_receipt") and receipt_data.get("transaction_id"):
+                        tid = receipt_data["transaction_id"]
+                        amt = receipt_data.get("amount_pkr", 0.0)
+                        provider = receipt_data.get("provider", "Payment Gateway")
+                        date_str = receipt_data.get("date_time", "")
+
+                        if receipt_data.get("is_duplicate"):
+                            dup_msg = (
+                                f"⚠️ *TRANSACTION NOTICE (DUPLICATE)*\n\n"
+                                f"Mohtaram Sarif! Transaction ID `{tid}` ({provider}) pehle se verify ho chuki hai.\n"
+                                f"Agar aap ko lagta hai yeh ghalti hai, to baraye meharbani hamare customer care par rabta farmein."
+                            )
+                            send_res = cls.send_message(
+                                organization_id=org_id,
+                                to_phone=clean_phone,
+                                chat_id=real_chat_id,
+                                message_text=dup_msg,
+                                quoted_message_id=message_id
+                            )
+                            return {
+                                "success": True,
+                                "action": "duplicate_payment_receipt",
+                                "tid": tid,
+                                "reply_body": dup_msg,
+                                "dispatch": send_res
+                            }
+
+                        # New valid receipt: record TID to prevent future duplicate
+                        cls.record_verified_tid(tid=tid, amount=amt, provider=provider, phone=clean_phone)
+
+                        # Match customer order and update to PAID & VERIFIED
+                        matched_order = None
+                        if has_app_context():
+                            try:
+                                from models import EcommerceOrder, Lead
+                                digits_only = "".join(filter(str.isdigit, str(clean_phone)))[-10:]
+                                matched_order = EcommerceOrder.query.filter(
+                                    EcommerceOrder.customer_phone.ilike(f"%{digits_only}%"),
+                                    EcommerceOrder.payment_status != "paid"
+                                ).order_by(EcommerceOrder.created_at.desc()).first()
+                                if matched_order:
+                                    matched_order.payment_status = "paid"
+                                    matched_order.order_status = "confirmed"
+                                    matched_order.payment_method = str(provider).lower()
+                                    matched_order.notes = (matched_order.notes or "") + f"\n[PAID & VERIFIED] Provider: {provider}, TID: {tid}, Amount: PKR {amt:,.0f}, Verified At: {datetime.datetime.utcnow().isoformat()}"
+                                    db.session.commit()
+
+                                # Log in CRM Leads
+                                crm_lead = Lead.query.filter(Lead.phone.ilike(f"%{digits_only}%")).order_by(Lead.created_at.desc()).first()
+                                if crm_lead:
+                                    crm_lead.status = "converted"
+                                    crm_lead.message = (crm_lead.message or "") + f"\n💰 [PAID & VERIFIED] Provider: {provider}, TID: {tid}, PKR {amt:,.0f}"
+                                else:
+                                    crm_lead = Lead(
+                                        name=sender_name or "Verified Customer",
+                                        phone=clean_phone,
+                                        status="converted",
+                                        intent="payment_verified",
+                                        message=f"💰 [PAID & VERIFIED] Provider: {provider}, TID: {tid}, PKR {amt:,.0f}",
+                                        organization_id=org_id
+                                    )
+                                    db.session.add(crm_lead)
+                                db.session.commit()
+                            except Exception as db_sync_err:
+                                logger.warning(f"Receipt DB match error: {db_sync_err}")
+                                try:
+                                    db.session.rollback()
+                                except Exception:
+                                    pass
+
+                        ord_info = f" (Order #{matched_order.order_number})" if matched_order else ""
+                        conf_msg = (
+                            f"✅ *PAYMENT VERIFIED & CONFIRMED!*{ord_info}\n\n"
+                            f"Shukriya {sender_name or 'Valued Customer'}! Aapki PKR {amt:,.0f} ki payment ({provider}) kamyabi ke sath tasdeeq (verify) ho chuki hai.\n\n"
+                            f"📌 *Transaction ID (TID):* {tid}\n"
+                            f"💵 *Raqam:* PKR {amt:,.0f}\n"
+                            f"📅 *Tareeq:* {date_str or 'Today'}\n"
+                            f"📦 *Status:* PAID & VERIFIED - Preparing for Dispatch\n\n"
+                            f"Aapka order jald dispatch kar diya jayega. Shukriya!"
+                        )
+                        send_res = cls.send_message(
+                            organization_id=org_id,
+                            to_phone=clean_phone,
+                            chat_id=real_chat_id,
+                            message_text=conf_msg,
+                            quoted_message_id=message_id
+                        )
+
+                        # Send automated voice note confirmation
+                        try:
+                            voice_script = f"Salam {sender_name or 'mohtaram sarif'}! Aapki {amt:,.0f} rupaye ki payment {provider} ke zariye kamyabi se verify ho chuki hai. Order confirm ho gaya hai aur jald dispatch kar diya jayega. Shukriya!"
+                            v_bytes = cls._synthesize_edge_tts(voice_script, language="urdu", organization_id=org_id)
+                            if v_bytes:
+                                cls.send_message(
+                                    organization_id=org_id,
+                                    to_phone=clean_phone,
+                                    chat_id=real_chat_id,
+                                    audio_bytes=v_bytes,
+                                    is_voice=True
+                                )
+                        except Exception as v_err:
+                            logger.debug(f"Voice note receipt confirmation error: {v_err}")
+
+                        return {
+                            "success": True,
+                            "action": "payment_receipt_verified",
+                            "tid": tid,
+                            "amount": amt,
+                            "provider": provider,
+                            "order_id": matched_order.id if matched_order else None,
+                            "reply_body": conf_msg,
+                            "dispatch": send_res
+                        }
+
                     vision_analysis = cls.call_gemini_vision(
                         image_bytes=img_bytes,
                         mime_type="image/jpeg",

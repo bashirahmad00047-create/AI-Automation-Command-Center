@@ -8368,6 +8368,8 @@ const COMMAND_PALETTE_ITEMS = [
     { id: 'nav-billing', category: 'Navigation', icon: '💳', title: 'Plans, Quotas & Billing', shortcut: 'G B', action: () => switchTab('billing') },
     { id: 'nav-settings', category: 'Navigation', icon: '⚙️', title: 'Workspace Settings', shortcut: 'G S', action: () => switchTab('settings') },
     { id: 'nav-products', category: 'Navigation', icon: '🛍️', title: 'Products Catalog & Shop', shortcut: 'G P', action: () => switchTab('products') },
+    { id: 'nav-ai-sandbox', category: 'Navigation', icon: '🧠', title: 'AI Engine Sandbox & Voice Studio', shortcut: 'G A', action: () => switchTab('nlp') },
+    { id: 'nav-storefront', category: 'Navigation', icon: '🌐', title: 'Public Storefront (/store)', shortcut: 'G T', action: () => window.open('/store', '_blank') },
 
     // Quick Actions
     { id: 'act-new-rule', category: 'Quick Actions', icon: '➕', title: 'Create New Workflow Rule', shortcut: 'N W', action: () => { switchTab('rules'); openRuleModal(); } },
@@ -14097,3 +14099,242 @@ function checkLiveCallVoiceAutoPlay(messages) {
     }
 }
 window.checkLiveCallVoiceAutoPlay = checkLiveCallVoiceAutoPlay;
+
+
+// ==============================================================================
+// MODULE 1: PUBLIC STOREFRONT SHARING HELPER
+// ==============================================================================
+function shareStoreLink() {
+    const storeUrl = `${window.location.origin}/store`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(storeUrl).then(() => {
+            if (typeof showHudToast === 'function') {
+                showHudToast('🌐 Store link copied to clipboard: ' + storeUrl, 'success');
+            } else {
+                alert('Store link copied to clipboard:\n' + storeUrl);
+            }
+        }).catch(() => {
+            prompt('Copy public store link:', storeUrl);
+        });
+    } else {
+        prompt('Copy public store link:', storeUrl);
+    }
+}
+window.shareStoreLink = shareStoreLink;
+
+
+// ==============================================================================
+// MODULE 2: AI VOICE STUDIO & LIVE VOICE TEST CONTROLS
+// ==============================================================================
+function updateRateSliderDisplay(val) {
+    const num = parseInt(val, 10);
+    const formatted = (num >= 0 ? '+' : '') + num + '%';
+    const disp = document.getElementById('rateSliderDisplay');
+    if (disp) disp.textContent = formatted;
+}
+window.updateRateSliderDisplay = updateRateSliderDisplay;
+
+function updatePitchSliderDisplay(val) {
+    const num = parseInt(val, 10);
+    const formatted = (num >= 0 ? '+' : '') + num + 'Hz';
+    const disp = document.getElementById('pitchSliderDisplay');
+    if (disp) disp.textContent = formatted;
+}
+window.updatePitchSliderDisplay = updatePitchSliderDisplay;
+
+function setSampleVoiceText(text) {
+    const input = document.getElementById('voiceTestInput');
+    if (input) input.value = text;
+}
+window.setSampleVoiceText = setSampleVoiceText;
+
+function handleVoicePersonaChange(persona) {
+    // Set natural default rate and pitch based on chosen persona
+    const rateSlider = document.getElementById('voiceRateSlider');
+    const pitchSlider = document.getElementById('voicePitchSlider');
+    if (!rateSlider || !pitchSlider) return;
+
+    if (persona === 'ur-PK-AsadNeural') {
+        rateSlider.value = 4;
+        pitchSlider.value = 0;
+    } else if (persona === 'ur-PK-UzmaNeural') {
+        rateSlider.value = 2;
+        pitchSlider.value = 0;
+    } else if (persona === 'gemini-puck') {
+        rateSlider.value = 0;
+        pitchSlider.value = -1;
+    } else {
+        rateSlider.value = 0;
+        pitchSlider.value = 0;
+    }
+    updateRateSliderDisplay(rateSlider.value);
+    updatePitchSliderDisplay(pitchSlider.value);
+}
+window.handleVoicePersonaChange = handleVoicePersonaChange;
+
+let currentLiveAudio = null;
+
+async function testVoiceLive() {
+    const btn = document.getElementById('testVoiceBtn');
+    const msg = document.getElementById('voiceStatusMsg');
+    const input = document.getElementById('voiceTestInput');
+    const persona = document.getElementById('voicePersonaSelector');
+    const rate = document.getElementById('voiceRateSlider');
+    const pitch = document.getElementById('voicePitchSlider');
+
+    const textToSynthesize = (input && input.value.trim()) ? input.value.trim() : 'Salam! OpsFlow AI voice studio bilkul theek kaam kar raha hai.';
+    const selectedVoice = persona ? persona.value : 'ur-PK-AsadNeural';
+    const rateVal = rate ? parseInt(rate.value, 10) : 4;
+    const pitchVal = pitch ? parseInt(pitch.value, 10) : 0;
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳ Synthesizing Audio...</span>';
+    }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.color = '#059669';
+        msg.textContent = 'Generating neural voice stream...';
+    }
+
+    try {
+        const res = await fetch('/api/v1/voice/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: textToSynthesize,
+                voice: selectedVoice,
+                rate: rateVal,
+                pitch: pitchVal
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success && data.audio_base64) {
+            if (currentLiveAudio) {
+                try { currentLiveAudio.pause(); } catch (_) {}
+            }
+            currentLiveAudio = new Audio('data:audio/mp3;base64,' + data.audio_base64);
+            currentLiveAudio.onplay = () => {
+                if (msg) msg.textContent = '🔊 Playing live audio in browser...';
+            };
+            currentLiveAudio.onended = () => {
+                if (msg) msg.textContent = '✓ Playback complete.';
+            };
+            await currentLiveAudio.play();
+            if (msg) msg.textContent = '🔊 Playing audio sample...';
+        } else {
+            if (msg) {
+                msg.style.color = '#ef4444';
+                msg.textContent = 'Test failed: ' + (data.error || 'Could not synthesize speech');
+            }
+        }
+    } catch (err) {
+        if (msg) {
+            msg.style.color = '#ef4444';
+            msg.textContent = 'Network error: ' + err.message;
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span>▶️</span> Test Voice Live';
+        }
+    }
+}
+window.testVoiceLive = testVoiceLive;
+
+async function saveVoiceSettings() {
+    const btn = document.getElementById('saveVoiceSettingsBtn');
+    const msg = document.getElementById('voiceStatusMsg');
+    const persona = document.getElementById('voicePersonaSelector');
+    const rate = document.getElementById('voiceRateSlider');
+    const pitch = document.getElementById('voicePitchSlider');
+
+    const selectedVoice = persona ? persona.value : 'ur-PK-AsadNeural';
+    const rateVal = rate ? parseInt(rate.value, 10) : 4;
+    const pitchVal = pitch ? parseInt(pitch.value, 10) : 0;
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳ Saving Settings...</span>';
+    }
+
+    try {
+        const res = await fetch('/api/v1/voice/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                voice: selectedVoice,
+                rate: (rateVal >= 0 ? '+' : '') + rateVal + '%',
+                pitch: (pitchVal >= 0 ? '+' : '') + pitchVal + 'Hz'
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+            if (msg) {
+                msg.style.display = 'block';
+                msg.style.color = '#059669';
+                msg.textContent = '✓ Saved! Default WhatsApp voice persona updated successfully. (No restart needed)';
+            }
+            if (typeof showHudToast === 'function') {
+                showHudToast('Voice settings saved as WhatsApp default!', 'success');
+            }
+        } else {
+            if (msg) {
+                msg.style.display = 'block';
+                msg.style.color = '#ef4444';
+                msg.textContent = 'Save failed: ' + (data.error || 'Server error');
+            }
+        }
+    } catch (err) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.color = '#ef4444';
+            msg.textContent = 'Network error: ' + err.message;
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span>💾</span> Save as Default WhatsApp Voice';
+        }
+    }
+}
+window.saveVoiceSettings = saveVoiceSettings;
+
+async function loadVoiceSettings() {
+    try {
+        const res = await fetch('/api/v1/voice/settings');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.settings) {
+                const s = data.settings;
+                const persona = document.getElementById('voicePersonaSelector');
+                const rate = document.getElementById('voiceRateSlider');
+                const pitch = document.getElementById('voicePitchSlider');
+
+                if (persona && s.voice) persona.value = s.voice;
+                if (rate && s.rate) {
+                    const rNum = parseInt(String(s.rate).replace('%', '').replace('+', ''), 10);
+                    if (!isNaN(rNum)) {
+                        rate.value = rNum;
+                        updateRateSliderDisplay(rNum);
+                    }
+                }
+                if (pitch && s.pitch) {
+                    const pNum = parseInt(String(s.pitch).replace('Hz', '').replace('+', ''), 10);
+                    if (!isNaN(pNum)) {
+                        pitch.value = pNum;
+                        updatePitchSliderDisplay(pNum);
+                    }
+                }
+            }
+        }
+    } catch (_) {}
+}
+window.loadVoiceSettings = loadVoiceSettings;
+
+// Initialize on DOM load
+document.addEventListener('DOMContentLoaded', () => {
+    loadVoiceSettings();
+});

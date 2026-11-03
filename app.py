@@ -37,7 +37,7 @@ from automation_engine import AutomationEngine
 from config import config_by_name
 from database import db, migrate
 from entitlements import QuotaService, check_feature_entitlement, check_resource_quota
-from models import Membership, Organization, User
+from models import Membership, Organization, User, Product, EcommerceOrder
 from presets import PRESET_BLUEPRINTS
 from storage import Storage
 
@@ -410,7 +410,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+        response.headers["Permissions-Policy"] = "geolocation=(self), camera=(), microphone=()"
         csp = (
             "default-src 'self' 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net https://cdn.socket.io https://unpkg.com https://cdnjs.cloudflare.com; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.socket.io https://unpkg.com https://cdnjs.cloudflare.com; "
@@ -1634,6 +1634,94 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "success": True,
             "message": f"Successfully imported {imported_count} rules."
         })
+
+        # =========================================================================
+    # MODULE 1: PUBLIC E-COMMERCE STOREFRONT & ORDER TRACKING ROUTES
+    # =========================================================================
+
+    @application.route("/store")
+    def public_storefront():
+        """Public mobile-first e-commerce shopping storefront ('Chitral & Global Bazar'). No login required."""
+        try:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            from models import Product
+            prods = Product.query.filter_by(is_active=True).order_by(Product.category, Product.name).all()
+            jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
+            b_name = os.environ.get("BUSINESS_NAME", "Chitral & Global Bazar")
+            return render_template(
+                "store.html",
+                products=prods,
+                business_name=b_name,
+                currency="PKR",
+                jazzcash_number=jc_num
+            )
+        except Exception as e:
+            application.logger.error(f"Error rendering /store: {e}", exc_info=True)
+            return render_template("store.html", products=[], business_name="Chitral & Global Bazar", currency="PKR", jazzcash_number="03209350858")
+
+    @application.route("/api/store/products", methods=["GET"])
+    def top_store_products():
+        from api_v1 import api_store_products
+        return api_store_products()
+
+    @application.route("/api/store/checkout", methods=["POST"])
+    def top_store_checkout():
+        from api_v1 import api_store_checkout
+        return api_store_checkout()
+
+    @application.route("/track/<order_id>")
+    def public_order_tracking(order_id: str):
+        """Public order tracking portal with live delivery status and Leaflet radar pin."""
+        try:
+            from models import EcommerceOrder
+            order = EcommerceOrder.query.filter(
+                (EcommerceOrder.id == order_id) | (EcommerceOrder.order_number == order_id)
+            ).first()
+            jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
+            b_name = os.environ.get("BUSINESS_NAME", "Chitral & Global Bazar")
+            return render_template(
+                "track.html",
+                order=order,
+                order_id=order_id,
+                business_name=b_name,
+                currency="PKR",
+                jazzcash_number=jc_num
+            )
+        except Exception as e:
+            application.logger.error(f"Error rendering /track/{order_id}: {e}", exc_info=True)
+            return render_template("track.html", order=None, order_id=order_id, business_name="Chitral & Global Bazar", currency="PKR", jazzcash_number="03209350858")
+
+    @application.route("/api/store/order/<order_id>", methods=["GET"])
+    def top_store_order_status(order_id: str):
+        from api_v1 import api_store_order_status
+        return api_store_order_status(order_id)
+
+    # =========================================================================
+    # MODULE 2: AI VOICE STUDIO LIVE TEST & SETTINGS ROUTES
+    # =========================================================================
+
+    @application.route("/api/voice/test", methods=["POST"])
+    def top_voice_test_live():
+        from api_v1 import api_voice_test_live
+        return api_voice_test_live()
+
+    @application.route("/api/voice/settings", methods=["GET", "POST"])
+    def top_voice_settings():
+        from api_v1 import api_voice_settings
+        return api_voice_settings()
+
+    # =========================================================================
+    # MODULE 3: PAYMENT RECEIPT AI VISION VERIFIER ROUTE
+    # =========================================================================
+
+    @application.route("/api/payments/verify-receipt", methods=["POST"])
+    def top_verify_payment_receipt():
+        from api_v1 import api_verify_payment_receipt
+        return api_verify_payment_receipt()
+
 
     # Error Handlers
     @application.errorhandler(400)

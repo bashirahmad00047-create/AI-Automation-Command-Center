@@ -118,6 +118,10 @@
                 <span class="tab-label">Campaigns &amp; Broadcasts</span>
                 <span class="nav-counter-pill" id="tabCampaignsCount" style="display:none;">0</span>
             </button>
+            <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" id="tabNavNlp" onclick="switchTab('nlp')" title="AI Engine Sandbox & Live Voice Studio">
+                <span class="tab-icon">🧠</span>
+                <span class="tab-label">AI Engine Sandbox</span>
+            </button>
             <button class="hud-tab text-gray-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800" id="tabNavDeliveryMap" onclick="switchTab('delivery-map')" title="Live Delivery Radar Map (Leaflet.js)">
                 <span class="tab-icon">📍</span>
                 <span class="tab-label">Live Delivery Map</span>
@@ -1515,13 +1519,101 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
         <!-- TAB 4: NLP INCIDENT TRIAGE -->
         <section id="tab-nlp" class="tab-panel">
             <div class="panel-header">
-                <h2>AI Incident Triage Console</h2>
+                <h2>AI Engine Sandbox &amp; Voice Studio</h2>
                 <span class="panel-badge">Heuristic NLP Core • Sub-Millisecond Latency</span>
             </div>
             <p style="color: var(--text-secondary); margin-bottom: 20px;">
                 Enter raw operational incident reports or natural language prompts. The heuristic NLP engine extracts intents,
                 calculates continuous urgency scores, parses network entities, and executes matching workflow pipelines.
             </p>
+
+            <!-- MODULE 2: AI VOICE STUDIO & MODEL SELECTOR -->
+            <div class="hud-panel" style="margin-bottom: 24px; border: 1px solid rgba(5, 150, 105, 0.3); background: rgba(5, 150, 105, 0.03);">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 14px; margin-bottom: 16px;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.6rem;">🎙️</span>
+                            <h3 style="margin: 0; font-size: 1.25rem; font-weight: 800; color: var(--text-primary, #0f172a);">
+                                AI Voice Studio &amp; Dynamic Model Selector
+                            </h3>
+                        </div>
+                        <p style="color: var(--text-secondary, #64748b); font-size: 0.88rem; margin-top: 4px;">
+                            Configure active neural voice persona, speaking rate, and pitch for automated WhatsApp voice replies without restarting the bridge.
+                        </p>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <span class="panel-badge" style="background: rgba(5,150,105,0.15); color: #059669; font-weight: 700; border: 1px solid rgba(5,150,105,0.3);">
+                            ● Real-Time Neural TTS Core
+                        </span>
+                    </div>
+                </div>
+
+                <div class="dashboard-columns" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px;">
+                    <!-- Left: Persona & Sliders -->
+                    <div>
+                        <div style="margin-bottom: 14px;">
+                            <label style="display: block; font-size: 0.85rem; font-weight: 700; color: var(--text-primary); margin-bottom: 6px;">
+                                Active Voice Persona *
+                            </label>
+                            <select id="voicePersonaSelector" class="hud-select" style="width: 100%; padding: 10px 12px; border-radius: 8px; font-weight: 600;" onchange="handleVoicePersonaChange(this.value)">
+                                <option value="gemini-puck">1) Gemini 2.5 Native Male (Puck - Ultra Human)</option>
+                                <option value="ur-PK-AsadNeural" selected>2) Pakistani Urdu Male (ur-PK-AsadNeural - Calm & Respectful)</option>
+                                <option value="ur-PK-UzmaNeural">3) Pakistani Urdu Female (ur-PK-UzmaNeural)</option>
+                                <option value="en-US-AndrewMultilingualNeural">4) English Natural Male (en-US-AndrewMultilingualNeural)</option>
+                                <option value="en-US-AvaMultilingualNeural">5) English Natural Female (en-US-AvaMultilingualNeural)</option>
+                            </select>
+                        </div>
+
+                        <!-- Speaking Rate Slider (-15% to +10%) -->
+                        <div style="margin-bottom: 14px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                <label style="font-size: 0.85rem; font-weight: 700; color: var(--text-primary);">
+                                    Speaking Rate: <span id="rateSliderDisplay" style="color: #059669; font-weight: 800;">+4%</span>
+                                </label>
+                                <span style="font-size: 0.75rem; color: var(--text-secondary);">Natural Cadence (-15% slow to +10%)</span>
+                            </div>
+                            <input type="range" id="voiceRateSlider" min="-15" max="10" value="4" step="1" style="width: 100%; accent-color: #059669;" oninput="updateRateSliderDisplay(this.value)">
+                        </div>
+
+                        <!-- Pitch Slider (-5Hz to +5Hz) -->
+                        <div style="margin-bottom: 14px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                <label style="font-size: 0.85rem; font-weight: 700; color: var(--text-primary);">
+                                    Pitch: <span id="pitchSliderDisplay" style="color: #059669; font-weight: 800;">+0Hz</span>
+                                </label>
+                                <span style="font-size: 0.75rem; color: var(--text-secondary);">Deep Male (-5Hz) to High (+5Hz)</span>
+                            </div>
+                            <input type="range" id="voicePitchSlider" min="-5" max="5" value="0" step="1" style="width: 100%; accent-color: #059669;" oninput="updatePitchSliderDisplay(this.value)">
+                        </div>
+                    </div>
+
+                    <!-- Right: Test Input & Playback -->
+                    <div>
+                        <div style="margin-bottom: 8px;">
+                            <label style="display: block; font-size: 0.85rem; font-weight: 700; color: var(--text-primary); margin-bottom: 6px;">
+                                Test Sentence (Urdu / Roman Urdu / English)
+                            </label>
+                            <textarea id="voiceTestInput" class="hud-textarea" rows="3" style="width: 100%; font-size: 0.9rem;" placeholder="Salam! Aapka order receive ho gaya hai aur jald dispatch kar diya jayega. Shukriya!"></textarea>
+                        </div>
+                        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;">
+                            <button type="button" class="hud-btn outline small" style="font-size: 0.75rem;" onclick="setSampleVoiceText('Salam! Chitral and Global Bazar me khushamdeed. Me aapki kya madad kar sakta hoon?')">💬 Greeting</button>
+                            <button type="button" class="hud-btn outline small" style="font-size: 0.75rem;" onclick="setSampleVoiceText('Aapka order number confirm ho chuka hai. Kul raqam 3500 rupaye hai.')">📦 Order Confirmed</button>
+                            <button type="button" class="hud-btn outline small" style="font-size: 0.75rem;" onclick="setSampleVoiceText('Aapki EasyPaisa payment verify ho chuki hai. Parcel courier ke hawale kar diya gaya hai.')">💰 Payment Verified</button>
+                        </div>
+
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <button type="button" class="hud-btn outline" id="testVoiceBtn" onclick="testVoiceLive()" style="display: flex; align-items: center; gap: 6px;">
+                                <span>▶️</span> Test Voice Live
+                            </button>
+                            <button type="button" class="hud-btn primary" id="saveVoiceSettingsBtn" onclick="saveVoiceSettings()" style="display: flex; align-items: center; gap: 6px;">
+                                <span>💾</span> Save as Default WhatsApp Voice
+                            </button>
+                        </div>
+                        <div id="voiceStatusMsg" style="margin-top: 8px; font-size: 0.82rem; font-weight: 600; display:none;"></div>
+                    </div>
+                </div>
+            </div>
+
 
             <div class="dashboard-columns">
                 <div class="hud-panel flex-1">
@@ -2875,6 +2967,9 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                     </button>
                     <button type="button" class="hud-btn outline small" onclick="openShareCatalogModal()" title="Share live product catalog with WhatsApp lead">
                         <span class="icon">💬</span> Share Catalog via WhatsApp
+                    </button>
+                    <button type="button" class="hud-btn primary small" onclick="shareStoreLink()" title="Open or Copy Public Customer Store Link (/store)">
+                        <span class="icon">🌐</span> Share Store Link (/store)
                     </button>
                     <button type="button" class="hud-btn outline small" onclick="loadProductsCatalog()" title="Refresh Catalog">
                         <span class="icon">🔄</span> Refresh

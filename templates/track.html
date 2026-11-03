@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Live Delivery Tracking | Chitral &amp; Global Bazar</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';">
+    <script src="/static/vendor/leaflet/leaflet.js" onerror="this.onerror=null;this.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';"></script>
+    <style>
+        :root {
+            --primary: #059669;
+            --primary-light: #ecfdf5;
+            --dark: #0f172a;
+            --gray-900: #111827;
+            --gray-700: #374151;
+            --gray-500: #6b7280;
+            --gray-200: #e5e7eb;
+            --gray-100: #f3f4f6;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+
+        body {
+            background-color: #f8fafc;
+            color: var(--gray-900);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: #ffffff;
+            border-bottom: 1px solid var(--gray-200);
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header h1 {
+            font-size: 1.15rem;
+            font-weight: 800;
+        }
+
+        .main-card {
+            max-width: 800px;
+            margin: 24px auto;
+            padding: 0 16px;
+            width: 100%;
+            flex: 1;
+        }
+
+        .card {
+            background: #ffffff;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--gray-200);
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+
+        .order-meta-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--gray-100);
+        }
+
+        .meta-item span {
+            display: block;
+            font-size: 0.78rem;
+            color: var(--gray-500);
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .meta-item strong {
+            font-size: 1.05rem;
+            color: var(--gray-900);
+        }
+
+        .badge-status {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .badge-status.confirmed { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+        .badge-status.paid { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+        .badge-status.unpaid { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+
+        /* Timeline */
+        .timeline {
+            display: flex;
+            justify-content: space-between;
+            margin: 24px 0 12px;
+            position: relative;
+        }
+
+        .timeline::before {
+            content: "";
+            position: absolute;
+            top: 14px;
+            left: 20px;
+            right: 20px;
+            height: 3px;
+            background: var(--gray-200);
+            z-index: 1;
+        }
+
+        .step {
+            position: relative;
+            z-index: 2;
+            text-align: center;
+            width: 25%;
+        }
+
+        .step-circle {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 3px solid var(--gray-200);
+            margin: 0 auto 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 800;
+            color: var(--gray-500);
+        }
+
+        .step.active .step-circle {
+            border-color: var(--primary);
+            background: var(--primary);
+            color: #ffffff;
+        }
+
+        .step-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--gray-500);
+        }
+
+        .step.active .step-label {
+            color: var(--primary);
+        }
+
+        /* Map */
+        #deliveryMap {
+            width: 100%;
+            height: 380px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--gray-200);
+            margin-top: 14px;
+        }
+
+        .support-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #25D366;
+            color: #ffffff;
+            text-decoration: none;
+            padding: 12px 20px;
+            border-radius: var(--radius-md);
+            font-weight: 700;
+            font-size: 0.95rem;
+            margin-top: 14px;
+            transition: opacity 0.2s;
+        }
+
+        .support-btn:hover {
+            opacity: 0.92;
+        }
+    </style>
+</head>
+<body>
+
+    <header class="header">
+        <h1>🏔️ Chitral &amp; Global Bazar</h1>
+        <a href="/store" style="color: var(--primary); text-decoration: none; font-weight: 700; font-size: 0.9rem;">&larr; Back to Shop</a>
+    </header>
+
+    <main class="main-card">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <span style="font-size: 0.8rem; color: var(--gray-500); font-weight: 700; text-transform: uppercase;">Real-Time Order Tracking</span>
+                    <h2 style="font-size: 1.4rem; font-weight: 800; margin-top: 2px;">
+                        Order #<span id="orderNumDisplay">{{ order.order_number if order else order_id }}</span>
+                    </h2>
+                </div>
+                <div>
+                    <span class="badge-status confirmed">{{ order.order_status if order else 'CONFIRMED' }}</span>
+                    <span class="badge-status {{ 'paid' if (order and order.payment_status == 'paid') else 'unpaid' }}">
+                        {{ order.payment_status.upper() if order else 'COD' }}
+                    </span>
+                </div>
+            </div>
+
+            <!-- Tracking Timeline -->
+            <div class="timeline">
+                <div class="step active">
+                    <div class="step-circle">1</div>
+                    <div class="step-label">Confirmed</div>
+                </div>
+                <div class="step active">
+                    <div class="step-circle">2</div>
+                    <div class="step-label">Preparing</div>
+                </div>
+                <div class="step">
+                    <div class="step-circle">3</div>
+                    <div class="step-label">Dispatched</div>
+                </div>
+                <div class="step">
+                    <div class="step-circle">4</div>
+                    <div class="step-label">Delivered</div>
+                </div>
+            </div>
+
+            <div class="order-meta-grid">
+                <div class="meta-item">
+                    <span>Customer Name</span>
+                    <strong>{{ order.customer_name if (order and order.customer_name) else 'Valued Customer' }}</strong>
+                </div>
+                <div class="meta-item">
+                    <span>WhatsApp Contact</span>
+                    <strong>{{ order.customer_phone if order else 'Registered Phone' }}</strong>
+                </div>
+                <div class="meta-item">
+                    <span>Total Amount</span>
+                    <strong style="color: var(--primary);">PKR {{ "{:,.0f}".format(order.total_amount) if order else '0' }}</strong>
+                </div>
+                <div class="meta-item">
+                    <span>Courier / Tracking</span>
+                    <strong>{{ order.courier_name or 'TCS Express' }}</strong>
+                </div>
+            </div>
+
+            <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--gray-100); font-size: 0.9rem;">
+                <span style="font-size: 0.78rem; color: var(--gray-500); font-weight: 700; text-transform: uppercase; display: block;">Delivery Address</span>
+                <strong>{{ order.shipping_address if (order and order.shipping_address) else 'Chitral, Khyber Pakhtunkhwa, Pakistan' }}</strong>
+            </div>
+        </div>
+
+        <!-- Live Radar Map Card -->
+        <div class="card">
+            <h3 style="font-size: 1.1rem; font-weight: 800;">📍 Live Delivery Radar Map</h3>
+            <p style="font-size: 0.85rem; color: var(--gray-500); margin-top: 4px;">
+                Tracking delivery fleet GPS pin and recipient dispatch coordinates.
+            </p>
+            <div id="deliveryMap"></div>
+        </div>
+
+        <!-- WhatsApp Support Card -->
+        <div class="card" style="text-align: center;">
+            <h3 style="font-size: 1.1rem; font-weight: 800;">Need Instant Assistance?</h3>
+            <p style="font-size: 0.88rem; color: var(--gray-500); margin-top: 4px;">
+                Our WhatsApp automated agent and support team are available 24/7.
+            </p>
+            <a href="https://wa.me/{{ jazzcash_number or '923209350858' }}?text=Salam!%20I%20am%20inquiring%20about%20my%20Order%20%23{{ order.order_number if order else order_id }}" target="_blank" class="support-btn">
+                <span>💬</span> Chat with Support on WhatsApp
+            </a>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize Leaflet Map centered on Chitral / Pakistan
+            const chitralCoords = [35.8510, 71.7864];
+            const map = L.map('deliveryMap').setView(chitralCoords, 13);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors',
+                maxZoom: 18
+            }).addTo(map);
+
+            // Add Delivery Pin
+            const marker = L.marker(chitralCoords).addTo(map);
+            marker.bindPopup("<b>Order Destination</b><br>Chitral Hub &amp; Delivery Destination").openPopup();
+
+            setTimeout(function() {
+                map.invalidateSize();
+            }, 300);
+        });
+    </script>
+</body>
+</html>

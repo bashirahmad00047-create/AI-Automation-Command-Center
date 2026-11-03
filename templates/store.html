@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chitral &amp; Global Bazar | Authentic Northern Pakistan Treasures &amp; Store</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Nastaliq+Urdu:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #059669;
+            --primary-hover: #047857;
+            --primary-light: #ecfdf5;
+            --accent: #d97706;
+            --dark: #0f172a;
+            --gray-900: #111827;
+            --gray-800: #1f2937;
+            --gray-700: #374151;
+            --gray-600: #4b5563;
+            --gray-500: #6b7280;
+            --gray-200: #e5e7eb;
+            --gray-100: #f3f4f6;
+            --gray-50: #f9fafb;
+            --white: #ffffff;
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --radius-full: 9999px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: #f8fafc;
+            color: var(--gray-800);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Top Announcement Bar */
+        .announcement-bar {
+            background: linear-gradient(90deg, #064e3b, #059669, #047857);
+            color: #ffffff;
+            text-align: center;
+            font-size: 0.85rem;
+            font-weight: 600;
+            padding: 8px 16px;
+            letter-spacing: 0.02em;
+        }
+
+        /* Navbar */
+        .store-header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--gray-200);
+            position: sticky;
+            top: 0;
+            z-index: 40;
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        .brand-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--dark);
+        }
+
+        .brand-icon {
+            font-size: 2rem;
+            line-height: 1;
+        }
+
+        .brand-text h1 {
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: var(--dark);
+            letter-spacing: -0.02em;
+            line-height: 1.2;
+        }
+
+        .brand-text span {
+            font-size: 0.75rem;
+            color: var(--primary);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .cart-trigger-btn {
+            position: relative;
+            background: var(--primary);
+            color: #ffffff;
+            border: none;
+            padding: 10px 18px;
+            border-radius: var(--radius-full);
+            font-weight: 700;
+            font-size: 0.92rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
+        }
+
+        .cart-trigger-btn:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+
+        .cart-badge {
+            background: #ef4444;
+            color: #fff;
+            font-size: 0.75rem;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: var(--radius-full);
+            display: inline-block;
+        }
+
+        /* Hero Banner */
+        .hero-section {
+            background: linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%);
+            color: #ffffff;
+            padding: 40px 20px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-section::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(circle at center, rgba(255,255,255,0.08) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .hero-title {
+            font-size: 2.2rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+            letter-spacing: -0.02em;
+        }
+
+        .hero-subtitle {
+            font-size: 1.05rem;
+            color: #d1fae5;
+            max-width: 650px;
+            margin: 0 auto 24px;
+            line-height: 1.5;
+        }
+
+        .search-wrapper {
+            max-width: 580px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 14px 20px 14px 48px;
+            border-radius: var(--radius-full);
+            border: 2px solid rgba(255,255,255,0.25);
+            background: rgba(255,255,255,0.95);
+            color: var(--gray-900);
+            font-size: 1rem;
+            outline: none;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+            transition: all 0.2s ease;
+        }
+
+        .search-input:focus {
+            background: #ffffff;
+            border-color: #ffffff;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 18px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.1rem;
+            color: var(--gray-500);
+            pointer-events: none;
+        }
+
+        /* Category Filter Pills */
+        .category-nav {
+            max-width: 1200px;
+            margin: 24px auto 0;
+            padding: 0 20px;
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .category-nav::-webkit-scrollbar {
+            display: none;
+        }
+
+        .category-pill {
+            background: #ffffff;
+            color: var(--gray-700);
+            border: 1px solid var(--gray-200);
+            padding: 8px 18px;
+            border-radius: var(--radius-full);
+            font-size: 0.88rem;
+            font-weight: 600;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .category-pill:hover, .category-pill.active {
+            background: var(--primary);
+            color: #ffffff;
+            border-color: var(--primary);
+            box-shadow: 0 2px 8px rgba(5, 150, 105, 0.25);
+        }
+
+        /* Products Grid */
+        .main-container {
+            max-width: 1200px;
+            margin: 24px auto 60px;
+            padding: 0 20px;
+            flex: 1;
+            width: 100%;
+        }
+
+        .grid-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .grid-title {
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: var(--gray-900);
+        }
+
+        .products-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 22px;
+        }
+
+        .product-card {
+            background: #ffffff;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--gray-200);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.25s ease;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .product-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+            border-color: #cbd5e1;
+        }
+
+        .product-img-wrapper {
+            position: relative;
+            width: 100%;
+            height: 200px;
+            background: #f1f5f9;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .product-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.3s ease;
+        }
+
+        .product-card:hover .product-img {
+            transform: scale(1.05);
+        }
+
+        .product-placeholder-icon {
+            font-size: 3.5rem;
+            color: #94a3b8;
+        }
+
+        .category-tag {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(4px);
+            color: #ffffff;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: var(--radius-full);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .stock-badge {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: #ecfdf5;
+            color: #065f46;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 4px 8px;
+            border-radius: var(--radius-full);
+            border: 1px solid #a7f3d0;
+        }
+
+        .stock-badge.out-of-stock {
+            background: #fef2f2;
+            color: #991b1b;
+            border-color: #fecaca;
+        }
+
+        .product-body {
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+
+        .product-name {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--gray-900);
+            margin-bottom: 6px;
+            line-height: 1.35;
+        }
+
+        .product-desc {
+            font-size: 0.85rem;
+            color: var(--gray-600);
+            line-height: 1.45;
+            margin-bottom: 14px;
+            flex: 1;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .product-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-top: 12px;
+            border-top: 1px solid var(--gray-100);
+        }
+
+        .product-price {
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: var(--primary);
+        }
+
+        .product-price span {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--gray-500);
+            margin-left: 2px;
+        }
+
+        .add-cart-btn {
+            background: var(--primary-light);
+            color: var(--primary);
+            border: 1px solid #a7f3d0;
+            padding: 8px 14px;
+            border-radius: var(--radius-md);
+            font-weight: 700;
+            font-size: 0.88rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .add-cart-btn:hover {
+            background: var(--primary);
+            color: #ffffff;
+            border-color: var(--primary);
+        }
+
+        /* Empty State */
+        .empty-grid-msg {
+            text-align: center;
+            padding: 60px 20px;
+            background: #ffffff;
+            border-radius: var(--radius-lg);
+            border: 1px dashed var(--gray-200);
+        }
+
+        /* Cart Drawer */
+        .drawer-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 50;
+            display: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .drawer-overlay.active {
+            display: block;
+            opacity: 1;
+        }
+
+        .cart-drawer {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            max-width: 440px;
+            background: #ffffff;
+            box-shadow: var(--shadow-xl);
+            z-index: 60;
+            transform: translateX(100%);
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .drawer-overlay.active .cart-drawer {
+            transform: translateX(0);
+        }
+
+        .drawer-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .drawer-header h3 {
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: var(--gray-900);
+        }
+
+        .close-drawer-btn {
+            background: var(--gray-100);
+            border: none;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            font-size: 1.1rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--gray-600);
+            transition: background 0.2s ease;
+        }
+
+        .close-drawer-btn:hover {
+            background: var(--gray-200);
+        }
+
+        .drawer-items {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .cart-item-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--gray-100);
+        }
+
+        .cart-item-img {
+            width: 60px;
+            height: 60px;
+            border-radius: var(--radius-md);
+            object-fit: cover;
+            background: var(--gray-100);
+        }
+
+        .cart-item-info {
+            flex: 1;
+        }
+
+        .cart-item-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--gray-900);
+            line-height: 1.25;
+            margin-bottom: 4px;
+        }
+
+        .cart-item-price {
+            font-size: 0.9rem;
+            color: var(--primary);
+            font-weight: 700;
+        }
+
+        .cart-qty-ctrl {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--gray-100);
+            border-radius: var(--radius-md);
+            padding: 2px 6px;
+        }
+
+        .qty-btn {
+            background: none;
+            border: none;
+            width: 24px;
+            height: 24px;
+            font-weight: 800;
+            font-size: 1rem;
+            cursor: pointer;
+            color: var(--gray-700);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .qty-count {
+            font-size: 0.9rem;
+            font-weight: 700;
+            min-width: 18px;
+            text-align: center;
+        }
+
+        .drawer-footer {
+            padding: 20px;
+            background: var(--gray-50);
+            border-top: 1px solid var(--gray-200);
+        }
+
+        .summary-line {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.95rem;
+            color: var(--gray-600);
+            margin-bottom: 8px;
+        }
+
+        .summary-line.total {
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: var(--gray-900);
+            padding-top: 8px;
+            border-top: 1px dashed var(--gray-200);
+            margin-top: 8px;
+        }
+
+        .checkout-btn {
+            width: 100%;
+            background: var(--primary);
+            color: #ffffff;
+            border: none;
+            padding: 14px;
+            border-radius: var(--radius-md);
+            font-size: 1rem;
+            font-weight: 800;
+            cursor: pointer;
+            margin-top: 16px;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .checkout-btn:hover {
+            background: var(--primary-hover);
+        }
+
+        /* Checkout Modal */
+        .checkout-modal-card {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 92%;
+            max-width: 540px;
+            max-height: 90vh;
+            background: #ffffff;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-xl);
+            z-index: 70;
+            overflow-y: auto;
+            display: none;
+            padding: 24px;
+        }
+
+        .checkout-modal-card.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: var(--gray-700);
+            margin-bottom: 6px;
+        }
+
+        .form-input, .form-textarea, .form-select {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+
+        .form-input:focus, .form-textarea:focus, .form-select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15);
+        }
+
+        .gps-detect-btn {
+            background: #f0fdf4;
+            color: #15803d;
+            border: 1px solid #bbf7d0;
+            padding: 8px 14px;
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .gps-detect-btn:hover {
+            background: #dcfce7;
+        }
+
+        .gps-badge {
+            display: inline-block;
+            background: #ecfdf5;
+            color: #065f46;
+            font-size: 0.8rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: var(--radius-full);
+            border: 1px solid #6ee7b7;
+            margin-top: 6px;
+        }
+
+        .payment-pill-group {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 6px;
+        }
+
+        .payment-pill {
+            border: 2px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+
+        .payment-pill.selected {
+            border-color: var(--primary);
+            background: var(--primary-light);
+            color: var(--primary);
+        }
+
+        .payment-info-box {
+            background: #f8fafc;
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            padding: 14px;
+            margin-top: 12px;
+            font-size: 0.88rem;
+            line-height: 1.5;
+        }
+
+        /* Order Success Modal */
+        .success-modal {
+            text-align: center;
+            padding: 30px 20px;
+        }
+
+        .success-icon {
+            font-size: 3.5rem;
+            margin-bottom: 12px;
+        }
+
+        /* Footer */
+        .store-footer {
+            background: var(--gray-900);
+            color: var(--gray-500);
+            padding: 40px 20px;
+            font-size: 0.88rem;
+            text-align: center;
+            margin-top: auto;
+        }
+
+        .store-footer strong {
+            color: #ffffff;
+        }
+
+        @media (max-width: 640px) {
+            .hero-title { font-size: 1.6rem; }
+            .products-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+            .product-img-wrapper { height: 140px; }
+            .product-body { padding: 10px; }
+            .product-name { font-size: 0.92rem; }
+            .product-price { font-size: 1.05rem; }
+            .payment-pill-group { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Announcement Bar -->
+    <div class="announcement-bar">
+        🏔️ Pure Chitrali Handicrafts, Dry Fruits &amp; Global Essentials • Free Delivery on Orders Above PKR 2,000!
+    </div>
+
+    <!-- Store Header -->
+    <header class="store-header">
+        <div class="nav-container">
+            <a href="/store" class="brand-logo">
+                <span class="brand-icon">🏔️</span>
+                <div class="brand-text">
+                    <h1>Chitral &amp; Global Bazar</h1>
+                    <span>Official Online Store</span>
+                </div>
+            </a>
+            <div class="header-actions">
+                <button class="cart-trigger-btn" onclick="openCartDrawer()">
+                    <span>🛒 Cart</span>
+                    <span class="cart-badge" id="cartCountBadge">0</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero-section">
+        <h2 class="hero-title">Treasures of the Hindukush &amp; Beyond</h2>
+        <p class="hero-subtitle">Authentic Chitrali Shawls, Pattu Caps, Pure Organic Honey, Walnuts, Gemstones &amp; Daily Essentials direct to your doorstep.</p>
+        <div class="search-wrapper">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="searchInput" class="search-input" placeholder="Search dry fruits, shawls, caps, honey, electronics..." oninput="handleSearch(this.value)">
+        </div>
+    </section>
+
+    <!-- Category Nav Pills -->
+    <div class="category-nav" id="categoryNav">
+        <button class="category-pill active" onclick="filterCategory('All')">🌟 All Products</button>
+        <button class="category-pill" onclick="filterCategory('Dry Fruits')">🥜 Dry Fruits &amp; Nuts</button>
+        <button class="category-pill" onclick="filterCategory('Handicrafts')">🧣 Chitrali Shawls &amp; Caps</button>
+        <button class="category-pill" onclick="filterCategory('Honey')">🍯 Pure Mountain Honey</button>
+        <button class="category-pill" onclick="filterCategory('Gemstones')">💎 Minerals &amp; Gems</button>
+        <button class="category-pill" onclick="filterCategory('Electronics')">⚡ Electronics &amp; Accessories</button>
+    </div>
+
+    <!-- Main Products Grid -->
+    <main class="main-container">
+        <div class="grid-header">
+            <h3 class="grid-title" id="gridSectionTitle">Featured Products</h3>
+            <span id="productCounter" style="font-size: 0.88rem; color: var(--gray-500); font-weight: 600;">Loading items...</span>
+        </div>
+
+        <div class="products-grid" id="productsGrid">
+            <!-- Dynamically populated or server-rendered items -->
+        </div>
+
+        <div class="empty-grid-msg" id="emptyState" style="display:none;">
+            <div style="font-size: 3rem; margin-bottom: 10px;">🔍</div>
+            <h4 style="font-size: 1.2rem; color: var(--gray-800); margin-bottom: 6px;">No products match your search</h4>
+            <p style="color: var(--gray-500); font-size: 0.9rem;">Try searching for walnuts, shawl, cap, or honey.</p>
+        </div>
+    </main>
+
+    <!-- Shopping Cart Slide-out Drawer -->
+    <div class="drawer-overlay" id="cartOverlay" onclick="closeCartDrawer(event)">
+        <div class="cart-drawer" onclick="event.stopPropagation()">
+            <div class="drawer-header">
+                <h3>Shopping Cart (<span id="drawerCount">0</span>)</h3>
+                <button class="close-drawer-btn" onclick="closeCartDrawer()">&times;</button>
+            </div>
+            <div class="drawer-items" id="drawerItemsList">
+                <!-- Cart rows injected here -->
+            </div>
+            <div class="drawer-footer" id="drawerFooter">
+                <div class="summary-line">
+                    <span>Subtotal</span>
+                    <span id="drawerSubtotal">PKR 0</span>
+                </div>
+                <div class="summary-line">
+                    <span>Delivery (Pakistan)</span>
+                    <span style="color: var(--primary); font-weight: 700;">FREE</span>
+                </div>
+                <div class="summary-line total">
+                    <span>Total Amount</span>
+                    <span id="drawerTotal" style="color: var(--primary);">PKR 0</span>
+                </div>
+                <button class="checkout-btn" onclick="openCheckoutModal()">
+                    <span>Proceed to Instant Checkout</span> &rarr;
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Instant Checkout Modal -->
+    <div class="drawer-overlay" id="checkoutOverlay" style="z-index: 65;" onclick="closeCheckoutModal(event)">
+        <div class="checkout-modal-card" id="checkoutModalCard" onclick="event.stopPropagation()">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; border-bottom: 1px solid var(--gray-200); padding-bottom: 12px;">
+                <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--gray-900);">Instant Checkout</h3>
+                <button class="close-drawer-btn" onclick="closeCheckoutModal()">&times;</button>
+            </div>
+
+            <form id="checkoutForm" onsubmit="handlePlaceOrder(event)">
+                <div class="form-group">
+                    <label class="form-label">Full Name *</label>
+                    <input type="text" id="custName" class="form-input" placeholder="e.g. Muhammad Bashir" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">WhatsApp Phone Number *</label>
+                    <input type="tel" id="custPhone" class="form-input" placeholder="0320 9350858" required>
+                    <span style="font-size: 0.75rem; color: var(--gray-500);">Order confirmation &amp; live voice note will be sent to this WhatsApp number.</span>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Delivery Address *</label>
+                    <textarea id="custAddress" class="form-textarea" rows="2" placeholder="House/Shop #, Street, Tehsil / City (e.g. Main Bazar Chitral)" required></textarea>
+                    <div>
+                        <button type="button" class="gps-detect-btn" onclick="detectGPSLocation()">
+                            <span>📍</span> Detect My GPS Location
+                        </button>
+                        <div id="gpsLocationBadge" style="display:none;" class="gps-badge"></div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Payment Method</label>
+                    <div class="payment-pill-group">
+                        <div class="payment-pill selected" id="payPillCod" onclick="selectPaymentMethod('cod')">
+                            💵 Cash on Delivery
+                        </div>
+                        <div class="payment-pill" id="payPillEasypaisa" onclick="selectPaymentMethod('easypaisa')">
+                            📱 EasyPaisa
+                        </div>
+                        <div class="payment-pill" id="payPillJazzcash" onclick="selectPaymentMethod('jazzcash')">
+                            💳 JazzCash
+                        </div>
+                        <div class="payment-pill" id="payPillBank" onclick="selectPaymentMethod('bank_transfer')">
+                            🏦 Bank Transfer
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Payment Details Box for Online / Mobile Accounts -->
+                <div id="paymentInstructionsBox" class="payment-info-box" style="display:none;">
+                    <div id="paymentAccountDetails"></div>
+                    <div style="margin-top: 10px;">
+                        <label class="form-label" style="font-size: 0.8rem;">Upload Payment Receipt Screenshot (Optional AI Auto-Verification):</label>
+                        <input type="file" id="receiptFileInput" accept="image/*" class="form-input" style="padding: 6px; font-size: 0.85rem;" onchange="handleReceiptFile(event)">
+                        <div id="receiptPreviewNote" style="font-size: 0.75rem; color: var(--primary); margin-top: 4px; display:none;">
+                            ✓ Receipt attached. Gemini Vision AI will automatically verify your TID and mark order as PAID.
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--gray-200);">
+                    <div class="summary-line total" style="border:none; margin-bottom: 14px;">
+                        <span>Payable Amount:</span>
+                        <span id="checkoutTotalAmount" style="color: var(--primary);">PKR 0</span>
+                    </div>
+                    <button type="submit" class="checkout-btn" id="placeOrderSubmitBtn">
+                        <span>Place Order &amp; Dispatch to WhatsApp</span> &rarr;
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Order Success Modal -->
+    <div class="drawer-overlay" id="orderSuccessOverlay" style="z-index: 80;">
+        <div class="checkout-modal-card active" style="max-width: 480px; text-align: center;">
+            <div class="success-icon">🎉</div>
+            <h3 style="font-size: 1.4rem; font-weight: 800; color: var(--gray-900); margin-bottom: 8px;">Order Confirmed!</h3>
+            <p style="color: var(--gray-600); font-size: 0.95rem; margin-bottom: 16px;">
+                Shukriya! Your order <strong id="successOrderNum">ORD-XXXX</strong> has been placed successfully.
+            </p>
+            <div style="background: var(--primary-light); border: 1px solid #a7f3d0; border-radius: var(--radius-md); padding: 14px; margin-bottom: 20px; text-align: left; font-size: 0.9rem;">
+                <div>💬 <strong>WhatsApp Notification:</strong> Confirmation message and Urdu voice note have been dispatched.</div>
+                <div style="margin-top: 6px;">🚚 <strong>Live Tracking:</strong> Real-time delivery tracking link is ready.</div>
+            </div>
+            <div style="display: flex; gap: 10px; flex-direction: column;">
+                <a href="#" id="successTrackingBtn" class="checkout-btn" style="text-decoration:none; margin-top:0;">
+                    📍 Track My Delivery Online
+                </a>
+                <button type="button" class="add-cart-btn" style="justify-content:center; padding: 12px;" onclick="closeSuccessModalAndReset()">
+                    Continue Shopping
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Store Footer -->
+    <footer class="store-footer">
+        <p>&copy; 2026 <strong>Chitral &amp; Global Bazar</strong> • Powered by OpsFlow Automation &amp; BashFlow Cloud</p>
+        <p style="margin-top: 6px; font-size: 0.8rem;">Direct Courier Dispatch from Chitral, Khyber Pakhtunkhwa &amp; Islamabad, Pakistan.</p>
+    </footer>
+
+    <!-- Storefront Logic -->
+    <script>
+        // Initial Default Catalog in case database catalog is initially loading
+        const DEFAULT_CATALOG = [
+            {
+                id: 'prd-honey-01',
+                name: 'Pure Chitrali Cedar & Wild Flora Honey (1 Kg)',
+                category: 'Honey',
+                price: 2800,
+                currency: 'PKR',
+                description: '100% Raw, unfiltered mountain honey harvested from high-altitude wild cedar forests of Chitral valley.',
+                image_url: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=600&q=80',
+                stock_status: 'in_stock'
+            },
+            {
+                id: 'prd-walnut-02',
+                name: 'Kaghazi Thin-Shelled Mountain Walnuts (1 Kg)',
+                category: 'Dry Fruits',
+                price: 1950,
+                currency: 'PKR',
+                description: 'Super thin-shelled fresh Kaghazi Akhrot from Chitral. Easy to crack by hand, high omega-3 oil content.',
+                image_url: 'https://images.unsplash.com/photo-1596701062351-8c2c14d1fdd0?auto=format&fit=crop&w=600&q=80',
+                stock_status: 'in_stock'
+            },
+            {
+                id: 'prd-shawl-03',
+                name: 'Pure Sheep Wool Handwoven Chitrali Shawl (Pattu)',
+                category: 'Handicrafts',
+                price: 6500,
+                currency: 'PKR',
+                description: 'Authentic pure warm wool shawl handwoven on traditional Chitrali wooden looms. Elegant natural earthy tone.',
+                image_url: 'https://images.unsplash.com/photo-1607344645866-009c320c5ab8?auto=format&fit=crop&w=600&q=80',
+                stock_status: 'in_stock'
+            },
+            {
+                id: 'prd-cap-04',
+                name: 'Traditional Chitrali Pakol Cap with Feather Crest',
+                category: 'Handicrafts',
+                price: 1650,
+                currency: 'PKR',
+                description: 'Traditional round rolled-brim wool hat crafted by Chitrali artisans with historic brass pin insignia.',
+                image_url: 'https://images.unsplash.com/photo-1576871337632-b9aef4c17ab9?auto=format&fit=crop&w=600&q=80',
+                stock_status: 'in_stock'
+            },
+            {
+                id: 'prd-almond-05',
+                name: 'Organic Chitral Mountain Sweet Almonds (1 Kg)',
+                category: 'Dry Fruits',
+                price: 2400,
+                currency: 'PKR',
+                description: 'Naturally sun-dried sweet almonds cultivated in pure snow-fed mountain orchards of Northern Chitral.',
+                image_url: 'https://images.unsplash.com/photo-1508061252445-5350f3ab0a55?auto=format&fit=crop&w=600&q=80',
+                stock_status: 'in_stock'
+            },
+            {
+                id: 'prd-gem-06',
+                name: 'Natural Natural Sky Blue Aquamarine Specimen',
+                category: 'Gemstones',
+                price: 14500,
+                currency: 'PKR',
+                description: '100% natural, unheated sky-blue crystal mined from high-altitude pegmatites of Chitral Hindu Kush.',
+                image_url: 'https://images.unsplash.com/photo-1600003014755-ba31aa59c4b6?auto=format&fit=crop&w=600&q=80',
+                stock_status: 'in_stock'
+            }
+        ];
+
+        let catalogProducts = [];
+        let currentFilter = 'All';
+        let searchQuery = '';
+        let cart = [];
+        let selectedPayment = 'cod';
+        let customerGPS = null;
+        let receiptBase64 = null;
+        const JAZZCASH_NUMBER = '{{ jazzcash_number or "03209350858" }}';
+
+        // Load Products from Backend API with fallback to DEFAULT_CATALOG
+        async function fetchProducts() {
+            try {
+                const res = await fetch('/api/v1/store/products');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.products && data.products.length > 0) {
+                        catalogProducts = data.products;
+                    } else {
+                        catalogProducts = DEFAULT_CATALOG;
+                    }
+                } else {
+                    catalogProducts = DEFAULT_CATALOG;
+                }
+            } catch (e) {
+                console.debug('Store API fallback:', e);
+                catalogProducts = DEFAULT_CATALOG;
+            }
+            renderProducts();
+        }
+
+        function renderProducts() {
+            const grid = document.getElementById('productsGrid');
+            const empty = document.getElementById('emptyState');
+            const counter = document.getElementById('productCounter');
+
+            let filtered = catalogProducts.filter(p => {
+                const matchesCat = (currentFilter === 'All') || (p.category && p.category.toLowerCase().includes(currentFilter.toLowerCase()));
+                const matchesSearch = !searchQuery || (
+                    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                    (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()))
+                );
+                return matchesCat && matchesSearch;
+            });
+
+            counter.textContent = `${filtered.length} product${filtered.length === 1 ? '' : 's'} available`;
+
+            if (filtered.length === 0) {
+                grid.innerHTML = '';
+                empty.style.display = 'block';
+                return;
+            }
+
+            empty.style.display = 'none';
+            grid.innerHTML = filtered.map(p => {
+                const imgHtml = p.image_url 
+                    ? `<img src="${p.image_url}" alt="${p.name}" class="product-img" onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=600&q=80';">`
+                    : `<span class="product-placeholder-icon">🛍️</span>`;
+
+                return `
+                    <div class="product-card">
+                        <div class="product-img-wrapper">
+                            ${imgHtml}
+                            <span class="category-tag">${p.category || 'General'}</span>
+                            <span class="stock-badge ${p.stock_status === 'out_of_stock' ? 'out-of-stock' : ''}">
+                                ${p.stock_status === 'out_of_stock' ? 'Out of Stock' : 'In Stock'}
+                            </span>
+                        </div>
+                        <div class="product-body">
+                            <h4 class="product-name">${p.name}</h4>
+                            <p class="product-desc">${p.description || 'Authentic quality product from Chitral & Global Bazar.'}</p>
+                            <div class="product-footer">
+                                <div class="product-price">
+                                    PKR ${Number(p.price).toLocaleString()}<span>/${p.unit || 'item'}</span>
+                                </div>
+                                <button class="add-cart-btn" onclick="addToCart('${p.id}')">
+                                    <span>+ Add</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterCategory(cat) {
+            currentFilter = cat;
+            document.querySelectorAll('.category-pill').forEach(btn => {
+                if (btn.textContent.includes(cat) || (cat === 'All' && btn.textContent.includes('All'))) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            document.getElementById('gridSectionTitle').textContent = cat === 'All' ? 'Featured Products' : cat;
+            renderProducts();
+        }
+
+        function handleSearch(val) {
+            searchQuery = val.trim();
+            renderProducts();
+        }
+
+        // Cart Drawer Management
+        function addToCart(productId) {
+            const prod = catalogProducts.find(p => p.id === productId);
+            if (!prod) return;
+
+            const existing = cart.find(it => it.id === productId);
+            if (existing) {
+                existing.quantity += 1;
+            } else {
+                cart.push({
+                    id: prod.id,
+                    name: prod.name,
+                    price: Number(prod.price),
+                    image_url: prod.image_url,
+                    quantity: 1,
+                    sku: prod.sku || ''
+                });
+            }
+            updateCartUI();
+            openCartDrawer();
+        }
+
+        function changeQty(productId, delta) {
+            const item = cart.find(it => it.id === productId);
+            if (!item) return;
+            item.quantity += delta;
+            if (item.quantity <= 0) {
+                cart = cart.filter(it => it.id !== productId);
+            }
+            updateCartUI();
+        }
+
+        function updateCartUI() {
+            const totalCount = cart.reduce((sum, it) => sum + it.quantity, 0);
+            const totalAmount = cart.reduce((sum, it) => sum + (it.price * it.quantity), 0);
+
+            document.getElementById('cartCountBadge').textContent = totalCount;
+            document.getElementById('drawerCount').textContent = totalCount;
+            document.getElementById('drawerSubtotal').textContent = `PKR ${totalAmount.toLocaleString()}`;
+            document.getElementById('drawerTotal').textContent = `PKR ${totalAmount.toLocaleString()}`;
+            document.getElementById('checkoutTotalAmount').textContent = `PKR ${totalAmount.toLocaleString()}`;
+
+            const list = document.getElementById('drawerItemsList');
+            if (cart.length === 0) {
+                list.innerHTML = `
+                    <div style="text-align:center; padding: 40px 10px; color: var(--gray-500);">
+                        <div style="font-size: 2.5rem; margin-bottom: 8px;">🛒</div>
+                        <p style="font-weight: 700; color: var(--gray-700);">Your cart is empty</p>
+                        <p style="font-size: 0.85rem; margin-top: 4px;">Explore items and add them to cart.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            list.innerHTML = cart.map(it => `
+                <div class="cart-item-row">
+                    <img src="${it.image_url || 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=200&q=80'}" class="cart-item-img" alt="${it.name}">
+                    <div class="cart-item-info">
+                        <div class="cart-item-title">${it.name}</div>
+                        <div class="cart-item-price">PKR ${(it.price * it.quantity).toLocaleString()}</div>
+                    </div>
+                    <div class="cart-qty-ctrl">
+                        <button type="button" class="qty-btn" onclick="changeQty('${it.id}', -1)">-</button>
+                        <span class="qty-count">${it.quantity}</span>
+                        <button type="button" class="qty-btn" onclick="changeQty('${it.id}', 1)">+</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function openCartDrawer() {
+            document.getElementById('cartOverlay').classList.add('active');
+        }
+
+        function closeCartDrawer(e) {
+            if (e && e.target !== e.currentTarget && !e.target.classList.contains('close-drawer-btn')) return;
+            document.getElementById('cartOverlay').classList.remove('active');
+        }
+
+        // Checkout Modal Management
+        function openCheckoutModal() {
+            if (cart.length === 0) {
+                alert('Please add items to cart before proceeding to checkout.');
+                return;
+            }
+            closeCartDrawer();
+            document.getElementById('checkoutOverlay').classList.add('active');
+            document.getElementById('checkoutModalCard').classList.add('active');
+        }
+
+        function closeCheckoutModal(e) {
+            if (e && e.target !== e.currentTarget && !e.target.classList.contains('close-drawer-btn')) return;
+            document.getElementById('checkoutOverlay').classList.remove('active');
+            document.getElementById('checkoutModalCard').classList.remove('active');
+        }
+
+        function selectPaymentMethod(method) {
+            selectedPayment = method;
+            document.querySelectorAll('.payment-pill').forEach(p => p.classList.remove('selected'));
+            const box = document.getElementById('paymentInstructionsBox');
+            const details = document.getElementById('paymentAccountDetails');
+
+            if (method === 'cod') {
+                document.getElementById('payPillCod').classList.add('selected');
+                box.style.display = 'none';
+            } else if (method === 'easypaisa') {
+                document.getElementById('payPillEasypaisa').classList.add('selected');
+                box.style.display = 'block';
+                details.innerHTML = `
+                    <strong>📱 EasyPaisa Account:</strong><br>
+                    • Title: <strong>Bashir Ahmad (Chitral Bazar)</strong><br>
+                    • Mobile / Account Number: <strong>${JAZZCASH_NUMBER}</strong><br>
+                    <em>Please transfer the total amount and attach screenshot below for instant verification.</em>
+                `;
+            } else if (method === 'jazzcash') {
+                document.getElementById('payPillJazzcash').classList.add('selected');
+                box.style.display = 'block';
+                details.innerHTML = `
+                    <strong>💳 JazzCash Mobile Account:</strong><br>
+                    • Title: <strong>Bashir Ahmad (Chitral Bazar)</strong><br>
+                    • Mobile / Account Number: <strong>${JAZZCASH_NUMBER}</strong><br>
+                    <em>Send via JazzCash app or *786# and attach screenshot below.</em>
+                `;
+            } else if (method === 'bank_transfer') {
+                document.getElementById('payPillBank').classList.add('selected');
+                box.style.display = 'block';
+                details.innerHTML = `
+                    <strong>🏦 Direct Bank Transfer (Meezan / HBL / UBL):</strong><br>
+                    • Bank: <strong>Meezan Bank Ltd</strong><br>
+                    • Account Title: <strong>Bashir Ahmad</strong><br>
+                    • IBAN: <strong>PK54MEZN0001000103209350</strong><br>
+                    <em>Transfer via Raast ID: ${JAZZCASH_NUMBER} or IBAN.</em>
+                `;
+            }
+        }
+
+        // GPS Location Detection
+        function detectGPSLocation() {
+            const badge = document.getElementById('gpsLocationBadge');
+            badge.style.display = 'inline-block';
+            badge.textContent = '📍 Locking GPS satellites...';
+
+            if (!navigator.geolocation) {
+                badge.textContent = '⚠️ Geolocation not supported by your browser.';
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    customerGPS = {
+                        latitude: pos.coords.latitude,
+                        longitude: pos.coords.longitude
+                    };
+                    badge.innerHTML = `✓ GPS Locked: ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)} (Live Radar Pin Assigned)`;
+                    const addrField = document.getElementById('custAddress');
+                    if (!addrField.value.trim()) {
+                        addrField.value = `Chitral / Verified Location (GPS: ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)})`;
+                    }
+                },
+                (err) => {
+                    badge.textContent = `Notice: GPS detection optional (${err.message}). Enter address manually.`;
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
+        // Payment Receipt File Reader
+        function handleReceiptFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                receiptBase64 = e.target.result;
+                document.getElementById('receiptPreviewNote').style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Place Order Submission
+        async function handlePlaceOrder(event) {
+            event.preventDefault();
+            const submitBtn = document.getElementById('placeOrderSubmitBtn');
+            const name = document.getElementById('custName').value.trim();
+            const phone = document.getElementById('custPhone').value.trim();
+            const address = document.getElementById('custAddress').value.trim();
+
+            if (!name || !phone || !address) {
+                alert('Please fill out all required fields.');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span>⏳ Confirming &amp; Dispatching...</span>';
+
+            const payload = {
+                name: name,
+                phone: phone,
+                address: address,
+                latitude: customerGPS ? customerGPS.latitude : null,
+                longitude: customerGPS ? customerGPS.longitude : null,
+                payment_method: selectedPayment,
+                items: cart,
+                receipt_base64: receiptBase64
+            };
+
+            try {
+                const res = await fetch('/api/v1/store/checkout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    closeCheckoutModal();
+                    // Show success modal
+                    document.getElementById('successOrderNum').textContent = data.order_number;
+                    document.getElementById('successTrackingBtn').href = data.tracking_url || `/track/${data.order_id}`;
+                    document.getElementById('orderSuccessOverlay').classList.add('active');
+                    // Clear cart
+                    cart = [];
+                    updateCartUI();
+                } else {
+                    alert('Order placement failed: ' + (data.error || 'Server error. Please retry.'));
+                }
+            } catch (err) {
+                alert('Connection error: ' + err.message);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<span>Place Order &amp; Dispatch to WhatsApp</span> &rarr;';
+            }
+        }
+
+        function closeSuccessModalAndReset() {
+            document.getElementById('orderSuccessOverlay').classList.remove('active');
+        }
+
+        // Auto-fetch on DOM loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchProducts();
+        });
+    </script>
+</body>
+</html>

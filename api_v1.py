@@ -7728,3 +7728,502 @@ def api_business_template_save():
         "message": f"Business Template applied successfully for '{b_name}'!",
         "updated_profile": updated
     }), 200
+
+
+# ==============================================================================
+# MODULE 1: PUBLIC E-COMMERCE STOREFRONT & CHECKOUT APIS
+# ==============================================================================
+
+@api_v1.route("/store/products", methods=["GET"])
+def api_store_products():
+    """Returns active products catalog for public shopping storefront."""
+    try:
+        from models import Product
+        org_id = request.args.get("org_id") or "org-enterprise-default"
+        q = Product.query.filter_by(is_active=True)
+        if org_id and org_id != "global":
+            org_prods = q.filter_by(organization_id=org_id).all()
+            if org_prods:
+                prods = org_prods
+            else:
+                prods = q.all()
+        else:
+            prods = q.all()
+
+        results = []
+        for p in prods:
+            results.append({
+                "id": p.id,
+                "name": p.name,
+                "category": p.category or "General",
+                "description": p.description or "",
+                "sku": p.sku or "",
+                "price": float(p.price or 0.0),
+                "currency": p.currency or "PKR",
+                "image_url": p.image_url or "",
+                "stock_quantity": int(p.stock_quantity or 0),
+                "stock_status": p.stock_status or "in_stock"
+            })
+        return jsonify({"success": True, "products": results, "count": len(results)}), 200
+    except Exception as e:
+        logger.error(f"Store products API error: {e}", exc_info=True)
+        return jsonify({"success": False, "products": [], "error": str(e)}), 500
+
+
+@api_v1.route("/store/checkout", methods=["POST"])
+def api_store_checkout():
+    """Handles instant customer order placement from public storefront.
+    Creates EcommerceOrder, CRM Lead, pins delivery coordinates for Live Radar Map,
+    and dispatches automated WhatsApp confirmation message + voice note.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        name = str(data.get("name") or "").strip()
+        phone = str(data.get("phone") or "").strip()
+        address = str(data.get("address") or "").strip()
+        lat = data.get("latitude")
+        lng = data.get("longitude")
+        payment_method = str(data.get("payment_method") or "cod").strip().lower()
+        items = data.get("items") or []
+        receipt_b64 = data.get("receipt_base64")
+        org_id = str(data.get("organization_id") or "org-enterprise-default").strip()
+
+        if not name:
+            return jsonify({"success": False, "error": "Customer name is required."}), 400
+        if not phone or len("".join(filter(str.isdigit, phone))) < 7:
+            return jsonify({"success": False, "error": "A valid WhatsApp phone number is required."}), 400
+        if not items or not isinstance(items, list):
+            return jsonify({"success": False, "error": "Cart cannot be empty. Please select products to purchase."}), 400
+
+        clean_phone = WhatsAppService.format_phone_number(phone)
+        total_amount = 0.0
+        cleaned_items = []
+        item_names = []
+        for it in items:
+            p_name = str(it.get("name") or "Product Item").strip()
+            p_price = float(it.get("price") or 0.0)
+            p_qty = max(1, int(it.get("quantity") or 1))
+            total_amount += (p_price * p_qty)
+            cleaned_items.append({
+                "id": str(it.get("id") or ""),
+                "name": p_name,
+                "price": p_price,
+                "quantity": p_qty,
+                "sku": str(it.get("sku") or "")
+            })
+            item_names.append(f"{p_qty}x {p_name} (Rs. {p_price * p_qty:,.0f})")
+
+        items_summary = ", ".join(item_names)
+        order_num = f"ORD-{int(time.time())}-{secrets.token_hex(2).upper()}"
+        initial_order_id = generate_uuid("ord")
+
+        # Payment status
+        p_status = "unpaid"
+        if payment_method == "cod":
+            p_status = "cod"
+
+        order_notes = f"Public Storefront Order.\nCustomer: {name}\nDelivery: {address or 'Not specified'}"
+        if lat is not None and lng is not None:
+            order_notes += f"\nGPS Coordinates: {lat}, {lng}"
+
+        from models import EcommerceOrder, Lead, WhatsAppMessage
+
+        order = EcommerceOrder(
+            id=initial_order_id,
+            organization_id=org_id,
+            order_number=order_num,
+            customer_phone=clean_phone,
+            customer_name=name,
+            total_amount=total_amount,
+            currency="PKR",
+            order_status="confirmed",
+            payment_status=p_status,
+            payment_method=payment_method,
+            items_json=json.dumps(cleaned_items),
+            shipping_address=address or "Chitral / Pakistan Delivery",
+            tracking_url=f"/track/{initial_order_id}",
+            notes=order_notes
+        )
+        db.session.add(order)
+        db.session.flush()
+
+        # Check if customer attached a payment receipt screenshot on checkout
+        verified_receipt_info = None
+        if receipt_b64 and ("base64," in str(receipt_b64) or len(str(receipt_b64)) > 100):
+            try:
+                raw_b64 = str(receipt_b64).split("base64,")[-1].strip()
+                rcpt_bytes = base64.b64decode(raw_b64)
+                v_res = WhatsAppService.verify_payment_receipt(
+                    image_bytes=rcpt_bytes,
+                    organization_id=org_id,
+                    sender_phone=clean_phone
+                )
+                if v_res.get("is_payment_receipt") and v_res.get("transaction_id") and not v_res.get("is_duplicate"):
+                    tid = v_res["transaction_id"]
+                    v_amt = v_res.get("amount_pkr", total_amount)
+                    v_prov = v_res.get("provider", payment_method)
+                    WhatsAppService.record_verified_tid(tid=tid, amount=v_amt, provider=v_prov, phone=clean_phone, order_id=order.id)
+                    order.payment_status = "paid"
+                    order.notes += f"\n[PAID & VERIFIED] Provider: {v_prov}, TID: {tid}, Amount: PKR {v_amt:,.0f}"
+                    verified_receipt_info = v_res
+            except Exception as rcpt_err:
+                logger.warning(f"Checkout receipt processing notice: {rcpt_err}")
+
+        # CRM Lead Integration + GPS Pinning for Live Delivery Radar Map
+        loc_str = ""
+        if lat is not None and lng is not None:
+            try:
+                loc_str = f" [Location: {float(lat):.6f}, {float(lng):.6f}]"
+            except Exception:
+                pass
+
+        lead_msg = (
+            f"🛍️ Storefront Order #{order_num}: {items_summary}. "
+            f"Total: PKR {total_amount:,.0f}. Address: {address or 'Chitral Delivery'}. "
+            f"Payment: {order.payment_status.upper()} ({payment_method.upper()}).{loc_str}"
+        )
+        lead = Lead(
+            id=generate_uuid("lead"),
+            organization_id=org_id,
+            name=name,
+            phone=clean_phone,
+            intent="ecommerce_order",
+            urgency_score=95,
+            lead_score=100,
+            status="qualified" if order.payment_status == "paid" else "new",
+            message=lead_msg
+        )
+        db.session.add(lead)
+
+        # Store an inbound WhatsApp message record with the location tag so Live Radar Map auto-plots it
+        try:
+            inbound_msg = WhatsAppMessage(
+                id=generate_uuid("msg"),
+                organization_id=org_id,
+                whatsapp_message_id=f"store-{order_num}",
+                sender=clean_phone,
+                sender_name=name,
+                recipient="BashFlow Store",
+                direction="inbound",
+                message_type="location" if loc_str else "text",
+                body=lead_msg,
+                status="received",
+                is_read=True
+            )
+            db.session.add(inbound_msg)
+        except Exception as msg_rec_err:
+            logger.debug(f"Order WhatsAppMessage record notice: {msg_rec_err}")
+
+        db.session.commit()
+
+        # Build Host URL for Tracking Link
+        try:
+            host_url = request.host_url.rstrip("/")
+        except Exception:
+            host_url = os.environ.get("RENDER_EXTERNAL_URL", "https://bashflow.onrender.com").rstrip("/")
+        tracking_link = f"{host_url}/track/{order.id}"
+        order.tracking_url = tracking_link
+        db.session.commit()
+
+        # Dispatch Automated WhatsApp Confirmation Message
+        order_msg = (
+            f"🎉 *SHUKRIYA! ORDER CONFIRMED* (Order #{order_num})\n\n"
+            f"Salam {name}!\n"
+            f"Aapka Chitral & Global Bazar ka order kamyabi se record ho chuka hai.\n\n"
+            f"📦 *Items:* {items_summary}\n"
+            f"💵 *Total Raqam:* PKR {total_amount:,.0f}\n"
+            f"💳 *Payment:* {order.payment_status.upper()} ({payment_method.upper()})\n"
+            f"📍 *Delivery Address:* {address or 'Chitral / Verified'}\n\n"
+            f"🚚 *Live Tracking Link:*\n{tracking_link}\n\n"
+            f"Hum aapka order jald courier ke hawale kar rahe hain. Shukriya!"
+        )
+
+        try:
+            WhatsAppService.send_message(
+                organization_id=org_id,
+                to_phone=clean_phone,
+                message_text=order_msg
+            )
+        except Exception as wa_err:
+            logger.warning(f"WhatsApp order confirmation dispatch notice: {wa_err}")
+
+        # Dispatch Automated WhatsApp Urdu Voice Note
+        try:
+            voice_script = (
+                f"Salam {name}! Chitral and Global Bazar se aapka order number {order_num} kamyabi ke sath receive ho gaya hai. "
+                f"Kul raqam {int(total_amount)} rupaye hai. "
+                f"Aapka parcel tayar kar ke jald dispatch kar diya jayega. Shukriya!"
+            )
+            v_bytes = WhatsAppService._synthesize_edge_tts(voice_script, language="urdu", organization_id=org_id)
+            if v_bytes:
+                WhatsAppService.send_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    audio_bytes=v_bytes,
+                    is_voice=True
+                )
+        except Exception as v_err:
+            logger.warning(f"WhatsApp order voice note dispatch notice: {v_err}")
+
+        return jsonify({
+            "success": True,
+            "order_id": order.id,
+            "order_number": order.order_number,
+            "total_amount": total_amount,
+            "tracking_url": tracking_link,
+            "payment_status": order.payment_status,
+            "message": "Order placed successfully!"
+        }), 201
+
+    except Exception as e:
+        logger.error(f"Store checkout error: {e}", exc_info=True)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify({"success": False, "error": f"Failed to place order: {str(e)}"}), 500
+
+
+@api_v1.route("/store/order/<order_id>", methods=["GET"])
+def api_store_order_status(order_id: str):
+    """Retrieves order tracking details for customer."""
+    try:
+        from models import EcommerceOrder
+        order = EcommerceOrder.query.filter(
+            (EcommerceOrder.id == order_id) | (EcommerceOrder.order_number == order_id)
+        ).first()
+        if not order:
+            return jsonify({"success": False, "error": "Order not found."}), 404
+
+        items = []
+        if order.items_json:
+            try:
+                items = json.loads(order.items_json)
+            except Exception:
+                pass
+
+        return jsonify({
+            "success": True,
+            "order": {
+                "id": order.id,
+                "order_number": order.order_number,
+                "customer_name": order.customer_name,
+                "customer_phone": order.customer_phone,
+                "total_amount": order.total_amount,
+                "currency": order.currency,
+                "order_status": order.order_status,
+                "payment_status": order.payment_status,
+                "payment_method": order.payment_method,
+                "shipping_address": order.shipping_address,
+                "courier_name": order.courier_name or "TCS / Leopard Express",
+                "tracking_number": order.tracking_number or f"TRK-{order.order_number}",
+                "tracking_url": order.tracking_url,
+                "items": items,
+                "created_at": order.created_at.isoformat() if order.created_at else None
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ==============================================================================
+# MODULE 2: AI VOICE STUDIO & LIVE VOICE TEST APIS
+# ==============================================================================
+
+@api_v1.route("/voice/test", methods=["POST"])
+def api_voice_test_live():
+    """Generates live audio sample using selected persona, rate, and pitch for browser preview."""
+    try:
+        data = request.get_json(silent=True) or {}
+        text = str(data.get("text") or "Salam! OpsFlow AI voice studio bilkul theek kaam kar raha hai.").strip()
+        voice = str(data.get("voice") or "ur-PK-AsadNeural").strip()
+        rate = data.get("rate")
+        pitch = data.get("pitch")
+        org_id = request.args.get("org_id") or "org-enterprise-default"
+
+        rate_str = f"{int(rate):+d}%" if (isinstance(rate, (int, float)) or (isinstance(rate, str) and str(rate).replace("+","").replace("-","").isdigit())) else (str(rate) if rate else None)
+        pitch_str = f"{int(pitch):+d}Hz" if (isinstance(pitch, (int, float)) or (isinstance(pitch, str) and str(pitch).replace("+","").replace("-","").isdigit())) else (str(pitch) if pitch else None)
+
+        audio_bytes = WhatsAppService._synthesize_edge_tts(
+            text=text,
+            voice=voice,
+            rate=rate_str,
+            pitch=pitch_str,
+            organization_id=org_id
+        )
+
+        if not audio_bytes:
+            return jsonify({"success": False, "error": "TTS synthesis returned no audio data."}), 500
+
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+        return jsonify({
+            "success": True,
+            "audio_base64": audio_b64,
+            "mime_type": "audio/mp3",
+            "voice": voice,
+            "rate": rate_str,
+            "pitch": pitch_str
+        }), 200
+    except Exception as e:
+        logger.error(f"Live voice test error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/voice/settings", methods=["GET", "POST"])
+def api_voice_settings():
+    """Reads or updates default WhatsApp voice settings in SystemSetting table."""
+    try:
+        from models import SystemSetting
+        org_id = request.args.get("org_id") or "org-enterprise-default"
+
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            voice = str(data.get("voice") or "").strip()
+            rate = data.get("rate")
+            pitch = data.get("pitch")
+
+            if voice:
+                SystemSetting.set_val("EDGE_TTS_VOICE", voice, description="Default WhatsApp TTS voice persona")
+                os.environ["EDGE_TTS_VOICE"] = voice
+
+            if rate is not None:
+                rate_str = f"{int(rate):+d}%" if (isinstance(rate, (int, float)) or (isinstance(rate, str) and str(rate).replace("+","").replace("-","").isdigit())) else str(rate).strip()
+                SystemSetting.set_val("EDGE_TTS_RATE", rate_str, description="Default WhatsApp TTS speech rate")
+                os.environ["EDGE_TTS_RATE"] = rate_str
+
+            if pitch is not None:
+                pitch_str = f"{int(pitch):+d}Hz" if (isinstance(pitch, (int, float)) or (isinstance(pitch, str) and str(pitch).replace("+","").replace("-","").isdigit())) else str(pitch).strip()
+                SystemSetting.set_val("EDGE_TTS_PITCH", pitch_str, description="Default WhatsApp TTS pitch")
+                os.environ["EDGE_TTS_PITCH"] = pitch_str
+
+            db.session.commit()
+
+            return jsonify({
+                "success": True,
+                "message": "Default WhatsApp Voice settings saved successfully!",
+                "settings": {
+                    "voice": SystemSetting.get_val("EDGE_TTS_VOICE", "ur-PK-AsadNeural"),
+                    "rate": SystemSetting.get_val("EDGE_TTS_RATE", "+4%"),
+                    "pitch": SystemSetting.get_val("EDGE_TTS_PITCH", "+0Hz")
+                }
+            }), 200
+
+        # GET request
+        return jsonify({
+            "success": True,
+            "settings": {
+                "voice": SystemSetting.get_val("EDGE_TTS_VOICE", "ur-PK-AsadNeural"),
+                "rate": SystemSetting.get_val("EDGE_TTS_RATE", "+4%"),
+                "pitch": SystemSetting.get_val("EDGE_TTS_PITCH", "+0Hz")
+            }
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Voice settings API error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ==============================================================================
+# MODULE 3: PAYMENT RECEIPT AI VISION VERIFIER API
+# ==============================================================================
+
+@api_v1.route("/payments/verify-receipt", methods=["POST"])
+def api_verify_payment_receipt():
+    """Inspects an uploaded or base64 payment receipt screenshot using Gemini 2.5 Flash Vision.
+    Extracts TID, Amount, Provider, and updates matching order and CRM lead.
+    """
+    try:
+        org_id = request.args.get("org_id") or "org-enterprise-default"
+        img_bytes = None
+        phone = ""
+        order_id = ""
+
+        # 1. Check multipart file upload
+        if "file" in request.files or "receipt" in request.files:
+            file_obj = request.files.get("file") or request.files.get("receipt")
+            if file_obj and file_obj.filename:
+                img_bytes = file_obj.read()
+            phone = request.form.get("phone") or ""
+            order_id = request.form.get("order_id") or ""
+
+        # 2. Check JSON payload
+        if not img_bytes:
+            data = request.get_json(silent=True) or {}
+            b64_str = data.get("image_base64") or data.get("image") or data.get("receipt_base64")
+            if b64_str:
+                clean_b64 = str(b64_str).split("base64,")[-1].strip()
+                try:
+                    img_bytes = base64.b64decode(clean_b64)
+                except Exception as b64_err:
+                    return jsonify({"success": False, "error": f"Invalid base64 image data: {b64_err}"}), 400
+            phone = data.get("phone") or phone
+            order_id = data.get("order_id") or order_id
+
+        if not img_bytes:
+            return jsonify({"success": False, "error": "Please provide an image file or image_base64 string."}), 400
+
+        # Run Gemini Vision payment receipt analysis
+        verification = WhatsAppService.verify_payment_receipt(
+            image_bytes=img_bytes,
+            mime_type="image/jpeg",
+            organization_id=org_id,
+            sender_phone=phone
+        )
+
+        matched_order_info = None
+        if verification.get("is_payment_receipt") and verification.get("transaction_id"):
+            tid = verification["transaction_id"]
+            amt = verification.get("amount_pkr", 0.0)
+            provider = verification.get("provider", "Digital Payment")
+
+            if not verification.get("is_duplicate"):
+                # Record verified TID
+                WhatsAppService.record_verified_tid(tid=tid, amount=amt, provider=provider, phone=phone, order_id=order_id)
+
+                # Match and update EcommerceOrder
+                from models import EcommerceOrder, Lead
+                target_order = None
+                if order_id:
+                    target_order = EcommerceOrder.query.filter(
+                        (EcommerceOrder.id == order_id) | (EcommerceOrder.order_number == order_id)
+                    ).first()
+                elif phone:
+                    digits = "".join(filter(str.isdigit, str(phone)))[-10:]
+                    if len(digits) >= 7:
+                        target_order = EcommerceOrder.query.filter(
+                            EcommerceOrder.customer_phone.ilike(f"%{digits}%"),
+                            EcommerceOrder.payment_status != "paid"
+                        ).order_by(EcommerceOrder.created_at.desc()).first()
+
+                if target_order:
+                    target_order.payment_status = "paid"
+                    target_order.order_status = "confirmed"
+                    target_order.payment_method = str(provider).lower()
+                    target_order.notes = (target_order.notes or "") + f"\n[PAID & VERIFIED] Provider: {provider}, TID: {tid}, Amount: PKR {amt:,.0f}, Verified At: {datetime.datetime.utcnow().isoformat()}"
+                    db.session.commit()
+                    matched_order_info = {
+                        "id": target_order.id,
+                        "order_number": target_order.order_number,
+                        "total_amount": target_order.total_amount,
+                        "payment_status": target_order.payment_status
+                    }
+
+                # Log in CRM Leads
+                if phone:
+                    digits = "".join(filter(str.isdigit, str(phone)))[-10:]
+                    crm_lead = Lead.query.filter(Lead.phone.ilike(f"%{digits}%")).order_by(Lead.created_at.desc()).first()
+                    if crm_lead:
+                        crm_lead.status = "converted"
+                        crm_lead.message = (crm_lead.message or "") + f"\n💰 [PAID & VERIFIED] Provider: {provider}, TID: {tid}, PKR {amt:,.0f}"
+                        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "verification": verification,
+            "matched_order": matched_order_info,
+            "message": "Payment receipt verified successfully!" if (verification.get("is_payment_receipt") and not verification.get("is_duplicate")) else "Verification complete."
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Payment receipt verification endpoint error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
