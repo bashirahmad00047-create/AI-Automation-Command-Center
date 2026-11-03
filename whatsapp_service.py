@@ -9188,11 +9188,22 @@ class WhatsAppService:
             bridge_payload["quoted_message_id"] = str(quoted_message_id).strip()
 
         if f_bytes:
-            import base64
-            bridge_payload["audioBase64"] = base64.b64encode(f_bytes).decode("ascii")
-            bridge_payload["ptt"] = bool(kwargs.get("ptt", True) or kwargs.get("is_voice", False))
-            bridge_payload["mimetype"] = kwargs.get("mime_type") or kwargs.get("mimetype") or "audio/ogg; codecs=opus"
-            out_msg_type = "voiceMessage" if bridge_payload["ptt"] else "audioMessage"
+            if len(f_bytes) > 1024:
+                import base64
+                bridge_payload["audioBase64"] = base64.b64encode(f_bytes).decode("ascii")
+                bridge_payload["ptt"] = bool(kwargs.get("ptt", True) or kwargs.get("is_voice", False))
+                bridge_payload["mimetype"] = kwargs.get("mime_type") or kwargs.get("mimetype") or "audio/ogg; codecs=opus"
+                out_msg_type = "voiceMessage" if bridge_payload["ptt"] else "audioMessage"
+            else:
+                logger.warning(f"[WhatsApp Audio Delivery Guarantee] Audio buffer rejected ({len(f_bytes)} bytes <= 1024). Delivering as text message.")
+                f_bytes = None
+                out_msg_type = "text"
+
+        if not bridge_message or str(bridge_message).strip() in ("[voice note]", "[voice message]", "[audio message]", ""):
+            fallback_text = kwargs.get("transcript") or kwargs.get("caption") or kwargs.get("text")
+            if fallback_text and str(fallback_text).strip():
+                bridge_message = str(fallback_text).strip()
+                bridge_payload["message"] = bridge_message
         # Automatic Product Image Attachment for Catalog cards
         if not kwargs.get("image_url") and not kwargs.get("imageUrl") and not kwargs.get("image_bytes") and not kwargs.get("imageBase64") and not f_bytes:
             extracted_prod = cls._extract_catalog_product_from_text(bridge_message, organization_id=organization_id)
@@ -9322,6 +9333,26 @@ class WhatsAppService:
                     logger.error(f"[Baileys Bridge Failed] HTTP {bridge_resp.status_code}: {err_text}")
             except Exception as bridge_err:
                 logger.error(f"[Baileys Bridge Exception] Failed to contact bridge at {bridge_url}: {bridge_err}")
+                if f_bytes and bridge_message:
+                    try:
+                        logger.info(f"[Baileys Bridge Guarantee] Retrying text delivery after audio dispatch exception for {real_chat_id}...")
+                        text_fb = {
+                            "chatId": real_chat_id,
+                            "to": clean_to,
+                            "recipient": real_chat_id,
+                            "message": bridge_message
+                        }
+                        if quoted_message_id:
+                            text_fb["quotedMessageId"] = str(quoted_message_id).strip()
+                        with cls.get_http_session(retries=1) as session:
+                            bridge_resp = session.post(
+                                bridge_url,
+                                json=text_fb,
+                                headers={"Content-Type": "application/json"},
+                                timeout=bridge_timeout
+                            )
+                    except Exception as fb_err:
+                        logger.warning(f"[Baileys Bridge Text Fallback Notice]: {fb_err}")
 
         if is_testing or cls.is_simulator_fallback_enabled():
             msg_id = f"wamid.mock_{int(time.time() * 1000)}"

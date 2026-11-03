@@ -99,3 +99,34 @@ def test_ai_catalog_grounding_injection():
     with app.app_context():
         kb = WhatsAppService.get_verified_business_knowledge_base()
         assert "CURRENT VERIFIED STORE CATALOG" in kb or "VERIFIED PRODUCTS" in kb
+
+
+def test_whatsapp_voice_buffer_validation_and_text_fallback():
+    """Verifies WhatsApp voice delivery guarantees:
+    - Audio buffers <= 1024 bytes are rejected and fall back to text delivery.
+    - Large valid buffers (> 1024 bytes) are preserved as voice.
+    - Messages never fail to reach the user's phone.
+    """
+    with app.app_context():
+        # Case 1: Corrupted / small buffer (e.g. 50 bytes) -> fallback to text
+        small_corrupt_buffer = b"RIFF" + b"\x00" * 46
+        res_small = WhatsAppService.send_message(
+            to_phone="+923209350856",
+            message_text="Assalam o Alaikum, your order is on the way!",
+            audio_bytes=small_corrupt_buffer,
+            is_voice=True
+        )
+        assert res_small["success"] is True
+        assert res_small["message_type"] == "text"
+
+        # Case 2: Valid audio buffer (> 1024 bytes) -> delivered as voiceMessage
+        valid_buffer = b"OggS" + b"\x00" * 2048
+        res_valid = WhatsAppService.send_message(
+            to_phone="+923209350856",
+            message_text="Assalam o Alaikum, audio reply.",
+            audio_bytes=valid_buffer,
+            is_voice=True
+        )
+        assert res_valid["success"] is True
+        assert res_valid["message_type"] in ("voiceMessage", "audioMessage")
+
