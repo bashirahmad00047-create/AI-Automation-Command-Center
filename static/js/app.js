@@ -12829,24 +12829,11 @@ function initLeafletRadarMap() {
 
         window.radarMap = leafletRadarMap;
 
-        // Street Tile Layer (OpenStreetMap)
-        const streetTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        // Rock-solid OpenStreetMap tile server (Dark Radar styled via CSS filter on .leaflet-tile-pane)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '&copy; OpenStreetMap contributors'
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors'
         }).addTo(leafletRadarMap);
-
-        // Dark Matter Tile Layer (Carto Dark)
-        const darkTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 19,
-            subdomains: 'abcd',
-            attribution: '&copy; OpenStreetMap &copy; CARTO'
-        });
-
-        // Layer Switcher: Street / Dark View
-        L.control.layers({
-            "🗺️ Street View": streetTiles,
-            "🌙 Dark Radar": darkTiles
-        }, null, { position: 'topright' }).addTo(leafletRadarMap);
 
         // Multiple staggered resize triggers to ensure tiles load seamlessly
         [100, 300, 600, 1000].forEach(delay => {
@@ -12990,21 +12977,20 @@ function openLocationOnRadarMap(lat, lng, customerName, phone, address) {
     // 3. Drop / highlight customer's pin on internal Leaflet map
     const marker = autoPlotWhatsAppLocation(latNum, lngNum, safeName, safePhone, safeAddress);
 
-    // 4. Smoothly zoom to coordinates using flyTo
+    // 4. Smoothly zoom to coordinates and invalidate size
+    window._targetRadarLat = latNum;
+    window._targetRadarLng = lngNum;
     setTimeout(() => {
-        const map = window.radarMap || leafletRadarMap;
-        if (map) {
+        const deliveryMap = window.radarMap || leafletRadarMap;
+        if (deliveryMap) {
             try {
-                map.invalidateSize();
-                map.flyTo([latNum, lngNum], 16, {
-                    animate: true,
-                    duration: 1.2
-                });
+                deliveryMap.invalidateSize(true);
+                deliveryMap.setView([latNum, lngNum], 15, { animate: true });
             } catch (_) {
-                try { map.setView([latNum, lngNum], 16); } catch (_) {}
+                try { deliveryMap.setView([latNum, lngNum], 15); } catch (_) {}
             }
         }
-    }, 200);
+    }, 150);
 
     // 5. Open rich popup card on the map
     setTimeout(() => {

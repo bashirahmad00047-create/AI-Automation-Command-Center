@@ -7759,14 +7759,22 @@ html.dark .dark\:hover\:bg-slate-800:hover, .dark .dark\:hover\:bg-slate-800:hov
 /* ==========================================================================
    ISSUE 1 & 2: LEAFLET RADAR MAP & 3-COLUMN RESPONSIVE LAYOUT
    ========================================================================== */
-#liveRadarMap, .liveRadarMap, .wa-delivery-map-container {
-    height: 550px !important;
-    min-height: 500px !important;
+#liveRadarMap, .liveRadarMap, .wa-delivery-map-container, #live-delivery-map {
+    height: calc(100vh - 80px) !important;
+    min-height: 550px !important;
     width: 100% !important;
     z-index: 1 !important;
-    background: #0f172a !important;
+    background: #0b0f19 !important;
     position: relative !important;
     display: block !important;
+}
+
+/* Invert standard OpenStreetMap tiles into a crisp Dark Radar view without failing third-party CDNs */
+#liveRadarMap .leaflet-tile-pane,
+.liveRadarMap .leaflet-tile-pane,
+.wa-delivery-map-container .leaflet-tile-pane,
+#live-delivery-map .leaflet-tile-pane {
+    filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 }
 
 #wa-delivery-map {
