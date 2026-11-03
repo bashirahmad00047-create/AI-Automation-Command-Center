@@ -11869,7 +11869,7 @@ function playLiveCallAudio(audioDataUri, audioBase64 = null) {
 
     isLiveAiSpeaking = true;
     setEqualizerActive(true);
-    if (statusLabel) statusLabel.textContent = '🔊 Assistant Speaking...';
+    if (statusLabel) statusLabel.textContent = '🔊 AI Speaking...';
 
     const intr = document.getElementById('liveCallInterruptIndicator');
     if (intr) intr.style.display = 'block';
@@ -12049,7 +12049,7 @@ function forceLiveCallAudioPlayback() {
             isLiveAiSpeaking = true;
             setEqualizerActive(true);
             const statusLabel = document.getElementById('voiceCallStatusLabel');
-            if (statusLabel) statusLabel.textContent = 'Assistant Speaking...';
+            if (statusLabel) statusLabel.textContent = '🔊 AI Speaking...';
             source.onended = () => {
                 liveCurrentSource = null;
                 isLiveAiSpeaking = false;
@@ -12066,7 +12066,7 @@ function forceLiveCallAudioPlayback() {
             isLiveAiSpeaking = true;
             setEqualizerActive(true);
             const statusLabel = document.getElementById('voiceCallStatusLabel');
-            if (statusLabel) statusLabel.textContent = 'Assistant Speaking...';
+            if (statusLabel) statusLabel.textContent = '🔊 AI Speaking...';
         }).catch(() => {});
     }
 }
