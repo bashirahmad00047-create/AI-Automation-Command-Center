@@ -3941,6 +3941,7 @@ def api_live_voice_call():
     try:
         data = request.get_json(silent=True) or {}
         user_text = str(data.get("text") or data.get("message") or "").strip()
+        audio_in_b64 = data.get("audio_base64") or data.get("audio") or ""
         persona = str(data.get("persona") or data.get("voice") or "").strip()
         rate = data.get("rate")
         pitch = data.get("pitch")
@@ -3966,6 +3967,18 @@ def api_live_voice_call():
                 reply_text = "Assalam-o-Alaikum! Welcome to BashFlow, how can I assist you today?"
                 voice_text = "Assalam-o-Alaikum! Welcome to BashFlow, how can I assist you today?"
         else:
+            if not user_text and audio_in_b64:
+                try:
+                    raw_b64 = str(audio_in_b64)
+                    if "," in raw_b64:
+                        raw_b64 = raw_b64.split(",", 1)[1]
+                    raw_audio_bytes = base64.b64decode(raw_b64)
+                    transcribed = WhatsAppService._transcribe_audio(raw_audio_bytes, organization_id=org_id)
+                    if transcribed and transcribed.strip():
+                        user_text = transcribed.strip()
+                except Exception as tr_err:
+                    logger.warning(f"Live voice call audio transcription notice: {tr_err}")
+
             if not user_text:
                 return jsonify({"success": False, "error": "Speech text is required"}), 400
 
@@ -4058,6 +4071,7 @@ def api_live_voice_call():
 
         return jsonify({
             "success": True,
+            "user_text": user_text,
             "reply_text": reply_text,
             "voice_script": normalized_speech,
             "audio_base64": audio_b64,

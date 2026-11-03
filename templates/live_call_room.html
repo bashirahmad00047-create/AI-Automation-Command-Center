@@ -92,16 +92,46 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            padding: 20px;
+            padding: 16px 20px;
             text-align: center;
+        }
+        .lang-switch-row {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .lang-chip {
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            color: #94a3b8;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 11px;
+            border-radius: 9999px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .lang-chip.active {
+            background: rgba(20, 184, 166, 0.2);
+            border-color: #14b8a6;
+            color: #14b8a6;
+            font-weight: 700;
         }
         .vapi-waves {
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            height: 80px;
-            margin-bottom: 24px;
+            height: 72px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            padding: 8px 20px;
+            border-radius: 16px;
+            transition: background 0.2s ease;
+        }
+        .vapi-waves:hover {
+            background: rgba(20, 184, 166, 0.05);
         }
         .wave-bar {
             width: 6px;
@@ -128,20 +158,20 @@
             border-radius: 14px;
             padding: 12px 14px;
             min-height: 64px;
-            max-height: 100px;
+            max-height: 95px;
             overflow-y: auto;
             font-size: 13px;
             line-height: 1.45;
             color: #cbd5e1;
             text-align: left;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
         }
         /* Text Fallback Row */
         .text-fallback-row {
             width: 100%;
             display: flex;
             gap: 8px;
-            margin-bottom: 6px;
+            margin-bottom: 4px;
         }
         .text-fallback-input {
             flex: 1;
@@ -150,7 +180,7 @@
             border-radius: 10px;
             padding: 8px 12px;
             color: #f8fafc;
-            font-size: 13px;
+            font-size: 12.5px;
             outline: none;
         }
         .text-fallback-btn {
@@ -165,7 +195,7 @@
         }
         /* Bottom Controls */
         .call-footer {
-            padding: 16px 20px 22px 20px;
+            padding: 14px 20px 20px 20px;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -174,8 +204,8 @@
             background: rgba(0, 0, 0, 0.2);
         }
         .btn-circle {
-            width: 50px;
-            height: 50px;
+            width: 48px;
+            height: 48px;
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -277,14 +307,29 @@
             <div class="call-timer" id="callTimer">00:00</div>
         </div>
 
-        <!-- Center: 5 Teal Wave Bars & Subtitle -->
+        <!-- Center: Wave Bars & Subtitle -->
         <div class="call-body">
-            <div class="vapi-waves" id="waveContainer">
+            <!-- Language Selection Chips -->
+            <div class="lang-switch-row">
+                <button type="button" id="btnLangUr" class="lang-chip active" onclick="switchLanguage('ur-PK')">🇵🇰 Urdu (اردو)</button>
+                <button type="button" id="btnLangEn" class="lang-chip" onclick="switchLanguage('en-US')">🇬🇧 English</button>
+            </div>
+
+            <div class="vapi-waves" id="waveContainer" onclick="interruptAssistant()" title="Tap to interrupt assistant">
                 <span class="wave-bar"></span>
                 <span class="wave-bar"></span>
                 <span class="wave-bar"></span>
                 <span class="wave-bar"></span>
                 <span class="wave-bar"></span>
+            </div>
+
+            <div id="interruptIndicator" style="display: none; font-size: 11px; color: #f59e0b; margin-top: -6px; margin-bottom: 10px; cursor: pointer;" onclick="interruptAssistant()">
+                ✋ Tap waves to Interrupt
+            </div>
+
+            <!-- Autoplay Unmute Fallback Prompt -->
+            <div id="unmutePrompt" style="display: none; width: 100%; background: rgba(20, 184, 166, 0.18); border: 1px solid #14b8a6; color: #14b8a6; border-radius: 10px; padding: 7px 12px; margin-bottom: 10px; font-size: 12px; font-weight: 700; text-align: center; cursor: pointer;" onclick="forceAudioPlayback()">
+                🔊 Tap to Hear AI Voice
             </div>
 
             <div class="transcript-box" id="transcriptBox">
@@ -316,6 +361,8 @@
         const phone = "{{ phone }}";
         let isCallActive = false;
         let isMuted = false;
+        let isAiSpeaking = false;
+        let currentLanguage = 'ur-PK';
         let callSeconds = 0;
         let timerInterval = null;
         let recognition = null;
@@ -324,6 +371,22 @@
         let audioPlayer = document.getElementById('audioPlayer');
         let lastSpokenText = '';
         let lastSpokenTime = 0;
+        let audioCtx = null;
+        let currentSource = null;
+        let pendingAudioBuffer = null;
+
+        function getAudioContext() {
+            if (!audioCtx) {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioContextClass) {
+                    audioCtx = new AudioContextClass();
+                }
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume().catch(() => {});
+            }
+            return audioCtx;
+        }
 
         function setStatus(text) {
             const el = document.getElementById('callStatusLabel');
@@ -333,6 +396,40 @@
         function setWaveAnimation(animating) {
             const wc = document.getElementById('waveContainer');
             if (wc) wc.classList.toggle('animating', Boolean(animating));
+            const intr = document.getElementById('interruptIndicator');
+            if (intr) intr.style.display = animating ? 'block' : 'none';
+        }
+
+        function switchLanguage(lang) {
+            currentLanguage = lang;
+            const btnUr = document.getElementById('btnLangUr');
+            const btnEn = document.getElementById('btnLangEn');
+            if (btnUr && btnEn) {
+                btnUr.classList.toggle('active', lang === 'ur-PK');
+                btnEn.classList.toggle('active', lang === 'en-US');
+            }
+            if (recognition) {
+                recognition.lang = lang;
+                try { recognition.stop(); } catch (_) {}
+            }
+        }
+
+        function interruptAssistant() {
+            if (isAiSpeaking) {
+                if (currentSource) {
+                    try { currentSource.stop(); } catch (_) {}
+                    currentSource = null;
+                }
+                if (audioPlayer) {
+                    try { audioPlayer.pause(); } catch (_) {}
+                }
+                isAiSpeaking = false;
+                setWaveAnimation(false);
+                setStatus('Listening... Speak now');
+                if (recognition && isCallActive && !isMuted) {
+                    try { recognition.start(); } catch (_) {}
+                }
+            }
         }
 
         function startTimer() {
@@ -356,7 +453,13 @@
             const overlay = document.getElementById('connectOverlay');
             if (overlay) overlay.style.display = 'none';
 
-            // Prime browser audio context on user gesture
+            // 1. Prime AudioContext on explicit user gesture
+            const ctx = getAudioContext();
+            if (ctx && ctx.state === 'suspended') {
+                ctx.resume();
+            }
+
+            // 2. Prime HTML5 audio element
             if (audioPlayer) {
                 audioPlayer.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
                 audioPlayer.play().then(() => audioPlayer.pause()).catch(() => {});
@@ -366,11 +469,140 @@
             startTimer();
             setStatus('Thinking...');
 
-            // Fetch and play initial greeting immediately
+            // 3. Fetch initial greeting
             fetchGreeting();
 
-            // Start continuous microphone recognition
+            // 4. Initialize speech recognition
             startSpeechRecognition();
+        }
+
+        function base64ToArrayBuffer(base64) {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        function playAudioResponse(audioUri, audioBase64) {
+            if (!audioUri && !audioBase64) return;
+            isAiSpeaking = true;
+            setWaveAnimation(true);
+            setStatus('Assistant Speaking...');
+
+            const promptEl = document.getElementById('unmutePrompt');
+            if (promptEl) promptEl.style.display = 'none';
+
+            const ctx = getAudioContext();
+
+            if (ctx && audioBase64) {
+                try {
+                    const arrayBuffer = base64ToArrayBuffer(audioBase64);
+                    ctx.decodeAudioData(arrayBuffer.slice(0), (decodedBuffer) => {
+                        if (!isCallActive) return;
+                        pendingAudioBuffer = decodedBuffer;
+
+                        if (currentSource) {
+                            try { currentSource.stop(); } catch (_) {}
+                        }
+                        const source = ctx.createBufferSource();
+                        source.buffer = decodedBuffer;
+                        source.connect(ctx.destination);
+                        currentSource = source;
+
+                        source.onended = () => {
+                            if (currentSource === source) {
+                                currentSource = null;
+                                isAiSpeaking = false;
+                                setWaveAnimation(false);
+                                if (isCallActive) {
+                                    setStatus('Listening... Speak now');
+                                    if (recognition && !isMuted) {
+                                        try { recognition.start(); } catch (_) {}
+                                    }
+                                }
+                            }
+                        };
+
+                        source.start(0);
+                    }, (decodeErr) => {
+                        console.warn('[WebAudio decode error]', decodeErr);
+                        playViaAudioElement(audioUri);
+                    });
+                } catch (webaudioErr) {
+                    console.warn('[WebAudio init error]', webaudioErr);
+                    playViaAudioElement(audioUri);
+                }
+            } else {
+                playViaAudioElement(audioUri);
+            }
+        }
+
+        function playViaAudioElement(audioUri) {
+            if (!audioPlayer || !audioUri) return;
+            audioPlayer.src = audioUri;
+            audioPlayer.muted = isMuted;
+
+            audioPlayer.onended = () => {
+                isAiSpeaking = false;
+                setWaveAnimation(false);
+                if (isCallActive) {
+                    setStatus('Listening... Speak now');
+                    if (recognition && !isMuted) {
+                        try { recognition.start(); } catch (_) {}
+                    }
+                }
+            };
+
+            audioPlayer.play().catch(err => {
+                console.warn('[HTML5 Audio play blocked]', err);
+                isAiSpeaking = false;
+                setWaveAnimation(false);
+                if (isCallActive) setStatus('Listening... Speak now');
+
+                const promptEl = document.getElementById('unmutePrompt');
+                if (promptEl && isCallActive) {
+                    promptEl.style.display = 'block';
+                }
+            });
+        }
+
+        function forceAudioPlayback() {
+            const promptEl = document.getElementById('unmutePrompt');
+            if (promptEl) promptEl.style.display = 'none';
+
+            const ctx = getAudioContext();
+            if (ctx && ctx.state === 'suspended') {
+                ctx.resume();
+            }
+            if (pendingAudioBuffer && ctx) {
+                try {
+                    const source = ctx.createBufferSource();
+                    source.buffer = pendingAudioBuffer;
+                    source.connect(ctx.destination);
+                    currentSource = source;
+                    isAiSpeaking = true;
+                    setWaveAnimation(true);
+                    setStatus('Assistant Speaking...');
+                    source.onended = () => {
+                        currentSource = null;
+                        isAiSpeaking = false;
+                        setWaveAnimation(false);
+                        if (isCallActive) setStatus('Listening... Speak now');
+                    };
+                    source.start(0);
+                    return;
+                } catch (_) {}
+            }
+            if (audioPlayer && audioPlayer.src) {
+                audioPlayer.play().then(() => {
+                    isAiSpeaking = true;
+                    setWaveAnimation(true);
+                    setStatus('Assistant Speaking...');
+                }).catch(() => {});
+            }
         }
 
         async function fetchGreeting() {
@@ -386,50 +618,32 @@
                 });
                 const data = await res.json();
                 if (data && data.success && isCallActive) {
-                    const greeting = data.reply_text || 'Assalam-o-Alaikum! Welcome to BashFlow, main aapki kya madad kar sakta hoon?';
+                    const greeting = data.reply_text || 'Assalam-o-Alaikum! Welcome to BashFlow, main aap ki kya madad kar sakta hoon?';
                     callHistory.push({ role: 'assistant', text: greeting });
 
                     const tb = document.getElementById('transcriptBox');
                     if (tb) {
                         tb.innerHTML = `<div style="color: #14b8a6; font-weight: 600;"><strong>Assistant:</strong> ${escapeHtml(greeting)}</div>`;
+                        tb.scrollTop = tb.scrollHeight;
                     }
 
-                    if (data.audio_data_uri) {
-                        playAudioResponse(data.audio_data_uri);
+                    if (data.audio_base64 || data.audio_data_uri) {
+                        playAudioResponse(data.audio_data_uri, data.audio_base64);
                     } else {
-                        setStatus('Listening...');
+                        setStatus('Listening... Speak now');
                     }
                 }
             } catch (err) {
                 console.warn('[Greeting error]', err);
-                setStatus('Listening...');
+                setStatus('Listening... Speak now');
             }
-        }
-
-        function playAudioResponse(audioUri) {
-            if (!audioPlayer) return;
-            audioPlayer.src = audioUri;
-            audioPlayer.muted = isMuted;
-            setWaveAnimation(true);
-            setStatus('Speaking...');
-
-            audioPlayer.onended = () => {
-                setWaveAnimation(false);
-                if (isCallActive) setStatus('Listening...');
-            };
-
-            audioPlayer.play().catch(err => {
-                console.warn('[Audio play blocked]', err);
-                setWaveAnimation(false);
-                if (isCallActive) setStatus('Listening...');
-            });
         }
 
         function startSpeechRecognition() {
             const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRec) {
                 const tb = document.getElementById('transcriptBox');
-                if (tb) tb.innerHTML += '<div style="color: #f59e0b; font-size: 11px; margin-top: 4px;">Speech recognition not supported in this browser. Please use the text input below.</div>';
+                if (tb) tb.innerHTML += '<div style="color: #f59e0b; font-size: 11px; margin-top: 4px;">Speech recognition not available in this browser. Please use Chrome/Edge or type in the input below.</div>';
                 return;
             }
 
@@ -440,17 +654,13 @@
                 recognition = new SpeechRec();
                 recognition.continuous = true;
                 recognition.interimResults = true;
-                recognition.lang = 'ur-PK';
+                recognition.lang = currentLanguage;
 
                 recognition.onresult = (event) => {
-                    // Instant Barge-In: Stop AI audio if user interrupts
-                    if (audioPlayer && !audioPlayer.paused) {
-                        try {
-                            audioPlayer.pause();
-                            audioPlayer.currentTime = 0;
-                        } catch (_) {}
-                        setWaveAnimation(false);
-                        setStatus('Listening...');
+                    // CRITICAL: If the AI assistant is speaking, IGNORE microphone input
+                    // to completely prevent acoustic feedback loop / self-interruption from device speakers!
+                    if (isAiSpeaking) {
+                        return;
                     }
 
                     let interim = '';
@@ -463,10 +673,15 @@
                         }
                     }
 
-                    const display = final || interim;
+                    const display = (final || interim).trim();
                     const tb = document.getElementById('transcriptBox');
                     if (tb && display) {
                         tb.innerHTML = `<div style="color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(display)}</div>`;
+                        tb.scrollTop = tb.scrollHeight;
+                    }
+
+                    if (display) {
+                        setStatus('Hearing you speak...');
                     }
 
                     clearTimeout(debounceTimer);
@@ -477,17 +692,26 @@
                         sendSpokenText(finalClean);
                     } else if (interimClean.length > 2) {
                         debounceTimer = setTimeout(() => {
-                            sendSpokenText(interimClean);
-                        }, 650);
+                            if (!isAiSpeaking && interimClean.length > 2) {
+                                sendSpokenText(interimClean);
+                            }
+                        }, 750);
                     }
                 };
 
                 recognition.onerror = (e) => {
-                    console.warn('[Speech recognition warning]', e);
+                    console.warn('[Speech recognition warning]', e && e.error);
+                    if (e && e.error === 'not-allowed') {
+                        const tb = document.getElementById('transcriptBox');
+                        if (tb) {
+                            tb.innerHTML = '<div style="color: #ef4444; font-size: 12px; font-weight: 600;">⚠️ Microphone permission denied. Please allow microphone in browser address bar and refresh.</div>';
+                        }
+                        setStatus('Mic Blocked');
+                    }
                 };
 
                 recognition.onend = () => {
-                    if (isCallActive && !isMuted && recognition) {
+                    if (isCallActive && !isMuted && !isAiSpeaking && recognition) {
                         try { recognition.start(); } catch (_) {}
                     }
                 };
@@ -499,10 +723,10 @@
         }
 
         async function sendSpokenText(text) {
-            if (!text || !text.trim() || !isCallActive) return;
+            if (!text || !text.trim() || !isCallActive || isAiSpeaking) return;
             const clean = text.trim();
             const now = Date.now();
-            if (clean === lastSpokenText && (now - lastSpokenTime) < 1400) return;
+            if (clean === lastSpokenText && (now - lastSpokenTime) < 1500) return;
             lastSpokenText = clean;
             lastSpokenTime = now;
 
@@ -513,8 +737,9 @@
             if (tb) {
                 tb.innerHTML = `
                     <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(clean)}</div>
-                    <div style="color: #94a3b8; font-style: italic;">Thinking...</div>
+                    <div style="color: #94a3b8; font-style: italic;">Assistant thinking...</div>
                 `;
+                tb.scrollTop = tb.scrollHeight;
             }
 
             try {
@@ -537,19 +762,20 @@
                             <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(clean)}</div>
                             <div style="color: #f8fafc;"><strong style="color: #14b8a6;">Assistant:</strong> ${escapeHtml(reply)}</div>
                         `;
+                        tb.scrollTop = tb.scrollHeight;
                     }
 
-                    if (data.audio_data_uri) {
-                        playAudioResponse(data.audio_data_uri);
+                    if (data.audio_base64 || data.audio_data_uri) {
+                        playAudioResponse(data.audio_data_uri, data.audio_base64);
                     } else {
-                        setStatus('Listening...');
+                        setStatus('Listening... Speak now');
                     }
                 } else {
-                    setStatus('Listening...');
+                    setStatus('Listening... Speak now');
                 }
             } catch (err) {
                 console.warn('[Voice exchange error]', err);
-                setStatus('Listening...');
+                setStatus('Listening... Speak now');
             }
         }
 
@@ -569,19 +795,30 @@
             if (icon) icon.textContent = isMuted ? '🔇' : '🎤';
             if (isMuted) {
                 if (recognition) { try { recognition.stop(); } catch (_) {} }
-                setStatus('Muted');
+                setStatus('Mic Muted');
             } else {
-                if (isCallActive && recognition) { try { recognition.start(); } catch (_) {} }
-                setStatus('Listening...');
+                if (isCallActive && !isAiSpeaking && recognition) {
+                    try { recognition.start(); } catch (_) {}
+                }
+                setStatus(isAiSpeaking ? 'Assistant Speaking...' : 'Listening... Speak now');
             }
         }
 
         function endCall() {
             isCallActive = false;
+            isAiSpeaking = false;
             stopTimer();
             setWaveAnimation(false);
-            if (recognition) { try { recognition.stop(); } catch (_) {} }
-            if (audioPlayer) { try { audioPlayer.pause(); } catch (_) {} }
+            if (currentSource) {
+                try { currentSource.stop(); } catch (_) {}
+                currentSource = null;
+            }
+            if (audioPlayer) {
+                try { audioPlayer.pause(); } catch (_) {}
+            }
+            if (recognition) {
+                try { recognition.stop(); } catch (_) {}
+            }
             setStatus('Call Ended');
             const tb = document.getElementById('transcriptBox');
             if (tb) tb.innerHTML = '<div style="color: #ef4444; font-weight: 700; text-align: center; padding-top: 10px;">Call Ended. Thank you!</div>';
