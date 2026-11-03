@@ -4256,7 +4256,7 @@ def api_call_status(phone):
         if not sess:
             return jsonify({
                 "success": True,
-                "status": "ended",
+                "status": "idle",
                 "phone": clean_phone,
                 "joined": False
             }), 200

@@ -12596,7 +12596,7 @@ async function initiateCallHandshake(phone, name) {
                     vadStatus.textContent = '● Customer Connected - Live Audio Active';
                 }
                 onCustomerJoinedCall(name, cleanPhone);
-            } else if (currentStatus === 'ended') {
+            } else if (currentStatus === 'ended' && isConnectedLogged) {
                 if (callStatusPollInterval) {
                     clearInterval(callStatusPollInterval);
                     callStatusPollInterval = null;
@@ -12749,7 +12749,8 @@ function handleAdminEndCall() {
 }
 
 function bindAdminCallWidgetButtons() {
-    const endBtn = document.getElementById('startVoiceCallBtn');
+    // Only bind red End Call button inside modal, NEVER touch main startVoiceCallBtn
+    const endBtn = document.getElementById('btnAdminEndVoiceCall');
     if (endBtn && !endBtn._boundEndCall) {
         endBtn._boundEndCall = true;
         endBtn.addEventListener('click', (e) => {
@@ -13013,7 +13014,13 @@ function handleModalVadCompletion() {
 }
 
 function toggleLiveVoiceCall() {
-    handleAdminEndCall();
+    const modal = document.getElementById('liveVoiceCallModal');
+    const isModalOpen = modal && modal.style.display && modal.style.display !== 'none';
+    if (liveVoiceCallActive || isModalOpen) {
+        handleAdminEndCall();
+    } else {
+        openLiveVoiceCallModal(true);
+    }
 }
 window.toggleLiveVoiceCall = toggleLiveVoiceCall;
 window.openLiveVoiceCallModal = openLiveVoiceCallModal;

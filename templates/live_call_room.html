@@ -330,7 +330,7 @@
             <p style="font-size: 13px; color: #94a3b8; max-width: 260px; line-height: 1.5; margin-bottom: 24px;">
                 Connecting you to our 100% Free Live AI Voice Assistant.
             </p>
-            <button type="button" class="btn-start-call" id="joinCallBtn" onclick="startCallFromOverlay()">
+            <button type="button" class="btn-start-call" id="joinCallBtn">
                 <span>📞</span>
                 <span id="joinCallBtnText">Tap to Join Call</span>
             </button>
@@ -504,6 +504,10 @@
         // ===================================================================
         // 1. UNLOCK BROWSER AUDIO & JOIN CALL (MOBILE TOUCH & CLICK HANDLER)
         // ===================================================================
+        function setupMicAnalyser(stream) {
+            return setupMicrophoneAnalyser(stream);
+        }
+
         function startCustomerListening(stream) {
             const overlay = document.getElementById('connectOverlay');
             if (overlay) overlay.style.display = 'none';
@@ -519,16 +523,37 @@
 
             if (stream) {
                 micStream = stream;
-                setupMicAnalyser(stream);
-                setupMediaRecorderVAD(stream);
-                startPrimarySpeechRecognition();
+                try {
+                    setupMicrophoneAnalyser(stream);
+                } catch (e) {
+                    console.warn('[Microphone Analyser Error]', e);
+                }
+                try {
+                    setupMediaRecorderVAD(stream);
+                } catch (e) {
+                    console.warn('[MediaRecorder VAD Error]', e);
+                }
+                try {
+                    startPrimarySpeechRecognition();
+                } catch (e) {
+                    console.warn('[Speech Recognition Error]', e);
+                }
             } else {
-                setupDualMicPipeline();
+                try {
+                    setupDualMicPipeline();
+                } catch (e) {
+                    console.warn('[Dual Mic Pipeline Fallback]', e);
+                }
             }
         }
         window.startCustomerListening = startCustomerListening;
 
+        let isJoinInProgress = false;
+
         async function executeJoinFlow() {
+            if (isJoinInProgress || isCallActive) return;
+            isJoinInProgress = true;
+
             const joinBtn = document.getElementById('joinCallBtn');
             const txt = document.getElementById('joinCallBtnText') || joinBtn;
             if (joinBtn) joinBtn.disabled = true;
@@ -537,27 +562,32 @@
             try {
                 // Mobile browser ke liye AudioContext unlock karna zaroori hai
                 const AudioCtx = window.AudioContext || window.webkitAudioContext;
-                if (!audioCtx) audioCtx = new AudioCtx();
-                if (audioCtx.state === 'suspended') {
-                    await audioCtx.resume();
+                if (!audioCtx && AudioCtx) audioCtx = new AudioCtx();
+                if (audioCtx && audioCtx.state === 'suspended') {
+                    await audioCtx.resume().catch(() => {});
                 }
-                const silentBuffer = audioCtx.createBuffer(1, 1, 22050);
-                const s = audioCtx.createBufferSource();
-                s.buffer = silentBuffer;
-                s.connect(audioCtx.destination);
-                s.start(0);
+                if (audioCtx) {
+                    try {
+                        const silentBuffer = audioCtx.createBuffer(1, 1, 22050);
+                        const s = audioCtx.createBufferSource();
+                        s.buffer = silentBuffer;
+                        s.connect(audioCtx.destination);
+                        s.start(0);
+                    } catch (_) {}
+                }
 
                 if (audioPlayer) {
-                    audioPlayer.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-                    audioPlayer.play().then(() => audioPlayer.pause()).catch(() => {});
+                    try {
+                        audioPlayer.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+                        audioPlayer.play().then(() => audioPlayer.pause()).catch(() => {});
+                    } catch (_) {}
                 }
-
-                // Mic permission mangna
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
                 // Server ko batana ki customer join ho gaya hai
                 if (socket && socket.emit) {
-                    socket.emit('join-call-room', { roomId: roomId, role: 'customer' });
+                    try {
+                        socket.emit('join-call-room', { roomId: roomId, role: 'customer' });
+                    } catch (_) {}
                 }
                 const targetPhone = roomId || phone;
                 if (targetPhone) {
@@ -568,13 +598,28 @@
                     }).catch(err => console.warn('Join report notice:', err));
                 }
 
-                // Mic listening start karein
+                // Mic permission mangna with graceful fallback
+                let stream = null;
+                try {
+                    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    }
+                } catch (micErr) {
+                    console.warn('[Microphone getUserMedia Notice]', micErr);
+                }
+
+                // Hide overlay and transition into call screen
+                const overlay = document.getElementById('connectOverlay');
+                if (overlay) overlay.style.display = 'none';
+
                 startCustomerListening(stream);
             } catch (err) {
-                console.error('[Mic Permission Error]', err);
-                alert('Mic allow karein taake baat ho sake: ' + (err.message || err.name));
-                if (joinBtn) joinBtn.disabled = false;
-                if (txt) txt.innerText = 'Tap to Join Call';
+                console.error('[executeJoinFlow Error]', err);
+                const overlay = document.getElementById('connectOverlay');
+                if (overlay) overlay.style.display = 'none';
+                startCustomerListening(null);
+            } finally {
+                isJoinInProgress = false;
             }
         }
 
@@ -591,6 +636,10 @@
                     e.preventDefault();
                     executeJoinFlow();
                 });
+                joinBtn.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    executeJoinFlow();
+                }, { passive: false });
             }
             // Bind customer End Call button
             const endBtn = document.getElementById('btnEndCall') || document.querySelector('.btn-end');
