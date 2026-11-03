@@ -327,6 +327,28 @@ function unwrapMessage(msgContent) {
 // Global mappings for contacts and groups
 const contactNamesMap = new Map();  // JID / phone / LID -> Contact Name
 const groupSubjectsMap = new Map(); // Group JID (@g.us) -> Group Subject/Name
+const activeChatsMap = new Map();   // Persistent in-memory chat directory (chatId -> Chat Meta)
+
+function saveChatToStore(chat) {
+  if (!chat || !chat.id) return;
+  if (chat.id === 'status@broadcast') return;
+  const existing = activeChatsMap.get(chat.id) || {};
+  const isGroup = Boolean(chat.id.endsWith('@g.us'));
+  const chName = chat.name || chat.subject || chat.notify || existing.name || (isGroup ? 'WhatsApp Group' : '');
+  const cleanPhone = isGroup ? chat.id : (cleanPhoneNumber(chat.id) || chat.id);
+
+  activeChatsMap.set(chat.id, {
+    ...existing,
+    ...chat,
+    id: chat.id,
+    name: chName,
+    phone: cleanPhone,
+    isGroup,
+    unreadCount: chat.unreadCount !== undefined ? chat.unreadCount : (existing.unreadCount || 0),
+    conversationTimestamp: chat.conversationTimestamp || chat.lastMessageRecvTimestamp || existing.conversationTimestamp || Math.floor(Date.now() / 1000),
+    lastMessage: chat.lastMessage || existing.lastMessage || ''
+  });
+}
 const sentAiMessageIds = new Set(); // Tracks outgoing bot message IDs to prevent self-chat loops
 const userMessageQueues = new Map(); // Per-User Smart Queue: remoteJid -> { timer, messages: [], isProcessing: boolean }
 
@@ -788,7 +810,7 @@ async function startWhatsAppBridge() {
 
     // 0. History synchronization on initial connect or reconnect (auto-syncs contacts and groups)
     sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest }) => {
-      console.log(`[WhatsApp Bridge Auto-Sync] Synchronized history: ${chats?.length || 0} chats, ${contacts?.length || 0} contacts (isLatest: ${Boolean(isLatest)})`);
+      console.log(`[WhatsApp Bridge Auto-Sync] Synchronized history: ${chats?.length || 0} chats, ${contacts?.length || 0} contacts, ${messages?.length || 0} messages (isLatest: ${Boolean(isLatest)})`);
       if (Array.isArray(contacts)) {
         for (const c of contacts) {
           const cName = c.name || c.notify || c.verifiedName;
@@ -810,11 +832,34 @@ async function startWhatsAppBridge() {
       }
       if (Array.isArray(chats)) {
         for (const chat of chats) {
+          saveChatToStore(chat);
           const chName = chat.name || chat.subject || chat.notify;
           if (chat.id && chName) {
-            groupSubjectMap.set(chat.id, chName);
-            chatSubjectMap.set(chat.id, chName);
+            groupSubjectsMap.set(chat.id, chName);
           }
+        }
+      }
+      if (Array.isArray(messages)) {
+        for (const msg of messages.slice(-50)) {
+          try {
+            const rJid = msg.key?.remoteJid;
+            if (rJid && rJid !== 'status@broadcast') {
+              const unwrapped = msg.message?.ephemeralMessage?.message || msg.message?.viewOnceMessage?.message || unwrapMessage(msg.message) || msg.message;
+              const text = extractMessageText(unwrapped);
+              const ts = msg.messageTimestamp ? Number(msg.messageTimestamp) : Math.floor(Date.now() / 1000);
+              const isGrp = rJid.endsWith('@g.us');
+              const sPhone = cleanPhoneNumber(msg.key?.participant || rJid);
+              saveChatToStore({
+                id: rJid,
+                name: (isGrp ? groupSubjectsMap.get(rJid) : contactNamesMap.get(rJid)) || sPhone,
+                phone: isGrp ? rJid : sPhone,
+                isGroup: isGrp,
+                lastMessage: text || '',
+                conversationTimestamp: ts,
+                unreadCount: 0
+              });
+            }
+          } catch (_) {}
         }
       }
     });
@@ -866,6 +911,7 @@ async function startWhatsAppBridge() {
     // Capture chat and group events to cache real group subjects and chat titles
     sock.ev.on('chats.upsert', (chats) => {
       for (const chat of chats) {
+        saveChatToStore(chat);
         if (!chat.id) continue;
         if (chat.id.endsWith('@g.us')) {
           const subject = chat.name || chat.subject;
@@ -938,7 +984,8 @@ function enqueueContactTask(targetJid, taskFn) {
 
 sock.ev.on('messages.upsert', async ({ messages, type }) => {
       try {
-        if (type !== 'notify' || !messages || !Array.isArray(messages)) return;
+        if (!messages || !Array.isArray(messages)) return;
+        const isHistoryAppend = (type === 'append');
 
         for (const msg of messages) {
           const ownPhone = sock?.user?.id ? cleanPhoneNumber(sock.user.id.split(':')[0]) : '';
@@ -1393,7 +1440,8 @@ if (!text) text = '[Voice note]';
               }
             }
 
-            if (resData && (resData.reply || resData.audio_base64 || resData.image_url || resData.image_base64)) {
+            // Only deliver automated AI replies for live incoming notifications (never for history sync appends)
+            if (!isHistoryAppend && resData && (resData.reply || resData.audio_base64 || resData.image_url || resData.image_base64)) {
               await deliverAiResponse(resData, targetJid);
             }
           });
@@ -1558,6 +1606,35 @@ app.use(express.json());
 /**
  * Health & status endpoint
  */
+app.get(['/chats', '/api/chats', '/conversations', '/api/conversations'], (req, res) => {
+  try {
+    const list = Array.from(activeChatsMap.values()).map(c => {
+      const isGrp = Boolean(c.isGroup || (c.id && c.id.endsWith('@g.us')));
+      const clnPhone = isGrp ? c.id : (cleanPhoneNumber(c.phone || c.id) || c.id);
+      return {
+        id: c.id,
+        phone: clnPhone,
+        name: c.name || contactNamesMap.get(c.id) || (isGrp ? 'WhatsApp Group' : `+${clnPhone}`),
+        is_group: isGrp,
+        chat_type: isGrp ? 'group' : 'individual',
+        last_message: c.lastMessage || '',
+        timestamp: c.conversationTimestamp ? new Date(c.conversationTimestamp * 1000).toISOString().replace('T', ' ').substring(0, 19) : '',
+        unread_count: c.unreadCount || 0
+      };
+    });
+    list.sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')));
+    return res.status(200).json({
+      success: true,
+      connected: isConnected || Boolean(sock?.user),
+      user: sock?.user || null,
+      count: list.length,
+      chats: list
+    });
+  } catch (err) {
+    return res.status(200).json({ success: false, error: err.message, chats: [] });
+  }
+});
+
 app.get(['/', '/status', '/health', '/api/status'], (req, res) => {
   try {
     return res.status(200).json({

@@ -34,9 +34,15 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Leaflet.js CDN (OpenStreetMap - Zero API Key Required) -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet.js (Local Vendor Asset + Fast CDN Fallback) -->
+    <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="/static/vendor/leaflet/leaflet.js"></script>
+    <script>
+        if (typeof L === "undefined") {
+            document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"><\/script>');
+        }
+    </script>
 </head>
 <body class="command-center-body enterprise-layout">
     <!-- ==========================================================================
@@ -3275,7 +3281,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
         </section>
 
             <!-- TAB: LIVE DELIVERY RADAR MAP (SEPARATE DEDICATED SIDEBAR TAB) -->
-        <section id="tab-map" data-tab="map" class="tab-panel">
+        <section id="tab-delivery-map" data-tab="delivery-map" class="tab-panel">
             <div class="panel-header" style="align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; background: rgba(17, 27, 33, 0.9); border: 1px solid rgba(0, 168, 132, 0.35); border-radius: 12px; padding: 12px 18px; backdrop-filter: blur(14px);">
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <span style="font-size: 26px;">🗺️</span>

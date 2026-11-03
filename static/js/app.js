@@ -334,15 +334,26 @@ function switchTab(tabId) {
             if (typeof loadCustomerLocationsFromChatHistory === 'function') loadCustomerLocationsFromChatHistory();
             const activeMap = window.radarMap || leafletRadarMap;
             if (activeMap) {
-                try { activeMap.invalidateSize(); } catch (_) {}
+                try {
+                    activeMap.invalidateSize(true);
+                    if (!window._radarMapHasCustomPins) {
+                        activeMap.setView([35.8700, 71.7840], 13);
+                    }
+                } catch (_) {}
             }
         }, 150);
         setTimeout(() => {
             const activeMap = window.radarMap || leafletRadarMap;
             if (activeMap) {
-                try { activeMap.invalidateSize(); } catch (_) {}
+                try { activeMap.invalidateSize(true); } catch (_) {}
             }
         }, 400);
+        setTimeout(() => {
+            const activeMap = window.radarMap || leafletRadarMap;
+            if (activeMap) {
+                try { activeMap.invalidateSize(true); } catch (_) {}
+            }
+        }, 800);
     }
     if (tabId === 'company-messaging') {
         if (typeof loadCompanyMessagingDashboard === 'function') loadCompanyMessagingDashboard();
@@ -7549,14 +7560,18 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
         }
 
         let messages = [];
+        let backendConversations = [];
         try {
-            // First call /api/whatsapp/conversations to trigger auto-sync from CRM Leads if empty
+            // First call /api/whatsapp/conversations to trigger auto-sync from Baileys & CRM Leads
             try {
                 const convRes = await fetch('/api/whatsapp/conversations');
                 if (convRes.ok) {
                     const cData = await convRes.json();
                     if (cData.messages && cData.messages.length > 0) {
                         messages = cData.messages;
+                    }
+                    if (cData.conversations && cData.conversations.length > 0) {
+                        backendConversations = cData.conversations;
                     }
                 }
             } catch (_) {}
@@ -7570,6 +7585,22 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
             }
         } catch (fetchErr) {
             console.warn('[WhatsApp Messages Fetch Notice]:', fetchErr.message);
+        }
+
+        // If message list is empty but backend returned conversations from Baileys WhatsApp session or CRM,
+        // synthesize message stubs so groupWhatsAppConversations & renderWhatsAppWebUI render the chat list immediately!
+        if (messages.length === 0 && backendConversations.length > 0) {
+            messages = backendConversations.map(c => ({
+                id: 'msg_conv_' + c.id,
+                sender: c.phone || c.id,
+                recipient: 'system',
+                direction: 'inbound',
+                body: c.last_message || 'Active conversation',
+                created_at: c.timestamp || new Date().toISOString(),
+                sender_name: c.name || c.phone,
+                status: (c.unread_count > 0 ? 'received' : 'read'),
+                is_group: Boolean(c.is_group)
+            }));
         }
 
         // Real conversations only: If empty, messages remains empty array
@@ -12229,19 +12260,36 @@ window.createRichRadarPopupHtml = createRichRadarPopupHtml;
 function initLeafletRadarMap() {
     const mapEl = document.getElementById('liveRadarMap') || document.getElementById('wa-delivery-map');
     if (!mapEl || typeof L === 'undefined') return;
+
     if (leafletRadarMap) {
         window.radarMap = leafletRadarMap;
+        try { leafletRadarMap.invalidateSize(true); } catch (_) {}
         setTimeout(() => {
-            try { leafletRadarMap.invalidateSize(); } catch (_) {}
-        }, 100);
+            try { leafletRadarMap.invalidateSize(true); } catch (_) {}
+        }, 150);
         return;
     }
+
+    // Guard against re-attaching if DOM node was already bound to an L.map
+    if (mapEl._leaflet_id && typeof L.map !== 'undefined') {
+        return;
+    }
+
     try {
-        leafletRadarMap = L.map(mapEl.id, { zoomControl: true }).setView([35.8700, 71.7840], 13);
-        window.radarMap = leafletRadarMap;
+        // Explicitly set explicit height style on the container to prevent 0px rendering
+        if (!mapEl.style.height || mapEl.style.height === '0px') {
+            mapEl.style.height = '550px';
+        }
+        mapEl.style.width = '100%';
+
+        leafletRadarMap = L.map(mapEl.id, { 
+            zoomControl: true,
+            preferCanvas: true
+        }).setView([35.8700, 71.7840], 13); // Default centered on Chitral / Pakistan
+
         window.radarMap = leafletRadarMap;
 
-        // Street Tile Layer (OpenStreetMap - high visibility & reliability)
+        // Street Tile Layer (OpenStreetMap)
         const streetTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; OpenStreetMap contributors'
@@ -12260,12 +12308,14 @@ function initLeafletRadarMap() {
             "🌙 Dark Radar": darkTiles
         }, null, { position: 'topright' }).addTo(leafletRadarMap);
 
-        setTimeout(() => {
-            try { leafletRadarMap.invalidateSize(); } catch (_) {}
-        }, 250);
-        setTimeout(() => {
-            try { leafletRadarMap.invalidateSize(); } catch (_) {}
-        }, 600);
+        // Multiple staggered resize triggers to ensure tiles load seamlessly
+        [100, 300, 600, 1000].forEach(delay => {
+            setTimeout(() => {
+                if (leafletRadarMap) {
+                    try { leafletRadarMap.invalidateSize(true); } catch (_) {}
+                }
+            }, delay);
+        });
 
         // Load existing customer location pins from chat history
         if (typeof loadCustomerLocationsFromChatHistory === 'function') {
@@ -12276,6 +12326,30 @@ function initLeafletRadarMap() {
     }
 }
 window.initLeafletRadarMap = initLeafletRadarMap;
+
+function centerRadarMapPakistan() {
+    initLeafletRadarMap();
+    const map = window.radarMap || leafletRadarMap;
+    if (map) {
+        try {
+            map.invalidateSize(true);
+            map.setView([30.3753, 69.3451], 6);
+        } catch (_) {}
+    }
+}
+window.centerRadarMapPakistan = centerRadarMapPakistan;
+
+function centerRadarMapChitral() {
+    initLeafletRadarMap();
+    const map = window.radarMap || leafletRadarMap;
+    if (map) {
+        try {
+            map.invalidateSize(true);
+            map.setView([35.8700, 71.7840], 13);
+        } catch (_) {}
+    }
+}
+window.centerRadarMapChitral = centerRadarMapChitral;
 
 function autoPlotWhatsAppLocation(lat, lng, label, phone, address, status = 'Preparing') {
     if (!lat || !lng || isNaN(lat) || isNaN(lng)) return null;

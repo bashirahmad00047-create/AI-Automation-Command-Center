@@ -259,65 +259,42 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 try:
                     from sqlalchemy import inspect as _sa_inspect, text as _sa_text
                     _insp = _sa_inspect(db.engine)
-                    if "users" in _insp.get_table_names():
-                        _user_cols = {c["name"] for c in _insp.get_columns("users")}
-                        with db.engine.connect() as _c_conn:
-                            if "phone" not in _user_cols:
-                                _c_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN phone VARCHAR(64);"))
-                            if "department" not in _user_cols:
-                                _c_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN department VARCHAR(64) DEFAULT 'General';"))
-                            if "products" in _insp.get_table_names():
-                                _prd_cols = {c["name"] for c in _insp.get_columns("products")}
-                                if "image_url" not in _prd_cols:
-                                    _c_conn.execute(_sa_text("ALTER TABLE products ADD COLUMN image_url VARCHAR(512);"))
-                            if "organizations" in _insp.get_table_names():
-                                _org_cols = {c["name"] for c in _insp.get_columns("organizations")}
-                                if "stripe_customer_id" not in _org_cols:
-                                    try:
-                                        _c_conn.execute(_sa_text("ALTER TABLE organizations ADD COLUMN stripe_customer_id VARCHAR(128);"))
-                                    except Exception:
-                                        pass
-                                if "stripe_subscription_id" not in _org_cols:
-                                    try:
-                                        _c_conn.execute(_sa_text("ALTER TABLE organizations ADD COLUMN stripe_subscription_id VARCHAR(128);"))
-                                    except Exception:
-                                        pass
-                            if "whatsapp_messages" in _insp.get_table_names():
-                                _wam_cols = {c["name"] for c in _insp.get_columns("whatsapp_messages")}
-                                if "parent_message_id" not in _wam_cols:
-                                    try:
-                                        _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN parent_message_id VARCHAR(128);"))
-                                    except Exception:
-                                        pass
-                                if "media_url" not in _wam_cols:
-                                    try:
-                                        _c_conn.execute(_sa_text("ALTER TABLE whatsapp_messages ADD COLUMN media_url TEXT;"))
-                                    except Exception:
-                                        pass
-                                if "audio_data" not in _wam_cols:
-                                    try:
-                                        _col_type = "BYTEA" if getattr(db.engine.dialect, "name", "") == "postgresql" else "BLOB"
-                                        _c_conn.execute(_sa_text(f"ALTER TABLE whatsapp_messages ADD COLUMN audio_data {_col_type};"))
-                                    except Exception:
-                                        pass
-                            if "leads" in _insp.get_table_names():
-                                _lead_cols = {c["name"] for c in _insp.get_columns("leads")}
-                                if "is_sample" not in _lead_cols:
-                                    try:
-                                        _c_conn.execute(_sa_text("ALTER TABLE leads ADD COLUMN is_sample BOOLEAN DEFAULT 0;"))
-                                    except Exception:
-                                        pass
-                                if "route_department" not in _lead_cols:
-                                    try:
-                                        _c_conn.execute(_sa_text("ALTER TABLE leads ADD COLUMN route_department VARCHAR(64) DEFAULT 'General Queue';"))
-                                    except Exception:
-                                        pass
-                                if "draft_response" not in _lead_cols:
-                                    try:
-                                        _c_conn.execute(_sa_text("ALTER TABLE leads ADD COLUMN draft_response TEXT;"))
-                                    except Exception:
-                                        pass
-                            _c_conn.commit()
+                    _existing_tables = set(_insp.get_table_names())
+                    _dialect = db.engine.dialect
+                    _dialect_name = getattr(_dialect, "name", "").lower()
+
+                    for _tname, _tbl in db.Model.metadata.tables.items():
+                        if _tname not in _existing_tables:
+                            continue
+                        try:
+                            _existing_cols = {c["name"] for c in _insp.get_columns(_tname)}
+                        except Exception as _e_cols:
+                            app_ref.logger.warning(f"Could not inspect columns for table {_tname}: {_e_cols}")
+                            continue
+
+                        for _col in _tbl.columns:
+                            if _col.name not in _existing_cols:
+                                try:
+                                    _col_type = _col.type.compile(_dialect)
+                                    if _dialect_name == "postgresql" and "BLOB" in str(_col_type).upper():
+                                        _col_type = "BYTEA"
+                                    _default_clause = ""
+                                    if _col.default is not None and getattr(_col.default, "is_scalar", False):
+                                        _val = _col.default.arg
+                                        if isinstance(_val, bool):
+                                            _default_clause = f" DEFAULT {1 if _val else 0}"
+                                        elif isinstance(_val, (int, float)):
+                                            _default_clause = f" DEFAULT {_val}"
+                                        elif isinstance(_val, str):
+                                            _escaped = _val.replace("'", "''")
+                                            _default_clause = f" DEFAULT '{_escaped}'"
+                                    _stmt = f"ALTER TABLE {_tname} ADD COLUMN {_col.name} {_col_type}{_default_clause};"
+                                    with db.engine.connect() as _c_conn:
+                                        _c_conn.execute(_sa_text(_stmt))
+                                        _c_conn.commit()
+                                    app_ref.logger.info(f"Dynamically added missing column: {_tname}.{_col.name} ({_col_type})")
+                                except Exception as _add_c_err:
+                                    app_ref.logger.warning(f"Column sync notice for {_tname}.{_col.name}: {_add_c_err}")
                 except Exception as _col_err:
                     app_ref.logger.warning(f"Runtime column sync notice: {_col_err}")
 
@@ -1558,12 +1535,35 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/api/leads", methods=["GET"])
     @require_auth
     def legacy_get_leads():
-        st = application.config.get("STORAGE_ENGINE")
-        status_val = request.args.get("status")
-        search_val = request.args.get("search")
-        org = getattr(g, "current_org", None)
-        leads = st.get_leads(status=status_val, search=search_val, organization_id=org.id if org else None) if st else []
-        return jsonify({"leads": leads, "count": len(leads)})
+        try:
+            st = application.config.get("STORAGE_ENGINE")
+            status_val = request.args.get("status")
+            search_val = request.args.get("search")
+            org = getattr(g, "current_org", None)
+            leads = st.get_leads(status=status_val, search=search_val, organization_id=org.id if org else None) if st else []
+            return jsonify({"leads": leads, "count": len(leads)})
+        except Exception as e:
+            application.logger.warning(f"Legacy leads fetch error: {e}")
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            return jsonify({"leads": [], "count": 0, "error": str(e)}), 200
+
+    @application.route("/api/catalog", methods=["GET"])
+    @require_auth
+    def legacy_get_catalog():
+        """Alias for /api/v1/ecommerce/products to ensure /api/catalog never 404s or 500s."""
+        try:
+            from api_v1 import list_ecommerce_products
+            return list_ecommerce_products()
+        except Exception as e:
+            application.logger.warning(f"Legacy catalog fetch error: {e}")
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            return jsonify({"status": "error", "products": [], "count": 0, "error": str(e)}), 200
 
     @application.route("/api/analytics", methods=["GET"])
     @require_auth
