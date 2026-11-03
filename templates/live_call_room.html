@@ -703,8 +703,8 @@
                     setupMicrophoneAnalyser(stream);
                     setupMediaRecorderVAD(stream);
                 }).catch(err => {
-                    logOnScreenError('Microphone permission denied: ' + (err.message || err));
-                    setStatus('Mic Blocked');
+                    console.warn('[Microphone permission notice]:', err && err.message);
+                    setStatus('💬 Tap to Speak or Type');
                 });
             }
 
@@ -859,8 +859,7 @@
                 recognition.onerror = (e) => {
                     console.warn('[Speech recognition error]', e && e.error);
                     if (e && e.error === 'not-allowed') {
-                        logOnScreenError('Microphone permission blocked in browser');
-                        setStatus('Mic Blocked');
+                        setStatus('💬 Tap to Speak or Type');
                     } else {
                         // Auto restart on transient error as long as call is active
                         restartRecognition();

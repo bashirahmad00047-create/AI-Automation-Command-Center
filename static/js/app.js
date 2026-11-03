@@ -12411,7 +12411,7 @@ function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customNa
     if (!modal) return;
     modal.style.display = 'flex';
 
-    // Unlock browser AudioContext inside the user click handler itself!
+    // 1. Unlock browser AudioContext inside the user click handler itself!
     try {
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         liveAudioCtx = new AudioContextClass();
@@ -12425,6 +12425,29 @@ function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customNa
         s.start(0);
     } catch (actxErr) {
         console.warn('[AudioContext Unlock Notice]', actxErr);
+    }
+
+    // 2. Request microphone permission immediately within this direct user click gesture!
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && !modalMicStream) {
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            modalMicStream = stream;
+            try {
+                const ctx = liveAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                if (ctx.state === 'suspended') ctx.resume();
+                const src = ctx.createMediaStreamSource(stream);
+                modalMicAnalyser = ctx.createAnalyser();
+                modalMicAnalyser.fftSize = 256;
+                src.connect(modalMicAnalyser);
+                modalMediaRecorder = new MediaRecorder(stream);
+                modalRecordedChunks = [];
+                modalMediaRecorder.ondataavailable = e => {
+                    if (e.data && e.data.size > 0) modalRecordedChunks.push(e.data);
+                };
+                modalMediaRecorder.start(250);
+            } catch (_) {}
+        }).catch(err => {
+            console.warn('[Live Mic Click Request Notice]:', err && err.message);
+        });
     }
 
     const domPlayer = document.getElementById('liveCallAudioPlayer');
@@ -12590,70 +12613,80 @@ function startContinuousVoiceVAD() {
     const transcriptBox = document.getElementById('voiceTranscriptBox');
 
     // 1. Microphone Stream for Live Volume Meter & MediaRecorder VAD Fallback
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-            modalMicStream = stream;
-            try {
-                const ctx = liveAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
-                if (ctx.state === 'suspended') ctx.resume();
-                const src = ctx.createMediaStreamSource(stream);
-                modalMicAnalyser = ctx.createAnalyser();
-                modalMicAnalyser.fftSize = 256;
-                src.connect(modalMicAnalyser);
+    function setupVolumeAndVAD(stream) {
+        try {
+            const ctx = liveAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            if (ctx.state === 'suspended') ctx.resume();
+            const src = ctx.createMediaStreamSource(stream);
+            modalMicAnalyser = ctx.createAnalyser();
+            modalMicAnalyser.fftSize = 256;
+            src.connect(modalMicAnalyser);
 
-                const dataArray = new Uint8Array(modalMicAnalyser.frequencyBinCount);
-                const volumeBar = document.getElementById('liveCallMicVolumeBar');
+            const dataArray = new Uint8Array(modalMicAnalyser.frequencyBinCount);
+            const volumeBar = document.getElementById('liveCallMicVolumeBar');
 
-                function updateModalVolume() {
-                    if (!liveVoiceCallActive) return;
-                    modalMicAnalyser.getByteFrequencyData(dataArray);
-                    let sum = 0;
-                    for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-                    const avgVol = sum / dataArray.length;
+            function updateModalVolume() {
+                if (!liveVoiceCallActive) return;
+                modalMicAnalyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                const avgVol = sum / dataArray.length;
 
-                    if (volumeBar) {
-                        const pct = Math.min(100, Math.round(avgVol * 2.2));
-                        volumeBar.style.width = `${pct}%`;
-                    }
+                if (volumeBar) {
+                    const pct = Math.min(100, Math.round(avgVol * 2.2));
+                    volumeBar.style.width = `${pct}%`;
+                }
 
-                    if (!isLiveAiSpeaking && !isMicMuted) {
-                        if (avgVol > 16) {
-                            modalVadSpeechDetected = true;
-                            if (statusLabel) statusLabel.textContent = '🟢 Listening... (Hearing voice)';
-                            clearTimeout(modalVadSilenceTimer);
-                        } else if (modalVadSpeechDetected) {
-                            if (!modalVadSilenceTimer) {
-                                modalVadSilenceTimer = setTimeout(() => {
-                                    if (modalVadSpeechDetected && !isLiveAiSpeaking) {
-                                        modalVadSpeechDetected = false;
-                                        handleModalVadCompletion();
-                                    }
-                                    modalVadSilenceTimer = null;
-                                }, 1200);
-                            }
+                if (!isLiveAiSpeaking && !isMicMuted) {
+                    if (avgVol > 16) {
+                        modalVadSpeechDetected = true;
+                        if (statusLabel) statusLabel.textContent = '🟢 Listening... (Hearing voice)';
+                        clearTimeout(modalVadSilenceTimer);
+                    } else if (modalVadSpeechDetected) {
+                        if (!modalVadSilenceTimer) {
+                            modalVadSilenceTimer = setTimeout(() => {
+                                if (modalVadSpeechDetected && !isLiveAiSpeaking) {
+                                    modalVadSpeechDetected = false;
+                                    handleModalVadCompletion();
+                                }
+                                modalVadSilenceTimer = null;
+                            }, 1200);
                         }
                     }
-                    modalMicAnimFrame = requestAnimationFrame(updateModalVolume);
                 }
-                updateModalVolume();
+                modalMicAnimFrame = requestAnimationFrame(updateModalVolume);
+            }
+            updateModalVolume();
 
-                // Setup MediaRecorder for VAD fallback
+            if (!modalMediaRecorder) {
                 modalMediaRecorder = new MediaRecorder(stream);
                 modalRecordedChunks = [];
                 modalMediaRecorder.ondataavailable = e => {
                     if (e.data && e.data.size > 0) modalRecordedChunks.push(e.data);
                 };
                 modalMediaRecorder.start(250);
-            } catch (err) {
-                console.warn('[Modal Audio Analyser Notice]', err);
             }
+        } catch (err) {
+            console.warn('[Modal Audio Analyser Notice]', err);
+        }
+    }
+
+    if (modalMicStream) {
+        setupVolumeAndVAD(modalMicStream);
+    } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            modalMicStream = stream;
+            setupVolumeAndVAD(stream);
         }).catch(err => {
-            logModalOnScreenError('Microphone permission blocked: ' + err.message);
-            if (statusLabel) statusLabel.textContent = 'Mic Blocked';
+            console.warn('[Microphone permission note]:', err && err.message);
+            // Graceful non-blocking status - allows user to type or use Push-to-Talk
+            if (statusLabel && liveVoiceCallActive) {
+                statusLabel.textContent = '💬 Tap to Speak or Type';
+            }
         });
     }
 
-    // 2. Primary SpeechRecognition
+    // 2. Primary SpeechRecognition (with graceful, zero-crash error handling)
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
         try {
@@ -12705,8 +12738,10 @@ function startContinuousVoiceVAD() {
             liveVoiceRecognition.onerror = function(err) {
                 console.warn('[Live Voice Call] Speech recognition note:', err && err.error);
                 if (err && err.error === 'not-allowed') {
-                    logModalOnScreenError('Microphone permission denied');
-                    if (statusLabel) statusLabel.textContent = 'Mic Blocked';
+                    // Graceful fallback - DO NOT crash or print scary error in transcript
+                    if (statusLabel && liveVoiceCallActive && !isLiveAiSpeaking) {
+                        statusLabel.textContent = '💬 Tap to Speak or Type';
+                    }
                 } else {
                     if (liveVoiceCallActive && !isMicMuted && !isLiveAiSpeaking && liveVoiceRecognition) {
                         try { liveVoiceRecognition.start(); } catch (_) {}
@@ -12772,11 +12807,14 @@ let leafletRadarMap = null;
 let radarMapMarkers = [];
 let deliveryRouteLines = [];
 
-// Helper: Calculate distance from store/hub (Lahore Hub default: 31.5204, 74.3587)
+// Helper: Calculate distance from store/hub (Chitral Central Store Hub: 35.86124, 71.78699)
+const STORE_HUB_LAT = 35.86124;
+const STORE_HUB_LNG = 71.78699;
+
 function calculateDistanceFromStore(lat, lng) {
     if (!lat || !lng || isNaN(lat) || isNaN(lng)) return 'N/A';
-    const storeLat = 31.5204;
-    const storeLng = 74.3587;
+    const storeLat = STORE_HUB_LAT;
+    const storeLng = STORE_HUB_LNG;
     const R = 6371; // km
     const dLat = (Number(lat) - storeLat) * Math.PI / 180;
     const dLon = (Number(lng) - storeLng) * Math.PI / 180;
@@ -12834,6 +12872,9 @@ function createRichRadarPopupHtml(lat, lng, customerName, phone, address, status
     } else if (status === 'Out for Delivery') {
         badgeBg = 'rgba(245, 158, 11, 0.2)';
         badgeColor = '#d97706';
+    } else if (status === 'Store Base') {
+        badgeBg = 'rgba(56, 189, 248, 0.2)';
+        badgeColor = '#0284c7';
     }
 
     return `
@@ -13006,9 +13047,9 @@ function autoPlotWhatsAppLocation(lat, lng, label, phone, address, status = 'Pre
 
     truckMarker.bindPopup(`
         <div style="font-family:sans-serif;font-size:12px;color:#111;min-width:190px;">
-            <b style="color:#f59e0b;font-size:13px;">🚚 BashFlow Delivery Rider</b>
-            <div style="color:#555;margin:3px 0;">Status: <b>On the Way (Live GPS)</b></div>
-            <div style="font-size:11px;color:#777;">Speed: 42 km/h &bull; ETA: 12 mins</div>
+            <b style="color:#f59e0b;font-size:13px;">🚚 BashFlow Delivery Courier</b>
+            <div style="color:#555;margin:3px 0;">Status: <b>Dispatch Active (Live GPS)</b></div>
+            <div style="font-size:11px;color:#777;">Zone: Chitral District &bull; Status: In Transit</div>
         </div>
     `);
 
@@ -13031,14 +13072,14 @@ window.autoPlotWhatsAppLocation = autoPlotWhatsAppLocation;
 
 // Main Internal Navigation Action: openLocationOnRadarMap
 function openLocationOnRadarMap(lat, lng, customerName, phone, address) {
-    const latNum = (!isNaN(lat) && Number(lat) !== 0) ? Number(lat) : 35.8700;
-    const lngNum = (!isNaN(lng) && Number(lng) !== 0) ? Number(lng) : 71.7840;
+    const latNum = (!isNaN(lat) && Number(lat) !== 0) ? Number(lat) : 35.86124;
+    const lngNum = (!isNaN(lng) && Number(lng) !== 0) ? Number(lng) : 71.78699;
     const safeName = customerName || 'Customer';
     const safePhone = phone || '';
-    const safeAddress = address || 'Delivery Destination';
+    const safeAddress = address || 'Chewbazar, Chitral';
 
-    // 1. Automatically switch the dashboard to the "Live Delivery Map" tab (#tab-map)
-    switchTab('map');
+    // 1. Automatically switch the dashboard to the "Live Delivery Map" tab
+    switchTab('delivery-map');
 
     // 2. Initialize radar map and invalidate size
     initLeafletRadarMap();
@@ -13213,9 +13254,9 @@ async function loadCustomerLocationsFromChatHistory() {
         });
     }
 
-    // Zero-Pins Fallback: Guarantee visible pin at 35.8700, 71.7840
+    // Store Hub Base Pin: Guarantee visible store fulfillment base at Chitral Central Hub
     if (radarMapMarkers.length === 0) {
-        autoPlotWhatsAppLocation(35.8700, 71.7840, 'Customer Delivery Pin', '+923001234567', 'Live GPS Customer Location');
+        autoPlotWhatsAppLocation(35.86124, 71.78699, 'BashFlow Central Fulfillment Hub', '+923400000000', 'Chewbazar, Chitral Hub Base', 'Store Base');
     }
 
     const countEl = document.getElementById('radarMapPinsCount');
@@ -13316,10 +13357,10 @@ function trackActiveDelivery() {
         return;
     }
 
-    // Default active location: Lahore / Pakistan hub
-    const defaultLat = 31.5204;
-    const defaultLng = 74.3587;
-    addRadarMapPin(defaultLat, defaultLng, activeName.replace(/Select a Conversation/g, 'Customer'), cleanPhone, null, 'On the Way');
+    // Default active location: Chitral Central Store Hub
+    const defaultLat = 35.86124;
+    const defaultLng = 71.78699;
+    addRadarMapPin(defaultLat, defaultLng, activeName.replace(/Select a Conversation/g, 'Customer'), cleanPhone, 'Chewbazar, Chitral', 'On the Way');
     if (leafletRadarMap) {
         leafletRadarMap.setView([defaultLat, defaultLng], 14);
     }
@@ -13342,8 +13383,8 @@ async function sendLiveTrackingLinkToCustomer(phone, lat, lng) {
     }
     if (!targetPhone) return;
 
-    const useLat = lat || 31.5204;
-    const useLng = lng || 74.3587;
+    const useLat = lat || 35.86124;
+    const useLng = lng || 71.78699;
     const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${useLat},${useLng}`;
     const msgText = `Assalam-o-Alaikum! Aap ki delivery live on the way hai. Aap niche diye gaye Google Maps link se rider ko real-time track kar sakte hain:\n${gmapsUrl}\nKisi bhi sawal ke liye hum yahan mojood hain. Shukriya!`;
 
@@ -13762,8 +13803,8 @@ function applyPresetLocation(lat, lng, label) {
 window.applyPresetLocation = applyPresetLocation;
 
 function submitSetOrderLocation() {
-    const lat = parseFloat((document.getElementById('orderLocLat') || {}).value || 31.5204);
-    const lng = parseFloat((document.getElementById('orderLocLng') || {}).value || 74.3587);
+    const lat = parseFloat((document.getElementById('orderLocLat') || {}).value || 35.86124);
+    const lng = parseFloat((document.getElementById('orderLocLng') || {}).value || 71.78699);
     const label = (document.getElementById('orderLocLabel') || {}).value || 'Customer';
     const phone = (window.currentActiveContact && window.currentActiveContact.phone) || '';
 

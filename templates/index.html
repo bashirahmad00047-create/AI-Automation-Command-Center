@@ -1283,10 +1283,10 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                             </div>
                             <div id="waDossierDeliveryLocation" onclick="trackActiveDelivery()" style="font-size: 11.5px; color: #cbd5e1; background: #0c1317; border: 1px solid #202c33; border-radius: 6px; padding: 8px 10px; cursor: pointer;" title="Click to view delivery destination on Live Radar Map">
                                 <div style="display: flex; align-items: center; gap: 6px; color: #10b981; font-weight: 600;">
-                                    <span>●</span> <span id="waDossierCityText">Lahore Hub Active</span>
+                                    <span>●</span> <span id="waDossierCityText">Chitral Hub Active</span>
                                 </div>
                                 <div id="waDossierCoordsText" style="font-size: 10.5px; color: #8696a0; font-family: var(--font-mono); margin-top: 3px;">
-                                    31.5204° N, 74.3587° E
+                                    35.8612° N, 71.7870° E
                                 </div>
                             </div>
                         </div>
@@ -5801,27 +5801,27 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 <div>
                     <label style="font-size: 11px; color: #8696a0; margin-bottom: 3px; display: block;">Quick City Presets:</label>
                     <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                        <button type="button" class="hud-btn small outline" onclick="applyPresetLocation(31.5204, 74.3587, 'Lahore Hub')">Lahore</button>
-                        <button type="button" class="hud-btn small outline" onclick="applyPresetLocation(24.8607, 67.0011, 'Karachi Center')">Karachi</button>
-                        <button type="button" class="hud-btn small outline" onclick="applyPresetLocation(33.6844, 73.0479, 'Islamabad F-7')">Islamabad</button>
-                        <button type="button" class="hud-btn small outline" onclick="applyPresetLocation(31.4504, 73.1350, 'Faisalabad')">Faisalabad</button>
+                        <button type="button" class="hud-btn small" style="background: rgba(0, 168, 132, 0.2); border: 1px solid #00a884; color: #25d366; font-weight: 700;" onclick="applyPresetLocation(35.8612, 71.7870, 'Chitral Hub (Chewbazar)')">Chitral Hub</button>
+                        <button type="button" class="hud-btn small outline" onclick="applyPresetLocation(35.8625, 71.7855, 'Chewbazar')">Chewbazar</button>
+                        <button type="button" class="hud-btn small outline" onclick="applyPresetLocation(35.8601, 71.7885, 'Governor Cottage')">Gov Cottage</button>
+                        <button type="button" class="hud-btn small outline" onclick="applyPresetLocation(35.8750, 71.7920, 'Airport Road')">Airport Rd</button>
                     </div>
                 </div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                     <div>
                         <label style="font-size: 11px; color: #8696a0; margin-bottom: 2px; display: block;">Latitude:</label>
-                        <input type="number" step="0.0001" id="orderLocLat" class="hud-input" value="31.5204" style="width: 100%; background: #182229; border: 1px solid #2a3942; border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 12.5px;">
+                        <input type="number" step="0.0001" id="orderLocLat" class="hud-input" value="35.8612" style="width: 100%; background: #182229; border: 1px solid #2a3942; border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 12.5px;">
                     </div>
                     <div>
                         <label style="font-size: 11px; color: #8696a0; margin-bottom: 2px; display: block;">Longitude:</label>
-                        <input type="number" step="0.0001" id="orderLocLng" class="hud-input" value="74.3587" style="width: 100%; background: #182229; border: 1px solid #2a3942; border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 12.5px;">
+                        <input type="number" step="0.0001" id="orderLocLng" class="hud-input" value="71.7870" style="width: 100%; background: #182229; border: 1px solid #2a3942; border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 12.5px;">
                     </div>
                 </div>
 
                 <div>
                     <label style="font-size: 11px; color: #8696a0; margin-bottom: 2px; display: block;">Customer / Location Label:</label>
-                    <input type="text" id="orderLocLabel" class="hud-input" placeholder="e.g. Tariq Mahmood (Gulberg III)" style="width: 100%; background: #182229; border: 1px solid #2a3942; border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 12.5px;">
+                    <input type="text" id="orderLocLabel" class="hud-input" placeholder="e.g. Bashir khani (Chewbazar, Chitral)" style="width: 100%; background: #182229; border: 1px solid #2a3942; border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 12.5px;">
                 </div>
             </div>
 
