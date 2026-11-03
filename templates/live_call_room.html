@@ -541,12 +541,21 @@
         // ===================================================================
         // 2. AUDIO PLAYBACK WITH ZERO CORS/AUTOPLAY ISSUES & SPEECH SYNTHESIS FALLBACK
         // ===================================================================
+        function ensureAudioUnlocked() {
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume().catch(() => {});
+            }
+        }
+        document.addEventListener('click', ensureAudioUnlocked, { passive: true });
+        document.addEventListener('touchstart', ensureAudioUnlocked, { passive: true });
+
         function speakAIResponse(replyText, audioBase64 = null) {
             if (!isCallActive) return;
 
             isAiSpeaking = true;
             setWaveAnimation(true);
             setStatus('🔊 AI Speaking...');
+            ensureAudioUnlocked();
 
             function finishSpeech() {
                 isAiSpeaking = false;
@@ -565,12 +574,13 @@
                 try {
                     window.speechSynthesis.cancel();
                     const utter = new SpeechSynthesisUtterance(replyText);
-                    utter.lang = currentLang || 'ur-PK';
+                    utter.lang = currentLanguage || currentLang || 'ur-PK';
                     utter.rate = 1.0;
                     utter.onend = () => finishSpeech();
                     utter.onerror = () => finishSpeech();
                     window.speechSynthesis.speak(utter);
                 } catch (synthErr) {
+                    console.warn('[SpeechSynthesis notice]', synthErr);
                     finishSpeech();
                 }
             }
@@ -583,23 +593,33 @@
                     }
                     const cleanB64 = String(audioBase64).trim();
                     const uriToPlay = cleanB64.startsWith('data:') ? cleanB64 : ('data:audio/mp3;base64,' + cleanB64);
-                    const player = new Audio(uriToPlay);
+                    
+                    // Prefer pre-unlocked DOM <audio> element to defeat mobile Autoplay restrictions
+                    let player = audioPlayer || document.getElementById('audioPlayer');
+                    if (!player) {
+                        player = new Audio();
+                        document.body.appendChild(player);
+                    }
                     currentAudioSource = player;
                     player.muted = isMuted;
 
                     player.onended = () => finishSpeech();
+                    player.onerror = (e) => {
+                        console.warn('[DOM Audio error, trying WebAudio buffer decode]', e);
+                        playViaWebAudioBuffer(cleanB64.replace(/^data:audio\/\w+;base64,/, ''), replyText, finishSpeech, runSpeechSynthesisFallback);
+                    };
 
+                    player.src = uriToPlay;
+                    player.currentTime = 0;
                     const playPromise = player.play();
                     if (playPromise !== undefined) {
                         playPromise.catch(playErr => {
-                            try {
-                                playViaWebAudioBuffer(cleanB64.replace(/^data:audio\/\w+;base64,/, ''));
-                            } catch (_) {
-                                runSpeechSynthesisFallback();
-                            }
+                            console.warn('[Audio play rejected by browser autoplay, falling back to WebAudio buffer decode]', playErr);
+                            playViaWebAudioBuffer(cleanB64.replace(/^data:audio\/\w+;base64,/, ''), replyText, finishSpeech, runSpeechSynthesisFallback);
                         });
                     }
                 } catch (err) {
+                    console.warn('[Audio play exception]', err);
                     runSpeechSynthesisFallback();
                 }
             } else {
@@ -613,43 +633,58 @@
             speakAIResponse(replyText || 'Assalam o Alaikum! Main BashFlow AI bol raha hoon.', b64);
         }
 
-        function playViaWebAudioBuffer(b64) {
+        function playViaWebAudioBuffer(b64, replyTextFallback = '', finishSpeechCb = null, fallbackCb = null) {
             if (!b64 || !audioCtx) {
-                isAiSpeaking = false;
-                setWaveAnimation(false);
-                setStatus('🟢 Listening... (Speak now)');
+                if (typeof fallbackCb === 'function') fallbackCb();
+                else {
+                    isAiSpeaking = false;
+                    setWaveAnimation(false);
+                    setStatus('🟢 Listening... (Speak now)');
+                }
                 return;
             }
             try {
+                ensureAudioUnlocked();
                 const binaryString = window.atob(b64);
                 const len = binaryString.length;
                 const bytes = new Uint8Array(len);
                 for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
 
-                audioCtx.decodeAudioData(bytes.buffer, (buffer) => {
+                audioCtx.decodeAudioData(bytes.buffer.slice(0), (buffer) => {
+                    if (!isCallActive) return;
                     const source = audioCtx.createBufferSource();
                     source.buffer = buffer;
                     source.connect(audioCtx.destination);
+                    currentAudioSource = source;
                     source.onended = () => {
-                        isAiSpeaking = false;
-                        setWaveAnimation(false);
-                        if (isCallActive) {
-                            setStatus('🟢 Listening... (Speak now)');
-                            restartRecognition();
+                        if (typeof finishSpeechCb === 'function') finishSpeechCb();
+                        else {
+                            isAiSpeaking = false;
+                            setWaveAnimation(false);
+                            if (isCallActive) {
+                                setStatus('🟢 Listening... (Speak now)');
+                                restartRecognition();
+                            }
                         }
                     };
                     source.start(0);
                 }, (decErr) => {
-                    logOnScreenError('WebAudio decode failed: ' + decErr);
+                    console.warn('[WebAudio decode failed, falling back to SpeechSynthesis]', decErr);
+                    if (typeof fallbackCb === 'function') fallbackCb();
+                    else {
+                        isAiSpeaking = false;
+                        setWaveAnimation(false);
+                        setStatus('🟢 Listening... (Speak now)');
+                    }
+                });
+            } catch (e) {
+                console.warn('[WebAudio exception, falling back to SpeechSynthesis]', e);
+                if (typeof fallbackCb === 'function') fallbackCb();
+                else {
                     isAiSpeaking = false;
                     setWaveAnimation(false);
                     setStatus('🟢 Listening... (Speak now)');
-                });
-            } catch (e) {
-                logOnScreenError('WebAudio fallback error: ' + e.message);
-                isAiSpeaking = false;
-                setWaveAnimation(false);
-                setStatus('🟢 Listening... (Speak now)');
+                }
             }
         }
 
@@ -949,7 +984,8 @@
                         tb.scrollTop = tb.scrollHeight;
                     }
 
-                    speakAIResponse(replyText, data.audioBase64 || data.audio_base64 || (data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio\/\w+;base64,/, '') : ''));
+                    const outAudioB64 = data.audioBase64 || data.audio_base64 || (data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio/\w+;base64,/, '') : '');
+                    speakAIResponse(reply, outAudioB64);
                 } else {
                     const errMsg = (data && data.error) || 'Failed to get AI voice response';
                     logOnScreenError(errMsg);

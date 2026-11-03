@@ -3997,7 +3997,8 @@ def api_live_voice_call():
                 "   - Natural Green Tourmaline Gemstones & Minerals - from PKR 12,000 (Certified natural raw/cut from Chitral & Skardu mines)\n"
                 "   - Mountain Dry Fruits & Walnuts - PKR 2,200/kg (Fresh high altitude harvest)\n"
                 "   - Delivery & Payment: Cash on Delivery (COD) available nationwide in Pakistan. Fast delivery in 2-4 working days.\n"
-                "5. Always answer directly, state the exact price if asked, and politely offer to book their order or confirm their delivery address."
+                "5. Always answer directly, state the exact price if asked, and politely offer to book their order or confirm their delivery address.\n"
+                "6. NO REPEATED GREETINGS: Do NOT say \"Assalam o Alaikum\" or repeat greetings if already greeted in previous conversation turns. Answer the customer inquiry directly."
             )
 
             # Build formatted conversation history
@@ -4040,6 +4041,13 @@ def api_live_voice_call():
                 disp, spch = WhatsAppService._parse_dual_ai_output(ai_raw)
                 reply_text = disp or ai_raw
                 voice_text = spch or disp or ai_raw
+
+        # Strip redundant Assalam o Alaikum if conversation is already in progress
+        if conv_hist and len(conv_hist) > 0 and not any(g in user_text.lower() for g in ["salam", "assalam", "aoa"]):
+            reply_text = re.sub(r"^(?:assalam[\s\-]?[uo]?[\s\-]?[a-z]*[!.,\s]*)+", "", reply_text, flags=re.IGNORECASE).strip()
+            voice_text = re.sub(r"^(?:السلام\s*علیکم[!.,\s]*)+", "", voice_text).strip()
+            if reply_text and len(reply_text) > 0:
+                reply_text = reply_text[0].upper() + reply_text[1:]
 
         # Preprocess text for natural speech
         clean_speech = WhatsAppService.humanize_speech_text(voice_text or reply_text)
@@ -4413,7 +4421,8 @@ def api_voice_transcribe_and_reply():
             "   - Natural Green Tourmaline Gemstones - from PKR 12,000 (Certified natural from Chitral mines)\n"
             "   - Mountain Dry Fruits & Walnuts - PKR 2,200/kg (Fresh high altitude harvest)\n"
             "   - Delivery & Payment: Cash on Delivery (COD) available nationwide in Pakistan. Fast delivery in 2-4 working days.\n"
-            "5. Always answer directly, state the exact price if asked, and politely offer to book their order or confirm their delivery address."
+            "5. Always answer directly, state the exact price if asked, and politely offer to book their order or confirm their delivery address.\n"
+                "6. NO REPEATED GREETINGS: Do NOT say \"Assalam o Alaikum\" or repeat greetings if already greeted in previous conversation turns. Answer the customer inquiry directly."
         )
 
         conv_hist = []
@@ -4450,6 +4459,13 @@ def api_voice_transcribe_and_reply():
             disp, spch = WhatsAppService._parse_dual_ai_output(ai_raw)
             reply_text = disp or ai_raw
             voice_text = spch or disp or ai_raw
+
+        # Strip redundant Assalam o Alaikum if conversation is already in progress
+        if conv_hist and len(conv_hist) > 0 and not any(g in user_text.lower() for g in ["salam", "assalam", "aoa"]):
+            reply_text = re.sub(r"^(?:assalam[\s\-]?[uo]?[\s\-]?[a-z]*[!.,\s]*)+", "", reply_text, flags=re.IGNORECASE).strip()
+            voice_text = re.sub(r"^(?:السلام\s*علیکم[!.,\s]*)+", "", voice_text).strip()
+            if reply_text and len(reply_text) > 0:
+                reply_text = reply_text[0].upper() + reply_text[1:]
 
         clean_speech = WhatsAppService.humanize_speech_text(voice_text or reply_text)
         normalized_speech = WhatsAppService.normalize_pakistani_pronunciation(

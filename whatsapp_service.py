@@ -6722,7 +6722,7 @@ class WhatsAppService:
                         or has_arabic_script
                         or any(word in (clean_reply_text or "").lower() for word in ["salam", "aap", "madad", "shukriya", "jee", "hain", "kya", "kar"])
                     )
-                    synth_lang = kwargs.get("detected_lang") or "en" 
+                    synth_lang = "urdu" if is_urdu_context else (kwargs.get("detected_lang") or "en") 
                     audio_res = cls.generate_spoken_audio(
                         text=speech_text,
                         language=synth_lang,
