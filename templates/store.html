@@ -114,6 +114,60 @@
             gap: 10px;
         }
 
+        .seller-cta-btn {
+            background: linear-gradient(135deg, #d97706, #b45309);
+            color: #ffffff;
+            border: none;
+            border-radius: var(--radius-full);
+            padding: 8px 16px;
+            font-size: 0.85rem;
+            font-weight: 800;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(217, 119, 6, 0.25);
+        }
+
+        .seller-cta-btn:hover {
+            background: linear-gradient(135deg, #b45309, #92400e);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(217, 119, 6, 0.35);
+        }
+
+        .owner-floating-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #0f172a;
+            color: #f8fafc;
+            border-top: 2px solid #f59e0b;
+            padding: 10px 20px;
+            z-index: 60;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
+        }
+
+        .owner-floating-bar .stats-group {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .owner-floating-bar .stat-badge {
+            background: #1e293b;
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid #334155;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
         .admin-trigger-btn {
             background: #0f172a;
             color: #ffffff;
@@ -809,6 +863,9 @@
                 </div>
             </a>
             <div class="header-actions">
+                <button type="button" class="seller-cta-btn" onclick="openSellerListingModal()" title="Muft Saman Lagayein (Free Seller Listing)">
+                    <span>&#127978; + Sell Your Item (Muft Saman Lagayein)</span>
+                </button>
                 <button type="button" class="admin-trigger-btn" onclick="openStoreManagerModal()" title="Admin: Add / Edit Store Products & Customize Branding">
                     <span>⚙️ Admin: + Add Product / Edit Store</span>
                 </button>
@@ -957,6 +1014,107 @@
         </div>
     </div>
 
+    <!-- Public Seller Listing Modal (Zero Subscription Required) -->
+    <div class="drawer-overlay" id="sellerListingOverlay" style="z-index: 75;" onclick="closeSellerListingModal(event)">
+        <div class="checkout-modal-card" style="max-width: 600px;" onclick="event.stopPropagation()">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--gray-200); padding-bottom: 10px;">
+                <div>
+                    <h3 style="font-size: 1.25rem; font-weight: 800; color: #b45309; display: flex; align-items: center; gap: 8px;">
+                        <span>&#127978;</span> Sell on Chitral &amp; Global Bazar
+                    </h3>
+                    <span style="font-size: 0.8rem; color: var(--gray-500); font-weight: 600;">Muft Saman Lagayein &bull; Zero Upfront Cost &bull; 100% Free Listing</span>
+                </div>
+                <button class="close-drawer-btn" onclick="closeSellerListingModal()">&times;</button>
+            </div>
+
+            <form id="publicSellerForm" onsubmit="handlePublicSellerSubmit(event)">
+                <div style="background: #fef3c7; border: 1px solid #fde68a; border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 14px; font-size: 0.82rem; color: #92400e; line-height: 1.45;">
+                    &#128161; <strong>Marketplace Rules:</strong> Anyone from Chitral, Gilgit, KPK or all Pakistan can list products for FREE. Platform commission is only 10% upon successful customer delivery.
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="form-group">
+                        <label class="form-label">Seller / Shop Name *</label>
+                        <input type="text" id="sellerShopName" class="form-input" placeholder="e.g. Hindukush Dry Fruits" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">WhatsApp Contact Number *</label>
+                        <input type="tel" id="sellerPhone" class="form-input" placeholder="03209350856 or +923..." required>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="form-group">
+                        <label class="form-label">City / Region *</label>
+                        <input type="text" id="sellerCity" class="form-input" placeholder="e.g. Chitral Town, Booni, Peshawar" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Product Category *</label>
+                        <select id="sellerCategory" class="form-select" required>
+                            <option value="Dry Fruits &amp; Nuts">&#129372; Dry Fruits &amp; Nuts (Walnuts, Almonds)</option>
+                            <option value="Chitrali Shawls &amp; Caps">&#129523; Chitrali Shawls &amp; Pattu Caps</option>
+                            <option value="Pure Mountain Honey">&#127855; Pure Mountain Honey</option>
+                            <option value="Minerals &amp; Gems">&#128142; Minerals &amp; Gems</option>
+                            <option value="Electronics &amp; Mobile">&#128241; Electronics &amp; Mobile</option>
+                            <option value="Fashion &amp; Footwear">&#128084; Fashion &amp; Footwear</option>
+                            <option value="General Store &amp; Food">&#128722; General Store &amp; Food</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Product Title *</label>
+                    <input type="text" id="sellerProdTitle" class="form-input" placeholder="e.g. Kagzi Walnuts 1kg Premium Grade A" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Selling Price (PKR) *</label>
+                    <input type="number" id="sellerPrice" class="form-input" placeholder="2500" min="50" required oninput="calcSellerCommission()">
+                </div>
+
+                <!-- Live Commission Preview -->
+                <div id="sellerCommBox" style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:var(--radius-md); padding:10px 14px; margin-bottom:12px; font-size:0.8rem; color:#166534; display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; text-align:center;">
+                    <div>
+                        <div style="font-size:0.72rem; color:#15803d; font-weight:600;">Customer Price</div>
+                        <strong id="prevCustPrice" style="font-size:0.95rem;">PKR 0</strong>
+                    </div>
+                    <div>
+                        <div style="font-size:0.72rem; color:#15803d; font-weight:600;">Platform Fee (10%)</div>
+                        <strong id="prevCommFee" style="font-size:0.95rem; color:#b45309;">PKR 0</strong>
+                    </div>
+                    <div>
+                        <div style="font-size:0.72rem; color:#15803d; font-weight:600;">Your Net Payout</div>
+                        <strong id="prevNetPayout" style="font-size:0.95rem; color:#047857;">PKR 0</strong>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Product Description</label>
+                    <textarea id="sellerDesc" class="form-textarea" rows="2" placeholder="Quality, weight, purity, freshness, or size details..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Product Photo (Upload File or Enter Image URL)</label>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input type="file" id="sellerPhotoFile" accept="image/*" class="form-input" style="padding: 6px;" onchange="handleSellerPhotoUpload(event)">
+                        <span style="font-size:0.8rem; color:var(--gray-500); font-weight:700;">OR</span>
+                        <input type="url" id="sellerPhotoUrl" class="form-input" placeholder="https://..." oninput="updateSellerPhotoPreview()">
+                    </div>
+                    <div id="sellerPhotoPreview" style="margin-top: 8px; display: none; align-items: center; gap: 10px;">
+                        <img id="sellerPreviewImg" src="" alt="Preview" style="width: 50px; height: 50px; object-fit: cover; border-radius: 6px; border: 1px solid var(--gray-300);">
+                        <span style="font-size: 0.78rem; color: #059669; font-weight: 700;">&#10003; Photo ready for listing</span>
+                    </div>
+                </div>
+
+                <div style="margin-top: 16px;">
+                    <button type="submit" class="checkout-btn" id="submitSellerBtn" style="background: linear-gradient(135deg, #d97706, #b45309);">
+                        <span>Publish Free Listing on Store</span> &rarr;
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Store & Catalog Manager Modal -->
     <div class="drawer-overlay" id="storeManagerOverlay" style="z-index: 70;" onclick="closeStoreManagerModal(event)">
         <div class="checkout-modal-card" style="max-width: 650px;" onclick="event.stopPropagation()">
@@ -968,6 +1126,7 @@
             <div class="modal-tabs">
                 <button class="modal-tab-btn active" id="tabBtnProducts" onclick="switchManagerTab('products')">📦 Manage Products</button>
                 <button class="modal-tab-btn" id="tabBtnBranding" onclick="switchManagerTab('branding')">🎨 Store Branding</button>
+                <button class="modal-tab-btn" id="tabBtnMarketplace" onclick="switchManagerTab('marketplace')">&#128081; Multi-Vendor Hub</button>
             </div>
 
             <!-- Tab 1: Products CRUD -->
@@ -1075,6 +1234,86 @@
                     </button>
                 </form>
             </div>
+
+            <!-- Tab 3: Multi-Vendor Marketplace Hub -->
+            <div id="managerTabMarketplace" style="display: none;">
+                <div style="background: #f8fafc; border: 1px solid var(--gray-200); border-radius: var(--radius-md); padding: 12px; margin-bottom: 14px;">
+                    <h4 style="font-size: 0.95rem; font-weight: 800; color: #0f172a; margin-bottom: 8px;">⚙️ Platform Commission &amp; Lead Routing</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                        <div>
+                            <label class="form-label">Platform Commission (%)</label>
+                            <input type="number" id="settingCommPct" class="form-input" value="10" min="0" max="50">
+                        </div>
+                        <div>
+                            <label class="form-label">Contact &amp; Order Mode</label>
+                            <select id="settingContactMode" class="form-select">
+                                <option value="smart_broker">Smart Broker + Direct Seller Connect (Recommended)</option>
+                                <option value="owner_escrow">Owner Escrow Mode (All Orders through Owner)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button type="button" class="save-prod-btn" style="width: auto; padding: 6px 14px; font-size: 0.8rem;" onclick="saveMarketplaceSettings()">
+                        <span>Update Marketplace Rules</span>
+                    </button>
+                </div>
+
+                <!-- Metrics Summary -->
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px;">
+                    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-md); padding: 10px; text-align: center;">
+                        <span style="font-size: 0.75rem; color: #1e40af; font-weight: 700;">Total Sellers</span>
+                        <div id="statTotalSellers" style="font-size: 1.3rem; font-weight: 800; color: #1e3a8a;">0</div>
+                    </div>
+                    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: var(--radius-md); padding: 10px; text-align: center;">
+                        <span style="font-size: 0.75rem; color: #166534; font-weight: 700;">Active Vendor Items</span>
+                        <div id="statTotalItems" style="font-size: 1.3rem; font-weight: 800; color: #14532d;">0</div>
+                    </div>
+                    <div style="background: #fef3c7; border: 1px solid #fde68a; border-radius: var(--radius-md); padding: 10px; text-align: center;">
+                        <span style="font-size: 0.75rem; color: #92400e; font-weight: 700;">Platform Commission</span>
+                        <div id="statTotalCommission" style="font-size: 1.3rem; font-weight: 800; color: #78350f;">PKR 0</div>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 14px;">
+                    <h5 style="font-size: 0.85rem; font-weight: 800; color: var(--gray-800); margin-bottom: 6px;">Registered Vendors &amp; Payouts</h5>
+                    <div style="max-height: 180px; overflow-y: auto; border: 1px solid var(--gray-200); border-radius: var(--radius-md);">
+                        <table class="mgmt-table" style="font-size: 0.8rem;">
+                            <thead>
+                                <tr>
+                                    <th>Shop / Seller</th>
+                                    <th>WhatsApp</th>
+                                    <th>City</th>
+                                    <th>Items</th>
+                                    <th>Sales</th>
+                                    <th>Commission</th>
+                                </tr>
+                            </thead>
+                            <tbody id="marketplaceSellersRows">
+                                <tr><td colspan="6" style="text-align:center; padding: 10px; color: var(--gray-500);">Loading vendors...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div>
+                    <h5 style="font-size: 0.85rem; font-weight: 800; color: var(--gray-800); margin-bottom: 6px;">Vendor Product Moderation &amp; Approvals</h5>
+                    <div style="max-height: 180px; overflow-y: auto; border: 1px solid var(--gray-200); border-radius: var(--radius-md);">
+                        <table class="mgmt-table" style="font-size: 0.8rem;">
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Seller</th>
+                                    <th>Price</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="marketplaceProductRows">
+                                <tr><td colspan="5" style="text-align:center; padding: 10px; color: var(--gray-500);">Loading products...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1094,6 +1333,13 @@
                 <a href="#" id="successTrackingBtn" class="checkout-btn" style="text-decoration:none; margin-top:0;">
                     📍 Track My Delivery Online
                 </a>
+
+                <!-- Multi-Vendor Direct Seller WhatsApp Connect -->
+                <div id="sellerWhatsAppLinksSection" style="margin-top: 6px; text-align: left; display: none;">
+                    <div style="font-size: 0.8rem; font-weight: 700; color: #065f46; margin-bottom: 6px;">💬 Chat Directly with Vendor(s) on WhatsApp:</div>
+                    <div id="sellerWhatsAppButtonsList" style="display: flex; flex-direction: column; gap: 6px;"></div>
+                </div>
+
                 <button type="button" class="add-cart-btn" style="justify-content:center; padding: 12px;" onclick="closeSuccessModalAndReset()">
                     Continue Shopping
                 </button>
@@ -1272,8 +1518,20 @@
                             </span>
                         </div>
                         <div class="product-body">
+                            ${p.seller_name ? `
+                                <div style="font-size:0.75rem; color:#b45309; font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:4px;">
+                                    <span>&#127978;</span> Sold by: ${p.seller_name} ${p.seller_city ? `(&#128205; ${p.seller_city})` : ''}
+                                </div>
+                            ` : ''}
                             <h4 class="product-name">${p.name}</h4>
                             <p class="product-desc">${p.description || 'Authentic quality product from our verified catalog.'}</p>
+                            ${p.seller_phone && p.contact_mode === 'smart_broker' ? `
+                                <div style="margin-bottom: 8px;">
+                                    <a href="https://wa.me/${p.seller_phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent('Assalam o Alaikum! I am inquiring about ' + p.name + ' on Chitral & Global Bazar.')}" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:0.76rem; color:#059669; font-weight:700; background:#ecfdf5; border:1px solid #a7f3d0; padding:3px 8px; border-radius:6px;">
+                                        <span>&#128172;</span> Chat Seller on WhatsApp
+                                    </a>
+                                </div>
+                            ` : ''}
                             <div class="product-footer">
                                 <div class="product-price">
                                     PKR ${Number(p.price).toLocaleString()}<span>/${p.unit || 'item'}</span>
@@ -1502,6 +1760,21 @@
                     closeCheckoutModal();
                     document.getElementById('successOrderNum').textContent = data.order_number;
                     document.getElementById('successTrackingBtn').href = data.tracking_url || `/track/${data.order_id}`;
+                    
+                    // Display Direct Vendor WhatsApp Connect links if available
+                    const sellerSection = document.getElementById('sellerWhatsAppLinksSection');
+                    const sellerList = document.getElementById('sellerWhatsAppButtonsList');
+                    if (data.seller_whatsapp_links && data.seller_whatsapp_links.length > 0) {
+                        sellerList.innerHTML = data.seller_whatsapp_links.map(l => `
+                            <a href="${l.whatsapp_url}" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; background:#ecfdf5; border:1px solid #a7f3d0; padding:8px 12px; border-radius:8px; color:#065f46; font-size:0.82rem; font-weight:700;">
+                                <span>&#128172;</span> Chat with ${l.seller_name} (${l.seller_phone}) on WhatsApp &rarr;
+                            </a>
+                        `).join('');
+                        sellerSection.style.display = 'block';
+                    } else {
+                        sellerSection.style.display = 'none';
+                    }
+
                     document.getElementById('orderSuccessOverlay').classList.add('active');
                     cart = [];
                     updateCartUI();
@@ -1535,16 +1808,14 @@
         }
 
         function switchManagerTab(tab) {
-            if (tab === 'products') {
-                document.getElementById('tabBtnProducts').classList.add('active');
-                document.getElementById('tabBtnBranding').classList.remove('active');
-                document.getElementById('managerTabProducts').style.display = 'block';
-                document.getElementById('managerTabBranding').style.display = 'none';
-            } else {
-                document.getElementById('tabBtnBranding').classList.add('active');
-                document.getElementById('tabBtnProducts').classList.remove('active');
-                document.getElementById('managerTabBranding').style.display = 'block';
-                document.getElementById('managerTabProducts').style.display = 'none';
+            ['products', 'branding', 'marketplace'].forEach(t => {
+                const btn = document.getElementById('tabBtn' + t.charAt(0).toUpperCase() + t.slice(1));
+                const panel = document.getElementById('managerTab' + t.charAt(0).toUpperCase() + t.slice(1));
+                if (btn) btn.classList.toggle('active', t === tab);
+                if (panel) panel.style.display = (t === tab) ? 'block' : 'none';
+            });
+            if (tab === 'marketplace') {
+                fetchMarketplaceData();
             }
         }
 
@@ -1697,6 +1968,193 @@
                     alert('Store branding updated successfully!');
                 } else {
                     alert('Error updating branding: ' + (data.error || 'Unknown error'));
+                }
+            } catch (err) {
+                alert('Connection error: ' + err.message);
+            }
+        }
+
+        // =========================================================================
+        // MULTI-VENDOR MARKETPLACE & PUBLIC SELLER ONBOARDING LOGIC
+        // =========================================================================
+        let sellerUploadedPhoto = '';
+
+        function openSellerListingModal() {
+            document.getElementById('sellerListingOverlay').classList.add('active');
+            calcSellerCommission();
+        }
+
+        function closeSellerListingModal(e) {
+            if (e && e.target !== e.currentTarget && !e.target.classList.contains('close-drawer-btn')) return;
+            document.getElementById('sellerListingOverlay').classList.remove('active');
+            document.getElementById('publicSellerForm').reset();
+            sellerUploadedPhoto = '';
+            document.getElementById('sellerPhotoPreview').style.display = 'none';
+        }
+
+        function calcSellerCommission() {
+            const price = parseFloat(document.getElementById('sellerPrice').value) || 0;
+            const comm = Math.round(price * 0.10);
+            const payout = price - comm;
+            document.getElementById('prevCustPrice').textContent = `PKR ${price.toLocaleString()}`;
+            document.getElementById('prevCommFee').textContent = `PKR ${comm.toLocaleString()}`;
+            document.getElementById('prevNetPayout').textContent = `PKR ${payout.toLocaleString()}`;
+        }
+
+        function handleSellerPhotoUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                sellerUploadedPhoto = evt.target.result;
+                document.getElementById('sellerPreviewImg').src = sellerUploadedPhoto;
+                document.getElementById('sellerPhotoPreview').style.display = 'flex';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function updateSellerPhotoPreview() {
+            const url = document.getElementById('sellerPhotoUrl').value.trim();
+            if (url) {
+                sellerUploadedPhoto = url;
+                document.getElementById('sellerPreviewImg').src = url;
+                document.getElementById('sellerPhotoPreview').style.display = 'flex';
+            }
+        }
+
+        async function handlePublicSellerSubmit(e) {
+            e.preventDefault();
+            const btn = document.getElementById('submitSellerBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span>&#9203; Listing Your Product...</span>';
+
+            const payload = {
+                seller_name: document.getElementById('sellerShopName').value.trim(),
+                seller_phone: document.getElementById('sellerPhone').value.trim(),
+                seller_city: document.getElementById('sellerCity').value.trim(),
+                category: document.getElementById('sellerCategory').value,
+                name: document.getElementById('sellerProdTitle').value.trim(),
+                price: parseFloat(document.getElementById('sellerPrice').value) || 0,
+                description: document.getElementById('sellerDesc').value.trim(),
+                image_url: sellerUploadedPhoto || document.getElementById('sellerPhotoUrl').value.trim()
+            };
+
+            try {
+                const res = await fetch('/api/v1/store/seller/list-product', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    closeSellerListingModal();
+                    await fetchProducts();
+                    alert(`Mubarak Ho! Item '${payload.name}' is now LIVE on Chitral & Global Bazar!\n\nYour net payout upon sale: PKR ${(payload.price * 0.9).toLocaleString()}\nA confirmation message has been sent to your WhatsApp (${payload.seller_phone}).`);
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to submit product listing.'));
+                }
+            } catch (err) {
+                alert('Connection error: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>Publish Free Listing on Store</span> &rarr;';
+            }
+        }
+
+        // =========================================================================
+        // PLATFORM OWNER MARKETPLACE CONTROL & COMMISSION ENGINE
+        // =========================================================================
+        async function fetchMarketplaceData() {
+            try {
+                const res = await fetch('/api/v1/store/marketplace/sellers');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.success) return;
+
+                document.getElementById('statTotalSellers').textContent = data.total_sellers;
+                document.getElementById('statTotalItems').textContent = data.total_seller_items;
+                document.getElementById('statTotalCommission').textContent = `PKR ${Math.round(data.total_commission).toLocaleString()}`;
+                document.getElementById('settingCommPct').value = data.commission_percent || 10;
+                document.getElementById('settingContactMode').value = data.contact_mode || 'smart_broker';
+
+                // Render Sellers table
+                const sTbody = document.getElementById('marketplaceSellersRows');
+                if (data.sellers && data.sellers.length > 0) {
+                    sTbody.innerHTML = data.sellers.map(s => `
+                        <tr>
+                            <td><strong>${s.seller_name}</strong></td>
+                            <td>${s.seller_phone}</td>
+                            <td>${s.seller_city}</td>
+                            <td>${s.items_count}</td>
+                            <td>PKR ${Math.round(s.total_sales).toLocaleString()}</td>
+                            <td style="color:#047857; font-weight:700;">PKR ${Math.round(s.total_commission).toLocaleString()}</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    sTbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:10px; color:var(--gray-500);">No third-party sellers registered yet.</td></tr>`;
+                }
+
+                // Render Products moderation table
+                const pTbody = document.getElementById('marketplaceProductRows');
+                const sellerProducts = catalogProducts.filter(p => p.seller_phone);
+                if (sellerProducts.length > 0) {
+                    pTbody.innerHTML = sellerProducts.map(p => `
+                        <tr>
+                            <td><strong>${p.name}</strong></td>
+                            <td>${p.seller_name || 'Vendor'}</td>
+                            <td>PKR ${Number(p.price).toLocaleString()}</td>
+                            <td>
+                                <span style="display:inline-block; padding:2px 8px; border-radius:12px; font-size:0.75rem; font-weight:700; background:${p.is_approved ? '#ecfdf5; color:#047857;' : '#fef2f2; color:#b91c1c;'}">
+                                    ${p.is_approved ? 'Approved' : 'Hidden'}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="action-link" onclick="toggleProductApproval('${p.id}', ${p.is_approved ? "'hide'" : "'approve'"})">${p.is_approved ? 'Hide' : 'Approve'}</span>
+                                <span class="action-link delete" onclick="toggleProductApproval('${p.id}', 'delete')">Delete</span>
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    pTbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:10px; color:var(--gray-500);">No vendor items awaiting review.</td></tr>`;
+                }
+            } catch (err) {
+                console.warn('Marketplace data fetch error:', err);
+            }
+        }
+
+        async function toggleProductApproval(id, action) {
+            try {
+                const res = await fetch(`/api/v1/store/marketplace/product/${id}/status`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: action })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    await fetchProducts();
+                    await fetchMarketplaceData();
+                } else {
+                    alert('Action failed: ' + (data.error || 'Server error'));
+                }
+            } catch (err) {
+                alert('Connection error: ' + err.message);
+            }
+        }
+
+        async function saveMarketplaceSettings() {
+            const pct = document.getElementById('settingCommPct').value;
+            const mode = document.getElementById('settingContactMode').value;
+            try {
+                const res = await fetch('/api/v1/store/marketplace/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ commission_percent: pct, default_mode: mode })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('Marketplace settings updated successfully!');
+                } else {
+                    alert('Failed to update settings: ' + data.error);
                 }
             } catch (err) {
                 alert('Connection error: ' + err.message);

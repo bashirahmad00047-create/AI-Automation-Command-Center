@@ -10565,6 +10565,20 @@ function updateProductCatalogKPIs(stats, count) {
         pill.textContent = activeCount;
         pill.style.display = activeCount > 0 ? 'inline-block' : 'none';
     }
+
+    const marketSellersEl = document.getElementById('prodMetricMarketSellers');
+    const marketCommEl = document.getElementById('prodMetricMarketCommission');
+    if (marketSellersEl || marketCommEl) {
+        fetch('/api/v1/store/marketplace/sellers')
+            .then(r => r.json())
+            .then(m => {
+                if (m && m.success) {
+                    if (marketSellersEl) marketSellersEl.textContent = m.total_sellers || 0;
+                    if (marketCommEl) marketCommEl.textContent = `PKR ${Math.round(m.total_commission || 0).toLocaleString()}`;
+                }
+            })
+            .catch(() => {});
+    }
 }
 
 function populateProductCategoryDropdowns(categories) {

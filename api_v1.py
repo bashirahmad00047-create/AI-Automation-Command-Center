@@ -7752,6 +7752,9 @@ def api_store_products():
 
         results = []
         for p in prods:
+            # Respect seller approval status
+            if hasattr(p, 'is_approved') and p.is_approved is False:
+                continue
             results.append({
                 "id": p.id,
                 "name": p.name,
@@ -7762,7 +7765,13 @@ def api_store_products():
                 "currency": p.currency or "PKR",
                 "image_url": p.image_url or "",
                 "stock_quantity": int(p.stock_quantity or 0),
-                "stock_status": p.stock_status or "in_stock"
+                "stock_status": p.stock_status or "in_stock",
+                "seller_name": getattr(p, 'seller_name', None) or "Chitral Bazar Official",
+                "seller_phone": getattr(p, 'seller_phone', None) or "",
+                "seller_city": getattr(p, 'seller_city', None) or "Chitral",
+                "seller_price": float(p.seller_price) if getattr(p, 'seller_price', None) is not None else float(p.price or 0.0),
+                "platform_commission": float(getattr(p, 'platform_commission', 0.0) or 0.0),
+                "contact_mode": getattr(p, 'contact_mode', 'smart_broker') or "smart_broker"
             })
         return jsonify({"success": True, "products": results, "count": len(results)}), 200
     except Exception as e:
@@ -7877,6 +7886,51 @@ def api_store_checkout():
             except Exception:
                 pass
 
+        # Multi-Vendor Seller Attribution & WhatsApp Lead Routing
+        seller_items_map = {}
+        seller_direct_links = []
+        from models import Product
+        for it in cleaned_items:
+            p_rec = None
+            if it.get("id"):
+                p_rec = db.session.get(Product, it["id"])
+            if not p_rec and it.get("name"):
+                p_rec = Product.query.filter_by(name=it["name"]).first()
+            if p_rec:
+                s_phone = getattr(p_rec, "seller_phone", None)
+                s_name = getattr(p_rec, "seller_name", "Chitral Bazar Vendor")
+                s_mode = getattr(p_rec, "contact_mode", "smart_broker") or "smart_broker"
+                it["seller_name"] = s_name
+                it["seller_phone"] = s_phone or ""
+                it["seller_city"] = getattr(p_rec, "seller_city", "Chitral")
+                it["platform_commission"] = getattr(p_rec, "platform_commission", 0.0) or (it["price"] * 0.10)
+                it["contact_mode"] = s_mode
+
+                if s_phone and str(s_phone).strip():
+                    clean_sp = str(s_phone).strip()
+                    if clean_sp not in seller_items_map:
+                        seller_items_map[clean_sp] = {
+                            "seller_name": s_name,
+                            "contact_mode": s_mode,
+                            "items": []
+                        }
+                    seller_items_map[clean_sp]["items"].append(it)
+
+                    # Build direct click-to-chat WhatsApp link
+                    if s_mode == "smart_broker":
+                        import urllib.parse
+                        dig_sp = "".join(filter(str.isdigit, clean_sp))
+                        chat_txt = urllib.parse.quote(f"Assalam o Alaikum {s_name}! I placed order #{order.order_number} for {it['name']} on Chitral & Global Bazar.")
+                        wa_link = f"https://wa.me/{dig_sp}?text={chat_txt}"
+                        seller_direct_links.append({
+                            "seller_name": s_name,
+                            "seller_phone": clean_sp,
+                            "product_name": it["name"],
+                            "chat_url": wa_link,
+                            "whatsapp_url": wa_link
+                        })
+
+        # Multi-vendor lead message with commission summary
         lead_msg = (
             f"🛍️ Storefront Order #{order_num}: {items_summary}. "
             f"Total: PKR {total_amount:,.0f}. Address: {address or 'Chitral Delivery'}. "
@@ -7947,6 +8001,38 @@ def api_store_checkout():
         except Exception as wa_err:
             logger.warning(f"WhatsApp order confirmation dispatch notice: {wa_err}")
 
+        # Dispatch automated WhatsApp notifications to each Seller
+        for s_phone, s_data in seller_items_map.items():
+            try:
+                s_name = s_data["seller_name"]
+                s_items = s_data["items"]
+                s_lines = "\n".join([f"• {x['quantity']}x {x['name']} - PKR {x['price'] * x['quantity']:,.0f}" for x in s_items])
+                s_subtotal = sum(x['price'] * x['quantity'] for x in s_items)
+                s_comm = sum(float(x.get('platform_commission', x['price'] * 0.10)) * x['quantity'] for x in s_items)
+                s_payout = s_subtotal - s_comm
+
+                seller_alert = (
+                    f"🚨 *NEW ORDER ALERT - CHITRAL & GLOBAL BAZAR!*\n\n"
+                    f"Assalam o Alaikum {s_name} Bhai! Aapki dukan ka item order hua hai:\n\n"
+                    f"📦 *Order #:* `{order.order_number}`\n"
+                    f"👤 *Customer:* {name}\n"
+                    f"📞 *WhatsApp:* {clean_phone}\n"
+                    f"📍 *Delivery Address:* {address or 'Chitral Delivery'}\n"
+                    f"{f'🗺️ *GPS Pin:* https://maps.google.com/?q={lat},{lng}' if lat and lng else ''}\n\n"
+                    f"*Items Ordered:*\n{s_lines}\n\n"
+                    f"💰 *Total Item Value:* PKR {s_subtotal:,.0f}\n"
+                    f"🤝 *Platform Commission (10%):* PKR {s_comm:,.0f}\n"
+                    f"💵 *Net Payout to You:* PKR {s_payout:,.0f}\n\n"
+                    f"Baraye karam customer se foran WhatsApp par rabta karein ya dispatch tayar karein! Shukriya!"
+                )
+                WhatsAppService.send_message(
+                    organization_id=org_id,
+                    to_phone=s_phone,
+                    message_text=seller_alert
+                )
+            except Exception as s_notif_err:
+                logger.warning(f"Seller order notification notice: {s_notif_err}")
+
         # Dispatch Automated WhatsApp Urdu Voice Note
         try:
             voice_script = (
@@ -7972,6 +8058,7 @@ def api_store_checkout():
             "total_amount": total_amount,
             "tracking_url": tracking_link,
             "payment_status": order.payment_status,
+            "seller_whatsapp_links": seller_direct_links,
             "message": "Order placed successfully!"
         }), 201
 
@@ -8404,4 +8491,287 @@ def api_verify_payment_receipt():
 
     except Exception as e:
         logger.error(f"Payment receipt verification endpoint error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ==============================================================================
+# MULTI-VENDOR MARKETPLACE & SELLER ONBOARDING APIS
+# ==============================================================================
+
+@api_v1.route("/store/seller/list-product", methods=["POST"])
+def api_store_seller_list_product():
+    """Public seller onboarding & item submission endpoint for multi-vendor marketplace."""
+    try:
+        from models import Product, Lead, SystemSetting, generate_uuid
+        data = request.get_json(silent=True) or {}
+        if not data and request.form:
+            data = request.form.to_dict()
+
+        seller_name = str(data.get("seller_name") or "").strip()
+        seller_phone = str(data.get("seller_phone") or "").strip()
+        seller_city = str(data.get("seller_city") or "Chitral").strip()
+        name = str(data.get("name") or "").strip()
+        category = str(data.get("category") or "General").strip()
+        price = float(data.get("price") or 0.0)
+        desc = str(data.get("description") or "").strip()
+        img = str(data.get("image_url") or data.get("image_base64") or data.get("image_data_uri") or "").strip()
+        org_id = str(data.get("organization_id") or "org-enterprise-default").strip()
+
+        if not seller_name:
+            return jsonify({"success": False, "error": "Seller / Shop name is required."}), 400
+        if not seller_phone or len("".join(filter(str.isdigit, seller_phone))) < 7:
+            return jsonify({"success": False, "error": "A valid WhatsApp number is required."}), 400
+        if not name:
+            return jsonify({"success": False, "error": "Product title is required."}), 400
+        if price <= 0:
+            return jsonify({"success": False, "error": "Product price must be greater than 0 PKR."}), 400
+
+        clean_seller_phone = WhatsAppService.format_phone_number(seller_phone)
+
+        # Category-matched fallback image if none provided
+        if not img or len(img) < 10:
+            cat_lower = category.lower()
+            if "honey" in cat_lower:
+                img = "https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=600&auto=format&fit=crop&q=80"
+            elif "dry" in cat_lower or "fruit" in cat_lower or "nut" in cat_lower or "walnut" in cat_lower:
+                img = "https://images.unsplash.com/photo-1596701062351-8c2c14d1fdd0?w=600&auto=format&fit=crop&q=80"
+            elif "shawl" in cat_lower or "cap" in cat_lower or "handicraft" in cat_lower or "pattu" in cat_lower:
+                img = "https://images.unsplash.com/photo-1607344645866-009c320c5ab8?w=600&auto=format&fit=crop&q=80"
+            elif "gem" in cat_lower or "mineral" in cat_lower:
+                img = "https://images.unsplash.com/photo-1600003014755-ba31aa59c4b6?w=600&auto=format&fit=crop&q=80"
+            elif "electr" in cat_lower or "mobile" in cat_lower or "tech" in cat_lower:
+                img = "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=600&auto=format&fit=crop&q=80"
+            elif "fash" in cat_lower or "cloth" in cat_lower or "kurta" in cat_lower or "foot" in cat_lower:
+                img = "https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=600&auto=format&fit=crop&q=80"
+            else:
+                img = "https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=600&auto=format&fit=crop&q=80"
+
+        # Commission calculation (default 10%)
+        comm_pct_str = SystemSetting.get_val("MARKETPLACE_COMMISSION_PERCENT", "10")
+        try: comm_pct = float(comm_pct_str)
+        except Exception: comm_pct = 10.0
+        commission_rate = comm_pct / 100.0
+        platform_commission = round(price * commission_rate, 2)
+        seller_payout = price - platform_commission
+
+        default_mode = SystemSetting.get_val("MARKETPLACE_DEFAULT_MODE", "smart_broker")
+
+        prod = Product(
+            id=generate_uuid("prd"),
+            organization_id=org_id,
+            name=name,
+            category=category,
+            price=price,
+            currency="PKR",
+            description=desc,
+            image_url=img,
+            stock_quantity=50,
+            stock_status="in_stock",
+            is_active=True,
+            seller_name=seller_name,
+            seller_phone=clean_seller_phone,
+            seller_city=seller_city,
+            seller_price=price,
+            platform_commission=platform_commission,
+            commission_rate=commission_rate,
+            is_approved=True,
+            contact_mode=default_mode
+        )
+        db.session.add(prod)
+
+        # Log seller in CRM Leads
+        lead = Lead(
+            id=generate_uuid("lead"),
+            organization_id=org_id,
+            name=seller_name,
+            phone=clean_seller_phone,
+            intent="marketplace_seller",
+            urgency_score=80,
+            lead_score=90,
+            status="qualified",
+            message=f"Marketplace Seller Onboarding: Shop '{seller_name}' ({seller_city}). Listed '{name}' for PKR {price:,.0f}."
+        )
+        db.session.add(lead)
+        db.session.commit()
+
+        # Send automated WhatsApp confirmation to Seller
+        seller_welcome = (
+            f"🎉 *Assalam o Alaikum {seller_name}!*\n\n"
+            f"Mubarak ho! Aap ka item *'{name}'* Chitral & Global Bazar par kamyabi se LIVE ho chuka hai!\n\n"
+            f"💰 *Customer Price:* PKR {price:,.0f}\n"
+            f"🤝 *Platform Commission ({int(comm_pct)}%):* PKR {platform_commission:,.0f}\n"
+            f"💵 *Your Net Payout upon Sale:* PKR {seller_payout:,.0f}\n"
+            f"📍 *Location:* {seller_city}\n\n"
+            f"Jaise hi koi customer aap ka item order karega, hum aapko WhatsApp par customer ka Name, Phone aur Address bhej dein ge! Shukriya!"
+        )
+        try:
+            WhatsAppService.send_message(
+                organization_id=org_id,
+                to_phone=clean_seller_phone,
+                message_text=seller_welcome
+            )
+        except Exception as wa_err:
+            logger.warning(f"Seller WhatsApp confirmation notice: {wa_err}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Mubarak ho! Item '{name}' is now live for sale on Chitral & Global Bazar.",
+            "product": prod.to_dict()
+        }), 201
+
+    except Exception as e:
+        logger.error(f"Seller listing error: {e}", exc_info=True)
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/store/marketplace/sellers", methods=["GET"])
+def api_store_marketplace_sellers():
+    """Returns aggregated marketplace sellers, listed items, and platform commissions."""
+    try:
+        from models import Product, EcommerceOrder, SystemSetting
+        org_id = request.args.get("org_id") or "org-enterprise-default"
+
+        products = Product.query.filter(
+            Product.organization_id == org_id,
+            Product.seller_phone.isnot(None),
+            Product.seller_phone != ""
+        ).all()
+
+        sellers_dict = {}
+        for p in products:
+            sp = p.seller_phone
+            if sp not in sellers_dict:
+                sellers_dict[sp] = {
+                    "seller_name": p.seller_name or "Vendor",
+                    "seller_phone": sp,
+                    "seller_city": p.seller_city or "Chitral",
+                    "items_count": 0,
+                    "total_sales": 0.0,
+                    "total_commission": 0.0,
+                    "is_active": p.is_active,
+                    "is_approved": p.is_approved,
+                    "contact_mode": p.contact_mode or "smart_broker"
+                }
+            sellers_dict[sp]["items_count"] += 1
+            if not p.is_active:
+                sellers_dict[sp]["is_active"] = False
+
+        orders = EcommerceOrder.query.filter_by(organization_id=org_id).all()
+        for o in orders:
+            for it in o.get_items():
+                sp = it.get("seller_phone")
+                if sp and sp in sellers_dict:
+                    amt = float(it.get("price", 0.0)) * int(it.get("quantity", 1))
+                    comm = float(it.get("platform_commission", amt * 0.10)) * int(it.get("quantity", 1))
+                    sellers_dict[sp]["total_sales"] += amt
+                    sellers_dict[sp]["total_commission"] += comm
+
+        sellers_list = list(sellers_dict.values())
+        total_comm = sum(s["total_commission"] for s in sellers_list)
+        total_sales = sum(s["total_sales"] for s in sellers_list)
+
+        return jsonify({
+            "success": True,
+            "total_sellers": len(sellers_list),
+            "total_seller_items": len(products),
+            "total_commission": total_comm,
+            "total_sales": total_sales,
+            "commission_percent": float(SystemSetting.get_val("MARKETPLACE_COMMISSION_PERCENT", "10")),
+            "contact_mode": SystemSetting.get_val("MARKETPLACE_DEFAULT_MODE", "smart_broker"),
+            "sellers": sellers_list
+        }), 200
+    except Exception as e:
+        logger.error(f"Marketplace sellers list error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/store/marketplace/product/<product_id>/status", methods=["POST"])
+def api_store_marketplace_product_status(product_id: str):
+    """Admin action to approve, hide, or delete a marketplace product."""
+    try:
+        from models import Product
+        prod = db.session.get(Product, product_id)
+        if not prod:
+            return jsonify({"success": False, "error": "Product not found."}), 404
+
+        data = request.get_json(silent=True) or {}
+        action = str(data.get("action") or "toggle").lower().strip()
+
+        if action == "approve":
+            prod.is_approved = True
+            prod.is_active = True
+        elif action == "hide":
+            prod.is_approved = False
+        elif action == "delete":
+            db.session.delete(prod)
+        elif action == "toggle":
+            prod.is_approved = not prod.is_approved
+
+        db.session.commit()
+        return jsonify({"success": True, "message": f"Product status updated ({action}).", "is_approved": getattr(prod, 'is_approved', False)}), 200
+    except Exception as e:
+        logger.error(f"Product status action error: {e}", exc_info=True)
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/store/marketplace/seller/<seller_phone>/block", methods=["POST"])
+def api_store_marketplace_seller_block(seller_phone: str):
+    """Admin action to block/unblock a seller and their products."""
+    try:
+        from models import Product
+        clean_sp = WhatsAppService.format_phone_number(seller_phone)
+        data = request.get_json(silent=True) or {}
+        block = bool(data.get("block", True))
+
+        prods = Product.query.filter(
+            (Product.seller_phone == clean_sp) | (Product.seller_phone == seller_phone)
+        ).all()
+        for p in prods:
+            p.is_active = not block
+            p.is_approved = not block
+
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "message": f"Seller {'blocked' if block else 'unblocked'} successfully. {len(prods)} products updated.",
+            "is_blocked": block
+        }), 200
+    except Exception as e:
+        logger.error(f"Seller block error: {e}", exc_info=True)
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/store/marketplace/settings", methods=["GET", "POST"])
+def api_store_marketplace_settings():
+    """Gets or updates marketplace platform commission and default contact mode."""
+    try:
+        from models import SystemSetting
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            if "commission_percent" in data:
+                SystemSetting.set_val("MARKETPLACE_COMMISSION_PERCENT", str(data["commission_percent"]).strip(), description="Default Platform Commission Percent")
+            if "contact_mode" in data:
+                SystemSetting.set_val("MARKETPLACE_DEFAULT_MODE", str(data["contact_mode"]).strip(), description="Default Contact Mode (smart_broker or owner_escrow)")
+
+            db.session.commit()
+            return jsonify({
+                "success": True,
+                "message": "Marketplace settings updated successfully!",
+                "commission_percent": float(SystemSetting.get_val("MARKETPLACE_COMMISSION_PERCENT", "10")),
+                "contact_mode": SystemSetting.get_val("MARKETPLACE_DEFAULT_MODE", "smart_broker")
+            }), 200
+
+        return jsonify({
+            "success": True,
+            "commission_percent": float(SystemSetting.get_val("MARKETPLACE_COMMISSION_PERCENT", "10")),
+            "contact_mode": SystemSetting.get_val("MARKETPLACE_DEFAULT_MODE", "smart_broker")
+        }), 200
+    except Exception as e:
+        logger.error(f"Marketplace settings error: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500

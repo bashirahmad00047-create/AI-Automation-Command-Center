@@ -267,7 +267,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                         if _tname not in _existing_tables:
                             continue
                         try:
-                            _existing_cols = {c["name"] for c in _insp.get_columns(_tname)}
+                            _existing_cols = {c["name"] for c in _sa_inspect(db.engine).get_columns(_tname)}
                         except Exception as _e_cols:
                             app_ref.logger.warning(f"Could not inspect columns for table {_tname}: {_e_cols}")
                             continue
@@ -293,6 +293,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                                         _c_conn.execute(_sa_text(_stmt))
                                         _c_conn.commit()
                                     app_ref.logger.info(f"Dynamically added missing column: {_tname}.{_col.name} ({_col_type})")
+                                    _existing_cols.add(_col.name)
                                 except Exception as _add_c_err:
                                     app_ref.logger.warning(f"Column sync notice for {_tname}.{_col.name}: {_add_c_err}")
                 except Exception as _col_err:
@@ -1718,6 +1719,31 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     def top_store_product_delete(product_id: str):
         from api_v1 import api_store_product_delete
         return api_store_product_delete(product_id)
+
+    @application.route("/api/store/seller/list-product", methods=["POST"])
+    def top_store_seller_list_product():
+        from api_v1 import api_store_seller_list_product
+        return api_store_seller_list_product()
+
+    @application.route("/api/store/marketplace/sellers", methods=["GET"])
+    def top_store_marketplace_sellers():
+        from api_v1 import api_store_marketplace_sellers
+        return api_store_marketplace_sellers()
+
+    @application.route("/api/store/marketplace/product/<product_id>/status", methods=["POST"])
+    def top_store_marketplace_product_status(product_id: str):
+        from api_v1 import api_store_marketplace_product_status
+        return api_store_marketplace_product_status(product_id)
+
+    @application.route("/api/store/marketplace/seller/<seller_phone>/block", methods=["POST"])
+    def top_store_marketplace_seller_block(seller_phone: str):
+        from api_v1 import api_store_marketplace_seller_block
+        return api_store_marketplace_seller_block(seller_phone)
+
+    @application.route("/api/store/marketplace/settings", methods=["GET", "POST"])
+    def top_store_marketplace_settings():
+        from api_v1 import api_store_marketplace_settings
+        return api_store_marketplace_settings()
 
     # =========================================================================
     # MODULE 2: AI VOICE STUDIO LIVE TEST & SETTINGS ROUTES

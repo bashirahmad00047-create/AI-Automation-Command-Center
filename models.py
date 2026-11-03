@@ -1537,6 +1537,14 @@ class Product(db.Model):
     stock_quantity = db.Column(db.Integer, nullable=False, default=0)
     stock_status = db.Column(db.String(32), nullable=False, default="in_stock")  # in_stock, low_stock, out_of_stock
     is_active = db.Column(db.Boolean, nullable=False, default=True)  # True = Active, False = Archived
+    seller_name = db.Column(db.String(120), nullable=True, default="Chitral Bazar Official")
+    seller_phone = db.Column(db.String(32), nullable=True)
+    seller_city = db.Column(db.String(80), nullable=True, default="Chitral")
+    seller_price = db.Column(db.Float, nullable=True)
+    platform_commission = db.Column(db.Float, nullable=True, default=0.0)
+    commission_rate = db.Column(db.Float, nullable=True, default=0.10)
+    is_approved = db.Column(db.Boolean, nullable=False, default=True)
+    contact_mode = db.Column(db.String(32), nullable=True, default="smart_broker")
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -1563,6 +1571,14 @@ class Product(db.Model):
             "stock_quantity": int(self.stock_quantity),
             "stock_status": self.stock_status or self.calculate_stock_status(),
             "is_active": bool(self.is_active),
+            "seller_name": self.seller_name or "Chitral Bazar Official",
+            "seller_phone": self.seller_phone or "",
+            "seller_city": self.seller_city or "Chitral",
+            "seller_price": float(self.seller_price) if self.seller_price is not None else float(self.price),
+            "platform_commission": float(self.platform_commission or 0.0),
+            "commission_rate": float(self.commission_rate or 0.10),
+            "is_approved": bool(self.is_approved),
+            "contact_mode": self.contact_mode or "smart_broker",
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }
@@ -1722,6 +1738,11 @@ class EcommerceOrder(db.Model):
     tracking_url = db.Column(db.String(512), nullable=True)
     shipping_address = db.Column(db.Text, nullable=True)
     notes = db.Column(db.Text, nullable=True)
+    seller_name = db.Column(db.String(120), nullable=True)
+    seller_phone = db.Column(db.String(32), nullable=True)
+    seller_price = db.Column(db.Float, nullable=True)
+    platform_commission = db.Column(db.Float, nullable=True, default=0.0)
+    contact_mode = db.Column(db.String(32), nullable=True, default="smart_broker")
     last_notified_status = db.Column(db.String(32), nullable=True)
     last_notified_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
@@ -1759,6 +1780,11 @@ class EcommerceOrder(db.Model):
             "tracking_url": self.tracking_url or "",
             "shipping_address": self.shipping_address or "",
             "notes": self.notes or "",
+            "seller_name": self.seller_name or "",
+            "seller_phone": self.seller_phone or "",
+            "seller_price": float(self.seller_price) if self.seller_price is not None else None,
+            "platform_commission": float(self.platform_commission or 0.0),
+            "contact_mode": self.contact_mode or "smart_broker",
             "last_notified_status": self.last_notified_status,
             "last_notified_at": self.last_notified_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_notified_at else None,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
