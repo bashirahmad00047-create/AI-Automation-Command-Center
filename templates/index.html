@@ -364,12 +364,12 @@
                     <div class="hud-flex-row hud-gap-sm">
                         <span style="color: #25d366;">💬</span>
                         <span style="color: var(--text-secondary);">Active Chats:</span>
-                        <strong id="telemetryActiveChats" style="color: #25d366; font-family: var(--font-mono);">8 Active</strong>
+                        <strong id="telemetryActiveChats" style="color: #25d366; font-family: var(--font-mono);">0 Active</strong>
                     </div>
                     <div class="hud-flex-row hud-gap-sm">
                         <span style="color: #06b6d4;">🎙️</span>
                         <span style="color: var(--text-secondary);">Voice Minutes:</span>
-                        <strong id="telemetryVoiceMinutes" style="color: #06b6d4; font-family: var(--font-mono);">24.5 Mins</strong>
+                        <strong id="telemetryVoiceMinutes" style="color: #06b6d4; font-family: var(--font-mono);">0.0 Mins</strong>
                     </div>
                     <div class="hud-flex-row hud-gap-sm">
                         <span style="color: #f59e0b;">⚡</span>
@@ -379,7 +379,7 @@
                     <div class="hud-flex-row hud-gap-sm" onclick="trackActiveDelivery()" style="cursor: pointer;" title="View Live Radar Map">
                         <span style="color: #ec4899;">🚚</span>
                         <span style="color: var(--text-secondary);">Orders Out for Delivery:</span>
-                        <strong id="telemetryDeliveryOrders" style="color: #ec4899; font-family: var(--font-mono);">3 In Transit 📍</strong>
+                        <strong id="telemetryDeliveryOrders" style="color: #ec4899; font-family: var(--font-mono);">0 In Transit 📍</strong>
                     </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
@@ -392,7 +392,7 @@
                     <div class="metric-header">
                         <span class="metric-title text-gray-600 dark:text-slate-400">TOTAL EXECUTIONS</span>
                         <div class="hud-flex-row hud-gap-xs">
-                            <span class="metric-delta up" title="Throughput status">▲ 100%</span>
+                            <span class="metric-delta neutral" id="statTotalExecutionsDelta" title="Throughput status">0%</span>
                             <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">DISPATCHED</span>
                         </div>
                     </div>
@@ -404,7 +404,7 @@
                     <div class="metric-header">
                         <span class="metric-title text-gray-600 dark:text-slate-400">SUCCESS RATE</span>
                         <div class="hud-flex-row hud-gap-xs">
-                            <span class="metric-delta up" id="statSuccessRateDelta" title="SLA target">● 99.9%</span>
+                            <span class="metric-delta neutral" id="statSuccessRateDelta" title="SLA target">0.0%</span>
                             <span class="metric-badge bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">RELIABILITY</span>
                         </div>
                     </div>

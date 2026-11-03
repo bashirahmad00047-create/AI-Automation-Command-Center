@@ -530,14 +530,23 @@ async function pollTelemetry(force = false) {
 
         const statSuccessRateEl = document.getElementById('statSuccessRate');
         const statSuccessRateSubEl = document.getElementById('statSuccessRateSub');
+        const totalExecDelta = document.getElementById('statTotalExecutionsDelta');
+        const successRateDelta = document.getElementById('statSuccessRateDelta');
+
+        if (totalExecDelta) {
+            totalExecDelta.textContent = totalExecs === 0 ? '0%' : `▲ ${Math.min(100, Math.round(totalExecs))}%`;
+        }
+
         if (statSuccessRateEl) {
             if (totalExecs === 0) {
                 statSuccessRateEl.textContent = '—';
                 if (statSuccessRateSubEl) statSuccessRateSubEl.textContent = 'No executions yet';
+                if (successRateDelta) successRateDelta.textContent = '0.0%';
             } else {
                 const rate = stats.success_rate !== undefined ? stats.success_rate : Math.round((successExecs / totalExecs) * 100);
                 statSuccessRateEl.textContent = `${rate}%`;
                 if (statSuccessRateSubEl) statSuccessRateSubEl.textContent = `${successExecs} / ${totalExecs} succeeded`;
+                if (successRateDelta) successRateDelta.textContent = `● ${rate}%`;
             }
         }
 
@@ -5371,7 +5380,12 @@ function handleRealtimeWhatsAppMessage(msg) {
     // Update message counters in header and badges
     const countBadge = document.getElementById('waMessageCountBadge');
     if (countBadge) countBadge.textContent = `${waAllMessagesCache.length} messages`;
-    updateNavBadge('tabWhatsAppCount', waAllMessagesCache.length);
+    const distinctChatsCount = new Set(
+        waAllMessagesCache
+            .map(m => m.resolved_phone || (m.direction === 'inbound' ? m.sender : m.recipient) || m.chat_id || m.remote_jid)
+            .filter(Boolean)
+    ).size;
+    updateNavBadge('tabWhatsAppCount', distinctChatsCount);
 
     // Refresh WhatsApp Web UI smoothly
     renderWhatsAppWebUI(waAllMessagesCache, true);
@@ -7624,7 +7638,12 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
         }
 
         if (countBadge) countBadge.textContent = `${messages.length} messages`;
-        updateNavBadge('tabWhatsAppCount', messages.length);
+        const distinctMsgChats = new Set(
+            (Array.isArray(messages) ? messages : [])
+                .map(m => m.resolved_phone || (m.direction === 'inbound' ? m.sender : m.recipient) || m.chat_id || m.remote_jid)
+                .filter(Boolean)
+        ).size;
+        updateNavBadge('tabWhatsAppCount', distinctMsgChats);
 
         // Real-Time Incoming WhatsApp Call Ring Alert & Auto-Voice Playback
         if (typeof checkIncomingCallAlert === 'function') checkIncomingCallAlert(messages);
@@ -13858,9 +13877,9 @@ function updateFiveModulePulseBar() {
         const chats = (Array.isArray(window.waConversationsCache) && window.waConversationsCache.length > 0)
             ? window.waConversationsCache.length
             : (Array.isArray(window.waAllMessagesCache) && window.waAllMessagesCache.length > 0
-                ? new Set(window.waAllMessagesCache.map(m => m.sender || m.recipient)).size
-                : 8);
-        activeChatsEl.textContent = `${Math.max(chats, 1)} Active`;
+                ? new Set(window.waAllMessagesCache.map(m => m.resolved_phone || (m.direction === 'inbound' ? m.sender : m.recipient) || m.chat_id).filter(Boolean)).size
+                : 0);
+        activeChatsEl.textContent = `${chats} Active`;
     }
 
     const voiceMinEl = document.getElementById('telemetryVoiceMinutes');
@@ -13868,12 +13887,12 @@ function updateFiveModulePulseBar() {
         let voiceSec = 0;
         if (Array.isArray(window.waAllMessagesCache)) {
             window.waAllMessagesCache.forEach(m => {
-                if (m.is_audio || m.duration) {
-                    voiceSec += Number(m.audio_duration || m.duration || 18);
+                if (m.is_audio || m.duration || m.message_type === 'audio') {
+                    voiceSec += Number(m.audio_duration || m.duration || 12);
                 }
             });
         }
-        const totalMin = voiceSec > 0 ? (voiceSec / 60).toFixed(1) : '24.5';
+        const totalMin = (voiceSec / 60).toFixed(1);
         voiceMinEl.textContent = `${totalMin} Mins`;
     }
 
@@ -13886,8 +13905,8 @@ function updateFiveModulePulseBar() {
     if (deliveryOrdersEl) {
         const pins = (Array.isArray(window.radarMapMarkers) && window.radarMapMarkers.length > 0)
             ? window.radarMapMarkers.length
-            : 3;
-        deliveryOrdersEl.textContent = `${Math.max(pins, 1)} In Transit 📍`;
+            : 0;
+        deliveryOrdersEl.textContent = `${pins} In Transit 📍`;
     }
 }
 window.updateFiveModulePulseBar = updateFiveModulePulseBar;

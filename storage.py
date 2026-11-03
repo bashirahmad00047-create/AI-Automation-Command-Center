@@ -1141,6 +1141,38 @@ class Storage:
         total_leads = session.query(Lead).filter_by(organization_id=org_id).count()
         high_priority_leads = session.query(Lead).filter_by(organization_id=org_id).filter(Lead.lead_score >= 70).count()
 
+        # Real WhatsApp Distinct Active Chats & Delivery Orders
+        distinct_chats = 0
+        voice_minutes = 0.0
+        delivery_orders = 0
+        try:
+            from models import WhatsAppMessage, EcommerceOrder
+            senders = [s[0] for s in session.query(WhatsAppMessage.sender).filter(
+                WhatsAppMessage.organization_id == org_id,
+                WhatsAppMessage.sender.isnot(None),
+                WhatsAppMessage.sender != ''
+            ).distinct().all() if s[0]]
+            recipients = [r[0] for r in session.query(WhatsAppMessage.recipient).filter(
+                WhatsAppMessage.organization_id == org_id,
+                WhatsAppMessage.recipient.isnot(None),
+                WhatsAppMessage.recipient != '',
+                WhatsAppMessage.recipient != 'BashFlow Store'
+            ).distinct().all() if r[0]]
+            distinct_chats = len(set(senders) | set(recipients))
+
+            audio_count = session.query(WhatsAppMessage).filter(
+                WhatsAppMessage.organization_id == org_id,
+                WhatsAppMessage.message_type.in_(["audio", "voice", "ptt"])
+            ).count()
+            voice_minutes = round(audio_count * 0.5, 1)
+
+            delivery_orders = session.query(EcommerceOrder).filter(
+                EcommerceOrder.organization_id == org_id,
+                EcommerceOrder.order_status.in_(["in_transit", "dispatched", "out_for_delivery"])
+            ).count()
+        except Exception:
+            pass
+
         return {
             "total_rules": total_rules,
             "active_rules": active_rules,
@@ -1154,6 +1186,11 @@ class Storage:
             "success_rate_percent": success_rate,
             "total_leads": total_leads,
             "high_priority_leads": high_priority_leads,
+            "distinct_chats": distinct_chats,
+            "distinct_active_chats": distinct_chats,
+            "voice_minutes": voice_minutes,
+            "delivery_orders": delivery_orders,
+            "active_deliveries": delivery_orders,
             "unread_notifications": open_alerts,
             "open_alerts": open_alerts,
             "acknowledged_alerts": ack_alerts,

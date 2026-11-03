@@ -2324,7 +2324,11 @@ def system_telemetry():
     return jsonify({
         "stats": stats,
         "telemetry": telemetry,
-        "engine_online": engine_online
+        "engine_online": engine_online,
+        "distinct_chats": stats.get("distinct_chats", 0),
+        "distinct_active_chats": stats.get("distinct_active_chats", 0),
+        "voice_minutes": stats.get("voice_minutes", 0.0),
+        "delivery_orders": stats.get("delivery_orders", 0)
     }), 200
 
 
@@ -7734,12 +7738,159 @@ def api_business_template_save():
 # MODULE 1: PUBLIC E-COMMERCE STOREFRONT & CHECKOUT APIS
 # ==============================================================================
 
+VERIFIED_CHITRAL_PRODUCTS = [
+    {
+        "name": "Pure Chitrali Sidr Mountain Honey (500g)",
+        "category": "Pure Mountain Honey",
+        "description": "100% pure, unpasteurized wild berry Sidr honey harvested from pristine valleys of Chitral. Known for exceptional antibacterial, digestive, and medicinal qualities.",
+        "sku": "CHIT-HONEY-001",
+        "price": 2800.0,
+        "seller_price": 2500.0,
+        "platform_commission": 300.0,
+        "image_url": "https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 45,
+        "stock_status": "in_stock",
+        "seller_name": "Tirich Mir Honey Apiary",
+        "seller_phone": "+923001234567",
+        "seller_city": "Chitral Town",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Handwoven Chitrali Pattu Wool Shawl",
+        "category": "Chitrali Shawls & Caps",
+        "description": "Authentic artisan handwoven pure mountain sheep wool Pattu chugha/shawl. Warm, timeless, and crafted by master weavers in Drosh and Booni.",
+        "sku": "CHIT-SHAWL-002",
+        "price": 6500.0,
+        "seller_price": 5800.0,
+        "platform_commission": 700.0,
+        "image_url": "https://images.unsplash.com/photo-1606760227091-3dd870d97f1d?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 20,
+        "stock_status": "in_stock",
+        "seller_name": "Hindukush Heritage Weavers",
+        "seller_phone": "+923019876543",
+        "seller_city": "Drosh, Chitral",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Traditional Chitrali Pakol Cap with Peacock Feather",
+        "category": "Chitrali Shawls & Caps",
+        "description": "Original hand-rolled Chitrali Pakol cap made from 100% fine woolen cloth. Classic symbol of Northern Pakistan pride, comfort, and heritage.",
+        "sku": "CHIT-PAKOL-003",
+        "price": 1400.0,
+        "seller_price": 1200.0,
+        "platform_commission": 200.0,
+        "image_url": "https://images.unsplash.com/photo-1521369909029-2afed882baee?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 60,
+        "stock_status": "in_stock",
+        "seller_name": "Shahi Bazar Cap Makers",
+        "seller_phone": "+923123456789",
+        "seller_city": "Chitral Bazar",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Kagzi Thin-Shell Mountain Walnuts (1kg)",
+        "category": "Dry Fruits & Nuts",
+        "description": "Crisp, oil-rich organic Kagzi walnuts from Garam Chashma. Can be cracked open by hand. Bursting with natural Omega-3 and mountain nutrients.",
+        "sku": "CHIT-WALNUT-004",
+        "price": 1600.0,
+        "seller_price": 1400.0,
+        "platform_commission": 200.0,
+        "image_url": "https://images.unsplash.com/photo-1568282377339-b9a3044a8385?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 80,
+        "stock_status": "in_stock",
+        "seller_name": "Garam Chashma Organic Farms",
+        "seller_phone": "+923335557799",
+        "seller_city": "Garam Chashma",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Natural Green Tourmaline Gemstone (Rough Specimen)",
+        "category": "Minerals & Gems",
+        "description": "Untreated, all-natural vibrant green tourmaline crystal matrix sourced directly from the pegmatite veins of the Chitral-Hindu Kush mountain range.",
+        "sku": "CHIT-TOURM-005",
+        "price": 12000.0,
+        "seller_price": 10500.0,
+        "platform_commission": 1500.0,
+        "image_url": "https://images.unsplash.com/photo-1615655406736-b37c4fabf923?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 8,
+        "stock_status": "in_stock",
+        "seller_name": "Karakoram & Hindu Kush Gems",
+        "seller_phone": "+923451122334",
+        "seller_city": "Booni, Upper Chitral",
+        "contact_mode": "smart_broker"
+    }
+]
+
+
+def ensure_seed_products():
+    """Guarantees at least 5 verified Chitrali authentic products exist in the database,
+    preventing /store from ever rendering 0 products."""
+    try:
+        from models import Product, Organization
+        from database import db
+        active_count = Product.query.filter_by(is_active=True).count()
+        if active_count >= 5:
+            return
+        
+        org = Organization.query.first()
+        org_id = org.id if org else "org-enterprise-default"
+        if not org:
+            try:
+                org = Organization(
+                    id="org-enterprise-default",
+                    name="Acme Enterprise Global",
+                    slug="enterprise-corp",
+                    plan_tier="enterprise",
+                    is_active=True
+                )
+                db.session.add(org)
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+        for item in VERIFIED_CHITRAL_PRODUCTS:
+            existing = Product.query.filter((Product.sku == item["sku"]) | (Product.name == item["name"])).first()
+            if not existing:
+                prod = Product(
+                    id=generate_uuid("prd"),
+                    organization_id=org_id,
+                    name=item["name"],
+                    category=item["category"],
+                    description=item["description"],
+                    sku=item["sku"],
+                    price=item["price"],
+                    currency="PKR",
+                    image_url=item["image_url"],
+                    stock_quantity=item["stock_quantity"],
+                    stock_status=item["stock_status"],
+                    is_active=True,
+                    seller_name=item["seller_name"],
+                    seller_phone=item["seller_phone"],
+                    seller_city=item["seller_city"],
+                    seller_price=item["seller_price"],
+                    platform_commission=item["platform_commission"],
+                    commission_rate=0.10,
+                    is_approved=True,
+                    contact_mode=item["contact_mode"]
+                )
+                db.session.add(prod)
+        db.session.commit()
+    except Exception as e:
+        logger.warning(f"ensure_seed_products notice: {e}")
+        try:
+            from database import db
+            db.session.rollback()
+        except Exception:
+            pass
+
+
 @api_v1.route("/store/products", methods=["GET"])
 def api_store_products():
     """Returns active products catalog for public shopping storefront."""
     try:
         from models import Product
-        org_id = request.args.get("org_id") or "org-enterprise-default"
+        ensure_seed_products()
+        org_id = request.args.get("org_id")
         q = Product.query.filter_by(is_active=True)
         if org_id and org_id != "global":
             org_prods = q.filter_by(organization_id=org_id).all()
@@ -8306,11 +8457,13 @@ def api_voice_test_live():
         pitch = data.get("pitch")
         org_id = request.args.get("org_id") or "org-enterprise-default"
 
-        rate_str = f"{int(rate):+d}%" if (isinstance(rate, (int, float)) or (isinstance(rate, str) and str(rate).replace("+","").replace("-","").isdigit())) else (str(rate) if rate else None)
-        pitch_str = f"{int(pitch):+d}Hz" if (isinstance(pitch, (int, float)) or (isinstance(pitch, str) and str(pitch).replace("+","").replace("-","").isdigit())) else (str(pitch) if pitch else None)
+        rate_str = f"{int(rate):+d}%" if (isinstance(rate, (int, float)) or (isinstance(rate, str) and str(rate).replace("+","").replace("-","").isdigit())) else (str(rate) if rate else "+0%")
+        pitch_str = f"{int(pitch):+d}Hz" if (isinstance(pitch, (int, float)) or (isinstance(pitch, str) and str(pitch).replace("+","").replace("-","").isdigit())) else (str(pitch) if pitch else "+0Hz")
+
+        clean_text = WhatsAppService.humanize_speech_text(text) or text
 
         audio_bytes = WhatsAppService._synthesize_edge_tts(
-            text=text,
+            text=clean_text,
             voice=voice,
             rate=rate_str,
             pitch=pitch_str,

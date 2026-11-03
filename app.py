@@ -1648,6 +1648,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 db.session.rollback()
             except Exception:
                 pass
+            from api_v1 import ensure_seed_products
+            ensure_seed_products()
             from models import Product
             prods = Product.query.filter_by(is_active=True).order_by(Product.category, Product.name).all()
             jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")

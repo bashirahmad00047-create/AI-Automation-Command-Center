@@ -2017,6 +2017,52 @@ class WhatsAppService:
             clean_speech = clean_disp
         return (clean_disp, clean_speech)
 
+    @staticmethod
+    def pcm_to_wav(pcm_bytes: bytes, sample_rate: int = 24000, channels: int = 1, sample_width: int = 2) -> bytes:
+        """Wraps raw 16-bit linear PCM audio bytes into a valid RIFF WAV container."""
+        import io, wave
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(channels)
+            wf.setsampwidth(sample_width)
+            wf.setframerate(sample_rate)
+            wf.writeframes(pcm_bytes)
+        return buf.getvalue()
+
+    @classmethod
+    def humanize_speech_text(cls, text: str, language: Optional[str] = None) -> str:
+        """Preprocesses text into natural, warm, human conversational speech.
+        - Strips markdown asterisks, hashes, backticks, bullets, and URLs.
+        - Naturally verbalizes PKR prices (e.g. 'PKR 2,500' -> '2500 rupees').
+        - Injects natural micro-pauses after conversational greetings ('Assalam-o-Alaikum, ...', 'Jee bilkul, ...').
+        """
+        if not text or not str(text).strip():
+            return ""
+        import re
+        t = str(text).strip()
+
+        # Remove raw URLs
+        t = re.sub(r'https?://\S+', '', t)
+
+        # Remove markdown symbols and bullets
+        t = re.sub(r'[*_~`#>•\-\[\]\(\)]', ' ', t)
+        t = re.sub(r'[\U00010000-\U0010ffff]', '', t)
+
+        # Format PKR currency naturally: PKR 2,500 or Rs. 2500 -> 2500 rupees
+        t = re.sub(r'(?i)\b(?:pkr|rs\.?|rupees)\s*([\d,]+)', r'\1 rupees', t)
+        t = re.sub(r'(?i)([\d,]+)\s*(?:pkr|rs\.?)\b', r'\1 rupees', t)
+
+        # Injects natural conversational micro-pauses for human breathing
+        t = re.sub(r'(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|as-salamu alaykum|salam)\b(?!\s*[\,\،])', r'\1، ', t)
+        t = re.sub(r'(?i)\b(jee\s*bilkul|ji\s*bilkul|ji\s*haan|jee\s*haan)\b(?!\s*[\,\،])', r'\1، ', t)
+        t = re.sub(r'(?i)\b(bohot\s*shukriya|boht\s*shukriya|shukriya|thank\s*you|thanks)\b(?!\s*[\,\،])', r'\1، ', t)
+        t = re.sub(r'(?i)\b(acha\s*dekhein|achha\s*dekhein|dekhein)\b(?!\s*[\,\،])', r'\1، ', t)
+
+        # Clean multiple spaces and punctuation
+        t = re.sub(r'[\.]{2,}|\u2026', ' ', t)
+        t = re.sub(r'\s+', ' ', t).strip()
+        return t
+
     @classmethod
     def _synthesize_edge_tts(
         cls,
@@ -2138,10 +2184,10 @@ class WhatsAppService:
                 speech_for_tts = re.sub(r'[,\،]', ' ', speech_for_tts)
                 speech_for_tts = re.sub(r'\s+', ' ', speech_for_tts).strip()
 
-            # Omit rate/pitch/volume if 0 to guarantee SSML validation success
-            comm_rate = active_rate if active_rate and active_rate not in ("+0%", "0%", "-0%") else None
-            comm_pitch = active_pitch if active_pitch and active_pitch not in ("+0Hz", "0Hz", "-0Hz") else None
-            comm_vol = active_volume if active_volume and active_volume not in ("+0%", "0%", "-0%") else None
+            # Guarantee valid edge_tts string parameters matching ^[+-]\d+%$ and ^[+-]\d+Hz$ (never None)
+            comm_rate = str(active_rate).strip() if (active_rate and re.match(r"^[+-]\d+%$", str(active_rate).strip())) else "+0%"
+            comm_pitch = str(active_pitch).strip() if (active_pitch and re.match(r"^[+-]\d+Hz$", str(active_pitch).strip())) else "+0Hz"
+            comm_vol = str(active_volume).strip() if (active_volume and re.match(r"^[+-]\d+%$", str(active_volume).strip())) else "+0%"
 
             async def _run():
                 comm = edge_tts.Communicate(speech_for_tts, active_voice, rate=comm_rate, pitch=comm_pitch, volume=comm_vol)
@@ -2255,6 +2301,7 @@ class WhatsAppService:
             return None
 
         clean_text = cls.preprocess_text_for_human_speech(text, language=language)
+        clean_text = cls.humanize_speech_text(clean_text or text, language=language)
         if not clean_text:
             clean_text = str(text).strip()
 
