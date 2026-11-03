@@ -144,14 +144,14 @@
     <div class="enterprise-app-main">
         <!-- Top App Bar -->
         <header class="hud-header enterprise-topbar">
-            <div class="topbar-left">
+            <div class="topbar-left" style="white-space: nowrap; display: flex; align-items: center; gap: 16px;">
                 <button class="mobile-toggle-btn" onclick="toggleSidebarCollapse()" title="Toggle Navigation Menu">
                     <span>☰</span>
                 </button>
-                <div class="topbar-brand-area">
-                    <span class="topbar-brand-title">BashFlow Cloud</span>
+                <div class="topbar-brand-area" style="white-space: nowrap; display: flex; align-items: center; gap: 16px;">
+                    <span class="topbar-brand-title" style="white-space: nowrap;">BashFlow Cloud</span>
                     <span class="topbar-brand-divider">/</span>
-                    <span class="breadcrumb-current" id="activeBreadcrumbText">Executive Overview</span>
+                    <span class="breadcrumb-current" id="activeBreadcrumbText" style="white-space: nowrap;">Executive Overview</span>
                 </div>
             </div>
 
@@ -5217,34 +5217,35 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
     <style>
         #liveVoiceCallModal {
             position: fixed;
-            bottom: 24px;
-            right: 24px;
+            bottom: 20px;
+            right: 20px;
             width: 320px;
-            height: 420px;
-            max-width: calc(100vw - 32px);
-            max-height: calc(100vh - 48px);
-            z-index: 99999;
+            max-width: calc(100vw - 40px);
+            max-height: calc(100vh - 90px);
+            background: #0b0f19;
+            border: 1px solid #14b8a6;
+            border-radius: 16px;
+            padding: 18px;
             box-sizing: border-box;
-            background: radial-gradient(circle at 50% 15%, #131d2e 0%, #0b0f19 80%);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(20, 184, 166, 0.25);
-            overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            color: #f8fafc;
-            backdrop-filter: blur(16px);
-            animation: vapiWidgetSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 999999;
             display: none;
             flex-direction: column;
             justify-content: space-between;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #f8fafc;
+            box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(20, 184, 166, 0.25);
+            backdrop-filter: blur(16px);
+            animation: vapiWidgetSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .vapi-wave-container {
             display: flex;
             justify-content: center;
             align-items: center;
             gap: 7px;
-            height: 56px;
-            margin: 6px 0;
+            height: 44px;
+            margin: 4px 0;
+            flex-shrink: 0;
         }
         .vapi-wave-bar {
             display: inline-block;
@@ -5272,7 +5273,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
         .eq-bar.active:nth-child(5) { animation: vapiWavePulse 1.0s ease-in-out infinite 0.15s; }
         @keyframes vapiWavePulse {
             0%, 100% { height: 10px; opacity: 0.4; }
-            50% { height: 44px; opacity: 1; box-shadow: 0 0 12px rgba(20, 184, 166, 0.85); }
+            50% { height: 38px; opacity: 1; box-shadow: 0 0 12px rgba(20, 184, 166, 0.85); }
         }
         @keyframes vapiWidgetSlideUp {
             from { opacity: 0; transform: translateY(16px) scale(0.97); }
@@ -5282,7 +5283,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
 
     <div id="liveVoiceCallModal">
         <!-- Header -->
-        <div style="padding: 12px 16px 10px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.06); background: rgba(0, 0, 0, 0.2);">
+        <div style="padding: 0 0 10px 0; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); flex-shrink: 0;">
             <div style="display: flex; align-items: center; gap: 8px;">
                 <div style="position: relative; width: 10px; height: 10px;">
                     <span id="callPulseRing" style="position: absolute; inset: -2px; border-radius: 50%; background: #14b8a6; opacity: 0.4; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
@@ -5297,19 +5298,20 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 </div>
             </div>
             <div style="display: flex; align-items: center; gap: 4px;">
-                <button type="button" onclick="closeLiveVoiceCallModal()" title="Close Call Widget" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #94a3b8; cursor: pointer; transition: all 0.2s;">✕</button>
+                <button type="button" onclick="closeLiveVoiceCallModal()" title="Close Call Widget" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #94a3b8; cursor: pointer; transition: all 0.2s;">✕</button>
             </div>
         </div>
 
         <!-- Center Visualizer: 5 Vertical Teal Wave Bars -->
-        <div style="padding: 4px 16px 0 16px; text-align: center; flex: 1; display: flex; flex-direction: column; justify-content: center;">
+        <div style="padding: 8px 0; text-align: center; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; justify-content: space-between;">
             <!-- Language Selector Chips -->
-            <div style="display: flex; justify-content: center; gap: 6px; margin-bottom: 6px;">
-                <button type="button" id="btnModalLangUr" onclick="switchLiveCallLanguage('ur-PK')" style="background: rgba(20, 184, 166, 0.2); border: 1px solid #14b8a6; color: #14b8a6; font-size: 10px; font-weight: 700; padding: 2px 9px; border-radius: 9999px; cursor: pointer;">🇵🇰 Urdu</button>
-                <button type="button" id="btnModalLangEn" onclick="switchLiveCallLanguage('en-US')" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); color: #94a3b8; font-size: 10px; font-weight: 600; padding: 2px 9px; border-radius: 9999px; cursor: pointer;">🇬🇧 English</button>
+            <div style="display: flex; justify-content: center; gap: 6px; margin-bottom: 4px; flex-shrink: 0;">
+                <button type="button" id="btnModalLangUr" onclick="switchLiveCallLanguage('ur-PK')" style="background: rgba(20, 184, 166, 0.2); border: 1px solid #14b8a6; color: #14b8a6; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 9999px; cursor: pointer;">🇵🇰 Urdu</button>
+                <button type="button" id="btnModalLangEn" onclick="switchLiveCallLanguage('en-US')" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); color: #94a3b8; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 9999px; cursor: pointer;">🇬🇧 English</button>
             </div>
 
-            <div id="liveCallWaveContainer" class="vapi-wave-container" onclick="interruptLiveVoiceCall()" title="Tap to interrupt AI assistant" style="cursor: pointer;">
+            <!-- 5 Vertical Teal Wave Bars -->
+            <div id="liveCallWaveContainer" class="vapi-wave-container" onclick="interruptLiveVoiceCall()" title="Tap to interrupt AI assistant" style="cursor: pointer; height: 42px; margin: 4px 0; flex-shrink: 0;">
                 <span class="vapi-wave-bar eq-bar"></span>
                 <span class="vapi-wave-bar eq-bar"></span>
                 <span class="vapi-wave-bar eq-bar"></span>
@@ -5317,58 +5319,58 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 <span class="vapi-wave-bar eq-bar"></span>
             </div>
 
-            <div id="liveCallInterruptIndicator" style="display: none; font-size: 10.5px; color: #f59e0b; margin-top: -4px; margin-bottom: 6px; cursor: pointer;" onclick="interruptLiveVoiceCall()">✋ Tap waves to Interrupt</div>
+            <div id="liveCallInterruptIndicator" style="display: none; font-size: 10px; color: #f59e0b; margin-top: -2px; margin-bottom: 4px; cursor: pointer;" onclick="interruptLiveVoiceCall()">✋ Tap waves to Interrupt</div>
 
-            <div id="liveCallUnmutePrompt" style="display: none; background: rgba(20, 184, 166, 0.18); border: 1px solid #14b8a6; color: #14b8a6; border-radius: 8px; padding: 5px 10px; font-size: 11px; font-weight: 700; text-align: center; margin-bottom: 6px; cursor: pointer;" onclick="forceLiveCallAudioPlayback()">🔊 Tap to Hear AI Voice</div>
+            <div id="liveCallUnmutePrompt" style="display: none; background: rgba(20, 184, 166, 0.18); border: 1px solid #14b8a6; color: #14b8a6; border-radius: 8px; padding: 4px 8px; font-size: 10.5px; font-weight: 700; text-align: center; margin-bottom: 4px; cursor: pointer;" onclick="forceLiveCallAudioPlayback()">🔊 Tap to Hear AI Voice</div>
 
             <!-- Live Mic Volume Meter -->
-            <div style="width: 100%; height: 3px; background: rgba(255, 255, 255, 0.08); border-radius: 9999px; overflow: hidden; margin-bottom: 6px;" title="Live Microphone Volume">
+            <div style="width: 100%; height: 3px; background: rgba(255, 255, 255, 0.08); border-radius: 9999px; overflow: hidden; margin-bottom: 6px; flex-shrink: 0;" title="Live Microphone Volume">
                 <div id="liveCallMicVolumeBar" style="width: 0%; height: 100%; background: #14b8a6; transition: width 0.06s ease; box-shadow: 0 0 8px rgba(20, 184, 166, 0.8);"></div>
             </div>
 
             <!-- Hold or Tap to Speak Button -->
-            <button type="button" id="btnModalPushToTalk" onmousedown="startModalPttRecord()" onmouseup="stopModalPttRecord()" ontouchstart="startModalPttRecord(event)" ontouchend="stopModalPttRecord(event)" style="width: 100%; background: rgba(20, 184, 166, 0.12); border: 1px solid rgba(20, 184, 166, 0.35); color: #14b8a6; font-size: 11px; font-weight: 700; padding: 5px 10px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; margin-bottom: 6px; transition: all 0.2s;">
+            <button type="button" id="btnModalPushToTalk" onmousedown="startModalPttRecord()" onmouseup="stopModalPttRecord()" ontouchstart="startModalPttRecord(event)" ontouchend="stopModalPttRecord(event)" style="width: 100%; background: rgba(20, 184, 166, 0.12); border: 1px solid rgba(20, 184, 166, 0.35); color: #14b8a6; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; margin-bottom: 6px; flex-shrink: 0;">
                 <span>🎙️</span>
                 <span id="modalPttText">Hold or Tap to Speak</span>
             </button>
 
             <!-- Subtle 1-2 line real-time subtitle preview box -->
-            <div id="voiceTranscriptBox" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 9px 12px; min-height: 52px; max-height: 80px; overflow-y: auto; font-size: 12px; line-height: 1.4; color: #cbd5e1; margin-bottom: 8px; text-align: left;">
+            <div id="voiceTranscriptBox" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 10px; padding: 8px 10px; min-height: 44px; max-height: 64px; overflow-y: auto; font-size: 11.5px; line-height: 1.35; color: #cbd5e1; margin-bottom: 6px; text-align: left; flex-shrink: 0;">
                 <em style="color: #64748b;">Listening via Web Speech API... Speak in Urdu or English.</em>
             </div>
 
             <!-- Fallback text input row -->
-            <div style="display: flex; gap: 6px; margin-bottom: 8px;">
-                <input type="text" id="liveCallTextInput" placeholder="Type here if mic pauses..." style="flex: 1; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 6px 10px; color: #f8fafc; font-size: 11.5px; outline: none;" onkeydown="if(event.key==='Enter') sendCallTextInput()">
+            <div style="display: flex; gap: 6px; margin-bottom: 4px; flex-shrink: 0;">
+                <input type="text" id="liveCallTextInput" placeholder="Type here if mic pauses..." style="flex: 1; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 5px 8px; color: #f8fafc; font-size: 11px; outline: none;" onkeydown="if(event.key==='Enter') sendCallTextInput()">
                 <button type="button" onclick="sendCallTextInput()" style="background: #14b8a6; border: none; border-radius: 8px; color: #0b0f19; font-weight: 700; font-size: 11px; padding: 0 10px; cursor: pointer;">Send</button>
             </div>
         </div>
 
         <!-- Action / Controls Area -->
-        <div style="padding: 0 14px 12px 14px;">
+        <div style="padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.06); flex-shrink: 0;">
             <!-- Send WhatsApp Call Link Button -->
             <div style="margin-bottom: 8px;">
-                <button type="button" id="btnSendWaCallLink" onclick="sendActiveCallLinkToWhatsApp()" style="width: 100%; background: rgba(37, 211, 102, 0.12); border: 1px solid rgba(37, 211, 102, 0.35); color: #25d366; font-size: 11px; font-weight: 700; padding: 7px 10px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s;">
+                <button type="button" id="btnSendWaCallLink" onclick="sendActiveCallLinkToWhatsApp()" style="width: 100%; background: rgba(37, 211, 102, 0.12); border: 1px solid rgba(37, 211, 102, 0.35); color: #25d366; font-size: 11px; font-weight: 700; padding: 6px 10px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s;">
                     <span>📱</span>
                     <span id="btnSendWaCallLinkText">Send Call Link to WhatsApp</span>
                 </button>
             </div>
 
             <!-- Bottom Controls: Circular Teal Mic Mute + Red Pill End Call + Speaker -->
-            <div style="display: flex; align-items: center; justify-content: center; gap: 12px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
                 <!-- Circular Teal Mic Mute / Unmute Button -->
-                <button type="button" id="btnCallMuteMic" onclick="toggleCallMute()" title="Mute / Unmute Microphone" style="width: 42px; height: 42px; border-radius: 50%; background: #14b8a6; border: none; color: #0b0f19; font-size: 17px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 14px rgba(20, 184, 166, 0.35);">
+                <button type="button" id="btnCallMuteMic" onclick="toggleCallMute()" title="Mute / Unmute Microphone" style="width: 38px; height: 38px; border-radius: 50%; background: #14b8a6; border: none; color: #0b0f19; font-size: 16px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 14px rgba(20, 184, 166, 0.35);">
                     <span id="callMuteIcon">🎙️</span>
                 </button>
 
                 <!-- Red Pill End Call Button -->
-                <button type="button" id="startVoiceCallBtn" onclick="toggleLiveVoiceCall()" style="display: flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 22px; border-radius: 9999px; background: #ef4444; border: none; color: #ffffff; font-size: 12.5px; font-weight: 700; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 16px rgba(239, 68, 68, 0.35);">
+                <button type="button" id="startVoiceCallBtn" onclick="toggleLiveVoiceCall()" style="display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 18px; border-radius: 9999px; background: #ef4444; border: none; color: #ffffff; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 16px rgba(239, 68, 68, 0.35);">
                     <span id="startVoiceBtnIcon">📞</span>
                     <span>End Call</span>
                 </button>
 
                 <!-- Speaker Toggle Button -->
-                <button type="button" id="btnCallSpeakerToggle" onclick="toggleCallSpeaker()" title="Toggle Speaker Mute" style="width: 36px; height: 36px; border-radius: 50%; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); color: #cbd5e1; font-size: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+                <button type="button" id="btnCallSpeakerToggle" onclick="toggleCallSpeaker()" title="Toggle Speaker Mute" style="width: 34px; height: 34px; border-radius: 50%; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); color: #cbd5e1; font-size: 13px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
                     <span id="callSpeakerIcon">🔊</span>
                 </button>
             </div>

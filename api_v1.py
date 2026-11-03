@@ -3940,7 +3940,8 @@ def api_live_voice_call():
     """
     try:
         data = request.get_json(silent=True) or {}
-        user_text = str(data.get("text") or data.get("message") or "").strip()
+        user_text = str(data.get("message") or data.get("text") or "").strip()
+        contact_name = str(data.get("contactName") or data.get("customerName") or data.get("name") or "Caller").strip()
         audio_in_b64 = data.get("audioBase64") or data.get("audio_base64") or data.get("audio") or ""
         persona = str(data.get("persona") or data.get("voice") or "").strip()
         rate = data.get("rate")
@@ -3956,7 +3957,7 @@ def api_live_voice_call():
         pitch_str = f"{int(pitch):+d}Hz" if (isinstance(pitch, (int, float)) or (isinstance(pitch, str) and str(pitch).replace("+","").replace("-","").isdigit())) else (str(pitch) if pitch else "+0Hz")
 
         is_greeting = bool(data.get("is_greeting"))
-        if is_greeting and not user_text:
+        if is_greeting:
             if "uzma" in persona.lower() or "female" in persona.lower():
                 reply_text = "Assalam o Alaikum! Main BashFlow AI bol rahi hoon, main aapki kya madad kar sakti hoon?"
                 voice_text = "السلام علیکم! میں بیش فلو اے آئی بول رہی ہوں، میں آپ کی کیا مدد کر سکتی ہوں؟"
@@ -4011,7 +4012,7 @@ def api_live_voice_call():
                 user_message=user_text,
                 system_prompt=system_prompt,
                 organization_id=org_id,
-                customer_name="Caller",
+                customer_name=contact_name,
                 conversation_history=conv_hist
             )
 

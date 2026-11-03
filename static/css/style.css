@@ -8001,3 +8001,18 @@ html:not(.dark) .wa-chat-input, html.light .wa-chat-input {
     color: #0f172a !important;
     border: 1px solid #cbd5e1 !important;
 }
+
+/* Bug 2: Prevent Top Navbar Brand & Breadcrumb Wrapping */
+.topbar-left,
+.topbar-brand-area {
+    white-space: nowrap !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 16px !important;
+}
+
+.topbar-brand-title,
+.breadcrumb-current,
+#activeBreadcrumbText {
+    white-space: nowrap !important;
+}

@@ -11856,56 +11856,125 @@ function getPersonaFriendlyName(personaKey) {
     return 'AI Voice Assistant';
 }
 
-function playLiveCallAudio(audioDataUri, audioBase64 = null) {
-    if (!audioDataUri && !audioBase64) {
-        logModalOnScreenError('TTS synthesis returned no audio data');
-        const statusLabel = document.getElementById('voiceCallStatusLabel');
-        if (statusLabel) statusLabel.textContent = '🟢 Listening... (Speak now)';
-        return;
-    }
-    const statusLabel = document.getElementById('voiceCallStatusLabel');
-    const promptEl = document.getElementById('liveCallUnmutePrompt');
-    if (promptEl) promptEl.style.display = 'none';
+function speakAIResponse(replyText, audioBase64 = null) {
+    if (!liveVoiceCallActive) return;
 
     isLiveAiSpeaking = true;
     setEqualizerActive(true);
+
+    const statusLabel = document.getElementById('voiceCallStatusLabel');
     if (statusLabel) statusLabel.textContent = '🔊 AI Speaking...';
 
     const intr = document.getElementById('liveCallInterruptIndicator');
     if (intr) intr.style.display = 'block';
 
-    const uriToPlay = audioDataUri || ('data:audio/mp3;base64,' + audioBase64);
+    const promptEl = document.getElementById('liveCallUnmutePrompt');
+    if (promptEl) promptEl.style.display = 'none';
 
-    try {
-        let player = document.getElementById('liveCallAudioPlayer');
-        if (!player) {
-            player = new Audio();
-            player.id = 'liveCallAudioPlayer';
-            document.body.appendChild(player);
+    function finishSpeech() {
+        isLiveAiSpeaking = false;
+        setEqualizerActive(false);
+        const intrEl = document.getElementById('liveCallInterruptIndicator');
+        if (intrEl) intrEl.style.display = 'none';
+        if (statusLabel && liveVoiceCallActive) {
+            statusLabel.textContent = '🟢 Listening... (Speak now)';
         }
-        currentVoiceAudioPlayer = player;
-        player.src = uriToPlay;
-        player.muted = isSpeakerMuted;
-
-        player.onended = function() {
-            isLiveAiSpeaking = false;
-            setEqualizerActive(false);
-            const intrEl = document.getElementById('liveCallInterruptIndicator');
-            if (intrEl) intrEl.style.display = 'none';
-            if (statusLabel && liveVoiceCallActive) statusLabel.textContent = '🟢 Listening... (Speak now)';
-            if (liveVoiceRecognition && liveVoiceCallActive && !isMicMuted) {
-                try { liveVoiceRecognition.start(); } catch (_) {}
-            }
-        };
-
-        player.play().catch(playErr => {
-            logModalOnScreenError('Audio play notice: ' + (playErr.message || playErr));
-            playLiveViaWebAudio(audioBase64);
-        });
-    } catch (err) {
-        logModalOnScreenError('Audio tag error: ' + err.message);
-        playLiveViaWebAudio(audioBase64);
+        if (liveVoiceRecognition && liveVoiceCallActive && !isMicMuted) {
+            try { liveVoiceRecognition.start(); } catch (_) {}
+        }
     }
+
+    function runBrowserSynthesisFallback() {
+        if (!replyText || !('speechSynthesis' in window)) {
+            finishSpeech();
+            return;
+        }
+        try {
+            window.speechSynthesis.cancel();
+            const utter = new SpeechSynthesisUtterance(replyText);
+            const activePersona = getActiveLiveVoicePersona() || '';
+            if (activePersona.includes('ur') || activePersona.includes('Asad') || activePersona.includes('Uzma')) {
+                utter.lang = 'ur-PK';
+            } else {
+                utter.lang = 'en-US';
+            }
+            utter.rate = 1.0;
+            utter.onend = () => finishSpeech();
+            utter.onerror = (e) => {
+                console.warn('[speechSynthesis error]', e);
+                finishSpeech();
+            };
+            window.speechSynthesis.speak(utter);
+        } catch (synthErr) {
+            console.warn('[speechSynthesis exception]', synthErr);
+            finishSpeech();
+        }
+    }
+
+    // Try HTML5 Audio tag first with MP3 base64
+    if (audioBase64 && String(audioBase64).trim()) {
+        try {
+            const cleanB64 = String(audioBase64).trim();
+            const audioUri = cleanB64.startsWith('data:') ? cleanB64 : ('data:audio/mp3;base64,' + cleanB64);
+            let player = document.getElementById('liveCallAudioPlayer');
+            if (!player) {
+                player = new Audio();
+                player.id = 'liveCallAudioPlayer';
+                document.body.appendChild(player);
+            }
+            if (currentVoiceAudioPlayer && currentVoiceAudioPlayer !== player) {
+                try { currentVoiceAudioPlayer.pause(); } catch (_) {}
+            }
+            currentVoiceAudioPlayer = player;
+            player.src = audioUri;
+            player.muted = isSpeakerMuted;
+
+            player.onended = function() {
+                finishSpeech();
+            };
+
+            const playPromise = player.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(playErr => {
+                    console.warn('[speakAIResponse Audio play notice]', playErr);
+                    // Try WebAudio buffer next, if it fails then speechSynthesis
+                    try {
+                        const rawB64 = cleanB64.replace(/^data:audio\/\w+;base64,/, '');
+                        const ctx = getLiveAudioContext();
+                        if (ctx) {
+                            const buf = base64ToBufferApp(rawB64);
+                            ctx.decodeAudioData(buf.slice(0), (decoded) => {
+                                if (!liveVoiceCallActive) return;
+                                const source = ctx.createBufferSource();
+                                source.buffer = decoded;
+                                source.connect(ctx.destination);
+                                liveCurrentSource = source;
+                                source.onended = () => finishSpeech();
+                                source.start(0);
+                            }, (decodeErr) => {
+                                console.warn('[WebAudio decode error]', decodeErr);
+                                runBrowserSynthesisFallback();
+                            });
+                            return;
+                        }
+                    } catch (_) {}
+                    runBrowserSynthesisFallback();
+                });
+            }
+        } catch (err) {
+            console.warn('[speakAIResponse Audio tag error]', err);
+            runBrowserSynthesisFallback();
+        }
+    } else {
+        // No audioBase64: immediately use browser SpeechSynthesis so AI is never silent!
+        runBrowserSynthesisFallback();
+    }
+}
+window.speakAIResponse = speakAIResponse;
+
+function playLiveCallAudio(audioDataUri, audioBase64 = null, replyText = '') {
+    const b64 = audioBase64 || (audioDataUri ? audioDataUri.replace(/^data:audio\/\w+;base64,/, '') : '');
+    speakAIResponse(replyText || 'Assalam o Alaikum! Main BashFlow AI bol raha hoon.', b64);
 }
 
 function playLiveViaWebAudio(b64) {
@@ -12187,9 +12256,14 @@ async function sendVoiceChatQuery(payload) {
             persona: getActiveLiveVoicePersona(),
             rate: getActiveLiveVoiceRate(),
             pitch: getActiveLiveVoicePitch(),
-            callHistory: liveVoiceCallHistory.slice(-8)
+            callHistory: liveVoiceCallHistory.slice(-8),
+            contactName: liveCallActiveName || 'Bashir khani',
+            message: cleanInput || ''
         };
-        if (cleanInput) bodyData.text = cleanInput;
+        if (cleanInput) {
+            bodyData.text = cleanInput;
+            bodyData.message = cleanInput;
+        }
         if (audioPayload) bodyData.audioBase64 = audioPayload;
 
         const res = await fetch('/api/v1/live-voice-call', {
@@ -12212,12 +12286,8 @@ async function sendVoiceChatQuery(payload) {
                 transcriptBox.scrollTop = transcriptBox.scrollHeight;
             }
 
-            if ((data.audioBase64 || data.audio_base64 || data.audio_data_uri) && liveVoiceCallActive) {
-                playLiveCallAudio(data.audio_data_uri, data.audioBase64 || data.audio_base64);
-            } else {
-                setEqualizerActive(false);
-                if (statusLabel && liveVoiceCallActive) statusLabel.textContent = '🟢 Listening... (Speak now)';
-            }
+            const outB64 = data.audioBase64 || data.audio_base64 || (data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio\/\w+;base64,/, '') : '');
+            speakAIResponse(replyText, outB64);
         } else {
             const err = (data && data.error) || 'Failed to get AI voice reply';
             logModalOnScreenError(err);
@@ -12481,6 +12551,8 @@ async function startLiveVoiceCall(callerName = 'Bashir khani', customPhone = '')
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 is_greeting: true,
+                message: 'Hello',
+                contactName: callerName || 'Bashir khani',
                 persona: persona,
                 rate: getActiveLiveVoiceRate(),
                 pitch: getActiveLiveVoicePitch(),
@@ -12488,28 +12560,25 @@ async function startLiveVoiceCall(callerName = 'Bashir khani', customPhone = '')
             })
         });
         const data = await res.json();
-        if (data && data.success && liveVoiceCallActive) {
-            const greetingText = data.replyText || data.reply_text || 'Assalam o Alaikum! Main BashFlow AI bol raha hoon, main aapki kya madad kar sakta hoon?';
-            liveVoiceCallHistory.push({ role: 'assistant', text: greetingText });
+        const greetingText = (data && (data.replyText || data.reply_text)) || 'Assalam o Alaikum! Main BashFlow AI bol raha hoon, main aapki kya madad kar sakta hoon?';
+        liveVoiceCallHistory.push({ role: 'assistant', text: greetingText });
 
-            if (transcriptBox) {
-                transcriptBox.innerHTML = `<div style="color: #14b8a6; font-weight: 600;"><strong>Assistant:</strong> ${escapeHtml(greetingText)}</div>`;
-                transcriptBox.scrollTop = transcriptBox.scrollHeight;
-            }
-
-            if (data.audioBase64 || data.audio_base64 || data.audio_data_uri) {
-                playLiveCallAudio(data.audio_data_uri, data.audioBase64 || data.audio_base64);
-            } else {
-                if (statusLabel && liveVoiceCallActive) statusLabel.textContent = '🟢 Listening... (Speak now)';
-            }
-        } else {
-            const err = (data && data.error) || 'Failed to fetch opening greeting';
-            logModalOnScreenError(err);
-            if (statusLabel && liveVoiceCallActive) statusLabel.textContent = '🟢 Listening... (Speak now)';
+        if (transcriptBox) {
+            transcriptBox.innerHTML = `<div style="color: #14b8a6; font-weight: 600;"><strong>Assistant:</strong> ${escapeHtml(greetingText)}</div>`;
+            transcriptBox.scrollTop = transcriptBox.scrollHeight;
         }
+
+        const greetB64 = (data && (data.audioBase64 || data.audio_base64)) || (data && data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio\/\w+;base64,/, '') : '');
+        speakAIResponse(greetingText, greetB64);
     } catch (greetErr) {
-        logModalOnScreenError('Greeting network error: ' + greetErr.message);
-        if (statusLabel && liveVoiceCallActive) statusLabel.textContent = '🟢 Listening... (Speak now)';
+        console.warn('Greeting fetch notice:', greetErr);
+        const fallbackGreeting = 'Assalam o Alaikum! Main BashFlow AI bol raha hoon, main aapki kya madad kar sakta hoon?';
+        liveVoiceCallHistory.push({ role: 'assistant', text: fallbackGreeting });
+        if (transcriptBox) {
+            transcriptBox.innerHTML = `<div style="color: #14b8a6; font-weight: 600;"><strong>Assistant:</strong> ${escapeHtml(fallbackGreeting)}</div>`;
+            transcriptBox.scrollTop = transcriptBox.scrollHeight;
+        }
+        speakAIResponse(fallbackGreeting, '');
     }
 
     // Start Dual-Mic System (SpeechRecognition + MediaRecorder Fallback + Live Volume Meter)

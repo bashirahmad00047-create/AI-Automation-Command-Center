@@ -528,49 +528,78 @@
         }
 
         // ===================================================================
-        // 2. AUDIO PLAYBACK WITH ZERO CORS/AUTOPLAY ISSUES
+        // 2. AUDIO PLAYBACK WITH ZERO CORS/AUTOPLAY ISSUES & SPEECH SYNTHESIS FALLBACK
         // ===================================================================
-        function playAudioResponse(audioBase64, audioDataUri) {
-            if (!audioBase64 && !audioDataUri) {
-                logOnScreenError('TTS synthesis returned no audio data');
-                setStatus('🟢 Listening... (Speak now)');
-                return;
-            }
+        function speakAIResponse(replyText, audioBase64 = null) {
+            if (!isCallActive) return;
 
             isAiSpeaking = true;
             setWaveAnimation(true);
             setStatus('🔊 AI Speaking...');
 
-            const uriToPlay = audioDataUri || ('data:audio/mp3;base64,' + audioBase64);
-
-            // Primary: new Audio("data:audio/mp3;base64,...").play()
-            try {
-                if (currentAudioSource) {
-                    try { currentAudioSource.pause(); } catch (_) {}
-                    currentAudioSource = null;
+            function finishSpeech() {
+                isAiSpeaking = false;
+                setWaveAnimation(false);
+                if (isCallActive) {
+                    setStatus('🟢 Listening... (Speak now)');
+                    restartRecognition();
                 }
-                const player = new Audio(uriToPlay);
-                currentAudioSource = player;
-                player.muted = isMuted;
-
-                player.onended = () => {
-                    isAiSpeaking = false;
-                    setWaveAnimation(false);
-                    if (isCallActive) {
-                        setStatus('🟢 Listening... (Speak now)');
-                        restartRecognition();
-                    }
-                };
-
-                player.play().catch(playErr => {
-                    logOnScreenError('Audio play blocked: ' + (playErr.message || playErr));
-                    // WebAudio buffer fallback
-                    playViaWebAudioBuffer(audioBase64);
-                });
-            } catch (err) {
-                logOnScreenError('Audio initialization error: ' + err.message);
-                playViaWebAudioBuffer(audioBase64);
             }
+
+            function runSpeechSynthesisFallback() {
+                if (!replyText || !('speechSynthesis' in window)) {
+                    finishSpeech();
+                    return;
+                }
+                try {
+                    window.speechSynthesis.cancel();
+                    const utter = new SpeechSynthesisUtterance(replyText);
+                    utter.lang = currentLang || 'ur-PK';
+                    utter.rate = 1.0;
+                    utter.onend = () => finishSpeech();
+                    utter.onerror = () => finishSpeech();
+                    window.speechSynthesis.speak(utter);
+                } catch (synthErr) {
+                    finishSpeech();
+                }
+            }
+
+            if (audioBase64 && String(audioBase64).trim()) {
+                try {
+                    if (currentAudioSource) {
+                        try { currentAudioSource.pause(); } catch (_) {}
+                        currentAudioSource = null;
+                    }
+                    const cleanB64 = String(audioBase64).trim();
+                    const uriToPlay = cleanB64.startsWith('data:') ? cleanB64 : ('data:audio/mp3;base64,' + cleanB64);
+                    const player = new Audio(uriToPlay);
+                    currentAudioSource = player;
+                    player.muted = isMuted;
+
+                    player.onended = () => finishSpeech();
+
+                    const playPromise = player.play();
+                    if (playPromise !== undefined) {
+                        playPromise.catch(playErr => {
+                            try {
+                                playViaWebAudioBuffer(cleanB64.replace(/^data:audio\/\w+;base64,/, ''));
+                            } catch (_) {
+                                runSpeechSynthesisFallback();
+                            }
+                        });
+                    }
+                } catch (err) {
+                    runSpeechSynthesisFallback();
+                }
+            } else {
+                runSpeechSynthesisFallback();
+            }
+        }
+        window.speakAIResponse = speakAIResponse;
+
+        function playAudioResponse(audioBase64, audioDataUri, replyText = '') {
+            const b64 = audioBase64 || (audioDataUri ? audioDataUri.replace(/^data:audio\/\w+;base64,/, '') : '');
+            speakAIResponse(replyText || 'Assalam o Alaikum! Main BashFlow AI bol raha hoon.', b64);
         }
 
         function playViaWebAudioBuffer(b64) {
@@ -651,7 +680,7 @@
                         tb.scrollTop = tb.scrollHeight;
                     }
 
-                    playAudioResponse(data.audioBase64 || data.audio_base64, data.audio_data_uri);
+                    speakAIResponse(greeting, data.audioBase64 || data.audio_base64 || (data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio\/\w+;base64,/, '') : ''));
                 } else {
                     const err = (data && data.error) || 'Failed to fetch opening greeting';
                     logOnScreenError(err);
@@ -910,7 +939,7 @@
                         tb.scrollTop = tb.scrollHeight;
                     }
 
-                    playAudioResponse(data.audioBase64 || data.audio_base64, data.audio_data_uri);
+                    speakAIResponse(replyText, data.audioBase64 || data.audio_base64 || (data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio\/\w+;base64,/, '') : ''));
                 } else {
                     const errMsg = (data && data.error) || 'Failed to get AI voice response';
                     logOnScreenError(errMsg);
