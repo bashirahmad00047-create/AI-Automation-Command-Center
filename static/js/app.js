@@ -12519,6 +12519,12 @@ function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customNa
 let callStatusPollInterval = null;
 
 async function initiateCallHandshake(phone, name) {
+    // Room ID is kept strictly clean (digits only) on both Dashboard and Mobile
+    const cleanPhone = String(phone || '').replace(/\D/g, '');
+    const roomId = cleanPhone;
+    liveCallActivePhone = cleanPhone;
+    window.roomId = roomId;
+
     const statusLabel = document.getElementById('voiceCallStatusLabel');
     const transcriptBox = document.getElementById('voiceTranscriptBox');
     const vadStatus = document.getElementById('callVADStatus');
@@ -12564,10 +12570,10 @@ async function initiateCallHandshake(phone, name) {
         const res = await fetch('/api/call/initiate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: phone, name: name })
+            body: JSON.stringify({ phone: cleanPhone, name: name })
         });
         const data = await res.json();
-        showToast(`📞 Ringing +${phone} on WhatsApp...`, 'info');
+        showToast(`📞 Ringing +${cleanPhone} on WhatsApp...`, 'info');
     } catch (err) {
         console.warn('Call initiate error:', err);
     }
@@ -12575,12 +12581,12 @@ async function initiateCallHandshake(phone, name) {
     // Poll backend call status every 1.5s
     callStatusPollInterval = setInterval(async () => {
         try {
-            const sRes = await fetch(`/api/call/${encodeURIComponent(phone)}/status`);
+            const sRes = await fetch(`/api/call/${encodeURIComponent(cleanPhone)}/status`);
             const sData = await sRes.json();
             if (sData && sData.joined) {
                 clearInterval(callStatusPollInterval);
                 callStatusPollInterval = null;
-                onCustomerJoinedCall(name, phone);
+                onCustomerJoinedCall(name, cleanPhone);
             }
         } catch (_) {}
     }, 1500);

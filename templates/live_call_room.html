@@ -406,7 +406,11 @@
     <audio id="audioPlayer" preload="auto" style="display: none;"></audio>
 
     <script>
-        const phone = "{{ phone }}";
+        // Room ID is kept strictly clean (digits only) on both mobile and dashboard
+        const rawPhone = "{{ phone }}";
+        const phone = String(rawPhone || window.location.pathname.split('/').filter(Boolean).pop() || '').replace(/\D/g, '');
+        const roomId = phone;
+        window.roomId = roomId;
         let isCallActive = false;
         let isMuted = false;
         let isAiSpeaking = false;
