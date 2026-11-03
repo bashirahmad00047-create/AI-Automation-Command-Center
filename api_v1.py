@@ -4301,35 +4301,41 @@ def api_customer_latest_order_info():
             }), 200
 
         # 2. Check latest incoming WhatsAppMessage from this customer
-        msg = WhatsAppMessage.query.filter(
+        messages = WhatsAppMessage.query.filter(
             (WhatsAppMessage.sender.like(f"%{phone_suffix}%")) | (WhatsAppMessage.recipient.like(f"%{phone_suffix}%"))
-        ).order_by(WhatsAppMessage.created_at.desc()).first()
+        ).order_by(WhatsAppMessage.created_at.desc()).limit(10).all()
 
-        if msg and msg.body:
-            body = msg.body.strip()
-            # Clean URLs or quoted tags
-            body = re.sub(r"\[.*?\]", "", body).strip()
-            body = re.sub(r"https?://\S+", "", body).strip()
-            if body:
-                return jsonify({
-                    "success": True,
-                    "type": "message",
-                    "summary": body[:75],
-                    "phone": clean_phone
-                }), 200
+        for msg in messages:
+            if msg and msg.body:
+                body = msg.body.strip()
+                # Clean location tags and URLs
+                body = re.sub(r"\[Location:.*?\]", "", body, flags=re.IGNORECASE).strip()
+                body = re.sub(r"Location:\s*[0-9.-]+,\s*[0-9.-]+", "", body, flags=re.IGNORECASE).strip()
+                body = re.sub(r"https?://\S+", "", body).strip()
+                if body and len(body) > 1:
+                    return jsonify({
+                        "success": True,
+                        "type": "message",
+                        "summary": body[:75],
+                        "phone": clean_phone
+                    }), 200
 
-        # 3. Check Lead notes
+        # 3. Check Lead message or notes
         lead = Lead.query.filter(
             Lead.phone.like(f"%{phone_suffix}%")
         ).order_by(Lead.created_at.desc()).first()
 
-        if lead and lead.notes:
-            return jsonify({
-                "success": True,
-                "type": "lead",
-                "summary": lead.notes[:75],
-                "phone": clean_phone
-            }), 200
+        if lead:
+            lead_summary = (lead.message or lead.notes or "").strip()
+            lead_summary = re.sub(r"\[Location:.*?\]", "", lead_summary, flags=re.IGNORECASE).strip()
+            lead_summary = re.sub(r"https?://\S+", "", lead_summary).strip()
+            if lead_summary and len(lead_summary) > 1:
+                return jsonify({
+                    "success": True,
+                    "type": "lead",
+                    "summary": lead_summary[:75],
+                    "phone": clean_phone
+                }), 200
 
     except Exception as e:
         logger.debug(f"Customer order lookup notice: {e}")
