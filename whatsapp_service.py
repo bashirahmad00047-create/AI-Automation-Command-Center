@@ -9787,10 +9787,11 @@ class WhatsAppService:
             lower_q = (query_text or "").lower()
             track_keywords = ["order", "kahan", "delivery", "track", "tracking", "rider", "dispatch", "status", "parcel", "pohncha", "pahuncha", "kab tak"]
             if any(k in lower_q for k in track_keywords):
-                live_radar_url = "https://www.google.com/maps/search/?api=1&query=31.5204,74.3587"
+                live_radar_url = "https://www.google.com/maps/search/?api=1&query=35.8518,71.7864"
                 return (
                     "CUSTOMER ORDER & TRACKING GROUNDING (LIVE DELIVERY RADAR MAP ACTIVE):\n"
                     "- Active Delivery Status: On the Way (Rider in transit)\n"
+                    "- Store Fulfillment Base: Chitral Main Bazar / Ataliq Bazar (35.8518, 71.7864)\n"
                     f"- Live GPS Radar Map Link: {live_radar_url}\n"
                     "- INSTRUCTION: Inform the customer politely in conversational Roman Urdu that their order is on the way with our rider and will arrive shortly. Provide them the live tracking link so they can see real-time rider coordinates.\n"
                     "- SPEECH INSTRUCTION (FOR URDU TTS): Write in pure Urdu script: 'آپ کا آرڈر راستے میں ہے اور ہمارا رائیڈر جلد آپ کے پاس پہنچ رہا ہے۔ آپ اس لنک سے لائیو ٹریکنگ کر سکتے ہیں' so Pakistani Neural TTS delivers natural, fluent speech."
@@ -9988,7 +9989,7 @@ class WhatsAppService:
         order.courier_name = f"Fleet Truck ({truck_id})"
         order.tracking_number = f"TRK-{truck_id}"
 
-        dest_clean = destination or order.shipping_address or "Delivery Destination"
+        dest_clean = destination or order.shipping_address or "Danin Lusht / Chew Bazar, Chitral, KPK"
         dest_query = urllib.parse.quote_plus(dest_clean)
         live_track_url = tracking_url or f"https://www.google.com/maps/search/?api=1&query={dest_query}"
         order.tracking_url = live_track_url

@@ -7463,14 +7463,17 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                         const dLng = 0.010;
                         const osmBbox = `${(lng - dLng).toFixed(5)}%2C${(lat - dLat).toFixed(5)}%2C${(lng + dLng).toFixed(5)}%2C${(lat + dLat).toFixed(5)}`;
                         const osmEmbedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${osmBbox}&layer=mapnik&marker=${lat.toFixed(5)}%2C${lng.toFixed(5)}`;
+                        const bubbleCustName = m.sender_name || (window.currentActiveContact && window.currentActiveContact.name) || 'Bashir khani';
+                        const bubblePhone = m.sender || (window.currentActiveContact && window.currentActiveContact.phone) || '923471000668';
+                        const bubbleArea = cleanBody || 'Danin Lusht / Chew Bazar, Chitral, KPK';
                         bodyHtml = `
-                            <div class="wa-location-bubble-card" data-lat="${lat}" data-lng="${lng}" style="background: rgba(0,0,0,0.38); border-radius: 10px; padding: 10px; margin-bottom: 6px; border: 1px solid rgba(0,168,132,0.45); width: 100%; min-width: 260px; max-width: 320px; box-shadow: 0 4px 18px rgba(0,0,0,0.35);">
+                            <div class="wa-location-bubble-card" data-lat="${lat}" data-lng="${lng}" data-name="${escapeHtml(bubbleCustName)}" data-phone="${escapeHtml(bubblePhone)}" data-addr="${escapeHtml(bubbleArea)}" style="background: rgba(0,0,0,0.38); border-radius: 10px; padding: 10px; margin-bottom: 6px; border: 1px solid rgba(0,168,132,0.45); width: 100%; min-width: 260px; max-width: 320px; box-shadow: 0 4px 18px rgba(0,0,0,0.35);">
                                 <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
                                     <div style="display:flex; align-items:center; gap:6px;">
                                         <span style="font-size:18px;">📍</span>
                                         <div>
-                                            <div style="font-weight:700; color:#00a884; font-size:12px;">Live WhatsApp Location</div>
-                                            <div style="font-size:11px; color:#cbd5e1; margin-top:1px;">📍 ${escapeHtml(cleanBody || 'Danin Lusht / Chew Bazar, Chitral, KPK')}</div>
+                                            <div style="font-weight:700; color:#00a884; font-size:12px;">📍 ${escapeHtml(bubbleCustName)}</div>
+                                            <div style="font-size:11px; color:#cbd5e1; margin-top:1px;">Area: ${escapeHtml(bubbleArea)}</div>
                                             <div style="font-size:10px; color:#8696a0; font-family: monospace; margin-top:2px;">GPS: ${lat.toFixed(4)}, ${lng.toFixed(4)} &bull; ${calculateDistanceFromStore(lat, lng)}</div>
                                         </div>
                                     </div>
@@ -7480,11 +7483,11 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                                 <!-- Embedded Zero-Fail OpenStreetMap Preview with Direct Control Click -->
                                 <div class="wa-chat-mini-map-box" style="height: 155px; width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 8px; border: 1px solid rgba(0,168,132,0.35); background: #0f172a; position: relative;">
                                     <iframe src="${osmEmbedUrl}" style="border: 0; width: 100%; height: 100%; display: block; border-radius: 8px; pointer-events: none;" loading="lazy" title="Live WhatsApp Location Preview"></iframe>
-                                    <div onclick="openLocationOnRadarMap(${lat}, ${lng}, '${escapeHtml(m.sender_name || 'Customer')}', '${escapeHtml(m.sender || '')}', '${escapeHtml(cleanBody || 'Customer Delivery Destination')}')" style="position: absolute; inset: 0; cursor: pointer; z-index: 10;" title="Click to view on Live Delivery Radar Map"></div>
+                                    <div onclick="openLocationOnRadarMap(${lat}, ${lng}, '${escapeHtml(bubbleCustName)}', '${escapeHtml(bubblePhone)}', '${escapeHtml(bubbleArea)}')" style="position: absolute; inset: 0; cursor: pointer; z-index: 10;" title="Click to view on Live Delivery Radar Map"></div>
                                 </div>
                                 
                                 <div style="display:flex; gap:6px;">
-                                    <button type="button" class="hud-btn small green" onclick="openLocationOnRadarMap(${lat}, ${lng}, '${escapeHtml(m.sender_name || 'Customer')}', '${escapeHtml(m.sender || '')}', '${escapeHtml(cleanBody || 'Customer Delivery Destination')}')" style="width: 100%; font-size:11.5px; padding:7px 10px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; background: #00a884; color: #fff; border: none; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,168,132,0.4);" title="Open in Radar Control Map">
+                                    <button type="button" class="hud-btn small green" onclick="openLocationOnRadarMap(${lat}, ${lng}, '${escapeHtml(bubbleCustName)}', '${escapeHtml(bubblePhone)}', '${escapeHtml(bubbleArea)}')" style="width: 100%; font-size:11.5px; padding:7px 10px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; background: #00a884; color: #fff; border: none; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,168,132,0.4);" title="Open in Radar Control Map">
                                         🗺️ Open in Radar Control Map
                                     </button>
                                 </div>
@@ -13256,12 +13259,22 @@ function autoPlotWhatsAppLocation(lat, lng, label, phone, address, status = 'Pre
 window.autoPlotWhatsAppLocation = autoPlotWhatsAppLocation;
 
 // Main Internal Navigation Action: openLocationOnRadarMap
-function openLocationOnRadarMap(lat, lng, customerName, phone, address) {
-    const latNum = (!isNaN(lat) && Number(lat) !== 0) ? Number(lat) : 35.86124;
-    const lngNum = (!isNaN(lng) && Number(lng) !== 0) ? Number(lng) : 71.78699;
-    const safeName = customerName || 'Customer';
-    const safePhone = phone || '';
-    const safeAddress = address || 'Chewbazar, Chitral';
+function openLocationOnRadarMap(lat, lng, customerName, phone, address, orderSummary) {
+    const latNum = (!isNaN(lat) && Number(lat) !== 0) ? Number(lat) : 35.8697;
+    const lngNum = (!isNaN(lng) && Number(lng) !== 0) ? Number(lng) : 71.7840;
+    let safeName = customerName;
+    if (!safeName || safeName === 'Customer' || safeName === 'Live Customer Location') {
+        safeName = (window.currentActiveContact && window.currentActiveContact.name) || 'Bashir khani';
+    }
+    let safePhone = phone;
+    if (!safePhone || safePhone === '923001234567') {
+        safePhone = (window.currentActiveContact && window.currentActiveContact.phone) || '923471000668';
+    }
+    let safeAddress = address;
+    if (!safeAddress || safeAddress === 'Delivery Destination' || safeAddress === 'Customer Delivery Destination') {
+        safeAddress = 'Danin Lusht / Chew Bazar, Chitral, KPK';
+    }
+    const safeOrder = orderSummary || 'Pure Mountain Sidr Honey (1kg)';
 
     // 1. Automatically switch the dashboard to the "Live Delivery Map" tab
     switchTab('delivery-map');
@@ -13270,7 +13283,7 @@ function openLocationOnRadarMap(lat, lng, customerName, phone, address) {
     initLeafletRadarMap();
 
     // 3. Drop / highlight customer's pin on internal Leaflet map
-    const marker = autoPlotWhatsAppLocation(latNum, lngNum, safeName, safePhone, safeAddress);
+    const marker = autoPlotWhatsAppLocation(latNum, lngNum, safeName, safePhone, safeAddress, 'Preparing', safeOrder);
 
     // 4. Smoothly zoom to coordinates and invalidate size
     window._targetRadarLat = latNum;
@@ -13434,7 +13447,10 @@ async function loadCustomerLocationsFromChatHistory() {
             const cLat = parseFloat(card.dataset.lat);
             const cLng = parseFloat(card.dataset.lng);
             if (!isNaN(cLat) && !isNaN(cLng)) {
-                autoPlotWhatsAppLocation(cLat, cLng, card.dataset.name || 'Live Customer Location', card.dataset.phone || '', card.dataset.addr || 'Delivery Destination');
+                const cName = card.dataset.name || (window.currentActiveContact && window.currentActiveContact.name) || 'Bashir khani';
+                const cPhone = card.dataset.phone || (window.currentActiveContact && window.currentActiveContact.phone) || '923471000668';
+                const cAddr = card.dataset.addr || 'Danin Lusht / Chew Bazar, Chitral, KPK';
+                autoPlotWhatsAppLocation(cLat, cLng, cName, cPhone, cAddr, 'Preparing', 'Pure Mountain Sidr Honey (1kg)');
             }
         });
     }
