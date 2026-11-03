@@ -13464,7 +13464,7 @@ function openLocationOnRadarMap(lat, lng, customerName, phone, address, orderSum
     if (!safeAddress || safeAddress === 'Delivery Destination' || safeAddress === 'Customer Delivery Destination') {
         safeAddress = 'Danin Lusht / Chew Bazar, Chitral, KPK';
     }
-    const safeOrder = orderSummary || 'Pure Mountain Sidr Honey (1kg)';
+    const safeOrder = orderSummary || 'Direct WhatsApp Customer Inquiry';
 
     // 1. Automatically switch the dashboard to the "Live Delivery Map" tab
     switchTab('delivery-map');
@@ -13640,7 +13640,7 @@ async function loadCustomerLocationsFromChatHistory() {
                 const cName = card.dataset.name || (window.currentActiveContact && window.currentActiveContact.name) || 'Bashir khani';
                 const cPhone = card.dataset.phone || (window.currentActiveContact && window.currentActiveContact.phone) || '923471000668';
                 const cAddr = card.dataset.addr || 'Danin Lusht / Chew Bazar, Chitral, KPK';
-                autoPlotWhatsAppLocation(cLat, cLng, cName, cPhone, cAddr, 'Preparing', 'Pure Mountain Sidr Honey (1kg)');
+                autoPlotWhatsAppLocation(cLat, cLng, cName, cPhone, cAddr, 'Preparing', 'Direct WhatsApp Customer Inquiry');
             }
         });
     }
