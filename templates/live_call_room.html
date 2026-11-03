@@ -20,14 +20,14 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 16px;
+            padding: 14px;
             overflow: hidden;
         }
         .call-card {
             width: 100%;
             max-width: 380px;
-            height: 92vh;
-            max-height: 600px;
+            height: 94vh;
+            max-height: 620px;
             background: radial-gradient(circle at 50% 15%, #131d2e 0%, #0b0f19 80%);
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 28px;
@@ -40,20 +40,21 @@
         }
         /* Header */
         .call-header {
-            padding: 20px 22px 14px 22px;
+            padding: 16px 20px 12px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(0, 0, 0, 0.2);
         }
         .caller-info {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
         }
         .pulse-dot {
-            width: 12px;
-            height: 12px;
+            width: 11px;
+            height: 11px;
             border-radius: 50%;
             background: #14b8a6;
             box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.7);
@@ -65,49 +66,49 @@
             100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(20, 184, 166, 0); }
         }
         .caller-name {
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 700;
             color: #f8fafc;
             letter-spacing: -0.2px;
         }
         .call-status {
-            font-size: 12px;
+            font-size: 11.5px;
             color: #94a3b8;
-            margin-top: 2px;
+            margin-top: 1px;
         }
         .call-timer {
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            font-size: 12.5px;
+            font-size: 12px;
             font-weight: 700;
             color: #14b8a6;
             background: rgba(20, 184, 166, 0.12);
             border: 1px solid rgba(20, 184, 166, 0.25);
-            padding: 3px 8px;
-            border-radius: 8px;
+            padding: 2px 7px;
+            border-radius: 6px;
         }
-        /* Center wave visualizer */
+        /* Center Area */
         .call-body {
             flex: 1;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            padding: 16px 20px;
+            padding: 14px 18px;
             text-align: center;
         }
         .lang-switch-row {
             display: flex;
             justify-content: center;
-            gap: 8px;
-            margin-bottom: 14px;
+            gap: 6px;
+            margin-bottom: 10px;
         }
         .lang-chip {
             border: 1px solid rgba(255, 255, 255, 0.1);
             background: rgba(255, 255, 255, 0.05);
             color: #94a3b8;
-            font-size: 11px;
+            font-size: 10.5px;
             font-weight: 600;
-            padding: 3px 11px;
+            padding: 3px 10px;
             border-radius: 9999px;
             cursor: pointer;
             transition: all 0.2s ease;
@@ -122,20 +123,20 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
-            height: 72px;
-            margin-bottom: 12px;
+            gap: 7px;
+            height: 64px;
+            margin-bottom: 10px;
             cursor: pointer;
-            padding: 8px 20px;
-            border-radius: 16px;
+            padding: 6px 16px;
+            border-radius: 14px;
             transition: background 0.2s ease;
         }
         .vapi-waves:hover {
             background: rgba(20, 184, 166, 0.05);
         }
         .wave-bar {
-            width: 6px;
-            height: 14px;
+            width: 5px;
+            height: 12px;
             background: #14b8a6;
             border-radius: 9999px;
             transition: height 0.2s ease, opacity 0.2s ease;
@@ -147,70 +148,109 @@
         .vapi-waves.animating .wave-bar:nth-child(4) { animation: wavePulse 1.0s ease-in-out infinite 0.3s; }
         .vapi-waves.animating .wave-bar:nth-child(5) { animation: wavePulse 1.0s ease-in-out infinite 0.15s; }
         @keyframes wavePulse {
-            0%, 100% { height: 12px; opacity: 0.4; }
-            50% { height: 60px; opacity: 1; box-shadow: 0 0 16px rgba(20, 184, 166, 0.85); }
+            0%, 100% { height: 10px; opacity: 0.4; }
+            50% { height: 54px; opacity: 1; box-shadow: 0 0 16px rgba(20, 184, 166, 0.85); }
+        }
+        /* Live Mic Volume Meter */
+        .vol-meter-wrap {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 9999px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        .vol-meter-bar {
+            width: 0%;
+            height: 100%;
+            background: #14b8a6;
+            transition: width 0.06s ease;
+            box-shadow: 0 0 8px rgba(20, 184, 166, 0.8);
         }
         /* Subtitles Box */
         .transcript-box {
             width: 100%;
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.07);
-            border-radius: 14px;
-            padding: 12px 14px;
-            min-height: 64px;
-            max-height: 95px;
+            border-radius: 12px;
+            padding: 10px 12px;
+            min-height: 60px;
+            max-height: 90px;
             overflow-y: auto;
-            font-size: 13px;
-            line-height: 1.45;
+            font-size: 12.5px;
+            line-height: 1.4;
             color: #cbd5e1;
             text-align: left;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
+        }
+        /* Push to talk button */
+        .btn-ptt {
+            width: 100%;
+            background: rgba(20, 184, 166, 0.12);
+            border: 1px solid rgba(20, 184, 166, 0.35);
+            color: #14b8a6;
+            font-size: 11.5px;
+            font-weight: 700;
+            padding: 8px 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-bottom: 8px;
+            transition: all 0.2s ease;
+        }
+        .btn-ptt.recording {
+            background: #ef4444 !important;
+            border-color: #ef4444 !important;
+            color: #ffffff !important;
+            animation: pulseTeal 1s infinite;
         }
         /* Text Fallback Row */
         .text-fallback-row {
             width: 100%;
             display: flex;
-            gap: 8px;
-            margin-bottom: 4px;
+            gap: 6px;
         }
         .text-fallback-input {
             flex: 1;
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            padding: 8px 12px;
+            border-radius: 8px;
+            padding: 6px 10px;
             color: #f8fafc;
-            font-size: 12.5px;
+            font-size: 11.5px;
             outline: none;
         }
         .text-fallback-btn {
             background: #14b8a6;
             color: #0b0f19;
             border: none;
-            border-radius: 10px;
-            padding: 0 14px;
+            border-radius: 8px;
+            padding: 0 12px;
             font-weight: 700;
-            font-size: 12px;
+            font-size: 11.5px;
             cursor: pointer;
         }
         /* Bottom Controls */
         .call-footer {
-            padding: 14px 20px 20px 20px;
+            padding: 12px 18px 16px 18px;
             display: flex;
             justify-content: center;
             align-items: center;
-            gap: 18px;
+            gap: 16px;
             border-top: 1px solid rgba(255, 255, 255, 0.05);
-            background: rgba(0, 0, 0, 0.2);
+            background: rgba(0, 0, 0, 0.25);
         }
         .btn-circle {
-            width: 48px;
-            height: 48px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: 18px;
             cursor: pointer;
             border: none;
             transition: all 0.2s ease;
@@ -218,26 +258,26 @@
         .btn-mic {
             background: #14b8a6;
             color: #0b0f19;
-            box-shadow: 0 4px 16px rgba(20, 184, 166, 0.4);
+            box-shadow: 0 4px 14px rgba(20, 184, 166, 0.35);
         }
         .btn-mic.muted {
             background: #ef4444;
             color: #ffffff;
-            box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+            box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
         }
         .btn-end {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             background: #ef4444;
             color: #ffffff;
             border-radius: 9999px;
-            padding: 12px 26px;
+            padding: 10px 24px;
             font-weight: 700;
-            font-size: 14px;
+            font-size: 13px;
             border: none;
             cursor: pointer;
-            box-shadow: 0 4px 18px rgba(239, 68, 68, 0.4);
+            box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
             transition: all 0.2s ease;
         }
         .btn-end:active, .btn-mic:active {
@@ -247,8 +287,8 @@
         .connect-overlay {
             position: absolute;
             inset: 0;
-            background: rgba(11, 15, 25, 0.94);
-            backdrop-filter: blur(12px);
+            background: rgba(11, 15, 25, 0.95);
+            backdrop-filter: blur(14px);
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -279,19 +319,19 @@
 </head>
 <body>
     <div class="call-card">
-        <!-- Initial Connect Overlay (Ensures browser audio permission on mobile) -->
+        <!-- Initial Connect Overlay: Captures explicit user click to unlock AudioContext -->
         <div id="connectOverlay" class="connect-overlay">
-            <div style="font-size: 56px; margin-bottom: 16px; animation: pulseTeal 2s infinite;">🎙️</div>
-            <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 6px;">BashFlow Voice Call</h2>
+            <div style="font-size: 54px; margin-bottom: 16px; animation: pulseTeal 2s infinite;">🎙️</div>
+            <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 6px;">BashFlow Live AI Call</h2>
             <p style="font-size: 13px; color: #94a3b8; max-width: 260px; line-height: 1.5; margin-bottom: 24px;">
-                You are connecting to our 100% Free Live AI Voice Assistant.
+                Connecting you to our 100% Free Live AI Voice Assistant.
             </p>
             <button type="button" class="btn-start-call" onclick="startCallFromOverlay()">
                 <span>📞</span>
                 <span>Tap to Join Call</span>
             </button>
             <div style="font-size: 11px; color: #64748b; margin-top: 20px;">
-                Instant Hands-Free Voice • Pakistani Urdu &amp; English
+                Instant Two-Way Voice • Pakistani Urdu &amp; English
             </div>
         </div>
 
@@ -307,7 +347,7 @@
             <div class="call-timer" id="callTimer">00:00</div>
         </div>
 
-        <!-- Center: Wave Bars & Subtitle -->
+        <!-- Center: Visualizer & Subtitles -->
         <div class="call-body">
             <!-- Language Selection Chips -->
             <div class="lang-switch-row">
@@ -315,6 +355,7 @@
                 <button type="button" id="btnLangEn" class="lang-chip" onclick="switchLanguage('en-US')">🇬🇧 English</button>
             </div>
 
+            <!-- 5 Wave Bars -->
             <div class="vapi-waves" id="waveContainer" onclick="interruptAssistant()" title="Tap to interrupt assistant">
                 <span class="wave-bar"></span>
                 <span class="wave-bar"></span>
@@ -323,18 +364,25 @@
                 <span class="wave-bar"></span>
             </div>
 
-            <div id="interruptIndicator" style="display: none; font-size: 11px; color: #f59e0b; margin-top: -6px; margin-bottom: 10px; cursor: pointer;" onclick="interruptAssistant()">
+            <div id="interruptIndicator" style="display: none; font-size: 10.5px; color: #f59e0b; margin-top: -6px; margin-bottom: 8px; cursor: pointer;" onclick="interruptAssistant()">
                 ✋ Tap waves to Interrupt
             </div>
 
-            <!-- Autoplay Unmute Fallback Prompt -->
-            <div id="unmutePrompt" style="display: none; width: 100%; background: rgba(20, 184, 166, 0.18); border: 1px solid #14b8a6; color: #14b8a6; border-radius: 10px; padding: 7px 12px; margin-bottom: 10px; font-size: 12px; font-weight: 700; text-align: center; cursor: pointer;" onclick="forceAudioPlayback()">
-                🔊 Tap to Hear AI Voice
+            <!-- Live Mic Volume Meter -->
+            <div class="vol-meter-wrap" title="Live Microphone Volume">
+                <div id="micVolumeBar" class="vol-meter-bar"></div>
             </div>
 
+            <!-- Subtitle / Transcript Box -->
             <div class="transcript-box" id="transcriptBox">
                 <em style="color: #64748b;">Connecting two-way voice stream...</em>
             </div>
+
+            <!-- Hold or Tap to Speak Button -->
+            <button type="button" id="btnPushToTalk" class="btn-ptt" onmousedown="startPttRecord()" onmouseup="stopPttRecord()" ontouchstart="startPttRecord(event)" ontouchend="stopPttRecord(event)">
+                <span id="pttIcon">🎙️</span>
+                <span id="pttText">Hold or Tap to Speak</span>
+            </button>
 
             <!-- Fallback text typing row -->
             <div class="text-fallback-row">
@@ -371,22 +419,20 @@
         let audioPlayer = document.getElementById('audioPlayer');
         let lastSpokenText = '';
         let lastSpokenTime = 0;
-        let audioCtx = null;
-        let currentSource = null;
-        let pendingAudioBuffer = null;
 
-        function getAudioContext() {
-            if (!audioCtx) {
-                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                if (AudioContextClass) {
-                    audioCtx = new AudioContextClass();
-                }
-            }
-            if (audioCtx && audioCtx.state === 'suspended') {
-                audioCtx.resume().catch(() => {});
-            }
-            return audioCtx;
-        }
+        // Web Audio Context & Audio Decoding
+        let audioCtx = null;
+        let currentAudioSource = null;
+        let micStream = null;
+        let micAnalyser = null;
+        let micAnimFrame = null;
+
+        // Dual-Mic MediaRecorder Fallback & VAD
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let vadSpeechDetected = false;
+        let vadSilenceTimer = null;
+        let isPttRecording = false;
 
         function setStatus(text) {
             const el = document.getElementById('callStatusLabel');
@@ -400,6 +446,15 @@
             if (intr) intr.style.display = animating ? 'block' : 'none';
         }
 
+        function logOnScreenError(msg) {
+            console.error('[Voice Call Error]', msg);
+            const tb = document.getElementById('transcriptBox');
+            if (tb) {
+                tb.innerHTML += `<div style="color: #ef4444; font-size: 11px; margin-top: 4px;">⚠️ ${escapeHtml(msg)}</div>`;
+                tb.scrollTop = tb.scrollHeight;
+            }
+        }
+
         function switchLanguage(lang) {
             currentLanguage = lang;
             const btnUr = document.getElementById('btnLangUr');
@@ -411,24 +466,6 @@
             if (recognition) {
                 recognition.lang = lang;
                 try { recognition.stop(); } catch (_) {}
-            }
-        }
-
-        function interruptAssistant() {
-            if (isAiSpeaking) {
-                if (currentSource) {
-                    try { currentSource.stop(); } catch (_) {}
-                    currentSource = null;
-                }
-                if (audioPlayer) {
-                    try { audioPlayer.pause(); } catch (_) {}
-                }
-                isAiSpeaking = false;
-                setWaveAnimation(false);
-                setStatus('Listening... Speak now');
-                if (recognition && isCallActive && !isMuted) {
-                    try { recognition.start(); } catch (_) {}
-                }
             }
         }
 
@@ -449,17 +486,31 @@
             timerInterval = null;
         }
 
+        // ===================================================================
+        // 1. UNLOCK BROWSER AUDIO & JOIN CALL
+        // ===================================================================
         function startCallFromOverlay() {
             const overlay = document.getElementById('connectOverlay');
             if (overlay) overlay.style.display = 'none';
 
-            // 1. Prime AudioContext on explicit user gesture
-            const ctx = getAudioContext();
-            if (ctx && ctx.state === 'suspended') {
-                ctx.resume();
+            // Requirement 1: Unlock browser AudioContext inside the click handler itself!
+            try {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContextClass();
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+                // Play tiny silent buffer
+                const silentBuffer = audioCtx.createBuffer(1, 1, 22050);
+                const s = audioCtx.createBufferSource();
+                s.buffer = silentBuffer;
+                s.connect(audioCtx.destination);
+                s.start(0);
+            } catch (ctxErr) {
+                console.warn('[AudioContext Unlock Notice]', ctxErr);
             }
 
-            // 2. Prime HTML5 audio element
+            // Also unlock HTML5 Audio element
             if (audioPlayer) {
                 audioPlayer.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
                 audioPlayer.play().then(() => audioPlayer.pause()).catch(() => {});
@@ -467,144 +518,117 @@
 
             isCallActive = true;
             startTimer();
-            setStatus('Thinking...');
+            setStatus('⏳ Thinking...');
 
-            // 3. Fetch initial greeting
+            // Fetch opening greeting from backend immediately
             fetchGreeting();
 
-            // 4. Initialize speech recognition
-            startSpeechRecognition();
+            // Setup Dual-Mic System (SpeechRecognition + MediaRecorder Fallback + Volume Meter)
+            setupDualMicPipeline();
         }
 
-        function base64ToArrayBuffer(base64) {
-            const binaryString = window.atob(base64);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
+        // ===================================================================
+        // 2. AUDIO PLAYBACK WITH ZERO CORS/AUTOPLAY ISSUES
+        // ===================================================================
+        function playAudioResponse(audioBase64, audioDataUri) {
+            if (!audioBase64 && !audioDataUri) {
+                logOnScreenError('TTS synthesis returned no audio data');
+                setStatus('🟢 Listening... (Speak now)');
+                return;
             }
-            return bytes.buffer;
-        }
 
-        function playAudioResponse(audioUri, audioBase64) {
-            if (!audioUri && !audioBase64) return;
             isAiSpeaking = true;
             setWaveAnimation(true);
-            setStatus('Assistant Speaking...');
+            setStatus('🔊 Assistant Speaking...');
 
-            const promptEl = document.getElementById('unmutePrompt');
-            if (promptEl) promptEl.style.display = 'none';
+            const uriToPlay = audioDataUri || ('data:audio/mp3;base64,' + audioBase64);
 
-            const ctx = getAudioContext();
-
-            if (ctx && audioBase64) {
-                try {
-                    const arrayBuffer = base64ToArrayBuffer(audioBase64);
-                    ctx.decodeAudioData(arrayBuffer.slice(0), (decodedBuffer) => {
-                        if (!isCallActive) return;
-                        pendingAudioBuffer = decodedBuffer;
-
-                        if (currentSource) {
-                            try { currentSource.stop(); } catch (_) {}
-                        }
-                        const source = ctx.createBufferSource();
-                        source.buffer = decodedBuffer;
-                        source.connect(ctx.destination);
-                        currentSource = source;
-
-                        source.onended = () => {
-                            if (currentSource === source) {
-                                currentSource = null;
-                                isAiSpeaking = false;
-                                setWaveAnimation(false);
-                                if (isCallActive) {
-                                    setStatus('Listening... Speak now');
-                                    if (recognition && !isMuted) {
-                                        try { recognition.start(); } catch (_) {}
-                                    }
-                                }
-                            }
-                        };
-
-                        source.start(0);
-                    }, (decodeErr) => {
-                        console.warn('[WebAudio decode error]', decodeErr);
-                        playViaAudioElement(audioUri);
-                    });
-                } catch (webaudioErr) {
-                    console.warn('[WebAudio init error]', webaudioErr);
-                    playViaAudioElement(audioUri);
+            // Primary: new Audio("data:audio/mp3;base64,...").play()
+            try {
+                if (currentAudioSource) {
+                    try { currentAudioSource.pause(); } catch (_) {}
+                    currentAudioSource = null;
                 }
-            } else {
-                playViaAudioElement(audioUri);
-            }
-        }
+                const player = new Audio(uriToPlay);
+                currentAudioSource = player;
+                player.muted = isMuted;
 
-        function playViaAudioElement(audioUri) {
-            if (!audioPlayer || !audioUri) return;
-            audioPlayer.src = audioUri;
-            audioPlayer.muted = isMuted;
-
-            audioPlayer.onended = () => {
-                isAiSpeaking = false;
-                setWaveAnimation(false);
-                if (isCallActive) {
-                    setStatus('Listening... Speak now');
-                    if (recognition && !isMuted) {
-                        try { recognition.start(); } catch (_) {}
+                player.onended = () => {
+                    isAiSpeaking = false;
+                    setWaveAnimation(false);
+                    if (isCallActive) {
+                        setStatus('🟢 Listening... (Speak now)');
+                        restartRecognition();
                     }
-                }
-            };
+                };
 
-            audioPlayer.play().catch(err => {
-                console.warn('[HTML5 Audio play blocked]', err);
-                isAiSpeaking = false;
-                setWaveAnimation(false);
-                if (isCallActive) setStatus('Listening... Speak now');
-
-                const promptEl = document.getElementById('unmutePrompt');
-                if (promptEl && isCallActive) {
-                    promptEl.style.display = 'block';
-                }
-            });
+                player.play().catch(playErr => {
+                    logOnScreenError('Audio play blocked: ' + (playErr.message || playErr));
+                    // WebAudio buffer fallback
+                    playViaWebAudioBuffer(audioBase64);
+                });
+            } catch (err) {
+                logOnScreenError('Audio initialization error: ' + err.message);
+                playViaWebAudioBuffer(audioBase64);
+            }
         }
 
-        function forceAudioPlayback() {
-            const promptEl = document.getElementById('unmutePrompt');
-            if (promptEl) promptEl.style.display = 'none';
-
-            const ctx = getAudioContext();
-            if (ctx && ctx.state === 'suspended') {
-                ctx.resume();
+        function playViaWebAudioBuffer(b64) {
+            if (!b64 || !audioCtx) {
+                isAiSpeaking = false;
+                setWaveAnimation(false);
+                setStatus('🟢 Listening... (Speak now)');
+                return;
             }
-            if (pendingAudioBuffer && ctx) {
-                try {
-                    const source = ctx.createBufferSource();
-                    source.buffer = pendingAudioBuffer;
-                    source.connect(ctx.destination);
-                    currentSource = source;
-                    isAiSpeaking = true;
-                    setWaveAnimation(true);
-                    setStatus('Assistant Speaking...');
+            try {
+                const binaryString = window.atob(b64);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+
+                audioCtx.decodeAudioData(bytes.buffer, (buffer) => {
+                    const source = audioCtx.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(audioCtx.destination);
                     source.onended = () => {
-                        currentSource = null;
                         isAiSpeaking = false;
                         setWaveAnimation(false);
-                        if (isCallActive) setStatus('Listening... Speak now');
+                        if (isCallActive) {
+                            setStatus('🟢 Listening... (Speak now)');
+                            restartRecognition();
+                        }
                     };
                     source.start(0);
-                    return;
-                } catch (_) {}
-            }
-            if (audioPlayer && audioPlayer.src) {
-                audioPlayer.play().then(() => {
-                    isAiSpeaking = true;
-                    setWaveAnimation(true);
-                    setStatus('Assistant Speaking...');
-                }).catch(() => {});
+                }, (decErr) => {
+                    logOnScreenError('WebAudio decode failed: ' + decErr);
+                    isAiSpeaking = false;
+                    setWaveAnimation(false);
+                    setStatus('🟢 Listening... (Speak now)');
+                });
+            } catch (e) {
+                logOnScreenError('WebAudio fallback error: ' + e.message);
+                isAiSpeaking = false;
+                setWaveAnimation(false);
+                setStatus('🟢 Listening... (Speak now)');
             }
         }
 
+        function interruptAssistant() {
+            if (isAiSpeaking) {
+                if (currentAudioSource) {
+                    try { currentAudioSource.pause(); } catch (_) {}
+                    currentAudioSource = null;
+                }
+                isAiSpeaking = false;
+                setWaveAnimation(false);
+                setStatus('🟢 Listening... (Speak now)');
+                restartRecognition();
+            }
+        }
+
+        // ===================================================================
+        // 3. FETCH OPENING GREETING
+        // ===================================================================
         async function fetchGreeting() {
             try {
                 const res = await fetch('/api/v1/live-voice-call', {
@@ -618,7 +642,7 @@
                 });
                 const data = await res.json();
                 if (data && data.success && isCallActive) {
-                    const greeting = data.reply_text || 'Assalam-o-Alaikum! Welcome to BashFlow, main aap ki kya madad kar sakta hoon?';
+                    const greeting = data.replyText || data.reply_text || 'Assalam o Alaikum! Main BashFlow AI bol raha hoon, main aapki kya madad kar sakta hoon?';
                     callHistory.push({ role: 'assistant', text: greeting });
 
                     const tb = document.getElementById('transcriptBox');
@@ -627,23 +651,130 @@
                         tb.scrollTop = tb.scrollHeight;
                     }
 
-                    if (data.audio_base64 || data.audio_data_uri) {
-                        playAudioResponse(data.audio_data_uri, data.audio_base64);
-                    } else {
-                        setStatus('Listening... Speak now');
-                    }
+                    playAudioResponse(data.audioBase64 || data.audio_base64, data.audio_data_uri);
+                } else {
+                    const err = (data && data.error) || 'Failed to fetch opening greeting';
+                    logOnScreenError(err);
+                    setStatus('🟢 Listening... (Speak now)');
                 }
             } catch (err) {
-                console.warn('[Greeting error]', err);
-                setStatus('Listening... Speak now');
+                logOnScreenError('Greeting network error: ' + err.message);
+                setStatus('🟢 Listening... (Speak now)');
             }
         }
 
-        function startSpeechRecognition() {
+        // ===================================================================
+        // 4. DUAL-MIC SYSTEM: SpeechRecognition + MediaRecorder Fallback + VAD
+        // ===================================================================
+        function setupDualMicPipeline() {
+            // A. Start Microphone Stream & Volume Meter + VAD
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                    micStream = stream;
+                    setupMicrophoneAnalyser(stream);
+                    setupMediaRecorderVAD(stream);
+                }).catch(err => {
+                    logOnScreenError('Microphone permission denied: ' + (err.message || err));
+                    setStatus('Mic Blocked');
+                });
+            }
+
+            // B. Primary SpeechRecognition
+            startPrimarySpeechRecognition();
+        }
+
+        function setupMicrophoneAnalyser(stream) {
+            try {
+                const ctx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                if (ctx.state === 'suspended') ctx.resume();
+                const src = ctx.createMediaStreamSource(stream);
+                micAnalyser = ctx.createAnalyser();
+                micAnalyser.fftSize = 256;
+                src.connect(micAnalyser);
+
+                const dataArray = new Uint8Array(micAnalyser.frequencyBinCount);
+                const volumeBar = document.getElementById('micVolumeBar');
+
+                function updateVolume() {
+                    if (!isCallActive) return;
+                    micAnalyser.getByteFrequencyData(dataArray);
+                    let sum = 0;
+                    for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                    const avgVolume = sum / dataArray.length; // 0 to 255
+
+                    if (volumeBar) {
+                        const pct = Math.min(100, Math.round(avgVolume * 2.2));
+                        volumeBar.style.width = `${pct}%`;
+                    }
+
+                    // VAD Trigger
+                    if (!isAiSpeaking && !isMuted) {
+                        if (avgVolume > 16) {
+                            vadSpeechDetected = true;
+                            setStatus('🟢 Listening... (Hearing voice)');
+                            clearTimeout(vadSilenceTimer);
+                        } else if (vadSpeechDetected) {
+                            // Silence detected after speech: trigger VAD dispatch after 1.2s pause
+                            if (!vadSilenceTimer) {
+                                vadSilenceTimer = setTimeout(() => {
+                                    if (vadSpeechDetected && !isAiSpeaking) {
+                                        vadSpeechDetected = false;
+                                        handleVadSpeechCompletion();
+                                    }
+                                    vadSilenceTimer = null;
+                                }, 1200);
+                            }
+                        }
+                    }
+
+                    micAnimFrame = requestAnimationFrame(updateVolume);
+                }
+                updateVolume();
+            } catch (err) {
+                console.warn('[Mic Analyser Notice]', err);
+            }
+        }
+
+        function setupMediaRecorderVAD(stream) {
+            try {
+                mediaRecorder = new MediaRecorder(stream);
+                recordedChunks = [];
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) {
+                        recordedChunks.push(e.data);
+                    }
+                };
+                mediaRecorder.start(250);
+            } catch (recErr) {
+                console.warn('[MediaRecorder Init Notice]', recErr);
+            }
+        }
+
+        function handleVadSpeechCompletion() {
+            // If primary SpeechRecognition already recognized and sent the text, skip
+            if (!mediaRecorder || recordedChunks.length === 0) return;
+            // If SpeechRecognition produced a recent final transcript in last 1.5s, skip
+            if (Date.now() - lastSpokenTime < 1500) {
+                recordedChunks = [];
+                return;
+            }
+
+            const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+            recordedChunks = [];
+            if (audioBlob.size < 2000) return; // Too small / silence
+
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64Audio = reader.result;
+                sendLiveVoicePayload({ audioBase64: base64Audio });
+            };
+            reader.readAsDataURL(audioBlob);
+        }
+
+        function startPrimarySpeechRecognition() {
             const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRec) {
-                const tb = document.getElementById('transcriptBox');
-                if (tb) tb.innerHTML += '<div style="color: #f59e0b; font-size: 11px; margin-top: 4px;">Speech recognition not available in this browser. Please use Chrome/Edge or type in the input below.</div>';
+                console.warn('[Notice] Web Speech API not supported; using MediaRecorder fallback.');
                 return;
             }
 
@@ -657,11 +788,8 @@
                 recognition.lang = currentLanguage;
 
                 recognition.onresult = (event) => {
-                    // CRITICAL: If the AI assistant is speaking, IGNORE microphone input
-                    // to completely prevent acoustic feedback loop / self-interruption from device speakers!
-                    if (isAiSpeaking) {
-                        return;
-                    }
+                    // Ignore mic feedback while AI is speaking
+                    if (isAiSpeaking) return;
 
                     let interim = '';
                     let final = '';
@@ -681,7 +809,7 @@
                     }
 
                     if (display) {
-                        setStatus('Hearing you speak...');
+                        setStatus('🟢 Listening... (Hearing voice)');
                     }
 
                     clearTimeout(debounceTimer);
@@ -689,94 +817,146 @@
                     const interimClean = interim.trim();
 
                     if (finalClean.length > 1) {
-                        sendSpokenText(finalClean);
+                        sendLiveVoicePayload({ text: finalClean });
                     } else if (interimClean.length > 2) {
                         debounceTimer = setTimeout(() => {
                             if (!isAiSpeaking && interimClean.length > 2) {
-                                sendSpokenText(interimClean);
+                                sendLiveVoicePayload({ text: interimClean });
                             }
                         }, 750);
                     }
                 };
 
                 recognition.onerror = (e) => {
-                    console.warn('[Speech recognition warning]', e && e.error);
+                    console.warn('[Speech recognition error]', e && e.error);
                     if (e && e.error === 'not-allowed') {
-                        const tb = document.getElementById('transcriptBox');
-                        if (tb) {
-                            tb.innerHTML = '<div style="color: #ef4444; font-size: 12px; font-weight: 600;">⚠️ Microphone permission denied. Please allow microphone in browser address bar and refresh.</div>';
-                        }
+                        logOnScreenError('Microphone permission blocked in browser');
                         setStatus('Mic Blocked');
+                    } else {
+                        // Auto restart on transient error as long as call is active
+                        restartRecognition();
                     }
                 };
 
                 recognition.onend = () => {
-                    if (isCallActive && !isMuted && !isAiSpeaking && recognition) {
-                        try { recognition.start(); } catch (_) {}
-                    }
+                    restartRecognition();
                 };
 
                 recognition.start();
             } catch (recErr) {
-                console.warn('[Speech init error]', recErr);
+                console.warn('[Speech init notice]', recErr);
             }
         }
 
-        async function sendSpokenText(text) {
-            if (!text || !text.trim() || !isCallActive || isAiSpeaking) return;
-            const clean = text.trim();
-            const now = Date.now();
-            if (clean === lastSpokenText && (now - lastSpokenTime) < 1500) return;
-            lastSpokenText = clean;
-            lastSpokenTime = now;
+        function restartRecognition() {
+            if (isCallActive && !isMuted && !isAiSpeaking && recognition) {
+                try {
+                    recognition.start();
+                } catch (_) {}
+            }
+        }
 
-            setStatus('Thinking...');
-            callHistory.push({ role: 'user', text: clean });
+        // ===================================================================
+        // 5. SEND VOICE PAYLOAD (TEXT OR AUDIO BASE64) TO BACKEND
+        // ===================================================================
+        async function sendLiveVoicePayload(payload) {
+            if (!isCallActive || isAiSpeaking) return;
+            const textQuery = payload.text ? payload.text.trim() : '';
+
+            if (textQuery) {
+                const now = Date.now();
+                if (textQuery === lastSpokenText && (now - lastSpokenTime) < 1400) return;
+                lastSpokenText = textQuery;
+                lastSpokenTime = now;
+                callHistory.push({ role: 'user', text: textQuery });
+            }
+
+            setStatus('⏳ Thinking...');
 
             const tb = document.getElementById('transcriptBox');
-            if (tb) {
+            if (tb && textQuery) {
                 tb.innerHTML = `
-                    <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(clean)}</div>
+                    <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(textQuery)}</div>
                     <div style="color: #94a3b8; font-style: italic;">Assistant thinking...</div>
                 `;
                 tb.scrollTop = tb.scrollHeight;
             }
 
             try {
+                const bodyData = {
+                    persona: 'ur-PK-AsadNeural',
+                    callHistory: callHistory.slice(-8)
+                };
+                if (payload.text) bodyData.text = payload.text;
+                if (payload.audioBase64) bodyData.audioBase64 = payload.audioBase64;
+
                 const res = await fetch('/api/v1/live-voice-call', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        text: clean,
-                        persona: 'ur-PK-AsadNeural',
-                        callHistory: callHistory.slice(-8)
-                    })
+                    body: JSON.stringify(bodyData)
                 });
+
                 const data = await res.json();
                 if (data && data.success && isCallActive) {
-                    const reply = data.reply_text || 'Jee bilkul.';
+                    const reply = data.replyText || data.reply_text || 'Jee bilkul.';
                     callHistory.push({ role: 'assistant', text: reply });
 
                     if (tb) {
+                        const recognizedUser = data.user_text || textQuery || 'Voice input';
                         tb.innerHTML = `
-                            <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(clean)}</div>
+                            <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(recognizedUser)}</div>
                             <div style="color: #f8fafc;"><strong style="color: #14b8a6;">Assistant:</strong> ${escapeHtml(reply)}</div>
                         `;
                         tb.scrollTop = tb.scrollHeight;
                     }
 
-                    if (data.audio_base64 || data.audio_data_uri) {
-                        playAudioResponse(data.audio_data_uri, data.audio_base64);
-                    } else {
-                        setStatus('Listening... Speak now');
-                    }
+                    playAudioResponse(data.audioBase64 || data.audio_base64, data.audio_data_uri);
                 } else {
-                    setStatus('Listening... Speak now');
+                    const errMsg = (data && data.error) || 'Failed to get AI voice response';
+                    logOnScreenError(errMsg);
+                    setStatus('🟢 Listening... (Speak now)');
                 }
             } catch (err) {
-                console.warn('[Voice exchange error]', err);
-                setStatus('Listening... Speak now');
+                logOnScreenError('Network call error: ' + err.message);
+                setStatus('🟢 Listening... (Speak now)');
             }
+        }
+
+        // ===================================================================
+        // 6. HOLD OR TAP TO SPEAK BUTTON
+        // ===================================================================
+        function startPttRecord(e) {
+            if (e && e.cancelable) e.preventDefault();
+            if (!isCallActive || isAiSpeaking) return;
+            isPttRecording = true;
+            const btn = document.getElementById('btnPushToTalk');
+            const txt = document.getElementById('pttText');
+            if (btn) btn.classList.add('recording');
+            if (txt) txt.textContent = 'Release to Send';
+            setStatus('🟢 Recording Speech...');
+            recordedChunks = [];
+        }
+
+        function stopPttRecord(e) {
+            if (e && e.cancelable) e.preventDefault();
+            if (!isPttRecording) return;
+            isPttRecording = false;
+            const btn = document.getElementById('btnPushToTalk');
+            const txt = document.getElementById('pttText');
+            if (btn) btn.classList.remove('recording');
+            if (txt) txt.textContent = 'Hold or Tap to Speak';
+
+            setTimeout(() => {
+                if (recordedChunks.length > 0) {
+                    const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+                    recordedChunks = [];
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        sendLiveVoicePayload({ audioBase64: reader.result });
+                    };
+                    reader.readAsDataURL(blob);
+                }
+            }, 300);
         }
 
         function sendTextInput() {
@@ -784,7 +964,7 @@
             if (!input || !input.value.trim()) return;
             const text = input.value.trim();
             input.value = '';
-            sendSpokenText(text);
+            sendLiveVoicePayload({ text: text });
         }
 
         function toggleMute() {
@@ -797,10 +977,8 @@
                 if (recognition) { try { recognition.stop(); } catch (_) {} }
                 setStatus('Mic Muted');
             } else {
-                if (isCallActive && !isAiSpeaking && recognition) {
-                    try { recognition.start(); } catch (_) {}
-                }
-                setStatus(isAiSpeaking ? 'Assistant Speaking...' : 'Listening... Speak now');
+                restartRecognition();
+                setStatus(isAiSpeaking ? '🔊 Assistant Speaking...' : '🟢 Listening... (Speak now)');
             }
         }
 
@@ -809,15 +987,16 @@
             isAiSpeaking = false;
             stopTimer();
             setWaveAnimation(false);
-            if (currentSource) {
-                try { currentSource.stop(); } catch (_) {}
-                currentSource = null;
-            }
-            if (audioPlayer) {
-                try { audioPlayer.pause(); } catch (_) {}
+            if (micAnimFrame) cancelAnimationFrame(micAnimFrame);
+            if (currentAudioSource) {
+                try { currentAudioSource.pause(); } catch (_) {}
+                currentAudioSource = null;
             }
             if (recognition) {
                 try { recognition.stop(); } catch (_) {}
+            }
+            if (micStream) {
+                try { micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
             }
             setStatus('Call Ended');
             const tb = document.getElementById('transcriptBox');

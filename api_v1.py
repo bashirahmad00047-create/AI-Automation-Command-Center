@@ -3941,7 +3941,7 @@ def api_live_voice_call():
     try:
         data = request.get_json(silent=True) or {}
         user_text = str(data.get("text") or data.get("message") or "").strip()
-        audio_in_b64 = data.get("audio_base64") or data.get("audio") or ""
+        audio_in_b64 = data.get("audioBase64") or data.get("audio_base64") or data.get("audio") or ""
         persona = str(data.get("persona") or data.get("voice") or "").strip()
         rate = data.get("rate")
         pitch = data.get("pitch")
@@ -3958,14 +3958,14 @@ def api_live_voice_call():
         is_greeting = bool(data.get("is_greeting"))
         if is_greeting and not user_text:
             if "uzma" in persona.lower() or "female" in persona.lower():
-                reply_text = "Assalam-o-Alaikum! Welcome to BashFlow, main aap ki kya madad kar sakti hoon?"
-                voice_text = "السلام علیکم! ویلکم ٹو بیش فلو، میں آپ کی کیا مدد کر سکتی ہوں؟"
+                reply_text = "Assalam o Alaikum! Main BashFlow AI bol rahi hoon, main aapki kya madad kar sakti hoon?"
+                voice_text = "السلام علیکم! میں بیش فلو اے آئی بول رہی ہوں، میں آپ کی کیا مدد کر سکتی ہوں؟"
             elif "asad" in persona.lower() or "ur" in persona.lower() or "puck" in persona.lower():
-                reply_text = "Assalam-o-Alaikum! Welcome to BashFlow, main aap ki kya madad kar sakta hoon?"
-                voice_text = "السلام علیکم! ویلکم ٹو بیش فلو، میں آپ کی کیا مدد کر سکتا ہوں؟"
+                reply_text = "Assalam o Alaikum! Main BashFlow AI bol raha hoon, main aapki kya madad kar sakta hoon?"
+                voice_text = "السلام علیکم! میں بیش فلو اے آئی بول رہا ہوں، میں آپ کی کیا مدد کر سکتا ہوں؟"
             else:
-                reply_text = "Assalam-o-Alaikum! Welcome to BashFlow, how can I assist you today?"
-                voice_text = "Assalam-o-Alaikum! Welcome to BashFlow, how can I assist you today?"
+                reply_text = "Assalam o Alaikum! This is BashFlow AI, how may I assist you today?"
+                voice_text = "Assalam o Alaikum! This is BashFlow AI, how may I assist you today?"
         else:
             if not user_text and audio_in_b64:
                 try:
@@ -4071,9 +4071,11 @@ def api_live_voice_call():
 
         return jsonify({
             "success": True,
-            "user_text": user_text,
+            "replyText": reply_text,
             "reply_text": reply_text,
+            "user_text": user_text,
             "voice_script": normalized_speech,
+            "audioBase64": audio_b64,
             "audio_base64": audio_b64,
             "audio_data_uri": audio_data_uri,
             "persona": persona,

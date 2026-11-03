@@ -30,7 +30,7 @@
     <link rel="icon" type="image/png" sizes="512x512" href="/static/img/icon-512.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/img/icon-180.png">
 
-    <link rel="stylesheet" href="/static/css/style.css?v=2.9.1">
+    <link rel="stylesheet" href="/static/css/style.css?v=2.9.2">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -5212,7 +5212,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
     <div id="toastContainer" class="toast-container"></div>
 
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <script src="/static/js/app.js?v=2.9.1"></script>
+    <script src="/static/js/app.js?v=2.9.2"></script>
     <!-- MODERN FLOATING VOICE AI CALL WIDGET (VAPI / RETELL STYLE) -->
     <style>
         #liveVoiceCallModal {
@@ -5320,6 +5320,17 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
             <div id="liveCallInterruptIndicator" style="display: none; font-size: 10.5px; color: #f59e0b; margin-top: -4px; margin-bottom: 6px; cursor: pointer;" onclick="interruptLiveVoiceCall()">✋ Tap waves to Interrupt</div>
 
             <div id="liveCallUnmutePrompt" style="display: none; background: rgba(20, 184, 166, 0.18); border: 1px solid #14b8a6; color: #14b8a6; border-radius: 8px; padding: 5px 10px; font-size: 11px; font-weight: 700; text-align: center; margin-bottom: 6px; cursor: pointer;" onclick="forceLiveCallAudioPlayback()">🔊 Tap to Hear AI Voice</div>
+
+            <!-- Live Mic Volume Meter -->
+            <div style="width: 100%; height: 3px; background: rgba(255, 255, 255, 0.08); border-radius: 9999px; overflow: hidden; margin-bottom: 6px;" title="Live Microphone Volume">
+                <div id="liveCallMicVolumeBar" style="width: 0%; height: 100%; background: #14b8a6; transition: width 0.06s ease; box-shadow: 0 0 8px rgba(20, 184, 166, 0.8);"></div>
+            </div>
+
+            <!-- Hold or Tap to Speak Button -->
+            <button type="button" id="btnModalPushToTalk" onmousedown="startModalPttRecord()" onmouseup="stopModalPttRecord()" ontouchstart="startModalPttRecord(event)" ontouchend="stopModalPttRecord(event)" style="width: 100%; background: rgba(20, 184, 166, 0.12); border: 1px solid rgba(20, 184, 166, 0.35); color: #14b8a6; font-size: 11px; font-weight: 700; padding: 5px 10px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; margin-bottom: 6px; transition: all 0.2s;">
+                <span>🎙️</span>
+                <span id="modalPttText">Hold or Tap to Speak</span>
+            </button>
 
             <!-- Subtle 1-2 line real-time subtitle preview box -->
             <div id="voiceTranscriptBox" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 9px 12px; min-height: 52px; max-height: 80px; overflow-y: auto; font-size: 12px; line-height: 1.4; color: #cbd5e1; margin-bottom: 8px; text-align: left;">
