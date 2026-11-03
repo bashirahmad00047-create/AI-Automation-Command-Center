@@ -518,10 +518,21 @@
 
             isCallActive = true;
             startTimer();
-            setStatus('⏳ Thinking...');
+            setStatus('🟢 Call Connected. Listening...');
 
-            // Fetch opening greeting from backend immediately
-            fetchGreeting();
+            const tb = document.getElementById('transcriptBox');
+            if (tb) {
+                tb.innerHTML = '<div style="color: #10b981; font-weight: 600;">🟢 Call Connected. Say "Salam" or speak your question.</div>';
+            }
+
+            // Report join to backend so admin dashboard immediately knows!
+            if (phone) {
+                fetch('/api/call/' + encodeURIComponent(phone) + '/join', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone: phone })
+                }).catch(err => console.warn('Join report notice:', err));
+            }
 
             // Setup Dual-Mic System (SpeechRecognition + MediaRecorder Fallback + Volume Meter)
             setupDualMicPipeline();
@@ -1011,6 +1022,14 @@
         }
 
         function endCall() {
+            if (phone) {
+                try {
+                    fetch('/api/call/' + encodeURIComponent(phone) + '/end', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    }).catch(() => {});
+                } catch (_) {}
+            }
             isCallActive = false;
             isAiSpeaking = false;
             stopTimer();

@@ -12510,10 +12510,131 @@ function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customNa
     if (nameElem) nameElem.textContent = resolvedName;
     if (phoneInput && resolvedPhone) phoneInput.value = `+${resolvedPhone}`;
 
-    if (autoConnect && !liveVoiceCallActive) {
-        startLiveVoiceCall(resolvedName, resolvedPhone);
+    if (autoConnect) {
+        initiateCallHandshake(resolvedPhone, resolvedName);
     }
 }
+
+
+let callStatusPollInterval = null;
+
+async function initiateCallHandshake(phone, name) {
+    const statusLabel = document.getElementById('voiceCallStatusLabel');
+    const transcriptBox = document.getElementById('voiceTranscriptBox');
+    const vadStatus = document.getElementById('callVADStatus');
+    const nameElem = document.getElementById('callContactName');
+
+    if (callStatusPollInterval) {
+        clearInterval(callStatusPollInterval);
+        callStatusPollInterval = null;
+    }
+
+    // Keep Admin Microphone OFF and AI 100% SILENT while waiting
+    liveVoiceCallActive = false;
+    isLiveAiSpeaking = false;
+    stopLiveCallTimer();
+    setEqualizerActive(false);
+
+    if (nameElem && name) nameElem.textContent = name;
+
+    if (statusLabel) {
+        statusLabel.innerHTML = `📞 <b>Ringing on WhatsApp...</b> <span style="font-size:11.5px; color:#f59e0b; display:block; margin-top:2px;">Waiting for customer to join call</span>`;
+    }
+    if (vadStatus) {
+        vadStatus.textContent = '● WhatsApp call link sent. Waiting for customer to tap "Join Call"...';
+    }
+    if (transcriptBox) {
+        transcriptBox.innerHTML = `
+            <div style="color: #38bdf8; font-size: 12px; margin-bottom: 6px;">
+                <strong>[Outgoing WhatsApp Call]</strong> Calling <b>${escapeHtml(name)}</b> (+${escapeHtml(phone)})...
+            </div>
+            <div style="color: #94a3b8; font-size: 11.5px; margin-bottom: 10px; line-height: 1.4;">
+                Invitation link dispatched to customer. Your PC mic and AI voice remain paused until the customer joins.
+            </div>
+            <div style="padding: 10px 12px; background: rgba(20, 184, 166, 0.08); border: 1px dashed rgba(20, 184, 166, 0.4); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 11px; color: #cbd5e1;">Test AI voice directly on your PC right now?</span>
+                <button type="button" onclick="startLocalAdminVoiceTest()" style="background: #14b8a6; color: #0b0f19; border: none; border-radius: 6px; padding: 5px 12px; font-size: 11px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 8px rgba(20,184,166,0.3);">
+                    🎙️ Test Voice Locally (Admin Mic)
+                </button>
+            </div>
+        `;
+    }
+
+    try {
+        const res = await fetch('/api/call/initiate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone: phone, name: name })
+        });
+        const data = await res.json();
+        showToast(`📞 Ringing +${phone} on WhatsApp...`, 'info');
+    } catch (err) {
+        console.warn('Call initiate error:', err);
+    }
+
+    // Poll backend call status every 1.5s
+    callStatusPollInterval = setInterval(async () => {
+        try {
+            const sRes = await fetch(`/api/call/${encodeURIComponent(phone)}/status`);
+            const sData = await sRes.json();
+            if (sData && sData.joined) {
+                clearInterval(callStatusPollInterval);
+                callStatusPollInterval = null;
+                onCustomerJoinedCall(name, phone);
+            }
+        } catch (_) {}
+    }, 1500);
+}
+window.initiateCallHandshake = initiateCallHandshake;
+
+function onCustomerJoinedCall(callerName, customPhone) {
+    const statusLabel = document.getElementById('voiceCallStatusLabel');
+    const transcriptBox = document.getElementById('voiceTranscriptBox');
+    const vadStatus = document.getElementById('callVADStatus');
+
+    liveVoiceCallActive = true;
+    startLiveCallTimer();
+
+    if (statusLabel) {
+        statusLabel.innerHTML = `🟢 <b>Customer Joined Call!</b> Listening...`;
+    }
+    if (vadStatus) {
+        vadStatus.textContent = '● Customer Connected. Two-way live voice stream active.';
+    }
+    if (transcriptBox) {
+        transcriptBox.innerHTML = `
+            <div style="color: #10b981; font-weight: 700; margin-bottom: 6px;">
+                🟢 Customer (${escapeHtml(callerName)}) Joined the Call!
+            </div>
+            <div style="color: #cbd5e1; font-size: 11.5px;">
+                Live two-way talking active. Speak naturally into your mic.
+            </div>
+        `;
+    }
+
+    showToast(`🟢 ${callerName} joined the live call!`, 'success');
+
+    // Start dual-engine mic (SpeechRecognition + MediaRecorder VAD)
+    startContinuousVoiceVAD();
+}
+window.onCustomerJoinedCall = onCustomerJoinedCall;
+
+function startLocalAdminVoiceTest() {
+    if (callStatusPollInterval) {
+        clearInterval(callStatusPollInterval);
+        callStatusPollInterval = null;
+    }
+    onCustomerJoinedCall(liveCallActiveName || 'Bashir khani', liveCallActivePhone || 'LocalTest');
+    const transcriptBox = document.getElementById('voiceTranscriptBox');
+    if (transcriptBox) {
+        transcriptBox.innerHTML += `
+            <div style="color: #f59e0b; font-size: 11px; margin-top: 6px;">
+                [Local Admin Test Mode Active — Speak into your mic or type below]
+            </div>
+        `;
+    }
+}
+window.startLocalAdminVoiceTest = startLocalAdminVoiceTest;
 
 function closeLiveVoiceCallModal() {
     const modal = document.getElementById('liveVoiceCallModal');
@@ -12524,6 +12645,18 @@ function closeLiveVoiceCallModal() {
 }
 
 function endLiveVoiceCall() {
+    if (callStatusPollInterval) {
+        clearInterval(callStatusPollInterval);
+        callStatusPollInterval = null;
+    }
+    if (liveCallActivePhone) {
+        try {
+            fetch(`/api/call/${encodeURIComponent(liveCallActivePhone)}/end`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }).catch(() => {});
+        } catch (_) {}
+    }
     liveVoiceCallActive = false;
     isLiveAiSpeaking = false;
     stopLiveCallTimer();
@@ -12957,8 +13090,53 @@ async function resolveAddressFromCoordinates(lat, lng, callback) {
 }
 window.resolveAddressFromCoordinates = resolveAddressFromCoordinates;
 
+
+async function sendDeliveryStatusNotificationToCustomer(phone, customerName, status, lat, lng) {
+    const rawPhone = String(phone || '').replace(/\D/g, '');
+    if (!rawPhone || rawPhone.length < 7) {
+        if (typeof showToast === 'function') showToast('A valid customer phone number is required.', 'warning');
+        return;
+    }
+    const name = customerName || 'Valued Customer';
+    let statusUrdu = status;
+    if (status === 'Preparing') statusUrdu = 'تیاری کے مراحل میں ہے (Preparing)';
+    else if (status === 'Dispatched' || status === 'Out for Delivery' || status.includes('Dispatched')) statusUrdu = 'روانہ ہو چکا ہے (Dispatched via Courier/Local)';
+    else if (status === 'Delivered') statusUrdu = 'کامیابی سے پہنچ چکا ہے (Delivered)';
+
+    const msg = `Assalam-o-Alaikum ${name}! 📦\n\nAapke order ka delivery status update ho gaya hai:\n✅ Status: *${status}* (${statusUrdu})\n📍 Delivery Location: Chitral Region\n\nKisi bhi maloomat ke liye hum se rabta karein. Shukriya!`;
+
+    try {
+        const res = await fetch('/api/v1/whatsapp/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                phone: rawPhone,
+                message: msg
+            })
+        });
+        const data = await res.json();
+        if (data && data.success) {
+            if (typeof showToast === 'function') showToast(`WhatsApp status update sent to +${rawPhone}`, 'success');
+        } else {
+            if (typeof showToast === 'function') showToast('WhatsApp status dispatch notice', 'info');
+        }
+    } catch (e) {
+        console.warn('Status dispatch error:', e);
+    }
+}
+window.sendDeliveryStatusNotificationToCustomer = sendDeliveryStatusNotificationToCustomer;
+
+function openCustomerWhatsAppChat(phone) {
+    switchTab('whatsapp');
+    const rawPhone = String(phone || '').replace(/\D/g, '');
+    if (typeof selectWhatsAppContact === 'function' && rawPhone) {
+        selectWhatsAppContact(rawPhone);
+    }
+}
+window.openCustomerWhatsAppChat = openCustomerWhatsAppChat;
+
 // Status selector update on map pin
-function updateDeliveryPinStatus(selectEl, lat, lng) {
+function updateDeliveryPinStatus(selectEl, lat, lng, phone = '', customerName = '') {
     const val = selectEl ? selectEl.value : 'Preparing';
     const latKey = Number(lat).toFixed(4).replace('.', '_');
     const lngKey = Number(lng).toFixed(4).replace('.', '_');
@@ -12968,7 +13146,7 @@ function updateDeliveryPinStatus(selectEl, lat, lng) {
         if (val === 'Delivered') {
             pill.style.background = 'rgba(16, 185, 129, 0.2)';
             pill.style.color = '#10b981';
-        } else if (val === 'Out for Delivery') {
+        } else if (val === 'Out for Delivery' || val.includes('Dispatched')) {
             pill.style.background = 'rgba(245, 158, 11, 0.2)';
             pill.style.color = '#d97706';
         } else {
@@ -12976,8 +13154,11 @@ function updateDeliveryPinStatus(selectEl, lat, lng) {
             pill.style.color = '#00a884';
         }
     }
-    if (typeof showNotification === 'function') {
-        showNotification(`Delivery status updated to: ${val}`, 'info');
+    if (phone) {
+        sendDeliveryStatusNotificationToCustomer(phone, customerName || 'Customer', val, lat, lng);
+    }
+    if (typeof showToast === 'function') {
+        showToast(`Delivery status updated to: ${val}`, 'info');
     }
 }
 window.updateDeliveryPinStatus = updateDeliveryPinStatus;
@@ -13022,20 +13203,23 @@ function createRichRadarPopupHtml(lat, lng, customerName, phone, address, status
         formattedPhone = `+92 ${rawPhone.slice(1, 4)} ${rawPhone.slice(4)}`;
     }
 
-    let initialAddress = address || 'Danin Lusht / Chew Bazar, Chitral, KPK';
-    if (!initialAddress || initialAddress === 'Customer Delivery Destination' || initialAddress === 'WhatsApp Location' || initialAddress === 'Delivery Destination' || initialAddress === 'Live GPS Customer Location' || initialAddress === 'Order Location Pin') {
-        initialAddress = 'Danin Lusht / Chew Bazar, Chitral, KPK';
+    let initialAddress = address || 'Chew Bazar / Danin, Chitral';
+    if (!initialAddress || initialAddress.includes('google.com') || initialAddress.includes('maps') || initialAddress.includes('http') || initialAddress === 'Customer Delivery Destination' || initialAddress === 'WhatsApp Location' || initialAddress === 'Delivery Destination' || initialAddress === 'Live GPS Customer Location' || initialAddress === 'Order Location Pin') {
+        initialAddress = 'Chew Bazar / Danin, Chitral';
     }
     const safeAddress = escapeHtml(initialAddress);
     const distStr = calculateDistanceFromStore(Number(lat), Number(lng));
     const latKey = Number(lat).toFixed(4).replace('.', '_');
     const lngKey = Number(lng).toFixed(4).replace('.', '_');
-    const truckLat = (Number(lat) - 0.012).toFixed(4);
-    const truckLng = (Number(lng) - 0.012).toFixed(4);
+
+    const origin = getStoreOrigin();
+    const originLat = origin.lat || DEFAULT_STORE_LAT;
+    const originLng = origin.lng || DEFAULT_STORE_LNG;
+    const gmapsRouteUrl = `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`;
 
     let displayOrder = orderSummary;
-    if (!displayOrder || displayOrder === 'Customer Delivery Destination' || displayOrder === 'Order Location Pin' || displayOrder === 'WhatsApp Location') {
-        displayOrder = 'Pure Mountain Sidr Honey (1kg) & Chitrali Wool Shawl';
+    if (!displayOrder || displayOrder.includes('Sidr Honey') || displayOrder === 'Customer Delivery Destination' || displayOrder === 'Order Location Pin' || displayOrder === 'WhatsApp Location') {
+        displayOrder = 'Direct WhatsApp Customer Inquiry';
     }
     const safeOrder = escapeHtml(displayOrder);
 
@@ -13044,7 +13228,7 @@ function createRichRadarPopupHtml(lat, lng, customerName, phone, address, status
     if (status === 'Delivered') {
         badgeBg = 'rgba(16, 185, 129, 0.2)';
         badgeColor = '#10b981';
-    } else if (status === 'Out for Delivery') {
+    } else if (status === 'Out for Delivery' || status.includes('Dispatched')) {
         badgeBg = 'rgba(245, 158, 11, 0.2)';
         badgeColor = '#d97706';
     } else if (status === 'Store Base') {
@@ -13062,33 +13246,56 @@ function createRichRadarPopupHtml(lat, lng, customerName, phone, address, status
         });
     }, 60);
 
+    // Asynchronously pull real WhatsApp order / message inquiry from database
+    setTimeout(() => {
+        if (rawPhone) {
+            fetch(`/api/v1/customer-latest-order-info?phone=${encodeURIComponent(rawPhone)}`)
+                .then(r => r.json())
+                .then(d => {
+                    if (d && d.summary) {
+                        const ordEl = document.getElementById(`pin_order_${latKey}_${lngKey}`);
+                        if (ordEl) ordEl.textContent = d.summary;
+                    }
+                }).catch(() => {});
+        }
+    }, 80);
+
     return `
         <div class="radar-rich-popup" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12.5px; color: #1e293b; min-width: 280px; padding: 6px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 5px;">
-                <b style="color: #00a884; font-size: 13.5px; display:flex; align-items:center; gap:4px;">📍 ${safeName} <span style="font-size:11.5px; font-weight:600; color:#334155;">(${formattedPhone})</span></b>
+                <b style="color: #00a884; font-size: 13.5px; display:flex; align-items:center; gap:4px;">📍 ${safeName} <span style="font-size:11px; font-weight:600; color:#475569;">(${formattedPhone})</span></b>
                 <span id="pin_status_pill_${latKey}_${lngKey}" style="background: ${badgeBg}; color: ${badgeColor}; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px;">${status}</span>
             </div>
             <div style="color: #475569; font-size: 11px; margin-bottom: 4px; display:flex; align-items:flex-start; gap:5px;">
-                <span>📍</span> <span><b>Area:</b> <span id="pin_addr_${latKey}_${lngKey}">${safeAddress}</span> <span style="font-family:monospace; color:#64748b; font-size:10px;">(${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)})</span></span>
+                <span>📍</span> <span><b>Area:</b> <span id="pin_addr_${latKey}_${lngKey}">${safeAddress}</span> • <span style="font-family:monospace; color:#64748b; font-size:10px;">${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</span></span>
             </div>
             <div style="color: #475569; font-size: 11px; margin-bottom: 4px; display:flex; align-items:flex-start; gap:5px;">
-                <span>📦</span> <span><b>Order/Inquiry:</b> <span style="color:#0f172a; font-weight:600;">${safeOrder}</span></span>
+                <span>📦</span> <span><b>Order/Inquiry:</b> <span id="pin_order_${latKey}_${lngKey}" style="color:#0f172a; font-weight:600;">${safeOrder}</span></span>
             </div>
             <div style="color: #475569; font-size: 11px; margin-bottom: 6px; display:flex; align-items:center; gap:5px;">
                 <span>📏</span> <span>Distance from Store: <b style="color:#0f172a;">${distStr}</b></span>
             </div>
             <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0;">
                 <label style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; display: block; margin-bottom: 3px;">Status Selector:</label>
-                <select onchange="updateDeliveryPinStatus(this, ${Number(lat)}, ${Number(lng)})" style="width: 100%; padding: 4px 8px; font-size: 11.5px; border-radius: 5px; border: 1px solid #cbd5e1; background: #fff; color: #1e293b; font-weight: 600; cursor: pointer;">
+                <select id="status_sel_${latKey}_${lngKey}" onchange="updateDeliveryPinStatus(this, ${Number(lat)}, ${Number(lng)}, '${rawPhone}', '${safeName}')" style="width: 100%; padding: 4px 8px; font-size: 11.5px; border-radius: 5px; border: 1px solid #cbd5e1; background: #fff; color: #1e293b; font-weight: 600; cursor: pointer;">
                     <option value="Preparing" ${status === 'Preparing' ? 'selected' : ''}>⏳ Preparing</option>
-                    <option value="Out for Delivery" ${status === 'Out for Delivery' ? 'selected' : ''}>🚚 Out for Delivery</option>
+                    <option value="Dispatched via Courier/Local" ${status === 'Dispatched via Courier/Local' || status === 'Out for Delivery' ? 'selected' : ''}>🚚 Dispatched via Courier/Local</option>
                     <option value="Delivered" ${status === 'Delivered' ? 'selected' : ''}>✅ Delivered</option>
                 </select>
             </div>
-            <div style="margin-top: 8px; display: flex; gap: 5px; flex-wrap: wrap;">
-                <button type="button" onclick="focusRiderLocation(${truckLat}, ${truckLng})" style="flex:1; background: rgba(245, 158, 11, 0.15); color: #d97706; border: 1px solid #f59e0b; border-radius: 4px; padding: 5px 6px; font-size: 10.5px; font-weight: 700; cursor: pointer; display:flex; align-items:center; justify-content:center; gap:3px;">🚚 Rider GPS Link</button>
-                <button type="button" onclick="switchTab('whatsapp')" style="flex:1; background: rgba(0, 168, 132, 0.12); color: #00a884; border: 1px solid #00a884; border-radius: 4px; padding: 5px 6px; font-size: 10.5px; font-weight: 700; cursor: pointer; display:flex; align-items:center; justify-content:center; gap:3px;">💬 Chat</button>
-                <button type="button" onclick="sendLiveTrackingLinkToCustomer('${rawPhone}', ${lat}, ${lng})" style="flex:1; background: #00a884; color: #fff; border: none; border-radius: 4px; padding: 5px 6px; font-size: 10.5px; font-weight: 700; cursor: pointer; display:flex; align-items:center; justify-content:center; gap:3px;">🚀 Send Link</button>
+            <!-- Practical Owner Delivery Actions (No Delivery Boy Required) -->
+            <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 5px;">
+                <div style="display: flex; gap: 5px;">
+                    <a href="${gmapsRouteUrl}" target="_blank" rel="noopener noreferrer" style="flex:1; background: #0284c7; color: #fff; border-radius: 4px; padding: 6px 8px; font-size: 11px; font-weight: 700; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 1px 4px rgba(2,132,199,0.3);">
+                        🗺️ Google Maps Route
+                    </a>
+                    <button type="button" onclick="openCustomerWhatsAppChat('${rawPhone}')" style="flex:1; background: rgba(0, 168, 132, 0.15); color: #00a884; border: 1px solid #00a884; border-radius: 4px; padding: 6px 8px; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                        💬 Open WhatsApp Chat
+                    </button>
+                </div>
+                <button type="button" onclick="sendDeliveryStatusNotificationToCustomer('${rawPhone}', '${safeName}', document.getElementById('status_sel_${latKey}_${lngKey}').value, ${Number(lat)}, ${Number(lng)})" style="width: 100%; background: #00a884; color: #fff; border: none; border-radius: 4px; padding: 6px 8px; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 1px 4px rgba(0,168,132,0.3);">
+                    💬 Send Status on WhatsApp
+                </button>
             </div>
         </div>
     `;
@@ -13209,40 +13416,23 @@ function autoPlotWhatsAppLocation(lat, lng, label, phone, address, status = 'Pre
     const customerMarker = L.marker([latNum, lngNum], { icon: customerIcon }).addTo(map);
     customerMarker._customPhone = phone ? String(phone).replace(/\D/g, '') : '';
 
-    // 2. Animated Delivery Truck Marker
-    const truckLat = latNum - 0.012;
-    const truckLng = lngNum - 0.012;
-    const truckIcon = L.divIcon({
-        className: 'delivery-truck-pin',
-        html: '<div style="background:#f59e0b; color:#fff; border-radius:50%; width:34px; height:34px; display:flex; align-items:center; justify-content:center; font-size:18px; box-shadow:0 0 16px rgba(245,158,11,0.8); border:2.5px solid #fff;">🚚</div>',
-        iconSize: [34, 34],
-        iconAnchor: [17, 34]
-    });
-    const truckMarker = L.marker([truckLat, truckLng], { icon: truckIcon }).addTo(map);
-
-    // 3. Draw Route Polyline
-    const routeLine = L.polyline([[truckLat, truckLng], [latNum, lngNum]], {
+    // 2. Practical Route Polyline from Shop Base to Customer Pin (No Fake Trucks)
+    const origin = getStoreOrigin();
+    const storeLat = origin.lat || DEFAULT_STORE_LAT;
+    const storeLng = origin.lng || DEFAULT_STORE_LNG;
+    const routeLine = L.polyline([[storeLat, storeLng], [latNum, lngNum]], {
         color: '#00a884',
-        weight: 4,
-        opacity: 0.85,
-        dashArray: '8, 8'
+        weight: 3.5,
+        opacity: 0.75,
+        dashArray: '6, 8'
     }).addTo(map);
     deliveryRouteLines.push(routeLine);
 
-    // Bind Rich Popups
-    const popupHtml = createRichRadarPopupHtml(latNum, lngNum, label, phone, address || 'Danin Lusht / Chew Bazar, Chitral', status, orderSummary);
-    customerMarker.bindPopup(popupHtml, { minWidth: 250 });
-
-    truckMarker.bindPopup(`
-        <div style="font-family:sans-serif;font-size:12px;color:#111;min-width:190px;">
-            <b style="color:#f59e0b;font-size:13px;">🚚 BashFlow Delivery Courier</b>
-            <div style="color:#555;margin:3px 0;">Status: <b>Dispatch Active (Live GPS)</b></div>
-            <div style="font-size:11px;color:#777;">Zone: Chitral District &bull; Status: In Transit</div>
-        </div>
-    `);
+    // Bind Rich Popup
+    const popupHtml = createRichRadarPopupHtml(latNum, lngNum, label, phone, address || 'Chew Bazar / Danin, Chitral', status, orderSummary);
+    customerMarker.bindPopup(popupHtml, { minWidth: 260 });
 
     radarMapMarkers.push(customerMarker);
-    radarMapMarkers.push(truckMarker);
 
     // Update Counter badge
     const countEl = document.getElementById('radarMapPinsCount');
@@ -13457,7 +13647,7 @@ async function loadCustomerLocationsFromChatHistory() {
 
     // Primary Customer Delivery Pin (Bashir khani at Danin Lusht / Chew Bazar, Chitral)
     if (radarMapMarkers.length === 0) {
-        autoPlotWhatsAppLocation(35.8697, 71.7840, 'Bashir khani', '+92 347 1000668', 'Danin Lusht / Chew Bazar, Chitral', 'Preparing', 'Pure Mountain Sidr Honey (1kg)');
+        autoPlotWhatsAppLocation(35.8697, 71.7840, 'Bashir khani', '+92 347 1000668', 'Chew Bazar / Danin, Chitral', 'Preparing', 'Direct WhatsApp Customer Inquiry');
     }
 
     const countEl = document.getElementById('radarMapPinsCount');

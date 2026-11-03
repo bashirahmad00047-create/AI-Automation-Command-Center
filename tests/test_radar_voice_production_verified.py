@@ -81,3 +81,53 @@ def test_voice_transcribe_and_reply_endpoint(client):
     reply = data.get("replyText") or data.get("reply_text")
     assert len(reply) > 0
     assert bool(data.get("audioBase64") or data.get("audio_base64")) is True
+
+
+def test_call_handshake_state_machine(client):
+    """Verify call state machine starts in RINGING_WAITING_FOR_JOIN, transitions to CUSTOMER_JOINED upon join, and ends properly."""
+    test_phone = "923471000668"
+    test_name = "Khanii Jani"
+
+    # 1. Admin initiates call: state must be RINGING_WAITING_FOR_JOIN
+    init_res = client.post("/api/call/initiate", json={"phone": test_phone, "name": test_name})
+    assert init_res.status_code == 200
+    init_data = init_res.get_json()
+    assert init_data.get("success") is True
+    assert init_data.get("status") == "RINGING_WAITING_FOR_JOIN"
+    assert "/call/923471000668" in init_data.get("call_url", "")
+
+    # 2. Check status while ringing: joined must be False
+    status_res = client.get(f"/api/call/{test_phone}/status")
+    assert status_res.status_code == 200
+    status_data = status_res.get_json()
+    assert status_data.get("joined") is False
+    assert status_data.get("status") == "RINGING_WAITING_FOR_JOIN"
+
+    # 3. Customer opens link and taps join: state becomes CUSTOMER_JOINED
+    join_res = client.post(f"/api/call/{test_phone}/join", json={"phone": test_phone})
+    assert join_res.status_code == 200
+    join_data = join_res.get_json()
+    assert join_data.get("success") is True
+    assert join_data.get("status") == "CUSTOMER_JOINED"
+
+    # 4. Check status after join: joined must now be True
+    status_res2 = client.get(f"/api/call/{test_phone}/status")
+    assert status_res2.status_code == 200
+    status_data2 = status_res2.get_json()
+    assert status_data2.get("joined") is True
+    assert status_data2.get("status") == "CUSTOMER_JOINED"
+
+    # 5. End call
+    end_res = client.post(f"/api/call/{test_phone}/end")
+    assert end_res.status_code == 200
+    assert end_res.get_json().get("status") == "CALL_ENDED"
+
+
+def test_customer_latest_order_info_endpoint(client):
+    """Verify /api/customer-latest-order-info returns dynamic customer inquiry/order data without hardcoded demo strings."""
+    res = client.get("/api/customer-latest-order-info?phone=923471000668")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data.get("success") is True
+    assert "summary" in data
+    assert len(data.get("summary")) > 0

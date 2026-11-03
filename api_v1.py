@@ -4136,6 +4136,212 @@ def api_send_voice_call_link():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ===================================================================
+# REAL-TIME CALL SESSION TRACKING & HANDSHAKE STATE MACHINE
+# ===================================================================
+_ACTIVE_CALL_SESSIONS: Dict[str, Dict[str, Any]] = {}
+_ACTIVE_CALL_SESSIONS_LOCK = threading.Lock()
+
+
+@api_v1.route("/call/initiate", methods=["POST"])
+def api_call_initiate():
+    """Initiates a WhatsApp Call session.
+    Registers state as RINGING_WAITING_FOR_JOIN, sends WhatsApp invite,
+    and returns session info without playing audio on Admin PC.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        raw_phone = str(data.get("phone") or data.get("phone_number") or "").strip()
+        customer_name = str(data.get("name") or data.get("contactName") or "Valued Customer").strip()
+        org_id = request.args.get("org_id") or "org-enterprise-default"
+
+        clean_phone = re.sub(r"\D", "", raw_phone)
+        if not clean_phone or len(clean_phone) < 7:
+            return jsonify({"success": False, "error": "A valid phone number is required"}), 400
+
+        host = request.host_url.rstrip("/")
+        call_url = f"{host}/call/{clean_phone}"
+
+        with _ACTIVE_CALL_SESSIONS_LOCK:
+            _ACTIVE_CALL_SESSIONS[clean_phone] = {
+                "phone": clean_phone,
+                "name": customer_name,
+                "status": "RINGING_WAITING_FOR_JOIN",
+                "initiated_at": datetime.datetime.utcnow().isoformat() + "Z",
+                "joined_at": None,
+                "call_url": call_url
+            }
+
+        # Automatically send the WhatsApp invitation link to customer
+        message_text = (
+            f"Assalam-o-Alaikum {customer_name}! 📞\n\n"
+            f"BashFlow AI Voice Assistant is calling you for your live voice inquiry.\n\n"
+            f"👉 Please tap below to join the live audio call:\n"
+            f"{call_url}\n\n"
+            f"(100% Free Live Audio Call — No app needed. Tap to speak directly with our AI assistant)."
+        )
+
+        dispatch_res = None
+        try:
+            dispatch_res = WhatsAppService.send_message(
+                organization_id=org_id,
+                to_phone=clean_phone,
+                message_text=message_text
+            )
+        except Exception as _disp_err:
+            logger.warning(f"Call invitation dispatch notice: {_disp_err}")
+
+        return jsonify({
+            "success": True,
+            "status": "RINGING_WAITING_FOR_JOIN",
+            "phone": clean_phone,
+            "name": customer_name,
+            "call_url": call_url,
+            "dispatch": dispatch_res
+        }), 200
+    except Exception as e:
+        logger.error(f"Call initiate error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/call/<phone>/join", methods=["POST"])
+def api_call_join(phone):
+    """Customer joins call room by tapping 'Join Call' in mobile browser."""
+    clean_phone = re.sub(r"\D", "", phone or "")
+    now_iso = datetime.datetime.utcnow().isoformat() + "Z"
+    with _ACTIVE_CALL_SESSIONS_LOCK:
+        sess = _ACTIVE_CALL_SESSIONS.get(clean_phone)
+        if not sess:
+            sess = {
+                "phone": clean_phone,
+                "name": "Customer",
+                "status": "CUSTOMER_JOINED",
+                "initiated_at": now_iso,
+                "joined_at": now_iso
+            }
+            _ACTIVE_CALL_SESSIONS[clean_phone] = sess
+        else:
+            sess["status"] = "CUSTOMER_JOINED"
+            sess["joined_at"] = now_iso
+
+    return jsonify({
+        "success": True,
+        "status": "CUSTOMER_JOINED",
+        "phone": clean_phone,
+        "joined_at": sess["joined_at"]
+    }), 200
+
+
+@api_v1.route("/call/<phone>/status", methods=["GET"])
+def api_call_status(phone):
+    """Admin dashboard polls this endpoint to detect when customer joins call."""
+    clean_phone = re.sub(r"\D", "", phone or "")
+    with _ACTIVE_CALL_SESSIONS_LOCK:
+        sess = _ACTIVE_CALL_SESSIONS.get(clean_phone)
+        if not sess:
+            return jsonify({
+                "success": True,
+                "status": "IDLE",
+                "phone": clean_phone,
+                "joined": False
+            }), 200
+        return jsonify({
+            "success": True,
+            "status": sess.get("status", "IDLE"),
+            "phone": clean_phone,
+            "joined": (sess.get("status") == "CUSTOMER_JOINED"),
+            "name": sess.get("name"),
+            "initiated_at": sess.get("initiated_at"),
+            "joined_at": sess.get("joined_at")
+        }), 200
+
+
+@api_v1.route("/call/<phone>/end", methods=["POST"])
+def api_call_end(phone):
+    """Marks call session as ended."""
+    clean_phone = re.sub(r"\D", "", phone or "")
+    with _ACTIVE_CALL_SESSIONS_LOCK:
+        sess = _ACTIVE_CALL_SESSIONS.get(clean_phone)
+        if sess:
+            sess["status"] = "CALL_ENDED"
+            sess["ended_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+    return jsonify({"success": True, "status": "CALL_ENDED", "phone": clean_phone}), 200
+
+
+@api_v1.route("/customer-latest-order-info", methods=["GET"])
+def api_customer_latest_order_info():
+    """Resolves actual latest WhatsApp inquiry or real EcommerceOrder for a given phone number.
+    Eliminates all hardcoded demo items and returns genuine customer context.
+    """
+    raw_phone = request.args.get("phone", "")
+    clean_phone = re.sub(r"\D", "", raw_phone)
+    if not clean_phone:
+        return jsonify({"success": True, "summary": "WhatsApp Customer Location Pin"}), 200
+
+    phone_suffix = clean_phone[-9:] if len(clean_phone) >= 9 else clean_phone
+
+    try:
+        from models import EcommerceOrder, WhatsAppMessage, Lead
+        # 1. Check real EcommerceOrder
+        order = EcommerceOrder.query.filter(
+            EcommerceOrder.customer_phone.like(f"%{phone_suffix}%")
+        ).order_by(EcommerceOrder.created_at.desc()).first()
+
+        if order:
+            items = order.get_items()
+            item_names = [it.get("name", "Product") for it in items] if items else []
+            item_str = ", ".join(item_names) if item_names else (order.notes or "Order In Transit")
+            return jsonify({
+                "success": True,
+                "type": "order",
+                "order_number": order.order_number,
+                "status": order.order_status,
+                "summary": f"Order #{order.order_number}: {item_str} ({order.currency} {order.total_amount:,.2f})",
+                "phone": clean_phone
+            }), 200
+
+        # 2. Check latest incoming WhatsAppMessage from this customer
+        msg = WhatsAppMessage.query.filter(
+            (WhatsAppMessage.sender.like(f"%{phone_suffix}%")) | (WhatsAppMessage.recipient.like(f"%{phone_suffix}%"))
+        ).order_by(WhatsAppMessage.created_at.desc()).first()
+
+        if msg and msg.body:
+            body = msg.body.strip()
+            # Clean URLs or quoted tags
+            body = re.sub(r"\[.*?\]", "", body).strip()
+            body = re.sub(r"https?://\S+", "", body).strip()
+            if body:
+                return jsonify({
+                    "success": True,
+                    "type": "message",
+                    "summary": body[:75],
+                    "phone": clean_phone
+                }), 200
+
+        # 3. Check Lead notes
+        lead = Lead.query.filter(
+            Lead.phone.like(f"%{phone_suffix}%")
+        ).order_by(Lead.created_at.desc()).first()
+
+        if lead and lead.notes:
+            return jsonify({
+                "success": True,
+                "type": "lead",
+                "summary": lead.notes[:75],
+                "phone": clean_phone
+            }), 200
+
+    except Exception as e:
+        logger.debug(f"Customer order lookup notice: {e}")
+
+    return jsonify({
+        "success": True,
+        "type": "default",
+        "summary": "Direct WhatsApp Customer Pin",
+        "phone": clean_phone
+    }), 200
+
+
 @api_v1.route("/voice/transcribe-and-reply", methods=["POST"])
 def api_voice_transcribe_and_reply():
     """Dual-Engine speech transcription & voice reply endpoint.

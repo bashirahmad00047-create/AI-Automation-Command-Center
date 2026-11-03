@@ -1147,6 +1147,36 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_reverse_geocode
         return api_reverse_geocode()
 
+    @application.route("/api/call/initiate", methods=["POST"])
+    @application.route("/api/v1/call/initiate", methods=["POST"])
+    def route_call_initiate():
+        from api_v1 import api_call_initiate
+        return api_call_initiate()
+
+    @application.route("/api/call/<phone>/join", methods=["POST"])
+    @application.route("/api/v1/call/<phone>/join", methods=["POST"])
+    def route_call_join(phone):
+        from api_v1 import api_call_join
+        return api_call_join(phone)
+
+    @application.route("/api/call/<phone>/status", methods=["GET"])
+    @application.route("/api/v1/call/<phone>/status", methods=["GET"])
+    def route_call_status(phone):
+        from api_v1 import api_call_status
+        return api_call_status(phone)
+
+    @application.route("/api/call/<phone>/end", methods=["POST"])
+    @application.route("/api/v1/call/<phone>/end", methods=["POST"])
+    def route_call_end(phone):
+        from api_v1 import api_call_end
+        return api_call_end(phone)
+
+    @application.route("/api/customer-latest-order-info", methods=["GET"])
+    @application.route("/api/v1/customer-latest-order-info", methods=["GET"])
+    def route_customer_latest_order_info():
+        from api_v1 import api_customer_latest_order_info
+        return api_customer_latest_order_info()
+
     @application.route("/call/<phone>", methods=["GET"])
     @application.route("/call/", methods=["GET"])
     @application.route("/call", methods=["GET"])
