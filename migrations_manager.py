@@ -66,9 +66,15 @@ def _inspect_current_revision() -> Optional[str]:
 
 def get_head_revision(directory: Optional[str] = None) -> Optional[str]:
     """Returns the latest head revision defined in the migrations directory."""
-    config = get_alembic_config(directory)
-    script_dir = ScriptDirectory.from_config(config)
-    return script_dir.get_current_head()
+    mig_dir = directory or os.path.join(os.path.dirname(__file__), "migrations")
+    if not os.path.exists(mig_dir):
+        return None
+    try:
+        config = get_alembic_config(directory)
+        script_dir = ScriptDirectory.from_config(config)
+        return script_dir.get_current_head()
+    except Exception:
+        return None
 
 
 def get_migration_status(app: Optional[Flask] = None) -> Dict[str, Any]:
@@ -96,6 +102,16 @@ def get_migration_status(app: Optional[Flask] = None) -> Dict[str, Any]:
 
 def run_database_migrations(app: Optional[Flask] = None) -> Dict[str, Any]:
     """Safely runs pending database migrations or stamps legacy pre-existing databases."""
+    mig_dir = os.path.join(os.path.dirname(__file__), "migrations")
+    if not os.path.exists(mig_dir):
+        logger.info("Alembic migrations directory not present; relying on dynamic universal schema reconciler & db.create_all().")
+        return {
+            "current_revision": None,
+            "head_revision": None,
+            "is_up_to_date": True,
+            "action_taken": "schema_reconciler"
+        }
+
     import flask_migrate
 
     with _resolve_app(app).app_context():

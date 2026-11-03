@@ -1069,8 +1069,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/api/whatsapp/conversations", methods=["GET"])
     @application.route("/api/v1/whatsapp/conversations", methods=["GET"])
+    @application.route("/api/whatsapp/chats", methods=["GET"])
+    @application.route("/api/v1/whatsapp/chats", methods=["GET"])
     @application.route("/api/wa/conversations", methods=["GET"])
     @application.route("/api/v1/wa/conversations", methods=["GET"])
+    @application.route("/api/wa/chats", methods=["GET"])
+    @application.route("/api/v1/wa/chats", methods=["GET"])
     def route_whatsapp_conversations():
         from api_v1 import api_whatsapp_conversations
         return api_whatsapp_conversations()

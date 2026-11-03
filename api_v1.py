@@ -2843,7 +2843,9 @@ def api_whatsapp_group_ai_toggle(group_jid):
 
 
 @api_v1.route("/whatsapp/conversations", methods=["GET"])
+@api_v1.route("/whatsapp/chats", methods=["GET"])
 @api_v1.route("/wa/conversations", methods=["GET"])
+@api_v1.route("/wa/chats", methods=["GET"])
 def api_whatsapp_conversations():
     """Returns real WhatsApp conversations grouped by partner/group JID.
     Syncs seamlessly across Baileys socket, database message history, and CRM Leads
