@@ -12769,13 +12769,13 @@ function bindAdminCallWidgetButtons() {
         };
     }
 
-    // 3. Main Call Start/Toggle button: properly initiates call and streams voice to customer
+    // 3. Main Call Start button: dedicated exclusively to initiating call and opening audio bridge
     const startCallBtn = document.getElementById('startVoiceCallBtn');
     if (startCallBtn && !startCallBtn._boundStartToggle) {
         startCallBtn._boundStartToggle = true;
         startCallBtn.onclick = (e) => {
             if (e && e.preventDefault) e.preventDefault();
-            toggleLiveVoiceCall();
+            openLiveVoiceCallModal(true);
         };
     }
 }
@@ -13025,13 +13025,7 @@ function handleModalVadCompletion() {
 }
 
 function toggleLiveVoiceCall() {
-    const modal = document.getElementById('liveVoiceCallModal');
-    const isModalOpen = modal && modal.style.display && modal.style.display !== 'none';
-    if (liveVoiceCallActive || isModalOpen) {
-        handleAdminEndCall();
-    } else {
-        openLiveVoiceCallModal(true);
-    }
+    openLiveVoiceCallModal(true);
 }
 window.toggleLiveVoiceCall = toggleLiveVoiceCall;
 window.openLiveVoiceCallModal = openLiveVoiceCallModal;
