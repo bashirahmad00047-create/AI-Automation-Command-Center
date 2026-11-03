@@ -5298,7 +5298,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 </div>
             </div>
             <div style="display: flex; align-items: center; gap: 4px;">
-                <button type="button" onclick="closeLiveVoiceCallModal()" title="Close Call Widget" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #94a3b8; cursor: pointer; transition: all 0.2s;">✕</button>
+                <button type="button" id="btnCloseLiveVoiceModal" onclick="closeLiveVoiceCallModal()" title="Close Call Widget" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #94a3b8; cursor: pointer; transition: all 0.2s;">✕</button>
             </div>
         </div>
 
@@ -5329,7 +5329,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
             </div>
 
             <!-- Hold or Tap to Speak Button -->
-            <button type="button" id="btnModalPushToTalk" onmousedown="startModalPttRecord()" onmouseup="stopModalPttRecord()" ontouchstart="startModalPttRecord(event)" ontouchend="stopModalPttRecord(event)" style="width: 100%; background: rgba(20, 184, 166, 0.12); border: 1px solid rgba(20, 184, 166, 0.35); color: #14b8a6; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; margin-bottom: 6px; flex-shrink: 0;">
+            <button type="button" id="btnModalPushToTalk" onmousedown="startModalPttRecord()" onmouseup="stopModalPttRecord()" ontouchstart="startModalPttRecord(event)" ontouchend="stopModalPttRecord(event)" style="width: 100%; background: rgba(20, 184, 166, 0.12); border: 1px solid rgba(20, 184, 166, 0.35); color: #14b8a6; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; margin-bottom: 6px; flex-shrink: 0; user-select: none; -webkit-user-select: none; touch-action: manipulation;">
                 <span>🎙️</span>
                 <span id="modalPttText">Hold or Tap to Speak</span>
             </button>

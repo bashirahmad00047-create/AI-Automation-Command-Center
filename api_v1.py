@@ -4149,12 +4149,14 @@ def api_send_voice_call_link():
 # ===================================================================
 _ACTIVE_CALL_SESSIONS: Dict[str, Dict[str, Any]] = {}
 _ACTIVE_CALL_SESSIONS_LOCK = threading.Lock()
+# Active call state dictionary with states: ringing, connected, ended
+active_calls: Dict[str, Dict[str, Any]] = _ACTIVE_CALL_SESSIONS
 
 
 @api_v1.route("/call/initiate", methods=["POST"])
 def api_call_initiate():
     """Initiates a WhatsApp Call session.
-    Registers state as RINGING_WAITING_FOR_JOIN, sends WhatsApp invite,
+    Registers state as ringing, sends WhatsApp invite,
     and returns session info without playing audio on Admin PC.
     """
     try:
@@ -4174,9 +4176,10 @@ def api_call_initiate():
             _ACTIVE_CALL_SESSIONS[clean_phone] = {
                 "phone": clean_phone,
                 "name": customer_name,
-                "status": "RINGING_WAITING_FOR_JOIN",
+                "status": "ringing",
                 "initiated_at": datetime.datetime.utcnow().isoformat() + "Z",
                 "joined_at": None,
+                "ended_at": None,
                 "call_url": call_url
             }
 
@@ -4201,7 +4204,7 @@ def api_call_initiate():
 
         return jsonify({
             "success": True,
-            "status": "RINGING_WAITING_FOR_JOIN",
+            "status": "ringing",
             "phone": clean_phone,
             "name": customer_name,
             "call_url": call_url,
@@ -4212,6 +4215,7 @@ def api_call_initiate():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@api_v1.route("/call/join/<phone>", methods=["POST"])
 @api_v1.route("/call/<phone>/join", methods=["POST"])
 def api_call_join(phone):
     """Customer joins call room by tapping 'Join Call' in mobile browser."""
@@ -4223,23 +4227,26 @@ def api_call_join(phone):
             sess = {
                 "phone": clean_phone,
                 "name": "Customer",
-                "status": "CUSTOMER_JOINED",
+                "status": "connected",
                 "initiated_at": now_iso,
-                "joined_at": now_iso
+                "joined_at": now_iso,
+                "ended_at": None
             }
             _ACTIVE_CALL_SESSIONS[clean_phone] = sess
         else:
-            sess["status"] = "CUSTOMER_JOINED"
+            sess["status"] = "connected"
             sess["joined_at"] = now_iso
 
     return jsonify({
         "success": True,
-        "status": "CUSTOMER_JOINED",
+        "status": "connected",
         "phone": clean_phone,
-        "joined_at": sess["joined_at"]
+        "joined_at": sess["joined_at"],
+        "joined": True
     }), 200
 
 
+@api_v1.route("/call/status/<phone>", methods=["GET"])
 @api_v1.route("/call/<phone>/status", methods=["GET"])
 def api_call_status(phone):
     """Admin dashboard polls this endpoint to detect when customer joins call."""
@@ -4249,31 +4256,51 @@ def api_call_status(phone):
         if not sess:
             return jsonify({
                 "success": True,
-                "status": "IDLE",
+                "status": "ended",
                 "phone": clean_phone,
                 "joined": False
             }), 200
+
+        raw_state = sess.get("status", "ended")
+        if raw_state in ("CUSTOMER_JOINED", "connected"):
+            normalized_status = "connected"
+        elif raw_state in ("CALL_ENDED", "ended"):
+            normalized_status = "ended"
+        elif raw_state in ("RINGING_WAITING_FOR_JOIN", "ringing"):
+            normalized_status = "ringing"
+        else:
+            normalized_status = str(raw_state).lower()
+
         return jsonify({
             "success": True,
-            "status": sess.get("status", "IDLE"),
+            "status": normalized_status,
             "phone": clean_phone,
-            "joined": (sess.get("status") == "CUSTOMER_JOINED"),
+            "joined": (normalized_status == "connected"),
             "name": sess.get("name"),
             "initiated_at": sess.get("initiated_at"),
-            "joined_at": sess.get("joined_at")
+            "joined_at": sess.get("joined_at"),
+            "ended_at": sess.get("ended_at")
         }), 200
 
 
+@api_v1.route("/call/end/<phone>", methods=["POST"])
 @api_v1.route("/call/<phone>/end", methods=["POST"])
 def api_call_end(phone):
     """Marks call session as ended."""
     clean_phone = re.sub(r"\D", "", phone or "")
+    now_iso = datetime.datetime.utcnow().isoformat() + "Z"
     with _ACTIVE_CALL_SESSIONS_LOCK:
         sess = _ACTIVE_CALL_SESSIONS.get(clean_phone)
         if sess:
-            sess["status"] = "CALL_ENDED"
-            sess["ended_at"] = datetime.datetime.utcnow().isoformat() + "Z"
-    return jsonify({"success": True, "status": "CALL_ENDED", "phone": clean_phone}), 200
+            sess["status"] = "ended"
+            sess["ended_at"] = now_iso
+        else:
+            _ACTIVE_CALL_SESSIONS[clean_phone] = {
+                "phone": clean_phone,
+                "status": "ended",
+                "ended_at": now_iso
+            }
+    return jsonify({"success": True, "status": "ended", "phone": clean_phone}), 200
 
 
 @api_v1.route("/customer-latest-order-info", methods=["GET"])

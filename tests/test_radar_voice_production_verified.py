@@ -88,12 +88,12 @@ def test_call_handshake_state_machine(client):
     test_phone = "923471000668"
     test_name = "Khanii Jani"
 
-    # 1. Admin initiates call: state must be RINGING_WAITING_FOR_JOIN
+    # 1. Admin initiates call: state must be ringing
     init_res = client.post("/api/call/initiate", json={"phone": test_phone, "name": test_name})
     assert init_res.status_code == 200
     init_data = init_res.get_json()
     assert init_data.get("success") is True
-    assert init_data.get("status") == "RINGING_WAITING_FOR_JOIN"
+    assert init_data.get("status") in ("RINGING_WAITING_FOR_JOIN", "ringing")
     assert "/call/923471000668" in init_data.get("call_url", "")
 
     # 2. Check status while ringing: joined must be False
@@ -101,26 +101,36 @@ def test_call_handshake_state_machine(client):
     assert status_res.status_code == 200
     status_data = status_res.get_json()
     assert status_data.get("joined") is False
-    assert status_data.get("status") == "RINGING_WAITING_FOR_JOIN"
+    assert status_data.get("status") in ("RINGING_WAITING_FOR_JOIN", "ringing")
 
-    # 3. Customer opens link and taps join: state becomes CUSTOMER_JOINED
+    # Also verify route variant /api/call/status/<phone>
+    status_res_alt = client.get(f"/api/call/status/{test_phone}")
+    assert status_res_alt.status_code == 200
+    assert status_res_alt.get_json().get("status") in ("RINGING_WAITING_FOR_JOIN", "ringing")
+
+    # 3. Customer opens link and taps join: state becomes connected
     join_res = client.post(f"/api/call/{test_phone}/join", json={"phone": test_phone})
     assert join_res.status_code == 200
     join_data = join_res.get_json()
     assert join_data.get("success") is True
-    assert join_data.get("status") == "CUSTOMER_JOINED"
+    assert join_data.get("status") in ("CUSTOMER_JOINED", "connected")
 
     # 4. Check status after join: joined must now be True
     status_res2 = client.get(f"/api/call/{test_phone}/status")
     assert status_res2.status_code == 200
     status_data2 = status_res2.get_json()
     assert status_data2.get("joined") is True
-    assert status_data2.get("status") == "CUSTOMER_JOINED"
+    assert status_data2.get("status") in ("CUSTOMER_JOINED", "connected")
 
     # 5. End call
     end_res = client.post(f"/api/call/{test_phone}/end")
     assert end_res.status_code == 200
-    assert end_res.get_json().get("status") == "CALL_ENDED"
+    assert end_res.get_json().get("status") in ("CALL_ENDED", "ended")
+
+    # 6. Verify status after call ended is ended
+    status_res3 = client.get(f"/api/call/status/{test_phone}")
+    assert status_res3.status_code == 200
+    assert status_res3.get_json().get("status") == "ended"
 
 
 def test_customer_latest_order_info_endpoint(client):

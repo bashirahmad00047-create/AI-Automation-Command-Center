@@ -30,7 +30,7 @@ from typing import Any, Dict, Optional
 import requests
 from flask import Flask, Response, g, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 
-from api_v1 import api_v1
+from api_v1 import api_v1, _ACTIVE_CALL_SESSIONS, _ACTIVE_CALL_SESSIONS_LOCK, active_calls
 from auth import get_current_org, log_audit_event, require_auth
 from limiter import rate_limit
 from automation_engine import AutomationEngine
@@ -229,7 +229,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                                 "joined_at": now_iso
                             }
                         else:
-                            sess["status"] = "CUSTOMER_JOINED"
+                            sess["status"] = "connected"
                             sess["joined_at"] = now_iso
                     emit("customer-joined", {"roomId": clean_room, "role": role}, room=clean_room)
             except Exception as _e:
@@ -1180,19 +1180,25 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_call_initiate
         return api_call_initiate()
 
+    @application.route("/api/call/join/<phone>", methods=["POST"])
     @application.route("/api/call/<phone>/join", methods=["POST"])
+    @application.route("/api/v1/call/join/<phone>", methods=["POST"])
     @application.route("/api/v1/call/<phone>/join", methods=["POST"])
     def route_call_join(phone):
         from api_v1 import api_call_join
         return api_call_join(phone)
 
+    @application.route("/api/call/status/<phone>", methods=["GET"])
     @application.route("/api/call/<phone>/status", methods=["GET"])
+    @application.route("/api/v1/call/status/<phone>", methods=["GET"])
     @application.route("/api/v1/call/<phone>/status", methods=["GET"])
     def route_call_status(phone):
         from api_v1 import api_call_status
         return api_call_status(phone)
 
+    @application.route("/api/call/end/<phone>", methods=["POST"])
     @application.route("/api/call/<phone>/end", methods=["POST"])
+    @application.route("/api/v1/call/end/<phone>", methods=["POST"])
     @application.route("/api/v1/call/<phone>/end", methods=["POST"])
     def route_call_end(phone):
         from api_v1 import api_call_end

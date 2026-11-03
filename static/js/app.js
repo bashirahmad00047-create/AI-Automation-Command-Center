@@ -12578,18 +12578,46 @@ async function initiateCallHandshake(phone, name) {
         console.warn('Call initiate error:', err);
     }
 
-    // Poll backend call status every 1.5s
+    // 2-second polling interval (GET /api/call/status/<phone>) while Admin Call Widget is open
+    let isConnectedLogged = false;
     callStatusPollInterval = setInterval(async () => {
+        if (!cleanPhone) return;
         try {
-            const sRes = await fetch(`/api/call/${encodeURIComponent(cleanPhone)}/status`);
+            const sRes = await fetch(`/api/call/status/${encodeURIComponent(cleanPhone)}`);
             const sData = await sRes.json();
-            if (sData && sData.joined) {
-                clearInterval(callStatusPollInterval);
-                callStatusPollInterval = null;
+            const currentStatus = String(sData.status || '').toLowerCase();
+
+            if ((currentStatus === 'connected' || sData.joined) && !isConnectedLogged) {
+                isConnectedLogged = true;
+                if (statusLabel) {
+                    statusLabel.innerHTML = `🟢 <b>Customer Connected - Live Audio Active</b>`;
+                }
+                if (vadStatus) {
+                    vadStatus.textContent = '● Customer Connected - Live Audio Active';
+                }
                 onCustomerJoinedCall(name, cleanPhone);
+            } else if (currentStatus === 'ended') {
+                if (callStatusPollInterval) {
+                    clearInterval(callStatusPollInterval);
+                    callStatusPollInterval = null;
+                }
+                stopLocalAudioAndMicTracks();
+                if (statusLabel) {
+                    statusLabel.innerHTML = `<span style="color: #ef4444; font-weight: 700;">Customer Ended Call</span>`;
+                }
+                if (vadStatus) {
+                    vadStatus.textContent = '● Customer Ended Call';
+                }
+                showToast('Customer Ended Call', 'info');
+                setTimeout(() => {
+                    const modal = document.getElementById('liveVoiceCallModal');
+                    if (modal) modal.style.display = 'none';
+                }, 1500);
             }
         } catch (_) {}
-    }, 1500);
+    }, 2000);
+
+    bindAdminCallWidgetButtons();
 }
 window.initiateCallHandshake = initiateCallHandshake;
 
@@ -12602,15 +12630,15 @@ function onCustomerJoinedCall(callerName, customPhone) {
     startLiveCallTimer();
 
     if (statusLabel) {
-        statusLabel.innerHTML = `🟢 <b>Customer Joined Call!</b> Listening...`;
+        statusLabel.innerHTML = `🟢 <b>Customer Connected - Live Audio Active</b>`;
     }
     if (vadStatus) {
-        vadStatus.textContent = '● Customer Connected. Two-way live voice stream active.';
+        vadStatus.textContent = '● Customer Connected - Live Audio Active';
     }
     if (transcriptBox) {
         transcriptBox.innerHTML = `
             <div style="color: #10b981; font-weight: 700; margin-bottom: 6px;">
-                🟢 Customer (${escapeHtml(callerName)}) Joined the Call!
+                🟢 Customer (${escapeHtml(callerName)}) Connected - Live Audio Active!
             </div>
             <div style="color: #cbd5e1; font-size: 11.5px;">
                 Live two-way talking active. Speak naturally into your mic.
@@ -12618,7 +12646,7 @@ function onCustomerJoinedCall(callerName, customPhone) {
         `;
     }
 
-    showToast(`🟢 ${callerName} joined the live call!`, 'success');
+    showToast(`🟢 ${callerName} connected! Live audio active`, 'success');
 
     // Start dual-engine mic (SpeechRecognition + MediaRecorder VAD)
     startContinuousVoiceVAD();
@@ -12642,34 +12670,16 @@ function startLocalAdminVoiceTest() {
 }
 window.startLocalAdminVoiceTest = startLocalAdminVoiceTest;
 
-function closeLiveVoiceCallModal() {
-    const modal = document.getElementById('liveVoiceCallModal');
-    if (modal) modal.style.display = 'none';
-    if (liveVoiceCallActive) {
-        endLiveVoiceCall();
-    }
-}
-
-function endLiveVoiceCall() {
-    if (callStatusPollInterval) {
-        clearInterval(callStatusPollInterval);
-        callStatusPollInterval = null;
-    }
-    if (liveCallActivePhone) {
-        try {
-            fetch(`/api/call/${encodeURIComponent(liveCallActivePhone)}/end`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            }).catch(() => {});
-        } catch (_) {}
-    }
+function stopLocalAudioAndMicTracks() {
     liveVoiceCallActive = false;
     isLiveAiSpeaking = false;
     stopLiveCallTimer();
     setEqualizerActive(false);
 
-    if (modalMicAnimFrame) cancelAnimationFrame(modalMicAnimFrame);
-
+    if (modalMicAnimFrame) {
+        cancelAnimationFrame(modalMicAnimFrame);
+        modalMicAnimFrame = null;
+    }
     if (liveCurrentSource) {
         try { liveCurrentSource.stop(); } catch (_) {}
         liveCurrentSource = null;
@@ -12686,6 +12696,10 @@ function endLiveVoiceCall() {
         try { modalMicStream.getTracks().forEach(t => t.stop()); } catch (_) {}
         modalMicStream = null;
     }
+    if (window.localStream) {
+        try { window.localStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+        window.localStream = null;
+    }
     if (currentVoiceAudioPlayer) {
         try { currentVoiceAudioPlayer.pause(); } catch (_) {}
         currentVoiceAudioPlayer = null;
@@ -12694,17 +12708,72 @@ function endLiveVoiceCall() {
     if (domPlayer) {
         try { domPlayer.pause(); } catch (_) {}
     }
-
+    if (window.speechSynthesis) {
+        try { window.speechSynthesis.cancel(); } catch (_) {}
+    }
     const intrEl = document.getElementById('liveCallInterruptIndicator');
     if (intrEl) intrEl.style.display = 'none';
+}
+
+function handleAdminEndCall() {
+    if (callStatusPollInterval) {
+        clearInterval(callStatusPollInterval);
+        callStatusPollInterval = null;
+    }
+
+    if (liveCallActivePhone) {
+        try {
+            fetch(`/api/call/end/${encodeURIComponent(liveCallActivePhone)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }).catch(() => {});
+        } catch (_) {}
+    }
+
+    stopLocalAudioAndMicTracks();
 
     const statusLabel = document.getElementById('voiceCallStatusLabel');
-    if (statusLabel) statusLabel.textContent = 'Call Ended';
-
-    const modal = document.getElementById('liveVoiceCallModal');
-    if (modal) modal.style.display = 'none';
+    if (statusLabel) {
+        statusLabel.innerHTML = '<span style="color: #ef4444; font-weight: 700;">Call Ended</span>';
+    }
+    const vadStatus = document.getElementById('callVADStatus');
+    if (vadStatus) vadStatus.textContent = '● Call Ended';
 
     showToast('Live AI Voice Call ended', 'info');
+
+    // Hides/closes the call widget modal cleanly after 1 second
+    setTimeout(() => {
+        const modal = document.getElementById('liveVoiceCallModal');
+        if (modal) modal.style.display = 'none';
+    }, 1000);
+}
+
+function bindAdminCallWidgetButtons() {
+    const endBtn = document.getElementById('startVoiceCallBtn');
+    if (endBtn && !endBtn._boundEndCall) {
+        endBtn._boundEndCall = true;
+        endBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleAdminEndCall();
+        });
+    }
+
+    const closeBtn = document.getElementById('btnCloseLiveVoiceModal') || document.querySelector('#liveVoiceCallModal button[title="Close Call Widget"]');
+    if (closeBtn && !closeBtn._boundCloseCall) {
+        closeBtn._boundCloseCall = true;
+        closeBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleAdminEndCall();
+        });
+    }
+}
+
+function closeLiveVoiceCallModal() {
+    handleAdminEndCall();
+}
+
+function endLiveVoiceCall() {
+    handleAdminEndCall();
 }
 
 async function startLiveVoiceCall(callerName = 'Bashir khani', customPhone = '') {
@@ -12944,11 +13013,7 @@ function handleModalVadCompletion() {
 }
 
 function toggleLiveVoiceCall() {
-    if (liveVoiceCallActive) {
-        endLiveVoiceCall();
-    } else {
-        openLiveVoiceCallModal(true);
-    }
+    handleAdminEndCall();
 }
 window.toggleLiveVoiceCall = toggleLiveVoiceCall;
 window.openLiveVoiceCallModal = openLiveVoiceCallModal;

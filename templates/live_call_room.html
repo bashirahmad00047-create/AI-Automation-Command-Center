@@ -201,6 +201,9 @@
             gap: 6px;
             margin-bottom: 8px;
             transition: all 0.2s ease;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
         }
         .btn-ptt.recording {
             background: #ef4444 !important;
@@ -380,7 +383,7 @@
             </div>
 
             <!-- Hold or Tap to Speak Button -->
-            <button type="button" id="btnPushToTalk" class="btn-ptt" onmousedown="startPttRecord()" onmouseup="stopPttRecord()" ontouchstart="startPttRecord(event)" ontouchend="stopPttRecord(event)">
+            <button type="button" id="btnPushToTalk" class="btn-ptt">
                 <span id="pttIcon">🎙️</span>
                 <span id="pttText">Hold or Tap to Speak</span>
             </button>
@@ -397,7 +400,7 @@
             <button type="button" id="btnMicMute" class="btn-circle btn-mic" onclick="toggleMute()" title="Mute/Unmute Mic">
                 <span id="micIcon">🎤</span>
             </button>
-            <button type="button" class="btn-end" onclick="endCall()" title="End Call">
+            <button type="button" id="btnEndCall" class="btn-end" onclick="endCall()" title="End Call">
                 <span>🔴</span>
                 <span>End Call</span>
             </button>
@@ -556,11 +559,12 @@
                 if (socket && socket.emit) {
                     socket.emit('join-call-room', { roomId: roomId, role: 'customer' });
                 }
-                if (phone) {
-                    fetch('/api/call/' + encodeURIComponent(phone) + '/join', {
+                const targetPhone = roomId || phone;
+                if (targetPhone) {
+                    fetch('/api/call/join/' + encodeURIComponent(targetPhone), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ phone: phone, roomId: roomId })
+                        body: JSON.stringify({ phone: targetPhone, roomId: roomId })
                     }).catch(err => console.warn('Join report notice:', err));
                 }
 
@@ -588,6 +592,15 @@
                     executeJoinFlow();
                 });
             }
+            // Bind customer End Call button
+            const endBtn = document.getElementById('btnEndCall') || document.querySelector('.btn-end');
+            if (endBtn) {
+                endBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    endCall();
+                });
+            }
+            bindPttButtonEvents();
         });
 
         // ===================================================================
@@ -1050,40 +1063,159 @@
         }
 
         // ===================================================================
-        // 6. HOLD OR TAP TO SPEAK BUTTON
+        // 6. HOLD OR TAP TO SPEAK BUTTON (MOBILE TOUCH & DESKTOP GESTURE PIPELINE)
         // ===================================================================
-        function startPttRecord(e) {
+        let isPttRecording = false;
+        let pttTouchStartTime = 0;
+        let pttTapMode = false;
+
+        async function ensurePttAudioContextAndMic() {
+            try {
+                if (audioCtx && audioCtx.state === 'suspended') {
+                    await audioCtx.resume();
+                }
+            } catch (_) {}
+
+            if (!micStream || !micStream.active) {
+                try {
+                    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    setupMicrophoneAnalyser(micStream);
+                    setupMediaRecorderVAD(micStream);
+                } catch (micErr) {
+                    console.warn('[Microphone Request Error on PTT]', micErr);
+                }
+            }
+
+            if (!recognition && isCallActive) {
+                startPrimarySpeechRecognition();
+            } else if (recognition) {
+                try { recognition.start(); } catch (_) {}
+            }
+        }
+
+        async function startPttAction(e) {
             if (e && e.cancelable) e.preventDefault();
             if (!isCallActive || isAiSpeaking) return;
+
+            // Ensure AudioContext and Mic strictly inside user gesture
+            await ensurePttAudioContextAndMic();
+
             isPttRecording = true;
             const btn = document.getElementById('btnPushToTalk');
             const txt = document.getElementById('pttText');
             if (btn) btn.classList.add('recording');
-            if (txt) txt.textContent = 'Release to Send';
-            setStatus('🟢 Recording Speech...');
+            if (txt) txt.textContent = pttTapMode ? 'Tap to Send' : 'Release or Tap to Send';
+            setStatus('🟢 Recording Speech... (Speak now)');
+
+            // Reset recorded chunks and request immediate new chunk from MediaRecorder
             recordedChunks = [];
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                try { mediaRecorder.requestData(); } catch (_) {}
+            } else if (mediaRecorder && mediaRecorder.state === 'inactive' && micStream) {
+                try { mediaRecorder.start(250); } catch (_) {}
+            }
         }
 
-        function stopPttRecord(e) {
+        function stopPttAction(e) {
             if (e && e.cancelable) e.preventDefault();
             if (!isPttRecording) return;
             isPttRecording = false;
+            pttTapMode = false;
+
             const btn = document.getElementById('btnPushToTalk');
             const txt = document.getElementById('pttText');
             if (btn) btn.classList.remove('recording');
             if (txt) txt.textContent = 'Hold or Tap to Speak';
+            setStatus('⏳ Processing Speech...');
+
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                try { mediaRecorder.requestData(); } catch (_) {}
+            }
 
             setTimeout(() => {
                 if (recordedChunks.length > 0) {
                     const blob = new Blob(recordedChunks, { type: 'audio/webm' });
                     recordedChunks = [];
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        sendLiveVoicePayload({ audioBase64: reader.result });
-                    };
-                    reader.readAsDataURL(blob);
+                    if (blob.size >= 800) {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            sendLiveVoicePayload({ audioBase64: reader.result });
+                        };
+                        reader.readAsDataURL(blob);
+                        return;
+                    }
                 }
-            }, 300);
+                if (isCallActive) setStatus('🟢 Listening... (Speak now)');
+            }, 250);
+        }
+
+        function startPttRecord(e) { startPttAction(e); }
+        function stopPttRecord(e) { stopPttAction(e); }
+
+        function bindPttButtonEvents() {
+            const pttBtn = document.getElementById('btnPushToTalk');
+            if (!pttBtn || pttBtn._boundPttEvents) return;
+            pttBtn._boundPttEvents = true;
+
+            // Touch events for mobile (iOS Safari / Android Chrome) with { passive: false } and e.preventDefault()
+            pttBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                pttTouchStartTime = Date.now();
+                if (pttTapMode && isPttRecording) {
+                    stopPttAction(e);
+                    return;
+                }
+                startPttAction(e);
+            }, { passive: false });
+
+            pttBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                const pressDuration = Date.now() - pttTouchStartTime;
+                if (pressDuration < 350) {
+                    // Tap toggle mode: stays recording until tapped again
+                    pttTapMode = true;
+                    const txt = document.getElementById('pttText');
+                    if (txt) txt.textContent = 'Tap to Send';
+                    setStatus('🟢 Listening... (Tap to Send)');
+                    return;
+                }
+                stopPttAction(e);
+            }, { passive: false });
+
+            pttBtn.addEventListener('touchcancel', (e) => {
+                e.preventDefault();
+                stopPttAction(e);
+            }, { passive: false });
+
+            // Desktop mouse events (mousedown / mouseup / mouseleave)
+            pttBtn.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                pttTouchStartTime = Date.now();
+                if (pttTapMode && isPttRecording) {
+                    stopPttAction(e);
+                    return;
+                }
+                startPttAction(e);
+            });
+
+            pttBtn.addEventListener('mouseup', (e) => {
+                e.preventDefault();
+                const pressDuration = Date.now() - pttTouchStartTime;
+                if (pressDuration < 350) {
+                    pttTapMode = true;
+                    const txt = document.getElementById('pttText');
+                    if (txt) txt.textContent = 'Tap to Send';
+                    setStatus('🟢 Listening... (Tap to Send)');
+                    return;
+                }
+                stopPttAction(e);
+            });
+
+            pttBtn.addEventListener('mouseleave', () => {
+                if (isPttRecording && !pttTapMode) {
+                    stopPttAction();
+                }
+            });
         }
 
         function sendTextInput() {
@@ -1109,15 +1241,30 @@
             }
         }
 
-        function endCall() {
-            if (phone) {
+        function syncCallEndedBeacon() {
+            const targetPhone = roomId || phone;
+            if (targetPhone) {
                 try {
-                    fetch('/api/call/' + encodeURIComponent(phone) + '/end', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
-                    }).catch(() => {});
+                    const url = '/api/call/end/' + encodeURIComponent(targetPhone);
+                    if (navigator.sendBeacon) {
+                        navigator.sendBeacon(url);
+                    } else {
+                        fetch(url, { method: 'POST', keepalive: true }).catch(() => {});
+                    }
                 } catch (_) {}
             }
+        }
+
+        window.addEventListener('beforeunload', () => {
+            syncCallEndedBeacon();
+        });
+
+        window.addEventListener('pagehide', () => {
+            syncCallEndedBeacon();
+        });
+
+        function endCall() {
+            syncCallEndedBeacon();
             isCallActive = false;
             isAiSpeaking = false;
             stopTimer();
