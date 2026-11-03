@@ -1870,10 +1870,16 @@ class WhatsAppService:
 
         # Multi-word conversational phrase substitutions
         phrases = [
-            (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|as-salamu alaykum|slam)\b", "السلام علیکم"),
+            (r"(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|as-salamu alaykum|slam|islam[\s\-]?[uo]?[\s\-]?[a-z]*)\b", "السلام علیکم"),
             (r"(?i)\b(walaikum[\s\-]?[uo]?[\s\-]?[a-z]*|wa alaykum as-salam)\b", "وعلیکم السلام"),
             (r"(?i)\b(jee\s*bilkul|ji\s*bilkul|ji\s*haan|jee\s*haan)\b", "جی بالکل"),
-            (r"(?i)\b(bohot\s*shukriya|boht\s*shukriya|shukriya|thank\s*you|thanks)\b", "بہت شکریہ"),
+            (r"(?i)\b(bohot\s*shukriya|boht\s*shukriya|shukriya|thank\s*you|thanks)\b", "شکریہ"),
+            (r"(?i)\b(ho\s*gaya\s*hai|ho\s*gya\s*hai)\b", "ہو گیا ہے"),
+            (r"(?i)\b(ho\s*gaya|ho\s*gya)\b", "ہو گیا"),
+            (r"(?i)\b(chitral\s*bazar|chitral\s*market)\b", "چترال بازار"),
+            (r"(?i)\b(chitral|chitraal)\b", "چترال"),
+            (r"(?i)\b(chitrali)\b", "چترالی"),
+            (r"(?i)\b(paisay|paise|pesay)\b", "پیسے"),
             (r"(?i)\b(acha\s*dekhein|achha\s*dekhein|dekhein)\b", "اچھا دیکھیں"),
             (r"(?i)\b(kya\s*haal\s*hai|kaise\s*hain|kaisi\s*hain|kese\s*hain)\b", "کیسے ہیں"),
             (r"(?i)\b(main\s*theek\s*hoon|mai\s*theek\s*hu|theek\s*hoon)\b", "میں ٹھیک ہوں"),
@@ -1934,6 +1940,7 @@ class WhatsAppService:
             "din": "دن", "raat": "رات", "waqt": "وقت", "aaj": "آج", "kal": "کل",
             "ek": "ایک", "aik": "ایک", "do": "دو", "teen": "تین", "chaar": "چار", "paanch": "پانچ",
             "rupay": "روپے", "rupee": "روپیہ", "rupees": "روپے", "hazar": "ہزار", "lakh": "لاکھ",
+            "chitral": "چترال", "paisay": "پیسے", "paise": "پیسے",
             "phone": "فون", "number": "نمبر", "call": "کال", "link": "لنک", "code": "کوڈ"
         }
 
@@ -1992,7 +1999,7 @@ class WhatsAppService:
                 parsed = json.loads(json_cand)
                 if isinstance(parsed, dict):
                     disp = str(parsed.get("display_text") or parsed.get("displayText") or parsed.get("text") or "").strip()
-                    spch = str(parsed.get("speech_text") or parsed.get("speechText") or parsed.get("audio_text") or "").strip()
+                    spch = str(parsed.get("voice_script") or parsed.get("speech_text") or parsed.get("speechText") or parsed.get("audio_text") or "").strip()
                     if disp:
                         if not spch:
                             spch = cls.roman_to_urdu_script(disp)
@@ -2000,9 +2007,9 @@ class WhatsAppService:
             except Exception:
                 pass
 
-        # Check for explicit tags [DISPLAY_TEXT]...[/DISPLAY_TEXT] and [SPEECH_TEXT]...[/SPEECH_TEXT]
-        disp_m = re.search(r"\[DISPLAY_TEXT\](.*?)\[/DISPLAY_TEXT\]", cleaned_raw, re.DOTALL | re.IGNORECASE)
-        spch_m = re.search(r"\[SPEECH_TEXT\](.*?)\[/SPEECH_TEXT\]", cleaned_raw, re.DOTALL | re.IGNORECASE)
+        # Check for explicit tags [DISPLAY_TEXT]...[/DISPLAY_TEXT] and [VOICE_SCRIPT]...[/VOICE_SCRIPT]
+        disp_m = re.search(r"\[(?:DISPLAY_TEXT)\](.*?)\[/(?:DISPLAY_TEXT)\]", cleaned_raw, re.DOTALL | re.IGNORECASE)
+        spch_m = re.search(r"\[(?:VOICE_SCRIPT|SPEECH_TEXT)\](.*?)\[/(?:VOICE_SCRIPT|SPEECH_TEXT)\]", cleaned_raw, re.DOTALL | re.IGNORECASE)
         if disp_m:
             disp = disp_m.group(1).strip()
             spch = spch_m.group(1).strip() if spch_m else cls.roman_to_urdu_script(disp)
@@ -4236,7 +4243,7 @@ class WhatsAppService:
             f"2. NATURAL GREETINGS: If customer says 'Kaise ho ap', 'Salam', or greets you, reply warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
             f"3. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, helpful conversational partner. Answer what the customer asked directly and politely in 1 to 3 short friendly sentences.\n"
             f"4. DUAL OUTPUT JSON FORMAT: Always output response as a clean JSON object with two fields:\n"
-            f"   {{\"display_text\": \"<Conversational Roman Urdu / English for chat bubble transcript without markdown artifacts>\", \"speech_text\": \"<Pure Urdu Nastaliq script (اردو) with English technical terms transliterated into Urdu script e.g. آرڈر ٹریکنگ, سروس, ڈیلیوری, بیش فلو for Microsoft Edge Neural Pakistani TTS>\"}}\n"
+            f"   {{\"display_text\": \"<Conversational Roman Urdu / English for chat bubble transcript without markdown artifacts>\", \"voice_script\": \"<Pure conversational Urdu Nastaliq script (اردو) with English technical/product terms kept natural or transliterated e.g. آرڈر ٹریکنگ, سروس, ڈیلیوری, بیش فلو for Microsoft Edge Neural Pakistani TTS>\", \"speech_text\": \"<Pure Urdu script matching voice_script>\"}}\n"
             f"   If JSON is not possible, deliver clean text directly without asterisks or hashtags."
         )
 
@@ -4515,7 +4522,7 @@ class WhatsAppService:
             f"2. NATURAL GREETINGS: If customer says 'Kaise ho ap', 'Salam', or greets you, reply warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
             f"3. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, helpful conversational partner. Answer what the customer asked directly and politely in 1 to 3 short friendly sentences.\n"
             f"4. DUAL OUTPUT JSON FORMAT: Always output response as a clean JSON object with two fields:\n"
-            f"   {{\"display_text\": \"<Conversational Roman Urdu / English for chat bubble transcript without markdown artifacts>\", \"speech_text\": \"<Pure Urdu Nastaliq script (اردو) with English technical terms transliterated into Urdu script e.g. آرڈر ٹریکنگ, سروس, ڈیلیوری, بیش فلو for Microsoft Edge Neural Pakistani TTS>\"}}\n"
+            f"   {{\"display_text\": \"<Conversational Roman Urdu / English for chat bubble transcript without markdown artifacts>\", \"voice_script\": \"<Pure conversational Urdu Nastaliq script (اردو) with English technical/product terms kept natural or transliterated e.g. آرڈر ٹریکنگ, سروس, ڈیلیوری, بیش فلو for Microsoft Edge Neural Pakistani TTS>\", \"speech_text\": \"<Pure Urdu script matching voice_script>\"}}\n"
             f"   If JSON is not possible, deliver clean text directly without asterisks or hashtags."
         )
 
@@ -5253,6 +5260,7 @@ class WhatsAppService:
                 "reply_body": disp,
                 "display_text": disp,
                 "speech_text": spch,
+                "voice_script": spch,
                 "intent": intent,
                 "urgency": urgency,
                 "lead_score": lead_score,
@@ -6705,7 +6713,7 @@ class WhatsAppService:
 
             if is_voice_inbound or kwargs.get("reply_as_voice") or (intent == "order_intent" and ("order" in str(message_body or "").lower() or "confirm" in str(message_body or "").lower())):
                 try:
-                    speech_text = generated.get("speech_text") or kwargs.get("tts_script") or clean_reply_text
+                    speech_text = generated.get("voice_script") or generated.get("speech_text") or kwargs.get("tts_script") or clean_reply_text
                     detected_lang_str = str(kwargs.get("detected_lang") or "").lower()
                     has_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in (speech_text or clean_reply_text or ""))
                     is_urdu_context = (
