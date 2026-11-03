@@ -2064,6 +2064,113 @@ class WhatsAppService:
         return t
 
     @classmethod
+    def get_custom_pronunciations(cls, organization_id: Optional[str] = None) -> Dict[str, str]:
+        """Loads custom pronunciation dictionary from database settings or returns default presets."""
+        import json
+        default_dict = {
+            "Chitral": "چترال",
+            "BashFlow": "Besh-Flow",
+            "Rs": "Rupay",
+            "COD": "Cash on Delivery",
+            "PKR": "Pakistani Rupay"
+        }
+        try:
+            from models import SystemSetting
+            val = SystemSetting.get_val("VOICE_PRONUNCIATION_DICT")
+            if val and str(val).strip():
+                loaded = json.loads(val)
+                if isinstance(loaded, dict) and loaded:
+                    return loaded
+        except Exception:
+            pass
+        return default_dict
+
+    @classmethod
+    def normalize_pakistani_pronunciation(
+        cls,
+        text: str,
+        persona: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        custom_dict: Optional[Dict[str, str]] = None
+    ) -> str:
+        """Normalizes Roman-Urdu and English text for authentic Pakistani pronunciation.
+        - Applies custom pronunciation dictionary (e.g. Chitral -> چترال, COD -> Cash on Delivery, Rs -> Rupay).
+        - If an Urdu persona (ur-PK-AsadNeural, ur-PK-UzmaNeural) is selected, converts Roman-Urdu phrases
+          into native Urdu Nastaliq script so the neural model pronounces words natively instead of stumbling on Latin letters.
+        - If an English/Multilingual persona (Puck / en-US-AndrewMultilingualNeural / Ava) is selected, applies phonetic
+          respellings (Aap-kaa, Shuk-riyaa, Chit-raal, Paa-kis-taan, etc.) so the voice speaks with an authentic Pakistani accent
+          without flat American phonetics.
+        """
+        if not text or not str(text).strip():
+            return ""
+        import re
+        t = str(text).strip()
+
+        # 1. Apply Custom Pronunciation Dictionary
+        cdict = custom_dict if (custom_dict is not None and isinstance(custom_dict, dict)) else cls.get_custom_pronunciations(organization_id=organization_id)
+        if cdict and isinstance(cdict, dict):
+            sorted_keys = sorted(cdict.keys(), key=len, reverse=True)
+            for k in sorted_keys:
+                v = cdict[k]
+                if k and v:
+                    t = re.sub(r'(?i)\b' + re.escape(str(k).strip()) + r'\b', str(v).strip(), t)
+
+        # 2. Check persona voice
+        p_str = str(persona or "").lower()
+        is_urdu_persona = ("ur-pk" in p_str or "asad" in p_str or "uzma" in p_str)
+
+        if is_urdu_persona:
+            return cls.roman_to_urdu_script(t)
+
+        # 3. For Multilingual / English / Puck Personas: Apply Pakistani Phonetic Respellings
+        phonetic_rules = [
+            (r'(?i)\b(?:assalam[\s\-]?[uo]?[\s\-]?[a-z]*|salam)\b', 'As-sa-laam-o-A-lai-kum'),
+            (r'(?i)\b(?:walaikum[\s\-]?[uo]?[\s\-]?[a-z]*)\b', 'Wa-a-lai-kum-as-sa-laam'),
+            (r'(?i)\b(?:aapka|apka)\b', 'Aap-kaa'),
+            (r'(?i)\b(?:aapki|apki)\b', 'Aap-kee'),
+            (r'(?i)\b(?:aapke|apke)\b', 'Aap-kay'),
+            (r'(?i)\b(?:aap|ap)\b', 'Aap'),
+            (r'(?i)\b(?:shukriya|shukria)\b', 'Shuk-riyaa'),
+            (r'(?i)\b(?:chitral)\b', 'Chit-raal'),
+            (r'(?i)\b(?:chitrali)\b', 'Chit-raa-lee'),
+            (r'(?i)\b(?:pakistan)\b', 'Paa-kis-taan'),
+            (r'(?i)\b(?:pakistani)\b', 'Paa-kis-taa-nee'),
+            (r'(?i)\b(?:bhai|bhaai)\b', 'bha-ee'),
+            (r'(?i)\b(?:kya)\b', 'kyaa'),
+            (r'(?i)\b(?:paisay|paise|pesay)\b', 'pai-say'),
+            (r'(?i)\b(?:rupay|rupaye)\b', 'roo-pa-ye'),
+            (r'(?i)\b(?:khushamdeed|khush\s*amdeed)\b', 'Khush-aam-deed'),
+            (r'(?i)\b(?:jee\s*bilkul|ji\s*bilkul)\b', 'Jee bil-kul'),
+            (r'(?i)\b(?:ho\s*gaya\s*hai)\b', 'ho ga-yaa hai'),
+            (r'(?i)\b(?:ho\s*gaya)\b', 'ho ga-yaa'),
+            (r'(?i)\b(?:kar\s*diya\s*jayega)\b', 'kar di-yaa jaa-ye-ga'),
+            (r'(?i)\b(?:kar\s*diya\s*gaya)\b', 'kar di-yaa ga-yaa'),
+            (r'(?i)\b(?:kar\s*diya)\b', 'kar di-yaa'),
+            (r'(?i)\b(?:meherbani|meharbani)\b', 'meh-er-baa-nee'),
+            (r'(?i)\b(?:madad)\b', 'ma-dad'),
+            (r'(?i)\b(?:hazir)\b', 'haa-zir'),
+            (r'(?i)\b(?:theek|thik)\b', 'theek'),
+            (r'(?i)\b(?:inshallah|in\s*sha\s*allah)\b', 'In-shaa-Al-laah'),
+            (r'(?i)\b(?:alhamdulillah|al-hamdu\s*lillah)\b', 'Al-ham-du-lil-laah'),
+            (r'(?i)\b(?:jazakallah)\b', 'Ja-zaak-Al-laah'),
+            (r'(?i)\b(?:shamil)\b', 'shaa-mil'),
+            (r'(?i)\b(?:kamyab)\b', 'kaam-yaab'),
+            (r'(?i)\b(?:intezar)\b', 'in-te-zaar'),
+            (r'(?i)\b(?:tasdeeq)\b', 'tas-deeq'),
+            (r'(?i)\b(?:pareshani|pareshan)\b', 'pa-ray-shaa-nee'),
+            (r'(?i)\b(?:shandar)\b', 'shaan-daar'),
+            (r'(?i)\b(?:zabardast)\b', 'za-bar-dast'),
+            (r'(?i)\b(?:bataiye|batayein)\b', 'ba-taa-yein'),
+            (r'(?i)\b(?:sunaiye|sunayein)\b', 'su-naa-yein'),
+            (r'(?i)\b(?:bohot|boht|bahut)\b', 'bo-hot'),
+            (r'(?i)\b(?:hoga|hogi|honge)\b', 'ho-gaa'),
+        ]
+        for pat, rep in phonetic_rules:
+            t = re.sub(pat, rep, t)
+
+        return t
+
+    @classmethod
     def _synthesize_edge_tts(
         cls,
         text: str,
@@ -2172,13 +2279,14 @@ class WhatsAppService:
             else:
                 active_volume = "+10%" if is_urdu else "+0%"
 
-            # Urdu TTS Rule: Convert speech text to 100% pure Urdu script before passing to Edge-TTS
-            if is_urdu and not is_arabic_script:
-                speech_for_tts = cls.roman_to_urdu_script(clean_speech)
-            else:
-                speech_for_tts = clean_speech
+            # Apply Pakistani pronunciation normalization (including custom pronunciation dictionary)
+            speech_for_tts = cls.normalize_pakistani_pronunciation(
+                text=clean_speech,
+                persona=active_voice,
+                organization_id=organization_id
+            )
 
-            if is_urdu:
+            if is_urdu or any('\u0600' <= ch <= '\u06FF' for ch in speech_for_tts):
                 # 100% Smooth Single-Breath Cadence: Strip intra-sentence commas and pause markers that cause Edge-TTS to hesitate
                 speech_for_tts = re.sub(r'[\.]{2,}|\u2026|[-]{2,}', ' ', speech_for_tts)
                 speech_for_tts = re.sub(r'[,\،]', ' ', speech_for_tts)

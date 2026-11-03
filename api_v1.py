@@ -8448,27 +8448,44 @@ def api_store_product_delete(product_id: str):
 
 @api_v1.route("/voice/test", methods=["POST"])
 def api_voice_test_live():
-    """Generates live audio sample using selected persona, rate, and pitch for browser preview."""
+    """Generates live audio sample using selected persona, rate, pitch, and custom pronunciation dictionary."""
     try:
         data = request.get_json(silent=True) or {}
         text = str(data.get("text") or "Salam! OpsFlow AI voice studio bilkul theek kaam kar raha hai.").strip()
         voice = str(data.get("voice") or "ur-PK-AsadNeural").strip()
         rate = data.get("rate")
         pitch = data.get("pitch")
+        custom_pronunciations = data.get("pronunciations")
         org_id = request.args.get("org_id") or "org-enterprise-default"
 
         rate_str = f"{int(rate):+d}%" if (isinstance(rate, (int, float)) or (isinstance(rate, str) and str(rate).replace("+","").replace("-","").isdigit())) else (str(rate) if rate else "+0%")
         pitch_str = f"{int(pitch):+d}Hz" if (isinstance(pitch, (int, float)) or (isinstance(pitch, str) and str(pitch).replace("+","").replace("-","").isdigit())) else (str(pitch) if pitch else "+0Hz")
 
         clean_text = WhatsAppService.humanize_speech_text(text) or text
+        normalized_text = WhatsAppService.normalize_pakistani_pronunciation(
+            text=clean_text,
+            persona=voice,
+            organization_id=org_id,
+            custom_dict=custom_pronunciations
+        )
 
         audio_bytes = WhatsAppService._synthesize_edge_tts(
-            text=clean_text,
+            text=normalized_text,
             voice=voice,
             rate=rate_str,
             pitch=pitch_str,
             organization_id=org_id
         )
+
+        if not audio_bytes:
+            fallback_voice = "ur-PK-AsadNeural" if ("ur" in voice.lower() or "asad" in voice.lower()) else "en-US-AndrewMultilingualNeural"
+            audio_bytes = WhatsAppService._synthesize_edge_tts(
+                text=normalized_text,
+                voice=fallback_voice,
+                rate=rate_str,
+                pitch=pitch_str,
+                organization_id=org_id
+            )
 
         if not audio_bytes:
             return jsonify({"success": False, "error": "TTS synthesis returned no audio data."}), 500
@@ -8480,7 +8497,8 @@ def api_voice_test_live():
             "mime_type": "audio/mp3",
             "voice": voice,
             "rate": rate_str,
-            "pitch": pitch_str
+            "pitch": pitch_str,
+            "normalized_text": normalized_text
         }), 200
     except Exception as e:
         logger.error(f"Live voice test error: {e}", exc_info=True)
@@ -8489,9 +8507,10 @@ def api_voice_test_live():
 
 @api_v1.route("/voice/settings", methods=["GET", "POST"])
 def api_voice_settings():
-    """Reads or updates default WhatsApp voice settings in SystemSetting table."""
+    """Reads or updates default WhatsApp voice settings and custom pronunciation dictionary."""
     try:
         from models import SystemSetting
+        import json
         org_id = request.args.get("org_id") or "org-enterprise-default"
 
         if request.method == "POST":
@@ -8499,6 +8518,7 @@ def api_voice_settings():
             voice = str(data.get("voice") or "").strip()
             rate = data.get("rate")
             pitch = data.get("pitch")
+            pronunciations = data.get("pronunciations")
 
             if voice:
                 SystemSetting.set_val("EDGE_TTS_VOICE", voice, description="Default WhatsApp TTS voice persona")
@@ -8514,25 +8534,32 @@ def api_voice_settings():
                 SystemSetting.set_val("EDGE_TTS_PITCH", pitch_str, description="Default WhatsApp TTS pitch")
                 os.environ["EDGE_TTS_PITCH"] = pitch_str
 
+            if pronunciations is not None and isinstance(pronunciations, dict):
+                SystemSetting.set_val("VOICE_PRONUNCIATION_DICT", json.dumps(pronunciations), description="Custom voice pronunciation mappings")
+
             db.session.commit()
 
+            cur_pron = WhatsAppService.get_custom_pronunciations(organization_id=org_id)
             return jsonify({
                 "success": True,
                 "message": "Default WhatsApp Voice settings saved successfully!",
                 "settings": {
                     "voice": SystemSetting.get_val("EDGE_TTS_VOICE", "ur-PK-AsadNeural"),
                     "rate": SystemSetting.get_val("EDGE_TTS_RATE", "+4%"),
-                    "pitch": SystemSetting.get_val("EDGE_TTS_PITCH", "+0Hz")
+                    "pitch": SystemSetting.get_val("EDGE_TTS_PITCH", "+0Hz"),
+                    "pronunciations": cur_pron
                 }
             }), 200
 
         # GET request
+        cur_pron = WhatsAppService.get_custom_pronunciations(organization_id=org_id)
         return jsonify({
             "success": True,
             "settings": {
                 "voice": SystemSetting.get_val("EDGE_TTS_VOICE", "ur-PK-AsadNeural"),
                 "rate": SystemSetting.get_val("EDGE_TTS_RATE", "+4%"),
-                "pitch": SystemSetting.get_val("EDGE_TTS_PITCH", "+0Hz")
+                "pitch": SystemSetting.get_val("EDGE_TTS_PITCH", "+0Hz"),
+                "pronunciations": cur_pron
             }
         }), 200
 

@@ -14284,6 +14284,64 @@ function handleVoicePersonaChange(persona) {
 }
 window.handleVoicePersonaChange = handleVoicePersonaChange;
 
+let _customPronunciations = {
+    "Chitral": "چترال",
+    "BashFlow": "Besh-Flow",
+    "Rs": "Rupay",
+    "COD": "Cash on Delivery"
+};
+
+function renderPronunciationRules() {
+    const container = document.getElementById('pronunciationRulesContainer');
+    if (!container) return;
+    container.innerHTML = '';
+    const keys = Object.keys(_customPronunciations);
+    if (keys.length === 0) {
+        container.innerHTML = '<span style="font-size: 0.72rem; color: var(--text-muted); font-style: italic;">No custom pronunciation rules defined.</span>';
+        return;
+    }
+    keys.forEach(k => {
+        const v = _customPronunciations[k];
+        const tag = document.createElement('span');
+        tag.style.cssText = 'display: inline-flex; align-items: center; gap: 4px; background: rgba(5, 150, 105, 0.15); color: #10b981; border: 1px solid rgba(5, 150, 105, 0.3); border-radius: 4px; padding: 2px 6px; font-size: 0.72rem; font-weight: 600;';
+        const cleanK = String(k).replace(/'/g, "\\'");
+        tag.innerHTML = `<span><b>${escapeHtml(k)}</b> ➔ ${escapeHtml(v)}</span><button type="button" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.8rem; line-height: 1; padding: 0 2px;" onclick="removeCustomPronunciationRule('${cleanK}')">&times;</button>`;
+        container.appendChild(tag);
+    });
+}
+window.renderPronunciationRules = renderPronunciationRules;
+
+function addCustomPronunciationRule() {
+    const wordInput = document.getElementById('customPronounceWord');
+    const spokenInput = document.getElementById('customPronounceSpoken');
+    if (!wordInput || !spokenInput) return;
+    const w = wordInput.value.trim();
+    const s = spokenInput.value.trim();
+    if (!w || !s) {
+        if (typeof showToast === 'function') showToast('Please enter both word and how to speak it', 'warning');
+        return;
+    }
+    _customPronunciations[w] = s;
+    wordInput.value = '';
+    spokenInput.value = '';
+    renderPronunciationRules();
+}
+window.addCustomPronunciationRule = addCustomPronunciationRule;
+
+function addPresetPronunciation(word, spoken) {
+    _customPronunciations[word] = spoken;
+    renderPronunciationRules();
+}
+window.addPresetPronunciation = addPresetPronunciation;
+
+function removeCustomPronunciationRule(word) {
+    if (_customPronunciations[word]) {
+        delete _customPronunciations[word];
+        renderPronunciationRules();
+    }
+}
+window.removeCustomPronunciationRule = removeCustomPronunciationRule;
+
 let currentLiveAudio = null;
 
 async function testVoiceLive() {
@@ -14317,7 +14375,8 @@ async function testVoiceLive() {
                 text: textToSynthesize,
                 voice: selectedVoice,
                 rate: rateVal,
-                pitch: pitchVal
+                pitch: pitchVal,
+                pronunciations: _customPronunciations
             })
         });
 
@@ -14378,7 +14437,8 @@ async function saveVoiceSettings() {
             body: JSON.stringify({
                 voice: selectedVoice,
                 rate: (rateVal >= 0 ? '+' : '') + rateVal + '%',
-                pitch: (pitchVal >= 0 ? '+' : '') + pitchVal + 'Hz'
+                pitch: (pitchVal >= 0 ? '+' : '') + pitchVal + 'Hz',
+                pronunciations: _customPronunciations
             })
         });
 
@@ -14440,6 +14500,10 @@ async function loadVoiceSettings() {
                         updatePitchSliderDisplay(pNum);
                     }
                 }
+                if (s.pronunciations && typeof s.pronunciations === 'object') {
+                    _customPronunciations = Object.assign({}, _customPronunciations, s.pronunciations);
+                    renderPronunciationRules();
+                }
             }
         }
     } catch (_) {}
@@ -14448,5 +14512,6 @@ window.loadVoiceSettings = loadVoiceSettings;
 
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
+    renderPronunciationRules();
     loadVoiceSettings();
 });
