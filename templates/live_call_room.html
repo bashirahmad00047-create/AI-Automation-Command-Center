@@ -329,6 +329,9 @@
         let isCallActive = false;
         let isMuted = false;
         let isAiSpeaking = false;
+        let isWaitingForServer = false;
+        let latestInterimTranscript = '';
+        const playedChunkIds = new Set();
         let currentLanguage = 'ur-PK';
         let callSeconds = 0;
         let timerInterval = null;
@@ -377,6 +380,7 @@
                 currentAudioSource = null;
             }
             isAiSpeaking = false;
+            isWaitingForServer = false;
             setWaveAnimation(false);
         }
 
@@ -422,6 +426,10 @@
 
         function enqueueCustomerAudioChunk(chunk) {
             if (!chunk) return;
+            const chunkUid = chunk.chunk_id || chunk.id || (typeof chunk.seq_id === 'number' ? 'seq_' + chunk.seq_id : null) || (chunk.audio ? String(chunk.audio).slice(0, 32) : null);
+            if (chunkUid && playedChunkIds.has(chunkUid)) return;
+            if (chunkUid) playedChunkIds.add(chunkUid);
+
             if (typeof chunk.seq_id === 'number') {
                 if (chunk.seq_id <= lastCustomerSeqId) return;
                 lastCustomerSeqId = chunk.seq_id;
@@ -463,21 +471,34 @@
                 }
                 const uri = cleanB64.startsWith('data:') ? cleanB64 : (`data:${mime};base64,` + cleanB64);
                 if (player) {
+                    try { player.pause(); player.currentTime = 0; } catch(_) {}
                     player.src = uri;
                     player.currentTime = 0;
                     player.onended = () => {
                         setWaveAnimation(false);
                         setStatus('Listening...');
+                        setTimeout(() => {
+                            isAiSpeaking = false;
+                            isWaitingForServer = false;
+                        }, 450);
                         advanceQueue();
                     };
-                    player.onerror = () => advanceQueue();
+                    player.onerror = () => {
+                        isAiSpeaking = false;
+                        isWaitingForServer = false;
+                        advanceQueue();
+                    };
                     const p = player.play();
                     if (p !== undefined) {
                         p.then(() => {
                             isAiSpeaking = true;
                             setStatus('Assistant Speaking...');
                             setWaveAnimation(true);
-                        }).catch(() => advanceQueue());
+                        }).catch(() => {
+                            isAiSpeaking = false;
+                            isWaitingForServer = false;
+                            advanceQueue();
+                        });
                     }
                 } else { advanceQueue(); }
             } else { advanceQueue(); }
@@ -765,13 +786,15 @@
                             const audioBlob = new Blob(recordedAudioChunks, { type: 'audio/webm' });
                             recordedAudioChunks = [];
                             if (audioBlob.size > 800) {
+                                isWaitingForServer = true;
                                 const reader = new FileReader();
                                 reader.onloadend = () => {
                                     const b64 = reader.result;
                                     currentTurnId++;
                                     turnId = currentTurnId;
-                                    broadcastLiveCallChunk('customer', b64, null, 'audio/webm');
-                                    sendLiveVoicePayload({ audioBase64: b64, turnId: currentTurnId });
+                                    broadcastLiveCallChunk('customer', b64, latestInterimTranscript || null, 'audio/webm');
+                                    sendLiveVoicePayload({ audioBase64: b64, text: latestInterimTranscript || null, turnId: currentTurnId });
+                                    latestInterimTranscript = '';
                                 };
                                 reader.readAsDataURL(audioBlob);
                             }
@@ -786,6 +809,11 @@
 
             vadInterval = setInterval(() => {
                 if (!isCallActive || isMuted) return;
+                if (isAiSpeaking || isWaitingForServer) {
+                    silenceDurationMs = 0;
+                    userHasSpoken = false;
+                    return;
+                }
 
                 let rms = 0;
                 if (micAnalyser) {
@@ -819,7 +847,7 @@
                     // Silence detection
                     if (userHasSpoken) {
                         silenceDurationMs += 100;
-                        if (silenceDurationMs >= 1200) {
+                        if (silenceDurationMs >= 1300) {
                             // 1.2s silence reached: dispatch recorded turn
                             userHasSpoken = false;
                             silenceDurationMs = 0;
@@ -860,12 +888,7 @@
                 };
 
                 recognition.onresult = (event) => {
-                    if (isMuted || !isCallActive) return;
-
-                    if (isAiSpeaking) {
-                        stopIncomingAiAudio();
-                        setStatus('Listening...');
-                    }
+                    if (isMuted || !isCallActive || isAiSpeaking || isWaitingForServer) return;
 
                     let interimTranscript = '';
                     let finalTranscript = '';
@@ -880,22 +903,13 @@
 
                     const liveSpeech = (finalTranscript || interimTranscript).trim();
                     if (liveSpeech) {
+                        latestInterimTranscript = liveSpeech;
                         setWaveAnimation(true);
                         setStatus('Listening to you...');
                         const tb = document.getElementById('transcriptBox');
                         if (tb) {
                             tb.innerHTML = `<span style="color:#cbd5e1;"><b>You:</b> ${escapeHtml(liveSpeech)}</span>`;
                         }
-
-                        if (speechDebounceTimer) clearTimeout(speechDebounceTimer);
-                        speechDebounceTimer = setTimeout(() => {
-                            if (liveSpeech && isCallActive && !isMuted) {
-                                currentTurnId++;
-                                turnId = currentTurnId;
-                                broadcastLiveCallChunk('customer', null, liveSpeech, 'text/plain');
-                                sendLiveVoicePayload({ text: liveSpeech, turnId: currentTurnId });
-                            }
-                        }, 1200);
                     }
                 };
 
@@ -919,6 +933,7 @@
         // ===================================================================
         async function sendLiveVoicePayload(payload) {
             if (!isCallActive) return;
+            isWaitingForServer = true;
 
             let textQuery = '';
             if (payload && typeof payload === 'object') {
@@ -963,6 +978,7 @@
 
                 if (data && data.success && isCallActive) {
                     if (data.empty_turn) {
+                        isWaitingForServer = false;
                         setStatus('Listening...');
                         setWaveAnimation(false);
                         return;
@@ -1006,12 +1022,16 @@
 
                 const uri = b64.startsWith('data:') ? b64 : (`data:${mime};base64,` + b64);
                 if (player) {
+                    try { player.pause(); player.currentTime = 0; } catch(_) {}
                     player.src = uri;
                     player.currentTime = 0;
                     player.onended = () => {
-                        isAiSpeaking = false;
-                        setStatus('Listening...');
                         setWaveAnimation(false);
+                        setStatus('Listening...');
+                        setTimeout(() => {
+                            isAiSpeaking = false;
+                            isWaitingForServer = false;
+                        }, 450);
                     };
                     player.onerror = () => {
                         playWithWebAudioBuffer(b64, replyText);
@@ -1049,9 +1069,12 @@
                         source.connect(audioCtx.destination);
                         currentAudioSource = source;
                         source.onended = () => {
-                            isAiSpeaking = false;
-                            setStatus('Listening...');
                             setWaveAnimation(false);
+                            setStatus('Listening...');
+                            setTimeout(() => {
+                                isAiSpeaking = false;
+                                isWaitingForServer = false;
+                            }, 450);
                         };
                         source.start(0);
                     }, () => fallbackBrowserSpeech(fallbackText));
@@ -1062,33 +1085,13 @@
         }
 
         function fallbackBrowserSpeech(text) {
-            if (!text || !('speechSynthesis' in window)) {
+            // Speech synthesis speak disabled for 100% single-engine audio playback
+            setTimeout(() => {
                 isAiSpeaking = false;
+                isWaitingForServer = false;
                 setStatus('Listening...');
                 setWaveAnimation(false);
-                return;
-            }
-            try {
-                window.speechSynthesis.cancel();
-                const utter = new SpeechSynthesisUtterance(text);
-                utter.lang = currentLanguage;
-                utter.rate = 1.05;
-                utter.onend = () => {
-                    isAiSpeaking = false;
-                    setStatus('Listening...');
-                    setWaveAnimation(false);
-                };
-                utter.onerror = () => {
-                    isAiSpeaking = false;
-                    setStatus('Listening...');
-                    setWaveAnimation(false);
-                };
-                window.speechSynthesis.speak(utter);
-            } catch (_) {
-                isAiSpeaking = false;
-                setStatus('Listening...');
-                setWaveAnimation(false);
-            }
+            }, 450);
         }
     </script>
 </body>

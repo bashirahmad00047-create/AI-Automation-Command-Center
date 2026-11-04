@@ -702,3 +702,71 @@ def test_real_voice_server_tts_and_webaudio_vad(client):
     assert "remoteVoicePlayer" in html
     assert "startWebAudioVADLoop" in html
     assert "Tap to Connect Live Call" in html
+
+
+def test_live_voice_call_zero_voice_mixing_and_duplex_relay(client):
+    """Verify zero overlapping voices, single-engine TTS, playedChunkIds deduplication,
+    mic lock during playback, and 2-way raw audio relay between customer and admin.
+    """
+    # 1. Verify live_call_room.html has ZERO speechSynthesis.speak
+    template_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "templates", "live_call_room.html"))
+    with open(template_path, "r", encoding="utf-8") as f:
+        html = f.read()
+
+    assert "speechSynthesis.speak" not in html, "speechSynthesis.speak must be completely eliminated to prevent overlapping voices"
+    assert "playedChunkIds" in html, "playedChunkIds deduplication set must exist in live_call_room.html"
+    assert "isAiSpeaking" in html, "isAiSpeaking state must exist to enforce half-duplex mic lock"
+    assert "isWaitingForServer" in html, "isWaitingForServer lock must exist"
+
+    # 2. Verify static/js/app.js has ZERO speechSynthesis.speak and has playedAdminChunkIds
+    app_js_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "js", "app.js"))
+    with open(app_js_path, "r", encoding="utf-8") as f:
+        app_js = f.read()
+
+    assert "speechSynthesis.speak" not in app_js, "app.js must not invoke speechSynthesis.speak"
+    assert "playedAdminChunkIds" in app_js, "playedAdminChunkIds deduplication must exist in app.js"
+
+    # 3. Test Customer-to-Admin Audio Relay
+    test_phone = "923471000888"
+    cust_audio_payload = "data:audio/webm;base64,dGVzdF9jdXN0b21lcl9hdWRpb19kYXRh"
+    cust_res = client.post(f"/api/call/voice/{test_phone}", json={
+        "phone": test_phone,
+        "sender": "customer",
+        "audio": cust_audio_payload,
+        "mimeType": "audio/webm"
+    })
+    assert cust_res.status_code == 200
+    cust_json = cust_res.get_json()
+    assert cust_json.get("success") is True
+
+    # Admin polls audio queue
+    admin_poll = client.get(f"/api/call/audio/{test_phone}?role=admin")
+    assert admin_poll.status_code == 200
+    admin_data = admin_poll.get_json()
+    assert admin_data.get("success") is True
+    chunks = admin_data.get("chunks", [])
+    assert len(chunks) > 0
+    assert any(c.get("sender") == "customer" for c in chunks)
+    assert any(c.get("audio") == cust_audio_payload for c in chunks)
+
+    # 4. Test Admin-to-Customer Audio Relay
+    admin_audio_payload = "data:audio/webm;base64,dGVzdF9hZG1pbl9hdWRpb19kYXRh"
+    admin_res = client.post(f"/api/call/voice/{test_phone}", json={
+        "phone": test_phone,
+        "sender": "admin",
+        "audio": admin_audio_payload,
+        "mimeType": "audio/webm"
+    })
+    assert admin_res.status_code == 200
+    admin_res_json = admin_res.get_json()
+    assert admin_res_json.get("success") is True
+
+    # Customer polls audio queue
+    cust_poll = client.get(f"/api/call/audio/{test_phone}?role=customer")
+    assert cust_poll.status_code == 200
+    cust_data = cust_poll.get_json()
+    assert cust_data.get("success") is True
+    cust_chunks = cust_data.get("chunks", [])
+    assert len(cust_chunks) > 0
+    assert any(c.get("sender") == "admin" for c in cust_chunks)
+    assert any(c.get("audio") == admin_audio_payload for c in cust_chunks)

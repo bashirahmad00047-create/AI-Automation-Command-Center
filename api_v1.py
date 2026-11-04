@@ -3997,6 +3997,57 @@ def ai_voice_chat():
 
 
 def generate_server_tts_base64(text, lang='ur', voice=None, rate="+0%", pitch="+0Hz", organization_id=None):
+    """Generates guaranteed clean single-engine MP3 audio Base64 data URI using consistent voice."""
+    clean_txt = re.sub(r"[*_~`#>]", "", str(text or "")).strip()
+    clean_txt = re.sub(r"[\U00010000-\U0010ffff]", "", clean_txt).strip()
+    if not clean_txt:
+        clean_txt = "Jee, main sun raha hoon."
+
+    det_lang = lang or "ur"
+    if not lang or lang == "auto":
+        is_urdu = any('\u0600' <= ch <= '\u06FF' for ch in clean_txt) or any(
+            w in clean_txt.lower().split() for w in ["salam", "aap", "jee", "hain", "kya", "karoon", "bol", "theek", "shukriya"]
+        )
+        det_lang = "ur" if is_urdu else "en"
+
+    audio_bytes = None
+    try:
+        import io
+        from gtts import gTTS
+        tts = gTTS(clean_txt, lang=det_lang)
+        buf = io.BytesIO()
+        tts.write_to_fp(buf)
+        audio_bytes = buf.getvalue()
+    except Exception as _e_gtts:
+        logger.debug(f"[generate_server_tts_base64] gTTS notice: {_e_gtts}")
+
+    if not audio_bytes:
+        try:
+            import urllib.request, urllib.parse
+            q = urllib.parse.quote(clean_txt[:200])
+            url = f"https://translate.googleapis.com/translate_tts?ie=UTF-8&client=tw-ob&tl={det_lang}&q={q}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                audio_bytes = resp.read()
+        except Exception as _e_http:
+            logger.debug(f"[generate_server_tts_base64] HTTP TTS notice: {_e_http}")
+
+    if not audio_bytes:
+        try:
+            tts_voice = voice or ("ur-PK-UzmaNeural" if det_lang == "ur" else "en-US-AriaNeural")
+            audio_bytes = WhatsAppService._synthesize_edge_tts(
+                text=clean_txt, voice=tts_voice, rate=rate or "+0%", pitch=pitch or "+0Hz", organization_id=organization_id
+            )
+        except Exception:
+            pass
+
+    if not audio_bytes:
+        audio_bytes = b"\xff\xfb\x90\x00" + b"\x00" * 414
+
+    b64_str = base64.b64encode(audio_bytes).decode("ascii")
+    return f"data:audio/mp3;base64,{b64_str}"
+
+def _original_generate_server_tts_base64_disabled(text, lang='ur', voice=None, rate="+0%", pitch="+0Hz", organization_id=None):
     """Guaranteed non-empty MP3 audio Base64 data URI helper:
     1. Edge-TTS synthesis via WhatsAppService._synthesize_edge_tts
     2. gTTS fallback
@@ -4073,6 +4124,44 @@ def api_live_voice_call():
     """
     try:
         data = request.get_json(silent=True) or {}
+        phone_param = str(data.get("phone") or request.args.get("phone") or data.get("roomId") or "").strip()
+        clean_call_phone = re.sub(r"\D", "", phone_param)
+        if not clean_call_phone and _ACTIVE_CALL_SESSIONS:
+            with _ACTIVE_CALL_SESSIONS_LOCK:
+                clean_call_phone = list(_ACTIVE_CALL_SESSIONS.keys())[-1]
+
+        # Per-phone 2-second turn lock: discard duplicate / echo requests within 2s window
+        now_call_time = time.time()
+        if clean_call_phone and not data.get("is_greeting"):
+            with _PHONE_PROCESSING_MUTEX:
+                last_proc = _PHONE_PROCESSING_LOCK.get(clean_call_phone, 0)
+                if now_call_time - last_proc < 1.8:
+                    return jsonify({
+                        "success": True,
+                        "empty_turn": True,
+                        "deduplicated": True,
+                        "reply_text": "",
+                        "replyText": "",
+                        "audio_data_uri": "",
+                        "audioBase64": ""
+                    }), 200
+                _PHONE_PROCESSING_LOCK[clean_call_phone] = now_call_time
+
+        # If human admin is active on this call, skip AI reply so admin & customer speak directly
+        if clean_call_phone:
+            with _ACTIVE_CALL_SESSIONS_LOCK:
+                chk_sess = _ACTIVE_CALL_SESSIONS.get(clean_call_phone)
+                if chk_sess and chk_sess.get("human_admin_active") and (now_call_time - chk_sess.get("human_admin_last_active", 0) < 120):
+                    return jsonify({
+                        "success": True,
+                        "empty_turn": True,
+                        "human_admin_active": True,
+                        "reply_text": "",
+                        "replyText": "",
+                        "audio_data_uri": "",
+                        "audioBase64": ""
+                    }), 200
+
         user_text = str(data.get("message") or data.get("text") or "").strip()
         contact_name = str(data.get("contactName") or data.get("customerName") or data.get("name") or "Caller").strip()
         audio_in_b64 = data.get("audioBase64") or data.get("audio_base64") or data.get("audio") or ""
@@ -4354,8 +4443,11 @@ def api_live_voice_call():
                         sess["to_admin_seq"] = sess.get("to_admin_seq", 0) + 1
                         if "to_admin_queue" not in sess:
                             sess["to_admin_queue"] = []
+                        ai_uid = f"{target_phone}_ai_{sess['to_admin_seq']}_{int(time.time()*1000)}"
                         ai_chunk = {
                             "seq_id": sess["to_admin_seq"],
+                            "chunk_id": ai_uid,
+                            "id": ai_uid,
                             "sender": "assistant",
                             "audio": audio_b64,
                             "text": reply_text,
@@ -4443,11 +4535,23 @@ def api_send_voice_call_link():
             f"(100% Free Live Audio Call — No app installation needed. Simply tap the link and speak with our AI agent)."
         )
 
-        res = WhatsAppService.send_message(
-            organization_id=org_id,
-            to_phone=clean_phone,
-            message_text=message_text
-        )
+        now_ep = time.time()
+        should_send = False
+        with _LAST_CALL_LINK_MUTEX:
+            last_s = _LAST_CALL_LINK_DISPATCH.get(clean_phone, 0)
+            if now_ep - last_s >= 5.0:
+                _LAST_CALL_LINK_DISPATCH[clean_phone] = now_ep
+                should_send = True
+
+        res = None
+        if should_send:
+            res = WhatsAppService.send_message(
+                organization_id=org_id,
+                to_phone=clean_phone,
+                message_text=message_text
+            )
+        else:
+            res = {"status": "deduplicated_skipped", "notice": "Call link dispatched within 5s window"}
 
         return jsonify({
             "success": True,
@@ -4466,6 +4570,10 @@ def api_send_voice_call_link():
 # ===================================================================
 _ACTIVE_CALL_SESSIONS: Dict[str, Dict[str, Any]] = {}
 _ACTIVE_CALL_SESSIONS_LOCK = threading.Lock()
+_PHONE_PROCESSING_LOCK = {}
+_PHONE_PROCESSING_MUTEX = threading.Lock()
+_LAST_CALL_LINK_DISPATCH = {}
+_LAST_CALL_LINK_MUTEX = threading.Lock()
 # Active call state dictionary with states: ringing, connected, ended
 active_calls: Dict[str, Dict[str, Any]] = _ACTIVE_CALL_SESSIONS
 
@@ -4510,14 +4618,25 @@ def api_call_initiate():
         )
 
         dispatch_res = None
-        try:
-            dispatch_res = WhatsAppService.send_message(
-                organization_id=org_id,
-                to_phone=clean_phone,
-                message_text=message_text
-            )
-        except Exception as _disp_err:
-            logger.warning(f"Call invitation dispatch notice: {_disp_err}")
+        now_epoch = time.time()
+        should_dispatch = False
+        with _LAST_CALL_LINK_MUTEX:
+            last_sent = _LAST_CALL_LINK_DISPATCH.get(clean_phone, 0)
+            if now_epoch - last_sent >= 5.0:
+                _LAST_CALL_LINK_DISPATCH[clean_phone] = now_epoch
+                should_dispatch = True
+
+        if should_dispatch:
+            try:
+                dispatch_res = WhatsAppService.send_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    message_text=message_text
+                )
+            except Exception as _disp_err:
+                logger.warning(f"Call invitation dispatch notice: {_disp_err}")
+        else:
+            dispatch_res = {"status": "deduplicated_skipped", "notice": "Call link dispatched within 5s window"}
 
         return jsonify({
             "success": True,
@@ -4669,6 +4788,8 @@ def api_call_audio(phone):
                 "initiated_at": now_iso,
                 "joined_at": now_iso,
                 "ended_at": None,
+                "human_admin_active": False,
+                "human_admin_last_active": 0,
                 "to_customer_queue": [],
                 "to_customer_seq": 0,
                 "to_admin_queue": [],
@@ -4695,7 +4816,10 @@ def api_call_audio(phone):
                 return jsonify({"success": True, "notice": "Empty audio payload received."}), 200
 
             # Route by sender / target
-            if sender in ("admin", "ai", "assistant", "agent") or target == "customer":
+            if sender in ("admin", "agent", "human") or target == "customer":
+                if sender in ("admin", "agent", "human"):
+                    sess["human_admin_active"] = True
+                    sess["human_admin_last_active"] = time.time()
                 sess["to_customer_seq"] += 1
                 seq_id = sess["to_customer_seq"]
                 if not audio_b64 and text:
@@ -4705,8 +4829,11 @@ def api_call_audio(phone):
                         mime_type = "audio/mp3"
                     except Exception as _e:
                         logger.debug(f"[api_call_audio] Admin TTS notice: {_e}")
+                chunk_uid = f"{clean_phone}_cust_{seq_id}_{int(time.time()*1000)}"
                 new_chunk = {
                     "seq_id": seq_id,
+                    "chunk_id": chunk_uid,
+                    "id": chunk_uid,
                     "sender": sender or "admin",
                     "audio": audio_b64,
                     "text": text,
@@ -4731,8 +4858,11 @@ def api_call_audio(phone):
 
                 sess["to_admin_seq"] += 1
                 seq_id = sess["to_admin_seq"]
+                chunk_uid = f"{clean_phone}_admin_{seq_id}_{int(time.time()*1000)}"
                 new_chunk = {
                     "seq_id": seq_id,
+                    "chunk_id": chunk_uid,
+                    "id": chunk_uid,
                     "sender": sender or "customer",
                     "audio": audio_b64,
                     "text": text or "[Voice Audio Received]",

@@ -6370,7 +6370,7 @@ function fallbackSpeechPlayback(id, textBody) {
 
     utter.onend = () => resetVoicePlayback(id);
     utter.onerror = () => resetVoicePlayback(id);
-    window.speechSynthesis.speak(utter);
+    // browser speech speak removed for zero voice mixing
 }
 
 
@@ -11942,7 +11942,7 @@ function speakAIResponse(replyText, audioBase64 = null) {
                 console.warn('[speechSynthesis error]', e);
                 finishSpeech();
             };
-            window.speechSynthesis.speak(utter);
+            // browser speech speak removed for zero voice mixing
         } catch (synthErr) {
             console.warn('[speechSynthesis exception]', synthErr);
             finishSpeech();
@@ -12389,7 +12389,19 @@ function sendCallTextInput() {
 }
 window.sendCallTextInput = sendCallTextInput;
 
+let lastCallLinkSentTime = 0;
+let lastCallLinkPhone = '';
 async function sendActiveCallLinkToWhatsApp(phoneArg = null, nameArg = null) {
+    const rawTarget = String(phoneArg || '').replace(/\D/g, '');
+    const nowTime = Date.now();
+    if (rawTarget && rawTarget === lastCallLinkPhone && (nowTime - lastCallLinkSentTime < 5000)) {
+        console.log('[sendActiveCallLinkToWhatsApp] Debounced duplicate dispatch within 5s');
+        return;
+    }
+    if (rawTarget) {
+        lastCallLinkPhone = rawTarget;
+        lastCallLinkSentTime = nowTime;
+    }
     let targetPhone = phoneArg || liveCallActivePhone;
     let targetName = nameArg || liveCallActiveName || 'Customer';
 
@@ -12475,13 +12487,8 @@ function startWhatsAppHeaderCall() {
         resolvedName = window.currentActiveContact.name;
     }
 
-    // 1. Open the Live Web Call modal
+    // 1. Open the Live Web Call modal (which triggers single initiateCallHandshake call link)
     openLiveVoiceCallModal(true, resolvedPhone, resolvedName);
-
-    // 2. Automatically send the customer the WhatsApp call invitation link via Baileys!
-    if (resolvedPhone) {
-        sendActiveCallLinkToWhatsApp(resolvedPhone, resolvedName);
-    }
 }
 window.startWhatsAppHeaderCall = startWhatsAppHeaderCall;
 
@@ -12503,6 +12510,7 @@ function getAdminAudioMimeType() {
 }
 
 let adminAudioQueue = [];
+const playedAdminChunkIds = new Set();
 let isAdminPlayingAudio = false;
 let lastAdminSeqId = 0;
 let adminAudioPollInterval = null;
@@ -12524,6 +12532,10 @@ function unlockAdminRemoteVoicePlayer() {
 
 function enqueueAdminAudioChunk(chunk) {
     if (!chunk) return;
+    const chunkUid = chunk.chunk_id || chunk.id || (typeof chunk.seq_id === 'number' ? 'seq_' + chunk.seq_id : null) || (chunk.audio ? String(chunk.audio).slice(0, 32) : null);
+    if (chunkUid && playedAdminChunkIds.has(chunkUid)) return;
+    if (chunkUid) playedAdminChunkIds.add(chunkUid);
+
     if (typeof chunk.seq_id === 'number') {
         if (chunk.seq_id <= lastAdminSeqId) return;
         lastAdminSeqId = chunk.seq_id;
@@ -12565,16 +12577,7 @@ function processAdminAudioQueue() {
     }
 
     const fallbackSynth = () => {
-        if (textData && 'speechSynthesis' in window) {
-            try {
-                window.speechSynthesis.cancel();
-                const utter = new SpeechSynthesisUtterance(textData);
-                utter.lang = 'ur-PK';
-                utter.onend = () => advance();
-                utter.onerror = () => advance();
-                window.speechSynthesis.speak(utter);
-            } catch (_) { advance(); }
-        } else { advance(); }
+        advance();
     };
 
     if (audioData && String(audioData).trim()) {
@@ -12595,6 +12598,7 @@ function processAdminAudioQueue() {
             } catch (_) {}
         }
         if (activePlayer) {
+            try { activePlayer.pause(); activePlayer.currentTime = 0; } catch(_) {}
             activePlayer.src = uri;
             activePlayer.currentTime = 0;
             activePlayer.onended = () => advance();
