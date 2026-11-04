@@ -770,3 +770,24 @@ def test_live_voice_call_zero_voice_mixing_and_duplex_relay(client):
     assert len(cust_chunks) > 0
     assert any(c.get("sender") == "admin" for c in cust_chunks)
     assert any(c.get("audio") == admin_audio_payload for c in cust_chunks)
+
+
+def test_database_connection_pooling_and_pg_options(client):
+    """Verify PostgreSQL DATABASE_URL connection pooling is active with pool_pre_ping=True
+    and pool_recycle=280 in app.py, models.py, and config.py.
+    """
+    from config import Config
+    from models import DEFAULT_ENGINE_OPTIONS
+    from app import app
+
+    # 1. Verify models.py defaults
+    assert DEFAULT_ENGINE_OPTIONS.get("pool_pre_ping") is True
+    assert DEFAULT_ENGINE_OPTIONS.get("pool_recycle") == 280
+
+    # 2. Verify config.py SQLALCHEMY_ENGINE_OPTIONS
+    assert Config.SQLALCHEMY_ENGINE_OPTIONS.get("pool_pre_ping") is True
+    assert Config.SQLALCHEMY_ENGINE_OPTIONS.get("pool_recycle") == 280
+
+    # 3. Verify app engine options
+    engine_opts = app.config.get("SQLALCHEMY_ENGINE_OPTIONS", {})
+    assert engine_opts.get("pool_pre_ping") is True

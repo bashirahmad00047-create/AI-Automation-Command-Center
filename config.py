@@ -61,6 +61,7 @@ class Config:
 
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
+        "pool_recycle": 280,
     }
     if "sqlite" in SQLALCHEMY_DATABASE_URI:
         from sqlalchemy.pool import NullPool

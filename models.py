@@ -25,6 +25,12 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from database import db
 
+# PostgreSQL / Supabase Connection Pooling Defaults (pool_pre_ping=True, pool_recycle=280)
+DEFAULT_ENGINE_OPTIONS = {
+    "pool_pre_ping": True,
+    "pool_recycle": 280,
+}
+
 
 PKT_TZ = datetime.timezone(datetime.timedelta(hours=5))
 

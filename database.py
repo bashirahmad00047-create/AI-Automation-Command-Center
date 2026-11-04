@@ -26,3 +26,13 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
             pass
         finally:
             cursor.close()
+
+
+try:
+    from backup_targeted import (
+        restore_sqlite_from_backup_if_needed,
+        sync_sqlite_snapshot,
+        start_periodic_sqlite_snapshot_sync,
+    )
+except ImportError:
+    pass

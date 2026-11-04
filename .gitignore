@@ -61,6 +61,7 @@ find_missing.py
 trace_rules.py
 verify_restore.py
 backup_*.py
+!backup_targeted.py
 *_dump*.json
 targeted_cleanup_backup.json
 

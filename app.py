@@ -263,6 +263,31 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     application.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production" or os.environ.get("RENDER") == "true" or os.environ.get("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1")
     application.config["SESSION_REFRESH_EACH_REQUEST"] = True
 
+    # Enforce PostgreSQL DATABASE_URL connection pooling & pre-ping
+    db_uri_val = str(application.config.get("SQLALCHEMY_DATABASE_URI") or "").strip()
+    engine_opts = dict(application.config.get("SQLALCHEMY_ENGINE_OPTIONS") or {})
+    engine_opts["pool_pre_ping"] = True
+    if "sqlite" not in db_uri_val.lower():
+        engine_opts["pool_recycle"] = int(os.environ.get("DB_POOL_RECYCLE", "280"))
+        if ":6543" in db_uri_val or "pooler.supabase" in db_uri_val:
+            from sqlalchemy.pool import NullPool
+            engine_opts["poolclass"] = NullPool
+            engine_opts["connect_args"] = {"sslmode": "require", "options": "-c statement_timeout=30000"}
+        else:
+            engine_opts.setdefault("pool_size", int(os.environ.get("DB_POOL_SIZE", "10")))
+            engine_opts.setdefault("max_overflow", int(os.environ.get("DB_MAX_OVERFLOW", "20")))
+            engine_opts.setdefault("connect_args", {"sslmode": "require"})
+    application.config["SQLALCHEMY_ENGINE_OPTIONS"] = engine_opts
+
+    # Auto-restore SQLite database from backup if primary DB is missing
+    try:
+        from backup_targeted import restore_sqlite_from_backup_if_needed, start_periodic_sqlite_snapshot_sync
+        restore_sqlite_from_backup_if_needed()
+        if not bool(application.config.get("TESTING")):
+            start_periodic_sqlite_snapshot_sync(interval_seconds=60)
+    except Exception as _b_err:
+        application.logger.warning(f"Database auto-restore/snapshot notice: {_b_err}")
+
     # Initialize SQLAlchemy & Database Migrations
     db.init_app(application)
     migrate.init_app(application, db, render_as_batch=True, compare_type=True)
@@ -385,6 +410,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                         st._init_db()
                 except Exception as _st_err:
                     app_ref.logger.warning(f"Storage init_db check: {_st_err}")
+
+                try:
+                    from wa_bridge_manager import start_wa_session_auto_backup
+                    start_wa_session_auto_backup(app=app_ref)
+                except Exception as _wa_bk_err:
+                    app_ref.logger.warning(f"WA session auto-backup notice: {_wa_bk_err}")
 
         storage_instance = Storage(init_db=is_testing and not is_cli_migration)
         engine_instance = AutomationEngine(storage=storage_instance)
