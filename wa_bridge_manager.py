@@ -91,9 +91,9 @@ def resolve_auth_dir(root_dir: str = None) -> str:
     return os.path.join(root_dir, "baileys_auth")
 
 
-def restore_wa_session_from_db(root_dir: str = None, app=None) -> bool:
+def restore_wa_session_from_db(root_dir: str = None, app=None, tenant_id: str = "default") -> bool:
     """Restores the WhatsApp Baileys credentials from the database into the auth dir
-    if local credentials are missing or corrupted.
+    if local credentials are missing or corrupted. Supports multi-tenant isolation.
     """
     auth_dir = resolve_auth_dir(root_dir)
     creds_file = os.path.join(auth_dir, "creds.json")
@@ -121,23 +121,42 @@ def restore_wa_session_from_db(root_dir: str = None, app=None) -> bool:
                     )
                 """))
                 conn.commit()
-                row = conn.execute(text("SELECT zip_b64 FROM wa_session_store WHERE id = 1")).fetchone()
+                try:
+                    conn.execute(text("ALTER TABLE wa_session_store ADD COLUMN tenant_id VARCHAR(100) DEFAULT 'default'"))
+                    conn.commit()
+                except Exception:
+                    pass
+
+                row = None
+                clean_tenant = str(tenant_id or "default").strip()
+                if clean_tenant and clean_tenant != "default":
+                    try:
+                        row = conn.execute(
+                            text("SELECT zip_b64 FROM wa_session_store WHERE tenant_id = :t ORDER BY updated_at DESC LIMIT 1"),
+                            {"t": clean_tenant}
+                        ).fetchone()
+                    except Exception:
+                        pass
+                if not row:
+                    row = conn.execute(text("SELECT zip_b64 FROM wa_session_store WHERE id = 1")).fetchone()
+
                 if row and row[0]:
                     os.makedirs(auth_dir, exist_ok=True)
                     raw_bytes = base64.b64decode(row[0])
                     with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
                         zf.extractall(auth_dir)
                     extracted_count = len(os.listdir(auth_dir))
-                    logger.info(f"[WA Bridge] Restored {extracted_count} permanent session files from DB into {auth_dir}!")
+                    logger.info(f"[WA Bridge] Restored {extracted_count} permanent session files from DB (tenant '{clean_tenant}') into {auth_dir}!")
                     return True
     except Exception as e:
         logger.warning(f"[WA Bridge] Database session restore skipped: {e}")
     return False
 
 
-def backup_wa_session_to_db(root_dir: str = None, app=None) -> bool:
+def backup_wa_session_to_db(root_dir: str = None, app=None, tenant_id: str = "default") -> bool:
     """Compresses all files in the Baileys auth folder and persists them as a Base64
     zip in the database (wa_session_store table) so the QR session survives redeployments.
+    Supports multi-tenant isolation per tenant_id while maintaining backward-compatible id=1.
     """
     auth_dir = resolve_auth_dir(root_dir)
     creds_file = os.path.join(auth_dir, "creds.json")
@@ -165,6 +184,8 @@ def backup_wa_session_to_db(root_dir: str = None, app=None) -> bool:
             return False
 
         b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
+        clean_tenant = str(tenant_id or "default").strip()
+        now_utc = datetime.datetime.utcnow()
 
         with safe_app_context(app):
             from database import db
@@ -178,30 +199,59 @@ def backup_wa_session_to_db(root_dir: str = None, app=None) -> bool:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """))
-                conn.execute(text("DELETE FROM wa_session_store WHERE id = 1"))
-                conn.execute(
-                    text("INSERT INTO wa_session_store (id, zip_b64, file_count, updated_at) VALUES (1, :d, :fc, :ua)"),
-                    {"d": b64_data, "fc": file_count, "ua": datetime.datetime.utcnow()}
-                )
+                conn.commit()
+                try:
+                    conn.execute(text("ALTER TABLE wa_session_store ADD COLUMN tenant_id VARCHAR(100) DEFAULT 'default'"))
+                    conn.commit()
+                except Exception:
+                    pass
+
+                if clean_tenant == "default":
+                    conn.execute(text("DELETE FROM wa_session_store WHERE id = 1 OR tenant_id = 'default'"))
+                    conn.execute(
+                        text("INSERT INTO wa_session_store (id, tenant_id, zip_b64, file_count, updated_at) VALUES (1, 'default', :d, :fc, :ua)"),
+                        {"d": b64_data, "fc": file_count, "ua": now_utc}
+                    )
+                else:
+                    existing = conn.execute(
+                        text("SELECT id FROM wa_session_store WHERE tenant_id = :t LIMIT 1"),
+                        {"t": clean_tenant}
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            text("UPDATE wa_session_store SET zip_b64 = :d, file_count = :fc, updated_at = :ua WHERE id = :id"),
+                            {"d": b64_data, "fc": file_count, "ua": now_utc, "id": existing[0]}
+                        )
+                    else:
+                        import random
+                        new_id = random.randint(100, 9999999)
+                        conn.execute(
+                            text("INSERT INTO wa_session_store (id, tenant_id, zip_b64, file_count, updated_at) VALUES (:id, :t, :d, :fc, :ua)"),
+                            {"id": new_id, "t": clean_tenant, "d": b64_data, "fc": file_count, "ua": now_utc}
+                        )
                 conn.commit()
 
-        logger.info(f"[WA Bridge] Backed up WhatsApp session to Database ({file_count} files, {len(b64_data)} bytes)")
+        logger.info(f"[WA Bridge] Backed up WhatsApp session to Database (tenant '{clean_tenant}', {file_count} files, {len(b64_data)} bytes)")
         return True
     except Exception as e:
         logger.warning(f"[WA Bridge] Failed to backup session to DB: {e}")
         return False
 
 
-def clear_wa_session_in_db(app=None) -> bool:
+def clear_wa_session_in_db(app=None, tenant_id: str = "default") -> bool:
     """Clears the session from the database when a user explicitly logs out or unlinks device."""
     try:
         with safe_app_context(app):
             from database import db
             from sqlalchemy import text
             with db.engine.connect() as conn:
-                conn.execute(text("DELETE FROM wa_session_store WHERE id = 1"))
+                clean_tenant = str(tenant_id or "default").strip()
+                if clean_tenant == "default":
+                    conn.execute(text("DELETE FROM wa_session_store WHERE id = 1 OR tenant_id = 'default'"))
+                else:
+                    conn.execute(text("DELETE FROM wa_session_store WHERE tenant_id = :t"), {"t": clean_tenant})
                 conn.commit()
-            logger.info("[WA Bridge] Cleared WhatsApp session from Database.")
+            logger.info(f"[WA Bridge] Cleared WhatsApp session for tenant '{clean_tenant}' from Database.")
             return True
     except Exception as e:
         logger.warning(f"[WA Bridge] Error clearing session from DB: {e}")

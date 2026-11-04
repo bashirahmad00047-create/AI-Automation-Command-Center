@@ -1852,23 +1852,148 @@ class WASessionStore(db.Model):
     """Permanent WhatsApp Baileys session storage table.
     Preserves encrypted multi-file auth credentials across container restarts
     and Render redeploys so WhatsApp Web never requires re-scanning QR.
+    Supports multi-tenant session isolation per tenant_id.
     """
     __tablename__ = "wa_session_store"
 
     id = db.Column(db.Integer, primary_key=True, default=1)
+    tenant_id = db.Column(db.String(100), nullable=True, default="default", index=True)
     zip_b64 = db.Column(db.Text, nullable=False)
     file_count = db.Column(db.Integer, nullable=False, default=0)
+    phone_number = db.Column(db.String(50), nullable=True)
+    whatsapp_mode = db.Column(db.String(30), nullable=True, default="baileys_bridge")
+    last_customer_message_at = db.Column(db.DateTime, nullable=True)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
+            "tenant_id": self.tenant_id or "default",
             "has_session": bool(self.zip_b64),
             "file_count": self.file_count,
+            "phone_number": self.phone_number,
+            "whatsapp_mode": self.whatsapp_mode or "baileys_bridge",
             "size_bytes": len(self.zip_b64) if self.zip_b64 else 0,
+            "last_customer_message_at": self.last_customer_message_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_customer_message_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }
 
 
 # Enterprise Alias for WhatsAppSessionStore
 WhatsAppSessionStore = WASessionStore
+
+
+class FleetDriver(db.Model):
+    """Multi-vehicle Fleet Driver (Bike, Rickshaw, Car, Carry Daba/Van) for live GPS delivery & ride dispatch."""
+    __tablename__ = "fleet_drivers"
+
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.String(100), nullable=False, default="default", index=True)
+    name = db.Column(db.String(120), nullable=False)
+    phone = db.Column(db.String(50), nullable=False, index=True)
+    vehicle_type = db.Column(db.String(30), nullable=False, default="bike")  # bike, rickshaw, car, van
+    plate_no = db.Column(db.String(50), nullable=True)
+    online_status = db.Column(db.String(20), nullable=False, default="offline")  # online, offline, busy
+    current_lat = db.Column(db.Float, nullable=True)
+    current_lng = db.Column(db.Float, nullable=True)
+    heading = db.Column(db.Float, nullable=True, default=0.0)
+    speed = db.Column(db.Float, nullable=True, default=0.0)
+    last_seen = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "name": self.name,
+            "phone": self.phone,
+            "vehicle_type": self.vehicle_type,
+            "plate_no": self.plate_no,
+            "online_status": self.online_status,
+            "current_lat": self.current_lat,
+            "current_lng": self.current_lng,
+            "heading": self.heading or 0.0,
+            "speed": self.speed or 0.0,
+            "last_seen": self.last_seen.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen else None,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+        }
+
+
+class RideRequest(db.Model):
+    """InDrive-style Ride & Delivery Dispatch request with customer fare offers and driver counter-bidding."""
+    __tablename__ = "ride_requests"
+
+    id = db.Column(db.String(64), primary_key=True)
+    tenant_id = db.Column(db.String(100), nullable=False, default="default", index=True)
+    customer_name = db.Column(db.String(120), nullable=True)
+    customer_phone = db.Column(db.String(50), nullable=False, index=True)
+    pickup_address = db.Column(db.Text, nullable=False)
+    dropoff_address = db.Column(db.Text, nullable=False)
+    pickup_lat = db.Column(db.Float, nullable=True)
+    pickup_lng = db.Column(db.Float, nullable=True)
+    dropoff_lat = db.Column(db.Float, nullable=True)
+    dropoff_lng = db.Column(db.Float, nullable=True)
+    vehicle_type = db.Column(db.String(30), nullable=False, default="bike")  # bike, rickshaw, car, van
+    customer_offer_pkr = db.Column(db.Float, nullable=False, default=0.0)
+    final_fare_pkr = db.Column(db.Float, nullable=True)
+    status = db.Column(db.String(30), nullable=False, default="requested")  # requested, bidding, accepted, in_progress, completed, cancelled
+    assigned_driver_id = db.Column(db.Integer, db.ForeignKey("fleet_drivers.id"), nullable=True)
+    driver_bids_json = db.Column(db.Text, nullable=True, default="[]")
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    driver = db.relationship("FleetDriver", backref="assigned_rides", lazy=True)
+
+    def get_bids(self) -> List[Dict[str, Any]]:
+        if not self.driver_bids_json:
+            return []
+        try:
+            return json.loads(self.driver_bids_json)
+        except Exception:
+            return []
+
+    def set_bids(self, bids: List[Dict[str, Any]]) -> None:
+        self.driver_bids_json = json.dumps(bids or [])
+
+    def add_bid(self, driver_id: int, driver_name: str, driver_phone: str, vehicle_type: str, bid_type: str, bid_pkr: float) -> Dict[str, Any]:
+        bids = self.get_bids()
+        new_bid = {
+            "driver_id": driver_id,
+            "driver_name": driver_name,
+            "driver_phone": driver_phone,
+            "vehicle_type": vehicle_type,
+            "bid_type": bid_type,  # "accept" or "counter"
+            "bid_pkr": float(bid_pkr),
+            "status": "pending",
+            "created_at": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        bids.append(new_bid)
+        self.set_bids(bids)
+        if self.status == "requested":
+            self.status = "bidding"
+        return new_bid
+
+    def to_dict(self) -> Dict[str, Any]:
+        assigned_driver_info = self.driver.to_dict() if self.driver else None
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "customer_name": self.customer_name,
+            "customer_phone": self.customer_phone,
+            "pickup_address": self.pickup_address,
+            "dropoff_address": self.dropoff_address,
+            "pickup_lat": self.pickup_lat,
+            "pickup_lng": self.pickup_lng,
+            "dropoff_lat": self.dropoff_lat,
+            "dropoff_lng": self.dropoff_lng,
+            "vehicle_type": self.vehicle_type,
+            "customer_offer_pkr": self.customer_offer_pkr,
+            "final_fare_pkr": self.final_fare_pkr,
+            "status": self.status,
+            "assigned_driver_id": self.assigned_driver_id,
+            "driver": assigned_driver_info,
+            "bids": self.get_bids(),
+            "tracking_url": f"/track/{self.id}",
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }

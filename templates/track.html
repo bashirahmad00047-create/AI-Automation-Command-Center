@@ -475,6 +475,34 @@
             display: block;
         }
 
+        /* Vehicle Select Buttons & InDrive Bidding */
+        .vehicle-select-btn {
+            background: #ffffff;
+            border: 1.5px solid var(--gray-300);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--gray-700);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .vehicle-select-btn.active {
+            background: var(--rider-blue);
+            color: #ffffff;
+            border-color: var(--rider-blue);
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+        }
+        .bid-card-item {
+            background: #ffffff;
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            padding: 10px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
         /* Marker Styles for Leaflet */
         .bike-radar-icon {
             text-align: center;
@@ -625,6 +653,33 @@
                 Tap <strong>Start Delivery</strong> to share your live location with the customer and store. Google Maps route navigation is available below.
             </p>
 
+            <!-- Vehicle Type Selector -->
+            <div style="margin-bottom: 14px;">
+                <span style="font-size: 0.75rem; color: var(--gray-600); font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 6px;">Select Vehicle Type</span>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <button type="button" class="vehicle-select-btn active" data-vtype="bike" onclick="selectVehicleType('bike')">🏍️ Bike</button>
+                    <button type="button" class="vehicle-select-btn" data-vtype="rickshaw" onclick="selectVehicleType('rickshaw')">🛺 Rickshaw</button>
+                    <button type="button" class="vehicle-select-btn" data-vtype="car" onclick="selectVehicleType('car')">🚗 Car</button>
+                    <button type="button" class="vehicle-select-btn" data-vtype="van" onclick="selectVehicleType('van')">🚐 Carry Daba</button>
+                </div>
+            </div>
+
+            <!-- InDrive Fare & Driver Bid Controls -->
+            <div style="background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 12px; padding: 12px 14px; margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 0.76rem; font-weight: 700; color: #475569; text-transform: uppercase;">InDrive Fare Offer</span>
+                    <span class="badge-status dispatched" id="indriveFareBadge">PKR {{ "{:,.0f}".format(ride.customer_offer_pkr) if (ride and ride.customer_offer_pkr) else ("{:,.0f}".format(order.total_amount) if order else '250') }}</span>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button type="button" class="rider-btn-primary" style="flex: 1; min-width: 120px; padding: 8px 10px; font-size: 0.82rem; background: #059669;" onclick="submitDriverBid('accept')">
+                        ✅ Accept Offer
+                    </button>
+                    <button type="button" class="rider-btn-primary" style="flex: 1; min-width: 120px; padding: 8px 10px; font-size: 0.82rem; background: #2563eb;" onclick="submitDriverBid('counter', 50)">
+                        ➕ Counter (+50 PKR)
+                    </button>
+                </div>
+            </div>
+
             <button type="button" id="btnToggleBroadcast" class="rider-btn-primary" onclick="toggleRiderBroadcast()">
                 <span>🚀</span> <span id="btnBroadcastLabel">Start Delivery / Share Live GPS</span>
             </button>
@@ -709,7 +764,18 @@
 
             <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--gray-100); font-size: 0.9rem;">
                 <span style="font-size: 0.74rem; color: var(--gray-500); font-weight: 700; text-transform: uppercase; display: block;">Destination Address</span>
-                <strong id="destAddressText">{{ order.shipping_address if (order and order.shipping_address) else 'Ataliq Bazar / Chew Bazar, Chitral, Khyber Pakhtunkhwa' }}</strong>
+                <strong id="destAddressText">{{ order.shipping_address if (order and order.shipping_address) else (ride.dropoff_address if ride else 'Ataliq Bazar / Chew Bazar, Chitral, Khyber Pakhtunkhwa') }}</strong>
+            </div>
+
+            <!-- Customer InDrive Driver Bids List -->
+            <div id="customerBidsContainer" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--gray-100);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 0.76rem; font-weight: 700; color: #475569; text-transform: uppercase;">⚡ Active Driver Bids (InDrive Style)</span>
+                    <span class="badge-status confirmed" id="bidsCountBadge">0 Bids</span>
+                </div>
+                <div id="customerBidsList" style="display: flex; flex-direction: column; gap: 6px;">
+                    <div style="font-size: 0.82rem; color: var(--gray-500); font-style: italic;">Waiting for drivers to bid or accept...</div>
+                </div>
             </div>
         </div>
 
@@ -775,6 +841,79 @@
         let map = null;
         let bikeMarker = null;
         let destMarker = null;
+        let currentVehicleType = '{{ (ride.vehicle_type if (ride and ride.vehicle_type) else "bike") }}';
+
+        function getVehicleEmoji(vType) {
+            const t = String(vType || currentVehicleType || 'bike').toLowerCase();
+            if (t.includes('rickshaw') || t === 'auto') return '🛺';
+            if (t.includes('car') || t.includes('taxi')) return '🚗';
+            if (t.includes('van') || t.includes('carry') || t.includes('loader')) return '🚐';
+            return '🏍️';
+        }
+
+        function getVehicleLabel(vType) {
+            const t = String(vType || currentVehicleType || 'bike').toLowerCase();
+            if (t.includes('rickshaw') || t === 'auto') return 'Auto Rickshaw';
+            if (t.includes('car') || t.includes('taxi')) return 'Car / Taxi';
+            if (t.includes('van') || t.includes('carry') || t.includes('loader')) return 'Carry Daba / Loader';
+            return 'Delivery Bike Rider';
+        }
+
+        function selectVehicleType(vType) {
+            currentVehicleType = vType;
+            document.querySelectorAll('.vehicle-select-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-vtype') === vType);
+            });
+            if (latestRiderCoords) {
+                updateDeliveryRoute(latestRiderCoords[0], latestRiderCoords[1], customerDestinationCoords[0], customerDestinationCoords[1], currentVehicleType);
+            }
+            showToast(`Vehicle set to: ${getVehicleLabel(vType)}`);
+        }
+
+        async function submitDriverBid(type, counterOffset = 0) {
+            try {
+                let baseOffer = parseFloat('{{ (ride.customer_offer_pkr if (ride and ride.customer_offer_pkr) else 250) }}') || 250;
+                let finalOffer = type === 'accept' ? baseOffer : (baseOffer + counterOffset);
+                const res = await fetch(`/api/rides/${ORDER_ID}/bid`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        driver_name: 'BashFlow Fleet Partner',
+                        vehicle_type: currentVehicleType,
+                        bid_type: type,
+                        counter_offer_pkr: finalOffer
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(type === 'accept' ? `Accepted customer offer of PKR ${finalOffer}!` : `Sent counter offer of PKR ${finalOffer}!`);
+                    pollRiderLocation();
+                } else {
+                    showToast(data.error || 'Failed to submit bid', true);
+                }
+            } catch (err) {
+                showToast('Bid error: ' + err.message, true);
+            }
+        }
+
+        async function acceptDriverBid(bidIndex) {
+            try {
+                const res = await fetch(`/api/rides/${ORDER_ID}/accept_bid`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bid_index: bidIndex })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`Driver assigned! Fare locked at PKR ${data.fare_pkr}.`);
+                    pollRiderLocation();
+                } else {
+                    showToast(data.error || 'Failed to accept bid', true);
+                }
+            } catch (err) {
+                showToast('Accept bid error: ' + err.message, true);
+            }
+        }
         let routePolyline = null;
         let latestRiderCoords = null;
         let customerDestinationCoords = [35.8659, 71.7924]; // Default Chitral Chew Bazar
@@ -921,25 +1060,30 @@
         }
 
         // Update Map Markers & Route Polyline
-        function updateDeliveryRoute(riderLat, riderLng, destLat, destLng) {
+        function updateDeliveryRoute(riderLat, riderLng, destLat, destLng, vType) {
             if (!map || typeof L === 'undefined') return;
 
             const riderPoint = [riderLat, riderLng];
             const destPoint = [destLat, destLng];
+            const vEmoji = getVehicleEmoji(vType);
+            const vLabel = getVehicleLabel(vType);
 
-            // 1. Move or create Bike Marker
+            // 1. Move or create Vehicle Marker
             if (!bikeMarker) {
                 const bIcon = L.divIcon({
                     className: 'bike-radar-icon',
-                    html: '<div class="bike-radar-pulse"></div><div class="bike-icon-circle">🏍️</div>',
+                    html: `<div class="bike-radar-pulse"></div><div class="bike-icon-circle" id="radarVehicleCircle">${vEmoji}</div>`,
                     iconSize: [44, 44],
                     iconAnchor: [22, 22],
                     popupAnchor: [0, -22]
                 });
                 bikeMarker = L.marker(riderPoint, { icon: bIcon }).addTo(map);
-                bikeMarker.bindPopup("<b>Delivery Bike Rider</b><br>Live GPS Location");
+                bikeMarker.bindPopup(`<b>${vLabel}</b><br>Live GPS Location`);
             } else {
                 bikeMarker.setLatLng(riderPoint);
+                const circleEl = document.getElementById('radarVehicleCircle');
+                if (circleEl) circleEl.innerHTML = vEmoji;
+                bikeMarker.setPopupContent(`<b>${vLabel}</b><br>Live GPS Location`);
             }
 
             // 2. Move Destination Marker
@@ -989,14 +1133,42 @@
                         }
                     }
 
+                    const activeVType = data.vehicle_type || (data.rider && data.rider.vehicle_type) || currentVehicleType || 'bike';
+                    currentVehicleType = activeVType;
+
+                    // Render InDrive Bids if present
+                    if (data.bids && Array.isArray(data.bids)) {
+                        const bidsListEl = document.getElementById('customerBidsList');
+                        const bidsCountEl = document.getElementById('bidsCountBadge');
+                        if (bidsCountEl) bidsCountEl.textContent = `${data.bids.length} Bid${data.bids.length === 1 ? '' : 's'}`;
+                        if (bidsListEl && data.bids.length > 0) {
+                            bidsListEl.innerHTML = data.bids.map((b, idx) => `
+                                <div class="bid-card-item">
+                                    <div>
+                                        <strong>${getVehicleEmoji(b.vehicle_type)} ${escapeHtml(b.driver_name || 'Driver')}</strong>
+                                        <div style="font-size: 0.75rem; color: var(--gray-500);">${getVehicleLabel(b.vehicle_type)} &bull; ${b.bid_type === 'accept' ? 'Agreed to Offer' : 'Counter Offer'}</div>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <strong style="color: var(--primary); font-size: 0.95rem;">PKR ${b.bid_pkr}</strong>
+                                        ${b.status === 'accepted' ? '<span class="badge-status delivered">ACCEPTED</span>' : `<button type="button" class="vehicle-select-btn active" style="padding: 4px 10px; font-size: 0.76rem;" onclick="acceptDriverBid(${idx})">Accept</button>`}
+                                    </div>
+                                </div>
+                            `).join('');
+                        }
+                    }
+
                     if (data.has_rider && data.rider && data.rider.lat && data.rider.lng) {
                         const rLat = parseFloat(data.rider.lat);
                         const rLng = parseFloat(data.rider.lng);
                         latestRiderCoords = [rLat, rLng];
 
-                        updateRadarStatus(true, "Rider GPS Live");
-                        updateDeliveryRoute(rLat, rLng, customerDestinationCoords[0], customerDestinationCoords[1]);
+                        updateRadarStatus(true, `${getVehicleLabel(activeVType)} Live`);
+                        updateDeliveryRoute(rLat, rLng, customerDestinationCoords[0], customerDestinationCoords[1], activeVType);
                         updateEtaDisplay(rLat, rLng, customerDestinationCoords[0], customerDestinationCoords[1]);
+                        const etaI = document.querySelector('.eta-icon');
+                        if (etaI) etaI.textContent = getVehicleEmoji(activeVType);
+                        const etaH = document.getElementById('etaStatusHeadline');
+                        if (etaH) etaH.textContent = `${getVehicleLabel(activeVType)} En Route`;
                     } else {
                         updateRadarStatus(true, "Live Radar Active");
                     }
@@ -1059,7 +1231,8 @@
                                 lng: lng,
                                 accuracy: accuracy,
                                 speed: speed,
-                                heading: heading
+                                heading: heading,
+                                vehicle_type: currentVehicleType
                             })
                         });
                         const postData = await postRes.json();

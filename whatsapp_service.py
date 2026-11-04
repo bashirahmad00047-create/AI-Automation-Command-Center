@@ -18,6 +18,7 @@ Architecture:
 from __future__ import annotations
 
 import base64
+import queue
 import concurrent.futures
 import datetime
 import hashlib
@@ -82,6 +83,239 @@ class WhatsAppService:
     # Method aliases for conversational TTS tuning and knowledge base resolution
     _tune_conversational_tts_script = None
     _get_tenant_or_global_knowledge_base = None
+
+    # Multi-tenant non-blocking message queues and concurrency workers
+    _tenant_message_queues: Dict[str, queue.Queue] = {}
+    _tenant_worker_threads: Dict[str, threading.Thread] = {}
+    _tenant_queue_lock = threading.Lock()
+    _tenant_queue_stats: Dict[str, Dict[str, int]] = {}
+    _customer_window_cache: Dict[Tuple[str, str], datetime.datetime] = {}
+
+    @classmethod
+    def enqueue_tenant_message(
+        cls,
+        tenant_id: str,
+        message_data: Dict[str, Any],
+        handler_callable: Optional[callable] = None,
+        app=None
+    ) -> Dict[str, Any]:
+        """Enqueues an incoming WhatsApp message payload into a non-blocking per-tenant queue.
+        A background daemon worker drains and processes messages concurrently per tenant
+        without blocking incoming Flask webhook requests or other tenants.
+        """
+        clean_tenant = str(tenant_id or "default").strip()
+        with cls._tenant_queue_lock:
+            if clean_tenant not in cls._tenant_message_queues:
+                cls._tenant_message_queues[clean_tenant] = queue.Queue(maxsize=1000)
+                cls._tenant_queue_stats[clean_tenant] = {"enqueued": 0, "processed": 0, "errors": 0}
+
+            q = cls._tenant_message_queues[clean_tenant]
+            target_app = app or (current_app._get_current_object() if has_app_context() else None)
+            item = {
+                "payload": message_data,
+                "handler": handler_callable,
+                "enqueued_at": time.time(),
+                "app": target_app
+            }
+            try:
+                q.put_nowait(item)
+                cls._tenant_queue_stats[clean_tenant]["enqueued"] += 1
+            except queue.Full:
+                logger.warning(f"[TenantQueue] Queue full for tenant '{clean_tenant}'. Dropping message.")
+                return {"success": False, "queued": False, "error": "Tenant queue full"}
+
+            t = cls._tenant_worker_threads.get(clean_tenant)
+            if not t or not t.is_alive():
+                wt = threading.Thread(
+                    target=cls._run_tenant_worker,
+                    args=(clean_tenant,),
+                    daemon=True,
+                    name=f"WA-Worker-{clean_tenant}"
+                )
+                cls._tenant_worker_threads[clean_tenant] = wt
+                wt.start()
+
+        return {
+            "success": True,
+            "queued": True,
+            "tenant_id": clean_tenant,
+            "queue_depth": q.qsize()
+        }
+
+    @classmethod
+    def _run_tenant_worker(cls, tenant_id: str):
+        """Per-tenant daemon worker that processes queued WhatsApp messages."""
+        q = cls._tenant_message_queues.get(tenant_id)
+        if not q:
+            return
+        while True:
+            try:
+                item = q.get(timeout=30)
+            except queue.Empty:
+                with cls._tenant_queue_lock:
+                    if q.empty():
+                        cls._tenant_worker_threads.pop(tenant_id, None)
+                        break
+                    else:
+                        continue
+
+            payload = item.get("payload")
+            handler = item.get("handler")
+            target_app = item.get("app")
+
+            try:
+                if target_app:
+                    with target_app.app_context():
+                        if handler:
+                            handler(payload, organization_id=tenant_id)
+                        else:
+                            cls.process_incoming_webhook_payload(payload, organization_id=tenant_id)
+                else:
+                    if handler:
+                        handler(payload, organization_id=tenant_id)
+                    else:
+                        cls.process_incoming_webhook_payload(payload, organization_id=tenant_id)
+                with cls._tenant_queue_lock:
+                    cls._tenant_queue_stats[tenant_id]["processed"] += 1
+            except Exception as proc_err:
+                logger.error(f"[TenantWorker] Error processing message for tenant '{tenant_id}': {proc_err}")
+                with cls._tenant_queue_lock:
+                    cls._tenant_queue_stats[tenant_id]["errors"] += 1
+            finally:
+                q.task_done()
+
+    @classmethod
+    def get_tenant_queue_status(cls, tenant_id: str = "default") -> Dict[str, Any]:
+        """Returns status, depth, and processed message count of a tenant's queue."""
+        clean_tenant = str(tenant_id or "default").strip()
+        with cls._tenant_queue_lock:
+            q = cls._tenant_message_queues.get(clean_tenant)
+            depth = q.qsize() if q else 0
+            stats = cls._tenant_queue_stats.get(clean_tenant, {"enqueued": 0, "processed": 0, "errors": 0})
+            is_running = bool(cls._tenant_worker_threads.get(clean_tenant) and cls._tenant_worker_threads[clean_tenant].is_alive())
+        return {
+            "tenant_id": clean_tenant,
+            "queue_depth": depth,
+            "worker_active": is_running,
+            "enqueued_total": stats.get("enqueued", 0),
+            "processed_total": stats.get("processed", 0),
+            "errors_total": stats.get("errors", 0),
+        }
+
+    @classmethod
+    def get_tenant_whatsapp_mode(cls, tenant_id: str = "default") -> str:
+        """Returns the active WhatsApp provider mode for the tenant:
+        'baileys_bridge' (free web session) or 'official_meta_cloud' (Meta Cloud API).
+        """
+        clean_tenant = str(tenant_id or "default").strip()
+        try:
+            from models import SystemSetting
+            mode = SystemSetting.get_val(f"WA_MODE_{clean_tenant}", None)
+            if not mode:
+                mode = SystemSetting.get_val("WHATSAPP_INTEGRATION_MODE", "baileys_bridge")
+            return mode.strip().lower() if mode else "baileys_bridge"
+        except Exception:
+            return "baileys_bridge"
+
+    @classmethod
+    def set_tenant_whatsapp_mode(cls, tenant_id: str, mode: str) -> str:
+        """Sets the active WhatsApp provider mode for the tenant ('baileys_bridge' or 'official_meta_cloud')."""
+        clean_tenant = str(tenant_id or "default").strip()
+        norm_mode = "official_meta_cloud" if "meta" in str(mode).lower() or "cloud" in str(mode).lower() else "baileys_bridge"
+        try:
+            from models import SystemSetting
+            SystemSetting.set_val(f"WA_MODE_{clean_tenant}", norm_mode, is_secret=False, description=f"WhatsApp Mode for tenant {clean_tenant}")
+        except Exception:
+            pass
+        return norm_mode
+
+    @classmethod
+    def is_within_24h_window(cls, last_incoming_timestamp: Union[datetime.datetime, str, float, int, None]) -> Tuple[bool, int, Optional[str]]:
+        """Calculates Meta Cloud API 24-hour Customer Service Window compliance.
+        Returns (is_open: bool, seconds_remaining: int, expires_at_iso: str).
+        During the 24-hour window, businesses can send free-form replies.
+        Outside the window, Meta requires pre-approved Business Templates.
+        """
+        if not last_incoming_timestamp:
+            return False, 0, None
+
+        last_dt = None
+        if isinstance(last_incoming_timestamp, (int, float)):
+            last_dt = datetime.datetime.utcfromtimestamp(last_incoming_timestamp)
+        elif isinstance(last_incoming_timestamp, str):
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    last_dt = datetime.datetime.strptime(last_incoming_timestamp.split(".")[0], fmt)
+                    break
+                except Exception:
+                    continue
+        elif isinstance(last_incoming_timestamp, datetime.datetime):
+            last_dt = last_incoming_timestamp
+
+        if not last_dt:
+            return False, 0, None
+
+        now = datetime.datetime.utcnow()
+        diff_sec = (now - last_dt).total_seconds()
+        window_seconds = 24 * 3600  # 86400 seconds
+
+        if 0 <= diff_sec <= window_seconds:
+            rem = int(window_seconds - diff_sec)
+            expires = (last_dt + datetime.timedelta(seconds=window_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+            return True, rem, expires
+        else:
+            return False, 0, (last_dt + datetime.timedelta(seconds=window_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+
+    @classmethod
+    def update_customer_service_window(cls, customer_phone: str, tenant_id: str = "default", last_seen: Optional[datetime.datetime] = None) -> Dict[str, Any]:
+        """Records customer incoming message timestamp to track 24h compliance window."""
+        clean_phone = cls.format_phone_number(customer_phone)
+        now_utc = last_seen or datetime.datetime.utcnow()
+        with cls._tenant_queue_lock:
+            cls._customer_window_cache[(tenant_id, clean_phone)] = now_utc
+
+        is_open, rem_secs, expires_at = cls.is_within_24h_window(now_utc)
+        return {
+            "customer_phone": clean_phone,
+            "tenant_id": tenant_id,
+            "window_open": is_open,
+            "seconds_remaining": rem_secs,
+            "expires_at": expires_at,
+            "last_message_at": now_utc.strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+    @classmethod
+    def get_customer_service_window_status(cls, customer_phone: str, tenant_id: str = "default") -> Dict[str, Any]:
+        """Checks 24-hour customer service window status for a given customer phone."""
+        clean_phone = cls.format_phone_number(customer_phone)
+        with cls._tenant_queue_lock:
+            last_dt = cls._customer_window_cache.get((tenant_id, clean_phone))
+
+        if not last_dt and has_app_context():
+            try:
+                from models import WhatsAppMessage
+                latest_msg = WhatsAppMessage.query.filter(
+                    WhatsAppMessage.direction == "inbound",
+                    (WhatsAppMessage.sender == clean_phone) | (WhatsAppMessage.sender.like(f"%{clean_phone[-10:]}"))
+                ).order_by(WhatsAppMessage.created_at.desc()).first()
+                if latest_msg:
+                    last_dt = latest_msg.created_at
+            except Exception:
+                pass
+
+        is_open, rem_secs, expires_at = cls.is_within_24h_window(last_dt)
+        mode = cls.get_tenant_whatsapp_mode(tenant_id)
+        return {
+            "customer_phone": clean_phone,
+            "tenant_id": tenant_id,
+            "mode": mode,
+            "window_open": is_open or (mode == "baileys_bridge"),
+            "meta_cloud_24h_window_open": is_open,
+            "seconds_remaining": rem_secs,
+            "expires_at": expires_at,
+            "can_send_freeform": is_open or (mode == "baileys_bridge"),
+            "requires_template": (mode == "official_meta_cloud" and not is_open)
+        }
     @classmethod
     def number_to_roman_urdu(cls, n: int) -> str:
         """Converts an integer into natural conversational Roman Urdu words.

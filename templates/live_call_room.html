@@ -436,6 +436,13 @@
         let lastSpokenText = '';
         let lastSpokenTime = 0;
 
+        // Strict Half-Duplex / Turn-Taking State (declared globally in script scope)
+        let currentTurnId = 0;
+        let turnId = 0;
+        let isCustomerSpeaking = false;
+        let pendingTranscript = '';
+        let speechDebounceTimer = null;
+
         // Web Audio Context & Audio Decoding
         let audioCtx = null;
         let currentAudioSource = null;
@@ -469,6 +476,44 @@
                 tb.innerHTML += `<div style="color: #ef4444; font-size: 11px; margin-top: 4px;">⚠️ ${escapeHtml(msg)}</div>`;
                 tb.scrollTop = tb.scrollHeight;
             }
+        }
+
+        function stopIncomingAiAudio() {
+            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
+            if (player) {
+                try {
+                    player.pause();
+                    player.currentTime = 0;
+                } catch (_) {}
+            }
+            if ('speechSynthesis' in window) {
+                try { window.speechSynthesis.cancel(); } catch (_) {}
+            }
+            customerAudioQueue = [];
+            isPlayingCustomerQueue = false;
+            isAiSpeaking = false;
+        }
+
+        function finalizeAndSendCustomerTurn() {
+            if (speechDebounceTimer) {
+                clearTimeout(speechDebounceTimer);
+                speechDebounceTimer = null;
+            }
+            const fullText = pendingTranscript.trim();
+            pendingTranscript = '';
+            isCustomerSpeaking = false;
+            if (!fullText || fullText.length < 2) return;
+
+            currentTurnId++;
+            turnId = currentTurnId;
+            const thisTurnId = currentTurnId;
+
+            // Broadcast to Admin queue so Dashboard receives customer transcript
+            if (typeof broadcastLiveCallChunk === 'function') {
+                try { broadcastLiveCallChunk('customer', null, fullText, 'text/plain'); } catch (_) {}
+            }
+
+            sendLiveVoicePayload({ text: fullText, turnId: thisTurnId });
         }
 
         function switchLanguage(lang) {
@@ -1119,7 +1164,9 @@
             const reader = new FileReader();
             reader.onloadend = () => {
                 const base64Audio = reader.result;
-                sendLiveVoicePayload({ audioBase64: base64Audio });
+                currentTurnId++;
+                turnId = currentTurnId;
+                sendLiveVoicePayload({ audioBase64: base64Audio, turnId: currentTurnId });
             };
             reader.readAsDataURL(audioBlob);
         }
@@ -1140,48 +1187,7 @@
                 recognition.interimResults = true;
                 recognition.lang = currentLanguage;
 
-                
-        // Strict Half-Duplex / Turn-Taking State
-        let isCustomerSpeaking = false;
-        let currentTurnId = 0;
-        let pendingTranscript = '';
-        let speechDebounceTimer = null;
-
-        function stopIncomingAiAudio() {
-            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
-            if (player) {
-                try {
-                    player.pause();
-                    player.currentTime = 0;
-                } catch (_) {}
-            }
-            if ('speechSynthesis' in window) {
-                try { window.speechSynthesis.cancel(); } catch (_) {}
-            }
-            customerAudioQueue = [];
-            isPlayingCustomerQueue = false;
-        }
-
-        function finalizeAndSendCustomerTurn() {
-            if (speechDebounceTimer) {
-                clearTimeout(speechDebounceTimer);
-                speechDebounceTimer = null;
-            }
-            const fullText = pendingTranscript.trim();
-            pendingTranscript = '';
-            isCustomerSpeaking = false;
-            if (!fullText || fullText.length < 2) return;
-
-            currentTurnId++;
-            const thisTurnId = currentTurnId;
-
-            // Broadcast to Admin queue so Dashboard receives customer transcript
-            broadcastLiveCallChunk('customer', null, fullText, 'text/plain');
-
-            sendLiveVoicePayload({ text: fullText, turnId: thisTurnId });
-        }
-
-        recognition.onresult = (event) => {
+                recognition.onresult = (event) => {
             // Customer is speaking: immediately interrupt any AI playback
             stopIncomingAiAudio();
             isCustomerSpeaking = true;
@@ -1214,45 +1220,7 @@
             }
         };
 
-        const _unused_old_onresult = (event) => {
-                    // Ignore mic feedback while AI is speaking
-                    if (isAiSpeaking) return;
 
-                    let interim = '';
-                    let final = '';
-                    for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        if (event.results[i].isFinal) {
-                            final += event.results[i][0].transcript;
-                        } else {
-                            interim += event.results[i][0].transcript;
-                        }
-                    }
-
-                    const display = (final || interim).trim();
-                    const tb = document.getElementById('transcriptBox');
-                    if (tb && display) {
-                        tb.innerHTML = `<div style="color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(display)}</div>`;
-                        tb.scrollTop = tb.scrollHeight;
-                    }
-
-                    if (display) {
-                        setStatus('🟢 Listening... (Hearing voice)');
-                    }
-
-                    clearTimeout(debounceTimer);
-                    const finalClean = final.trim();
-                    const interimClean = interim.trim();
-
-                    if (finalClean.length > 1) {
-                        sendLiveVoicePayload({ text: finalClean });
-                    } else if (interimClean.length > 2) {
-                        debounceTimer = setTimeout(() => {
-                            if (!isAiSpeaking && interimClean.length > 2) {
-                                sendLiveVoicePayload({ text: interimClean });
-                            }
-                        }, 750);
-                    }
-                };
 
                 recognition.onerror = (e) => {
                     console.warn('[Speech recognition error]', e && e.error);
@@ -1316,6 +1284,10 @@
                 if (payload.text) bodyData.text = payload.text;
                 if (payload.audioBase64) bodyData.audioBase64 = payload.audioBase64;
 
+                if (!payload.turnId) {
+                    currentTurnId++;
+                    turnId = currentTurnId;
+                }
                 const targetTurnId = payload.turnId || currentTurnId;
                 const res = await fetch('/api/v1/live-voice-call', {
                     method: 'POST',
@@ -1390,6 +1362,9 @@
             if (e && e.cancelable) e.preventDefault();
             if (!isCallActive || isAiSpeaking) return;
 
+            // Interrupt any AI speech playback immediately upon PTT press
+            stopIncomingAiAudio();
+
             // Ensure AudioContext and Mic strictly inside user gesture
             await ensurePttAudioContextAndMic();
 
@@ -1432,7 +1407,9 @@
                     if (blob.size >= 800) {
                         const reader = new FileReader();
                         reader.onloadend = () => {
-                            sendLiveVoicePayload({ audioBase64: reader.result });
+                            currentTurnId++;
+                            turnId = currentTurnId;
+                            sendLiveVoicePayload({ audioBase64: reader.result, turnId: currentTurnId });
                         };
                         reader.readAsDataURL(blob);
                         return;
@@ -1516,7 +1493,9 @@
             if (!input || !input.value.trim()) return;
             const text = input.value.trim();
             input.value = '';
-            sendLiveVoicePayload({ text: text });
+            currentTurnId++;
+            turnId = currentTurnId;
+            sendLiveVoicePayload({ text: text, turnId: currentTurnId });
         }
 
         function toggleMute() {

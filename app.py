@@ -1799,16 +1799,21 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     def public_order_tracking(order_id: str):
         """Public order tracking portal with live delivery status and Leaflet radar pin."""
         try:
-            from models import EcommerceOrder
+            from models import EcommerceOrder, RideRequest
             order = EcommerceOrder.query.filter(
                 (EcommerceOrder.id == order_id) | (EcommerceOrder.order_number == order_id)
             ).first()
+            ride = None
+            if not order:
+                ride = RideRequest.query.filter_by(id=order_id).first()
+
             jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
             b_name = os.environ.get("BUSINESS_NAME", "Chitral & Global Bazar")
             role = request.args.get("role", "customer").lower().strip()
             return render_template(
                 "track.html",
                 order=order,
+                ride=ride,
                 order_id=order_id,
                 business_name=b_name,
                 currency="PKR",
@@ -1817,7 +1822,33 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             )
         except Exception as e:
             application.logger.error(f"Error rendering /track/{order_id}: {e}", exc_info=True)
-            return render_template("track.html", order=None, order_id=order_id, business_name="Chitral & Global Bazar", currency="PKR", jazzcash_number="03209350858", initial_role="customer")
+            return render_template("track.html", order=None, ride=None, order_id=order_id, business_name="Chitral & Global Bazar", currency="PKR", jazzcash_number="03209350858", initial_role="customer")
+
+    # InDrive-style Fleet & Ride Dispatch Top-Level Route Aliases
+    @application.route("/api/fleet/register", methods=["POST"])
+    def top_fleet_register():
+        from api_v1 import api_fleet_register
+        return api_fleet_register()
+
+    @application.route("/api/fleet/drivers", methods=["GET"])
+    def top_fleet_drivers():
+        from api_v1 import api_fleet_drivers
+        return api_fleet_drivers()
+
+    @application.route("/api/rides/request", methods=["POST"])
+    def top_rides_request():
+        from api_v1 import api_rides_request
+        return api_rides_request()
+
+    @application.route("/api/rides/<ride_id>/bid", methods=["POST"])
+    def top_rides_bid(ride_id: str):
+        from api_v1 import api_rides_bid
+        return api_rides_bid(ride_id)
+
+    @application.route("/api/rides/<ride_id>/accept_bid", methods=["POST"])
+    def top_rides_accept_bid(ride_id: str):
+        from api_v1 import api_rides_accept_bid
+        return api_rides_accept_bid(ride_id)
 
     @application.route("/api/store/order/<order_id>", methods=["GET"])
     def top_store_order_status(order_id: str):

@@ -149,15 +149,17 @@ function triggerSessionBackup() {
   sessionBackupDebounce = setTimeout(async () => {
     sessionBackupDebounce = null;
     try {
+      const tenantId = process.env.TENANT_ID || 'default';
       const backupUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-backup`;
       const res = await fetch(backupUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Internal-Bridge': '1' },
+        body: JSON.stringify({ tenant_id: tenantId }),
         signal: AbortSignal.timeout(6000)
       });
       const data = await res.json().catch(() => null);
       if (data && data.success) {
-        console.log('[WhatsApp Bridge] Session credentials permanently saved to Database!');
+        console.log(`[WhatsApp Bridge] Session credentials for tenant '${tenantId}' permanently saved to Database!`);
       }
     } catch (e) {
       console.warn('[WhatsApp Bridge] Session backup notice:', e.message);
@@ -167,19 +169,22 @@ function triggerSessionBackup() {
 
 function triggerSessionClear() {
   try {
+    const tenantId = process.env.TENANT_ID || 'default';
     const clearUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-clear`;
     fetch(clearUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Internal-Bridge': '1' },
+      body: JSON.stringify({ tenant_id: tenantId }),
       signal: AbortSignal.timeout(4000)
     }).catch(() => {});
   } catch (_) {}
 }
 
 async function tryRestoreFromPythonBackend() {
+  const tenantId = encodeURIComponent(process.env.TENANT_ID || 'default');
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
-      const restoreUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-restore`;
+      const restoreUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-restore?tenant_id=${tenantId}`;
       const res = await fetch(restoreUrl, {
         method: 'GET',
         headers: { 'X-Internal-Bridge': '1' },

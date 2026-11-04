@@ -3317,22 +3317,38 @@ def api_whatsapp_bridge_status():
 @api_v1.route("/whatsapp/session-state", methods=["GET"])
 @require_auth
 def api_whatsapp_session_state():
-    """Returns database-backed session state information."""
+    """Returns database-backed session state information per tenant."""
+    tenant_id = request.args.get("tenant_id") or "default"
     try:
         from database import db
         from sqlalchemy import text
         with db.engine.connect() as conn:
-            row = conn.execute(text("SELECT file_count, length(zip_b64), updated_at FROM wa_session_store WHERE id = 1")).fetchone()
+            row = None
+            if tenant_id and tenant_id != "default":
+                try:
+                    row = conn.execute(
+                        text("SELECT file_count, length(zip_b64), updated_at, tenant_id FROM wa_session_store WHERE tenant_id = :t ORDER BY updated_at DESC LIMIT 1"),
+                        {"t": tenant_id}
+                    ).fetchone()
+                except Exception:
+                    pass
+            if not row:
+                try:
+                    row = conn.execute(text("SELECT file_count, length(zip_b64), updated_at, tenant_id FROM wa_session_store WHERE id = 1")).fetchone()
+                except Exception:
+                    row = conn.execute(text("SELECT file_count, length(zip_b64), updated_at FROM wa_session_store WHERE id = 1")).fetchone()
+
             if row and row[1]:
                 return jsonify({
                     "has_saved_session": True,
+                    "tenant_id": row[3] if len(row) > 3 else tenant_id,
                     "file_count": row[0] or 0,
                     "size_bytes": row[1] or 0,
                     "updated_at": str(row[2]) if row[2] else None
                 }), 200
     except Exception as e:
         logger.warning(f"[WA Bridge] session-state error: {e}")
-    return jsonify({"has_saved_session": False, "file_count": 0, "size_bytes": 0}), 200
+    return jsonify({"has_saved_session": False, "tenant_id": tenant_id, "file_count": 0, "size_bytes": 0}), 200
 
 
 
@@ -3421,41 +3437,91 @@ def _is_bridge_or_authenticated():
 
 @api_v1.route("/whatsapp/session-backup", methods=["POST", "GET"])
 def api_whatsapp_session_backup():
-    """Triggers an immediate database backup of Baileys auth files to Supabase / PostgreSQL."""
+    """Triggers an immediate database backup of Baileys auth files to Supabase / PostgreSQL per tenant."""
     if not _is_bridge_or_authenticated():
         return jsonify({"error": "Unauthorized"}), 401
     try:
+        tenant_id = request.args.get("tenant_id") or (request.get_json(silent=True) or {}).get("tenant_id") or "default"
         from wa_bridge_manager import backup_wa_session_to_db
-        success = backup_wa_session_to_db()
-        return jsonify({"success": success, "message": "WhatsApp session backed up to DB" if success else "No credentials to backup"}), 200
+        success = backup_wa_session_to_db(tenant_id=tenant_id)
+        return jsonify({
+            "success": success,
+            "tenant_id": tenant_id,
+            "message": "WhatsApp session backed up to DB" if success else "No credentials to backup"
+        }), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @api_v1.route("/whatsapp/session-restore", methods=["POST", "GET"])
 def api_whatsapp_session_restore():
-    """Restores Baileys session files from DB into the auth folder on container boot."""
+    """Restores Baileys session files from DB into the auth folder on container boot per tenant."""
     if not _is_bridge_or_authenticated():
         return jsonify({"error": "Unauthorized"}), 401
     try:
+        tenant_id = request.args.get("tenant_id") or (request.get_json(silent=True) or {}).get("tenant_id") or "default"
         from wa_bridge_manager import restore_wa_session_from_db
-        restored = restore_wa_session_from_db()
-        return jsonify({"success": True, "restored": restored, "message": "WhatsApp session restored from DB" if restored else "No session found in DB"}), 200
+        restored = restore_wa_session_from_db(tenant_id=tenant_id)
+        return jsonify({
+            "success": True,
+            "restored": restored,
+            "tenant_id": tenant_id,
+            "message": "WhatsApp session restored from DB" if restored else "No session found in DB"
+        }), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @api_v1.route("/whatsapp/session-clear", methods=["POST", "DELETE"])
 def api_whatsapp_session_clear():
-    """Clears the session from the DB when device is explicitly logged out."""
+    """Clears the session from the DB when device is explicitly logged out per tenant."""
     if not _is_bridge_or_authenticated():
         return jsonify({"error": "Unauthorized"}), 401
     try:
+        tenant_id = request.args.get("tenant_id") or (request.get_json(silent=True) or {}).get("tenant_id") or "default"
         from wa_bridge_manager import clear_wa_session_in_db
-        cleared = clear_wa_session_in_db()
-        return jsonify({"success": cleared, "message": "WhatsApp session cleared from DB"}), 200
+        cleared = clear_wa_session_in_db(tenant_id=tenant_id)
+        return jsonify({"success": cleared, "tenant_id": tenant_id, "message": "WhatsApp session cleared from DB"}), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/whatsapp/mode", methods=["GET", "POST"])
+def api_whatsapp_mode():
+    """Gets or sets the WhatsApp provider mode ('baileys_bridge' or 'official_meta_cloud') per tenant."""
+    from whatsapp_service import WhatsAppService
+    tenant_id = request.args.get("tenant_id") or (request.get_json(silent=True) or {}).get("tenant_id") or "default"
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        new_mode = data.get("mode") or data.get("whatsapp_mode")
+        if not new_mode:
+            return jsonify({"success": False, "error": "Field 'mode' is required ('baileys_bridge' or 'official_meta_cloud')."}), 400
+        set_mode = WhatsAppService.set_tenant_whatsapp_mode(tenant_id, new_mode)
+        return jsonify({"success": True, "tenant_id": tenant_id, "mode": set_mode}), 200
+    else:
+        current_mode = WhatsAppService.get_tenant_whatsapp_mode(tenant_id)
+        return jsonify({"success": True, "tenant_id": tenant_id, "mode": current_mode}), 200
+
+
+@api_v1.route("/whatsapp/customer-window", methods=["GET"])
+def api_whatsapp_customer_window():
+    """Checks 24-hour customer service window status for a customer phone and tenant."""
+    phone = request.args.get("phone") or request.args.get("customer_phone")
+    if not phone:
+        return jsonify({"success": False, "error": "Query param 'phone' is required."}), 400
+    tenant_id = request.args.get("tenant_id") or "default"
+    from whatsapp_service import WhatsAppService
+    status = WhatsAppService.get_customer_service_window_status(phone, tenant_id=tenant_id)
+    return jsonify({"success": True, **status}), 200
+
+
+@api_v1.route("/whatsapp/queue-status", methods=["GET"])
+def api_whatsapp_queue_status():
+    """Returns status, depth, and processed message count of a tenant's queue."""
+    tenant_id = request.args.get("tenant_id") or "default"
+    from whatsapp_service import WhatsAppService
+    status = WhatsAppService.get_tenant_queue_status(tenant_id)
+    return jsonify({"success": True, **status}), 200
 
 
 
@@ -8010,15 +8076,20 @@ _ACTIVE_ORDER_LOCATIONS_LOCK = threading.Lock()
 
 @api_v1.route("/track/<order_id>/location", methods=["GET", "POST"])
 def api_order_tracking_location(order_id: str):
-    """Handles real-time bike rider GPS broadcasting and customer tracking polling."""
+    """Handles real-time multi-vehicle GPS broadcasting and customer tracking polling
+    for both e-commerce deliveries and InDrive-style rides (Bike, Rickshaw, Car, Van).
+    """
     clean_id = str(order_id or "").strip()
     if not clean_id:
         return jsonify({"success": False, "error": "Order ID is required."}), 400
 
-    from models import EcommerceOrder
+    from models import EcommerceOrder, RideRequest, FleetDriver
     order = EcommerceOrder.query.filter(
         (EcommerceOrder.id == clean_id) | (EcommerceOrder.order_number == clean_id)
     ).first()
+    ride = None
+    if not order:
+        ride = RideRequest.query.filter_by(id=clean_id).first()
 
     if request.method == "POST":
         data = request.get_json(silent=True) or {}
@@ -8033,6 +8104,12 @@ def api_order_tracking_location(order_id: str):
         heading = float(data.get("heading") or 0.0)
         now_iso = datetime.datetime.utcnow().isoformat() + "Z"
 
+        vehicle_type = "bike"
+        if ride and ride.vehicle_type:
+            vehicle_type = ride.vehicle_type
+        elif data.get("vehicle_type"):
+            vehicle_type = str(data.get("vehicle_type")).lower().strip()
+
         with _ACTIVE_ORDER_LOCATIONS_LOCK:
             _ACTIVE_ORDER_LOCATIONS[clean_id] = {
                 "lat": lat,
@@ -8040,7 +8117,8 @@ def api_order_tracking_location(order_id: str):
                 "accuracy": accuracy,
                 "speed": speed,
                 "heading": heading,
-                "status": "dispatched",
+                "vehicle_type": vehicle_type,
+                "status": "in_progress" if ride else "dispatched",
                 "updated_at": now_iso
             }
             if order and order.id != clean_id:
@@ -8059,22 +8137,72 @@ def api_order_tracking_location(order_id: str):
                 db.session.rollback()
                 logger.warning(f"Order status dispatch update notice: {_commit_err}")
 
+        if ride:
+            try:
+                if ride.status == "accepted":
+                    ride.status = "in_progress"
+                if ride.assigned_driver_id:
+                    d_obj = db.session.get(FleetDriver, ride.assigned_driver_id)
+                    if d_obj:
+                        d_obj.current_lat = lat
+                        d_obj.current_lng = lng
+                        d_obj.heading = heading
+                        d_obj.speed = speed
+                        d_obj.last_seen = datetime.datetime.utcnow()
+                db.session.commit()
+            except Exception as _r_commit:
+                db.session.rollback()
+
         return jsonify({
             "success": True,
             "order_id": clean_id,
-            "status": "dispatched",
+            "vehicle_type": vehicle_type,
+            "status": "in_progress" if ride else "dispatched",
             "lat": lat,
             "lng": lng,
             "updated_at": now_iso
         }), 200
 
-    # GET request: return latest rider location and customer destination
+    # GET request: return latest vehicle location and destination
     with _ACTIVE_ORDER_LOCATIONS_LOCK:
         loc = _ACTIVE_ORDER_LOCATIONS.get(clean_id)
         if not loc and order:
             loc = _ACTIVE_ORDER_LOCATIONS.get(order.id) or _ACTIVE_ORDER_LOCATIONS.get(order.order_number)
 
-    # Destination resolution: defaults to local Chitral destination
+    # If ride request, return specialized ride structure
+    if ride:
+        dest_lat = ride.dropoff_lat or 35.8659
+        dest_lng = ride.dropoff_lng or 71.7924
+        dest_addr = ride.dropoff_address or "Dropoff Location"
+        pickup_lat = ride.pickup_lat or 35.8518
+        pickup_lng = ride.pickup_lng or 71.7864
+        pickup_addr = ride.pickup_address or "Pickup Location"
+
+        return jsonify({
+            "success": True,
+            "order_id": clean_id,
+            "is_ride": True,
+            "ride": ride.to_dict(),
+            "vehicle_type": ride.vehicle_type,
+            "has_rider": bool(loc),
+            "rider": loc,
+            "pickup": {
+                "lat": pickup_lat,
+                "lng": pickup_lng,
+                "address": pickup_addr
+            },
+            "destination": {
+                "lat": dest_lat,
+                "lng": dest_lng,
+                "address": dest_addr
+            },
+            "customer_offer_pkr": ride.customer_offer_pkr,
+            "final_fare_pkr": ride.final_fare_pkr,
+            "bids": ride.get_bids(),
+            "order_status": ride.status
+        }), 200
+
+    # E-commerce destination resolution: defaults to local Chitral destination
     dest_lat = 35.8659
     dest_lng = 71.7924
     dest_addr = "Chew Bazar / Danin, Chitral"
@@ -8100,6 +8228,294 @@ def api_order_tracking_location(order_id: str):
         },
         "order_status": order.order_status if order else "confirmed"
     }), 200
+
+
+# ===================================================================
+# INDRIVE-STYLE MULTI-VEHICLE FLEET & RIDE/DELIVERY DISPATCH SYSTEM
+# ===================================================================
+
+@api_v1.route("/fleet/register", methods=["POST"])
+def api_fleet_register():
+    """Registers or updates a fleet driver (Bike, Rickshaw, Car, Carry Daba/Van)."""
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip()
+    phone = str(data.get("phone") or "").strip()
+    if not name or not phone:
+        return jsonify({"success": False, "error": "Name and phone are required."}), 400
+
+    vehicle_type = str(data.get("vehicle_type") or "bike").strip().lower()
+    if vehicle_type not in ("bike", "rickshaw", "car", "van"):
+        vehicle_type = "bike"
+
+    plate_no = str(data.get("plate_no") or "").strip()
+    online_status = str(data.get("online_status") or "online").strip().lower()
+    tenant_id = str(data.get("tenant_id") or "default").strip()
+
+    lat = None
+    lng = None
+    try:
+        if data.get("lat") is not None:
+            lat = float(data.get("lat"))
+        if data.get("lng") is not None:
+            lng = float(data.get("lng"))
+    except (ValueError, TypeError):
+        pass
+
+    from models import FleetDriver
+    driver = FleetDriver.query.filter_by(phone=phone, tenant_id=tenant_id).first()
+    if not driver:
+        driver = FleetDriver(
+            tenant_id=tenant_id,
+            name=name,
+            phone=phone,
+            vehicle_type=vehicle_type,
+            plate_no=plate_no,
+            online_status=online_status,
+            current_lat=lat,
+            current_lng=lng
+        )
+        db.session.add(driver)
+    else:
+        driver.name = name
+        driver.vehicle_type = vehicle_type
+        if plate_no:
+            driver.plate_no = plate_no
+        driver.online_status = online_status
+        if lat is not None:
+            driver.current_lat = lat
+        if lng is not None:
+            driver.current_lng = lng
+        driver.last_seen = datetime.datetime.utcnow()
+
+    try:
+        db.session.commit()
+        return jsonify({"success": True, "driver": driver.to_dict()}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/fleet/drivers", methods=["GET"])
+def api_fleet_drivers():
+    """Lists registered fleet drivers with filtering by vehicle_type, online_status, or tenant_id."""
+    v_type = request.args.get("vehicle_type")
+    status = request.args.get("online_status")
+    tenant_id = request.args.get("tenant_id") or "default"
+
+    from models import FleetDriver
+    q = FleetDriver.query
+    if tenant_id and tenant_id != "all":
+        q = q.filter_by(tenant_id=tenant_id)
+    if v_type:
+        q = q.filter_by(vehicle_type=str(v_type).lower().strip())
+    if status:
+        q = q.filter_by(online_status=str(status).lower().strip())
+
+    drivers = q.order_by(FleetDriver.last_seen.desc()).limit(100).all()
+    return jsonify({
+        "success": True,
+        "count": len(drivers),
+        "drivers": [d.to_dict() for d in drivers]
+    }), 200
+
+
+@api_v1.route("/rides/request", methods=["POST"])
+def api_rides_request():
+    """Customer or WhatsApp AI creates a ride/delivery request with InDrive-style fare offer."""
+    data = request.get_json(silent=True) or {}
+    pickup_addr = str(data.get("pickup_address") or "").strip()
+    dropoff_addr = str(data.get("dropoff_address") or "").strip()
+    customer_phone = str(data.get("customer_phone") or data.get("phone") or "").strip()
+    customer_name = str(data.get("customer_name") or data.get("name") or "Valued Customer").strip()
+
+    if not pickup_addr or not dropoff_addr or not customer_phone:
+        return jsonify({"success": False, "error": "pickup_address, dropoff_address, and customer_phone are required."}), 400
+
+    try:
+        offer_pkr = float(data.get("customer_offer_pkr") or data.get("offer_pkr") or 0.0)
+    except (ValueError, TypeError):
+        offer_pkr = 0.0
+
+    vehicle_type = str(data.get("vehicle_type") or "bike").strip().lower()
+    if vehicle_type not in ("bike", "rickshaw", "car", "van"):
+        vehicle_type = "bike"
+
+    tenant_id = str(data.get("tenant_id") or "default").strip()
+
+    pickup_lat = None
+    pickup_lng = None
+    dropoff_lat = None
+    dropoff_lng = None
+    try:
+        if data.get("pickup_lat") is not None:
+            pickup_lat = float(data.get("pickup_lat"))
+        if data.get("pickup_lng") is not None:
+            pickup_lng = float(data.get("pickup_lng"))
+        if data.get("dropoff_lat") is not None:
+            dropoff_lat = float(data.get("dropoff_lat"))
+        if data.get("dropoff_lng") is not None:
+            dropoff_lng = float(data.get("dropoff_lng"))
+    except (ValueError, TypeError):
+        pass
+
+    import uuid
+    ride_id = f"RIDE-{uuid.uuid4().hex[:8].upper()}"
+    from models import RideRequest
+    ride = RideRequest(
+        id=ride_id,
+        tenant_id=tenant_id,
+        customer_name=customer_name,
+        customer_phone=customer_phone,
+        pickup_address=pickup_addr,
+        dropoff_address=dropoff_addr,
+        pickup_lat=pickup_lat or 35.8518,
+        pickup_lng=pickup_lng or 71.7864,
+        dropoff_lat=dropoff_lat or 35.8659,
+        dropoff_lng=dropoff_lng or 71.7924,
+        vehicle_type=vehicle_type,
+        customer_offer_pkr=offer_pkr,
+        status="requested"
+    )
+
+    try:
+        db.session.add(ride)
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "ride_id": ride.id,
+            "tracking_url": f"/track/{ride.id}",
+            "ride": ride.to_dict()
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/rides/<ride_id>/bid", methods=["POST"])
+def api_rides_bid(ride_id: str):
+    """Driver accepts customer offer or submits counter-fare offer (InDrive style)."""
+    from models import RideRequest, FleetDriver
+    ride = RideRequest.query.filter_by(id=str(ride_id).strip()).first()
+    if not ride:
+        return jsonify({"success": False, "error": f"Ride '{ride_id}' not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    driver_id = data.get("driver_id")
+    driver_name = str(data.get("driver_name") or "Partner Driver").strip()
+    driver_phone = str(data.get("driver_phone") or "").strip()
+    vehicle_type = str(data.get("vehicle_type") or ride.vehicle_type).strip().lower()
+    bid_type = str(data.get("bid_type") or "counter").strip().lower()
+
+    if driver_id:
+        driver_obj = db.session.get(FleetDriver, int(driver_id))
+        if driver_obj:
+            driver_name = driver_obj.name
+            driver_phone = driver_obj.phone
+            vehicle_type = driver_obj.vehicle_type
+
+    if bid_type in ("accept", "accepted"):
+        bid_pkr = ride.customer_offer_pkr
+    else:
+        try:
+            bid_pkr = float(data.get("counter_offer_pkr") or data.get("bid_pkr") or ride.customer_offer_pkr)
+        except (ValueError, TypeError):
+            bid_pkr = ride.customer_offer_pkr
+
+    new_bid = ride.add_bid(
+        driver_id=int(driver_id) if driver_id else 0,
+        driver_name=driver_name,
+        driver_phone=driver_phone,
+        vehicle_type=vehicle_type,
+        bid_type=bid_type,
+        bid_pkr=bid_pkr
+    )
+
+    try:
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "ride_id": ride.id,
+            "status": ride.status,
+            "bid": new_bid,
+            "all_bids": ride.get_bids()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/rides/<ride_id>/accept_bid", methods=["POST"])
+def api_rides_accept_bid(ride_id: str):
+    """Customer or Admin accepts a driver's bid, assigning driver and opening live tracking."""
+    from models import RideRequest, FleetDriver
+    ride = RideRequest.query.filter_by(id=str(ride_id).strip()).first()
+    if not ride:
+        return jsonify({"success": False, "error": f"Ride '{ride_id}' not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    bids = ride.get_bids()
+    if not bids:
+        return jsonify({"success": False, "error": "No driver bids available for this ride."}), 400
+
+    selected_bid = None
+    bid_idx = data.get("bid_index")
+    if bid_idx is not None and 0 <= int(bid_idx) < len(bids):
+        selected_bid = bids[int(bid_idx)]
+    elif data.get("driver_id"):
+        d_id = int(data.get("driver_id"))
+        for b in bids:
+            if b.get("driver_id") == d_id:
+                selected_bid = b
+                break
+
+    if not selected_bid:
+        selected_bid = bids[0]
+
+    for b in bids:
+        if b == selected_bid:
+            b["status"] = "accepted"
+        else:
+            b["status"] = "declined"
+    ride.set_bids(bids)
+
+    ride.status = "accepted"
+    ride.final_fare_pkr = selected_bid["bid_pkr"]
+    driver_id = selected_bid.get("driver_id")
+    driver_obj = None
+    if driver_id:
+        ride.assigned_driver_id = driver_id
+        driver_obj = db.session.get(FleetDriver, driver_id)
+        if driver_obj:
+            driver_obj.online_status = "busy"
+
+    driver_lat = driver_obj.current_lat if (driver_obj and driver_obj.current_lat) else (ride.pickup_lat or 35.8518)
+    driver_lng = driver_obj.current_lng if (driver_obj and driver_obj.current_lng) else (ride.pickup_lng or 71.7864)
+    with _ACTIVE_ORDER_LOCATIONS_LOCK:
+        _ACTIVE_ORDER_LOCATIONS[ride.id] = {
+            "lat": driver_lat,
+            "lng": driver_lng,
+            "accuracy": 5.0,
+            "speed": 20.0,
+            "heading": 0.0,
+            "vehicle_type": selected_bid.get("vehicle_type", ride.vehicle_type),
+            "status": "accepted",
+            "driver_name": selected_bid.get("driver_name"),
+            "updated_at": datetime.datetime.utcnow().isoformat() + "Z"
+        }
+
+    try:
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "ride_id": ride.id,
+            "status": "accepted",
+            "fare_pkr": ride.final_fare_pkr,
+            "driver": driver_obj.to_dict() if driver_obj else selected_bid,
+            "tracking_url": f"/track/{ride.id}"
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # --- 3. Abandoned Cart Recovery Alerts Endpoints ---

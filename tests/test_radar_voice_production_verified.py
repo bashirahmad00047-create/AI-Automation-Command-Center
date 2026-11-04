@@ -297,3 +297,258 @@ def test_live_rider_gps_broadcast_and_polling(client):
     assert "destination" in get_json
     assert get_json["destination"]["lat"] is not None
 
+def test_live_call_room_turn_id_global_scope(client):
+    """Regression test: Ensure currentTurnId and turnId are declared in global <script> scope
+
+    before any function usage or async handler, preventing ReferenceError on mobile.
+    Also validates JavaScript syntax with node -c.
+    """
+    import re
+    import subprocess
+    import tempfile
+
+    template_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "templates", "live_call_room.html"))
+    assert os.path.exists(template_path), f"Template not found: {template_path}"
+
+    with open(template_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+
+    # 1. Verify let currentTurnId = 0 and let turnId = 0 exist in template
+    assert "let currentTurnId = 0;" in html_content, "let currentTurnId = 0; missing in template"
+    assert "let turnId = 0;" in html_content, "let turnId = 0; missing in template"
+
+    # 2. Extract <script> content
+    m = re.search(r"<script>(.*?)</script>", html_content, re.DOTALL)
+    assert m is not None, "<script> tag not found in live_call_room.html"
+    js_content = m.group(1)
+
+    # 3. Check position: declaration MUST precede sendLiveVoicePayload, startPrimarySpeechRecognition, etc.
+    decl_pos = js_content.find("let currentTurnId = 0;")
+    assert decl_pos != -1, "currentTurnId declaration not found in <script>"
+
+    send_payload_pos = js_content.find("async function sendLiveVoicePayload")
+    assert send_payload_pos != -1, "sendLiveVoicePayload function not found"
+    assert decl_pos < send_payload_pos, "currentTurnId declared AFTER sendLiveVoicePayload (must be in top-level scope)"
+
+    start_speech_pos = js_content.find("function startPrimarySpeechRecognition")
+    assert start_speech_pos != -1, "startPrimarySpeechRecognition function not found"
+    assert decl_pos < start_speech_pos, "currentTurnId declared AFTER startPrimarySpeechRecognition (must be global)"
+
+    # Ensure it is NOT declared inside startPrimarySpeechRecognition
+    inner_speech_code = js_content[start_speech_pos:send_payload_pos]
+    assert "let currentTurnId" not in inner_speech_code, "currentTurnId should not be scoped inside startPrimarySpeechRecognition"
+
+    # 4. Check rendered route /call/<phone>
+    res = client.get("/call/923209350858")
+    assert res.status_code == 200
+    rendered = res.get_data(as_text=True)
+    assert "let currentTurnId = 0;" in rendered
+    assert "let turnId = 0;" in rendered
+
+    # 5. Syntax validation via node -c
+    js_for_node = re.sub(r"\{\{.*?\}\}", "923209350858", js_content)
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as tf:
+        tf.write(js_for_node)
+        temp_js_path = tf.name
+
+    try:
+        proc = subprocess.run(["node", "-c", temp_js_path], capture_output=True, text=True)
+        assert proc.returncode == 0, f"node -c failed: {proc.stderr}"
+    finally:
+        if os.path.exists(temp_js_path):
+            os.remove(temp_js_path)
+
+def test_multi_tenant_whatsapp_hybrid_and_24h_window(client):
+    """Verify multi-tenant WhatsApp hybrid provider mode, non-blocking queue,
+
+    and Meta 24-hour customer service window compliance helper.
+    """
+    from whatsapp_service import WhatsAppService
+    import datetime
+
+    tenant = "tenant_production_retail_01"
+
+    # 1. Default mode is baileys_bridge
+    default_mode = WhatsAppService.get_tenant_whatsapp_mode(tenant)
+    assert default_mode in ("baileys_bridge", "official_meta_cloud")
+
+    # 2. Switch mode to official_meta_cloud
+    set_mode = WhatsAppService.set_tenant_whatsapp_mode(tenant, "official_meta_cloud")
+    assert set_mode == "official_meta_cloud"
+    assert WhatsAppService.get_tenant_whatsapp_mode(tenant) == "official_meta_cloud"
+
+    # 3. 24-hour compliance window calculations
+    now_utc = datetime.datetime.utcnow()
+    is_open, rem_secs, exp_str = WhatsAppService.is_within_24h_window(now_utc)
+    assert is_open is True
+    assert rem_secs > 86000
+    assert exp_str is not None
+
+    past_25h = now_utc - datetime.timedelta(hours=25)
+    is_open_past, rem_secs_past, _ = WhatsAppService.is_within_24h_window(past_25h)
+    assert is_open_past is False
+    assert rem_secs_past == 0
+
+    # 4. Update customer service window
+    test_phone = "923209350858"
+    WhatsAppService.update_customer_service_window(test_phone, tenant_id=tenant, last_seen=now_utc)
+    status = WhatsAppService.get_customer_service_window_status(test_phone, tenant_id=tenant)
+    assert status["meta_cloud_24h_window_open"] is True
+    assert status["can_send_freeform"] is True
+
+    # 5. Non-blocking queue enqueue & status check
+    q_res = WhatsAppService.enqueue_tenant_message(tenant, {"type": "test_ping", "from": test_phone})
+    assert q_res.get("success") is True
+    assert q_res.get("queued") is True
+
+    q_stat = WhatsAppService.get_tenant_queue_status(tenant)
+    assert q_stat["tenant_id"] == tenant
+    assert q_stat["enqueued_total"] >= 1
+
+    # 6. Test HTTP endpoints
+    mode_get = client.get(f"/api/v1/whatsapp/mode?tenant_id={tenant}")
+    assert mode_get.status_code == 200
+    assert mode_get.get_json().get("mode") == "official_meta_cloud"
+
+    win_get = client.get(f"/api/v1/whatsapp/customer-window?phone={test_phone}&tenant_id={tenant}")
+    assert win_get.status_code == 200
+    assert win_get.get_json().get("meta_cloud_24h_window_open") is True
+
+
+def test_fleet_driver_registration_and_multi_vehicle_status(client):
+    """Verify fleet drivers can register across multiple vehicle types (bike, rickshaw, car, van)
+
+    and report online GPS status.
+    """
+    # 1. Register Bike Rider
+    res_bike = client.post("/api/fleet/register", json={
+        "name": "Javed Bike Express",
+        "phone": "03471000111",
+        "vehicle_type": "bike",
+        "plate_no": "CH-BK-101",
+        "online_status": "online",
+        "lat": 35.8518,
+        "lng": 71.7864
+    })
+    assert res_bike.status_code in (200, 201)
+    d_bike = res_bike.get_json().get("driver")
+    assert d_bike["vehicle_type"] == "bike"
+    assert d_bike["online_status"] == "online"
+
+    # 2. Register Auto Rickshaw Driver
+    res_rickshaw = client.post("/api/fleet/register", json={
+        "name": "Gulzar Auto Rickshaw",
+        "phone": "03472000222",
+        "vehicle_type": "rickshaw",
+        "plate_no": "CH-RK-202",
+        "online_status": "online",
+        "lat": 35.8530,
+        "lng": 71.7870
+    })
+    assert res_rickshaw.status_code in (200, 201)
+    d_rk = res_rickshaw.get_json().get("driver")
+    assert d_rk["vehicle_type"] == "rickshaw"
+
+    # 3. Register Car / Taxi Driver
+    res_car = client.post("/api/fleet/register", json={
+        "name": "Shabbir Chitral Taxi",
+        "phone": "03473000333",
+        "vehicle_type": "car",
+        "plate_no": "CH-CAR-303",
+        "online_status": "online",
+        "lat": 35.8550,
+        "lng": 71.7890
+    })
+    assert res_car.status_code in (200, 201)
+    d_car = res_car.get_json().get("driver")
+    assert d_car["vehicle_type"] == "car"
+
+    # 4. List drivers and filter by vehicle_type
+    list_res = client.get("/api/fleet/drivers?vehicle_type=rickshaw")
+    assert list_res.status_code == 200
+    drivers = list_res.get_json().get("drivers", [])
+    assert len(drivers) >= 1
+    assert any(d["phone"] == "03472000222" for d in drivers)
+
+
+def test_indrive_ride_request_bidding_and_tracking(client):
+    """Verify InDrive-style ride creation with customer fare offer, driver bidding/counter-offers,
+
+    acceptance, and live multi-vehicle GPS tracking on /track/<id>.
+    """
+    # 1. Customer creates Ride Request with initial fare offer of PKR 300
+    ride_payload = {
+        "customer_name": "Zubair Ahmad",
+        "customer_phone": "03209350858",
+        "pickup_address": "Ataliq Bazar, Chitral",
+        "dropoff_address": "Danin, Chitral",
+        "pickup_lat": 35.8518,
+        "pickup_lng": 71.7864,
+        "dropoff_lat": 35.8697,
+        "dropoff_lng": 71.7840,
+        "vehicle_type": "rickshaw",
+        "customer_offer_pkr": 300.0
+    }
+    create_res = client.post("/api/rides/request", json=ride_payload)
+    assert create_res.status_code in (200, 201)
+    create_json = create_res.get_json()
+    assert create_json.get("success") is True
+    ride_id = create_json.get("ride_id")
+    assert ride_id.startswith("RIDE-")
+    assert "/track/" in create_json.get("tracking_url")
+
+    # 2. Driver 1 submits a counter-fare offer of PKR 350
+    bid_payload = {
+        "driver_name": "Gulzar Auto Rickshaw",
+        "driver_phone": "03472000222",
+        "vehicle_type": "rickshaw",
+        "bid_type": "counter",
+        "counter_offer_pkr": 350.0
+    }
+    bid_res = client.post(f"/api/rides/{ride_id}/bid", json=bid_payload)
+    assert bid_res.status_code == 200
+    bid_json = bid_res.get_json()
+    assert bid_json.get("success") is True
+    assert bid_json.get("status") == "bidding"
+    assert len(bid_json.get("all_bids")) == 1
+    assert bid_json["all_bids"][0]["bid_pkr"] == 350.0
+
+    # 3. Customer accepts the counter-offer
+    accept_res = client.post(f"/api/rides/{ride_id}/accept_bid", json={"bid_index": 0})
+    assert accept_res.status_code == 200
+    accept_json = accept_res.get_json()
+    assert accept_json.get("success") is True
+    assert accept_json.get("status") == "accepted"
+    assert accept_json.get("fare_pkr") == 350.0
+
+    # 4. Driver broadcasts live GPS location
+    loc_post = client.post(f"/api/track/{ride_id}/location", json={
+        "lat": 35.8525,
+        "lng": 71.7868,
+        "speed": 32.0,
+        "heading": 90.0,
+        "vehicle_type": "rickshaw"
+    })
+    assert loc_post.status_code == 200
+    loc_post_json = loc_post.get_json()
+    assert loc_post_json.get("success") is True
+    assert loc_post_json.get("vehicle_type") == "rickshaw"
+
+    # 5. Customer polls location
+    loc_get = client.get(f"/api/track/{ride_id}/location")
+    assert loc_get.status_code == 200
+    loc_get_json = loc_get.get_json()
+    assert loc_get_json.get("success") is True
+    assert loc_get_json.get("is_ride") is True
+    assert loc_get_json.get("vehicle_type") == "rickshaw"
+    assert loc_get_json.get("final_fare_pkr") == 350.0
+    assert loc_get_json.get("has_rider") is True
+    assert loc_get_json["rider"]["lat"] == 35.8525
+
+    # 6. Render /track/<ride_id>
+    page_res = client.get(f"/track/{ride_id}")
+    assert page_res.status_code == 200
+    page_html = page_res.get_data(as_text=True)
+    assert ride_id in page_html
+    assert "InDrive Fare Offer" in page_html
+
