@@ -216,6 +216,7 @@
             text-align: center;
             z-index: 50;
             border-radius: 28px;
+            cursor: pointer;
         }
         .btn-start-call {
             background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -238,7 +239,7 @@
 <body>
     <div class="call-card">
         <!-- Initial Connect Overlay: Captures initial user click to unlock AudioContext -->
-        <div id="connectOverlay" class="connect-overlay">
+        <div id="connectOverlay" class="connect-overlay" onclick="executeJoinFlow(event)">
             <div style="font-size: 56px; margin-bottom: 16px; filter: drop-shadow(0 0 16px rgba(16, 185, 129, 0.6));">🎙️</div>
             <h2 style="font-size: 21px; font-weight: 700; color: #f8fafc; margin-bottom: 8px;">BashFlow AI Receptionist</h2>
             <p style="font-size: 13px; color: #94a3b8; max-width: 270px; line-height: 1.5; margin-bottom: 24px;">
@@ -246,7 +247,7 @@
             </p>
             <button type="button" class="btn-start-call" id="joinCallBtn" onclick="executeJoinFlow(event)">
                 <span>📞</span>
-                <span id="joinCallBtnText">Tap to Start Call</span>
+                <span id="joinCallBtnText">Tap to Connect Live Call</span>
             </button>
             <div style="font-size: 11px; color: #64748b; margin-top: 18px;">
                 Instant Hands-Free Voice • No Typing Required
@@ -335,20 +336,20 @@
         let lastSpokenText = '';
         let lastSpokenTime = 0;
 
-        let isCustomerSpeaking = false;
-        let pendingTranscript = '';
-        let speechDebounceTimer = null;
-
         let audioCtx = null;
         let currentAudioSource = null;
         let micStream = null;
         let micAnalyser = null;
-        let micAnimFrame = null;
 
         let mediaRecorder = null;
-        let recordedChunks = [];
-        let vadSpeechDetected = false;
-        let vadSilenceTimer = null;
+        let recordedAudioChunks = [];
+        let isVADRecording = false;
+        let vadInterval = null;
+        let silenceDurationMs = 0;
+        let userHasSpoken = false;
+
+        let speechDebounceTimer = null;
+        let recognition = null;
 
         function setStatus(text) {
             const el = document.getElementById('callStatusLabel');
@@ -546,7 +547,6 @@
             if (overlay) overlay.style.display = 'none';
 
             isCallActive = true;
-            // Synchronously unlock AudioContext AND player in this direct click gesture
             try {
                 const AudioCtx = window.AudioContext || window.webkitAudioContext;
                 if (!audioCtx && AudioCtx) audioCtx = new AudioCtx();
@@ -586,14 +586,6 @@
                     });
                 }
             }
-
-            try {
-                const AudioCtx = window.AudioContext || window.webkitAudioContext;
-                if (!audioCtx && AudioCtx) audioCtx = new AudioCtx();
-                if (audioCtx && audioCtx.state === 'suspended') {
-                    audioCtx.resume().catch(() => {});
-                }
-            } catch (_) {}
 
             setupDualMicPipeline();
         }
@@ -635,6 +627,11 @@
             isCallActive = false;
             stopTimer();
             stopIncomingAiAudio();
+
+            if (vadInterval) {
+                clearInterval(vadInterval);
+                vadInterval = null;
+            }
 
             if (customerAudioPollInterval) {
                 clearInterval(customerAudioPollInterval);
@@ -707,7 +704,7 @@
                     if (tb) {
                         tb.innerHTML = `<span style="color:#10b981;"><b>Assistant:</b> ${escapeHtml(greeting)}</span>`;
                     }
-                    speakAIResponse(greeting, data.audioBase64 || data.audio_base64 || '');
+                    speakAIResponse(greeting, data.audio_data_uri || data.audioBase64 || data.audio_base64 || '');
                 } else {
                     setStatus('Listening...');
                 }
@@ -717,14 +714,13 @@
         }
 
         // ===================================================================
-        // 5. DUAL-MIC PIPELINE WITH 1.2S SILENCE DETECTION & 0MS BARGE-IN
+        // 5. WEBAUDIO VAD (RMS 100ms) + MEDIA RECORDER LOOP (REAL CALL)
         // ===================================================================
         function setupDualMicPipeline() {
             if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
                 navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
                     micStream = stream;
-                    setupMicrophoneAnalyser(stream);
-                    setupMediaRecorderVAD(stream);
+                    startWebAudioVADLoop(stream);
                 }).catch(() => {
                     setStatus('Listening...');
                 });
@@ -732,58 +728,119 @@
             startPrimarySpeechRecognition();
         }
 
-        function setupMicrophoneAnalyser(stream) {
+        function startWebAudioVADLoop(stream) {
+            if (vadInterval) clearInterval(vadInterval);
+            silenceDurationMs = 0;
+            userHasSpoken = false;
+
             try {
                 const AudioCtx = window.AudioContext || window.webkitAudioContext;
                 if (!audioCtx && AudioCtx) audioCtx = new AudioCtx();
                 if (audioCtx && audioCtx.state === 'suspended') {
                     audioCtx.resume().catch(() => {});
                 }
-                const source = audioCtx.createMediaStreamSource(stream);
-                micAnalyser = audioCtx.createAnalyser();
-                micAnalyser.fftSize = 256;
-                source.connect(micAnalyser);
-            } catch (_) {}
-        }
-
-        function setupMediaRecorderVAD(stream) {
-            try {
-                let options = { mimeType: 'audio/webm' };
-                if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-                    options = { mimeType: 'audio/webm;codecs=opus' };
+                if (!micAnalyser && audioCtx) {
+                    const src = audioCtx.createMediaStreamSource(stream);
+                    micAnalyser = audioCtx.createAnalyser();
+                    micAnalyser.fftSize = 512;
+                    src.connect(micAnalyser);
                 }
-                mediaRecorder = new MediaRecorder(stream, options);
-                recordedChunks = [];
-                mediaRecorder.ondataavailable = e => {
-                    if (e.data && e.data.size > 0) {
-                        recordedChunks.push(e.data);
-                    }
-                };
-                mediaRecorder.start(250);
             } catch (_) {}
-        }
 
-        function handleVadSpeechCompletion() {
-            if (isMuted || !isCallActive) return;
-            if (recordedChunks.length === 0) return;
+            function initRecorder() {
+                try {
+                    let opts = { mimeType: 'audio/webm' };
+                    if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                        opts = { mimeType: 'audio/webm;codecs=opus' };
+                    }
+                    mediaRecorder = new MediaRecorder(stream, opts);
+                    recordedAudioChunks = [];
+                    mediaRecorder.ondataavailable = (e) => {
+                        if (e.data && e.data.size > 0) {
+                            recordedAudioChunks.push(e.data);
+                        }
+                    };
+                    mediaRecorder.onstop = () => {
+                        if (recordedAudioChunks.length > 0 && isCallActive && !isMuted) {
+                            const audioBlob = new Blob(recordedAudioChunks, { type: 'audio/webm' });
+                            recordedAudioChunks = [];
+                            if (audioBlob.size > 800) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                    const b64 = reader.result;
+                                    currentTurnId++;
+                                    turnId = currentTurnId;
+                                    broadcastLiveCallChunk('customer', b64, null, 'audio/webm');
+                                    sendLiveVoicePayload({ audioBase64: b64, turnId: currentTurnId });
+                                };
+                                reader.readAsDataURL(audioBlob);
+                            }
+                        }
+                    };
+                } catch (_) {}
+            }
 
-            const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
-            recordedChunks = [];
-            if (audioBlob.size < 1800) return;
+            initRecorder();
 
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64Audio = reader.result;
-                currentTurnId++;
-                turnId = currentTurnId;
-                broadcastLiveCallChunk('customer', base64Audio, null, 'audio/webm');
-                sendLiveVoicePayload({ audioBase64: base64Audio, turnId: currentTurnId });
-            };
-            reader.readAsDataURL(audioBlob);
+            const pcmData = new Float32Array(micAnalyser ? micAnalyser.fftSize : 256);
+
+            vadInterval = setInterval(() => {
+                if (!isCallActive || isMuted) return;
+
+                let rms = 0;
+                if (micAnalyser) {
+                    micAnalyser.getFloatTimeDomainData(pcmData);
+                    let sum = 0;
+                    for (let i = 0; i < pcmData.length; i++) {
+                        sum += pcmData[i] * pcmData[i];
+                    }
+                    rms = Math.sqrt(sum / pcmData.length);
+                }
+
+                if (rms > 0.02) {
+                    // User is speaking
+                    if (isAiSpeaking) {
+                        // 0ms BARGE-IN: Immediately mute and stop AI voice
+                        stopIncomingAiAudio();
+                    }
+                    setStatus('Listening to you...');
+                    setWaveAnimation(true);
+                    userHasSpoken = true;
+                    silenceDurationMs = 0;
+
+                    if (mediaRecorder && mediaRecorder.state !== 'recording') {
+                        recordedAudioChunks = [];
+                        try {
+                            mediaRecorder.start(200);
+                            isVADRecording = true;
+                        } catch (_) {}
+                    }
+                } else {
+                    // Silence detection
+                    if (userHasSpoken) {
+                        silenceDurationMs += 100;
+                        if (silenceDurationMs >= 1200) {
+                            // 1.2s silence reached: dispatch recorded turn
+                            userHasSpoken = false;
+                            silenceDurationMs = 0;
+                            setWaveAnimation(false);
+                            setStatus('Assistant Speaking...');
+                            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                                try {
+                                    mediaRecorder.stop();
+                                } catch (_) {}
+                            }
+                        }
+                    } else if (!isAiSpeaking) {
+                        setWaveAnimation(false);
+                        setStatus('Listening...');
+                    }
+                }
+            }, 100);
         }
 
         // ===================================================================
-        // 6. SPEECH RECOGNITION (WEB SPEECH API)
+        // 6. SPEECH RECOGNITION (WEB SPEECH API FALLBACK / COMPANION)
         // ===================================================================
         let isRecognitionRunning = false;
 
@@ -805,7 +862,6 @@
                 recognition.onresult = (event) => {
                     if (isMuted || !isCallActive) return;
 
-                    // 0ms BARGE-IN: If user speaks while assistant is speaking, immediately stop AI
                     if (isAiSpeaking) {
                         stopIncomingAiAudio();
                         setStatus('Listening...');
@@ -825,32 +881,19 @@
                     const liveSpeech = (finalTranscript || interimTranscript).trim();
                     if (liveSpeech) {
                         setWaveAnimation(true);
-                        setStatus('Listening...');
+                        setStatus('Listening to you...');
                         const tb = document.getElementById('transcriptBox');
                         if (tb) {
                             tb.innerHTML = `<span style="color:#cbd5e1;"><b>You:</b> ${escapeHtml(liveSpeech)}</span>`;
                         }
 
-                        // 1.2s Silence Detection: convert recorded real voice chunks to base64 WebM
                         if (speechDebounceTimer) clearTimeout(speechDebounceTimer);
                         speechDebounceTimer = setTimeout(() => {
                             if (liveSpeech && isCallActive && !isMuted) {
                                 currentTurnId++;
                                 turnId = currentTurnId;
-                                if (recordedChunks && recordedChunks.length > 0) {
-                                    const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
-                                    recordedChunks = [];
-                                    const reader = new FileReader();
-                                    reader.onloadend = () => {
-                                        const base64Audio = reader.result;
-                                        broadcastLiveCallChunk('customer', base64Audio, liveSpeech, 'audio/webm');
-                                        sendLiveVoicePayload({ text: liveSpeech, audioBase64: base64Audio, turnId: currentTurnId });
-                                    };
-                                    reader.readAsDataURL(audioBlob);
-                                } else {
-                                    broadcastLiveCallChunk('customer', null, liveSpeech, 'text/plain');
-                                    sendLiveVoicePayload({ text: liveSpeech, turnId: currentTurnId });
-                                }
+                                broadcastLiveCallChunk('customer', null, liveSpeech, 'text/plain');
+                                sendLiveVoicePayload({ text: liveSpeech, turnId: currentTurnId });
                             }
                         }, 1200);
                     }
@@ -872,7 +915,7 @@
         }
 
         // ===================================================================
-        // 7. ULTRA-FAST SEND TO /api/v1/live-voice-call
+        // 7. ULTRA-FAST SEND TO /api/call/voice & /api/v1/live-voice-call
         // ===================================================================
         async function sendLiveVoicePayload(payload) {
             if (!isCallActive) return;
@@ -932,7 +975,7 @@
                         tb.innerHTML = `<span style="color:#10b981;"><b>Assistant:</b> ${escapeHtml(reply)}</span>`;
                     }
 
-                    const outAudioB64 = data.audioBase64 || data.audio_base64 || (data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio\/\w+;base64,/, '') : '');
+                    const outAudioB64 = data.audio_data_uri || data.audioBase64 || data.audio_base64 || '';
                     speakAIResponse(reply, outAudioB64);
                 } else {
                     setStatus('Listening...');

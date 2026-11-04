@@ -12575,15 +12575,21 @@ function processAdminAudioQueue() {
             mime = 'audio/webm';
         }
         const uri = cleanB64.startsWith('data:') ? cleanB64 : (`data:${mime};base64,` + cleanB64);
-        if (player) {
-            player.src = uri;
-            player.currentTime = 0;
-            player.onended = () => advance();
-            player.onerror = (err) => {
+        let activePlayer = player;
+        if (!activePlayer) {
+            try {
+                activePlayer = new Audio();
+            } catch (_) {}
+        }
+        if (activePlayer) {
+            activePlayer.src = uri;
+            activePlayer.currentTime = 0;
+            activePlayer.onended = () => advance();
+            activePlayer.onerror = (err) => {
                 console.log('[Remote Voice Player Error]', err);
                 fallbackSynth();
             };
-            const p = player.play();
+            const p = activePlayer.play();
             if (p !== undefined) {
                 p.catch((err) => {
                     console.log('[Remote Voice Player Play Exception]', err);

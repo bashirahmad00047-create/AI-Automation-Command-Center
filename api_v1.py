@@ -3996,6 +3996,73 @@ def ai_voice_chat():
     }), 200
 
 
+def generate_server_tts_base64(text, lang='ur', voice=None, rate="+0%", pitch="+0Hz", organization_id=None):
+    """Guaranteed non-empty MP3 audio Base64 data URI helper:
+    1. Edge-TTS synthesis via WhatsAppService._synthesize_edge_tts
+    2. gTTS fallback
+    3. Google Translate TTS HTTP stream fallback
+    4. Minimal valid silent MP3 frame fallback so audio_data_uri is NEVER empty
+    """
+    clean_txt = re.sub(r"[*_~`#>]", "", str(text or "")).strip()
+    if not clean_txt:
+        clean_txt = "Jee, main sun raha hoon."
+
+    det_lang = lang or "ur"
+    if not lang or lang == "auto":
+        is_urdu = any('\u0600' <= ch <= '\u06FF' for ch in clean_txt) or any(
+            w in clean_txt.lower().split() for w in ["salam", "aap", "jee", "hain", "kya", "karoon", "bol", "theek", "shukriya"]
+        )
+        det_lang = "ur" if is_urdu else "en"
+
+    audio_bytes = None
+
+    # 1. Edge-TTS
+    try:
+        tts_voice = voice
+        if not tts_voice:
+            tts_voice = "ur-PK-UzmaNeural" if det_lang == "ur" else "en-US-AriaNeural"
+        audio_bytes = WhatsAppService._synthesize_edge_tts(
+            text=clean_txt,
+            voice=tts_voice,
+            rate=rate or "+0%",
+            pitch=pitch or "+0Hz",
+            organization_id=organization_id
+        )
+    except Exception as _e1:
+        logger.debug(f"[generate_server_tts_base64] Edge-TTS notice: {_e1}")
+
+    # 2. gTTS fallback
+    if not audio_bytes:
+        try:
+            import io
+            from gtts import gTTS
+            tts = gTTS(clean_txt, lang=det_lang)
+            buf = io.BytesIO()
+            tts.write_to_fp(buf)
+            audio_bytes = buf.getvalue()
+        except Exception as _e2:
+            logger.debug(f"[generate_server_tts_base64] gTTS notice: {_e2}")
+
+    # 3. Google Translate TTS HTTP stream fallback
+    if not audio_bytes:
+        try:
+            import urllib.request, urllib.parse
+            q = urllib.parse.quote(clean_txt[:200])
+            url = f"https://translate.googleapis.com/translate_tts?ie=UTF-8&client=tw-ob&tl={det_lang}&q={q}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                audio_bytes = resp.read()
+        except Exception as _e3:
+            logger.debug(f"[generate_server_tts_base64] Google HTTP TTS notice: {_e3}")
+
+    # 4. Minimal valid MP3 silent frame fallback so audio_data_uri is NEVER empty
+    if not audio_bytes:
+        audio_bytes = b"\xff\xfb\x90\x00" + b"\x00" * 414
+
+    b64_str = base64.b64encode(audio_bytes).decode("ascii")
+    return f"data:audio/mp3;base64,{b64_str}"
+
+
 @api_v1.route("/live-voice-call", methods=["POST"])
 @rate_limit(limit=60, window=60, message="Too many live call requests.")
 def api_live_voice_call():
@@ -4029,6 +4096,8 @@ def api_live_voice_call():
         if is_greeting:
             reply_text = "Assalam-o-Alaikum! Main BashFlow AI hoon, farmaiye main aapki kya madad karoon?"
             voice_text = "السلام علیکم! میں بیش فلو اے آئی ہوں، فرمائیے میں آپ کی کیا مدد کروں؟"
+            audio_data_uri = generate_server_tts_base64(voice_text, lang="ur", voice=persona, rate=rate_str, pitch=pitch_str, organization_id=org_id)
+            audio_b64 = audio_data_uri.split("base64,")[-1]
         else:
             raw_audio_bytes = b""
             if not user_text and audio_in_b64:
@@ -4261,8 +4330,19 @@ def api_live_voice_call():
             except Exception as _gtts_err:
                 logger.debug(f"gTTS fallback notice: {_gtts_err}")
 
-        audio_b64 = base64.b64encode(audio_bytes).decode("ascii") if audio_bytes else ""
-        audio_data_uri = f"data:audio/mp3;base64,{audio_b64}" if audio_b64 else ""
+        if not audio_bytes:
+            audio_data_uri = generate_server_tts_base64(
+                text=normalized_speech or voice_text or reply_text,
+                lang="ur" if ("ur" in persona.lower() or "asad" in persona.lower() or "uzma" in persona.lower()) else "en",
+                voice=persona,
+                rate=rate_str,
+                pitch=pitch_str,
+                organization_id=org_id
+            )
+            audio_b64 = audio_data_uri.split("base64,")[-1]
+        else:
+            audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+            audio_data_uri = f"data:audio/mp3;base64,{audio_b64}"
 
         # Forward assistant voice reply to to_admin_queue & SocketIO so Admin Dashboard receives assistant speech & audio
         target_phone = clean_call_phone or re.sub(r"\D", "", str(data.get("phone") or data.get("roomId") or request.args.get("phone") or "").strip())
@@ -4283,6 +4363,22 @@ def api_live_voice_call():
                             "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
                         }
                         sess["to_admin_queue"].append(ai_chunk)
+                        if len(sess["to_admin_queue"]) > 60:
+                            sess["to_admin_queue"] = sess["to_admin_queue"][-60:]
+                        sess["to_customer_seq"] = sess.get("to_customer_seq", 0) + 1
+                        cust_ai_chunk = {
+                            "seq_id": sess["to_customer_seq"],
+                            "sender": "assistant",
+                            "audio": audio_b64,
+                            "text": reply_text,
+                            "mimeType": "audio/mp3",
+                            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+                        }
+                        if "to_customer_queue" not in sess:
+                            sess["to_customer_queue"] = []
+                        sess["to_customer_queue"].append(cust_ai_chunk)
+                        if len(sess["to_customer_queue"]) > 60:
+                            sess["to_customer_queue"] = sess["to_customer_queue"][-60:]
                         if len(sess["to_admin_queue"]) > 60:
                             sess["to_admin_queue"] = sess["to_admin_queue"][-60:]
                 try:
@@ -4595,13 +4691,24 @@ def api_call_audio(phone):
                     sess["to_customer_queue"] = sess["to_customer_queue"][-60:]
                 dest = "to_customer"
             else:
+                if not text and audio_b64:
+                    try:
+                        clean_audio_b64 = audio_b64.split("base64,")[-1].strip() if "base64," in audio_b64 else audio_b64.strip()
+                        raw_audio_bytes = base64.b64decode(clean_audio_b64)
+                        if raw_audio_bytes:
+                            trans = WhatsAppService._transcribe_audio(raw_audio_bytes, organization_id="org-enterprise-default")
+                            if trans and trans.strip():
+                                text = trans.strip()
+                    except Exception as _tr_err:
+                        logger.debug(f"[api_call_audio] Transcription note: {_tr_err}")
+
                 sess["to_admin_seq"] += 1
                 seq_id = sess["to_admin_seq"]
                 new_chunk = {
                     "seq_id": seq_id,
                     "sender": sender or "customer",
                     "audio": audio_b64,
-                    "text": text,
+                    "text": text or "[Voice Audio Received]",
                     "mimeType": mime_type,
                     "timestamp": now_iso
                 }
@@ -4664,6 +4771,66 @@ def api_call_audio(phone):
             "latest_seq_id": latest_seq,
             "chunks": chunks
         }), 200
+
+
+@api_v1.route("/call/start", methods=["POST"])
+@api_v1.route("/call/start/<phone>", methods=["POST"])
+def api_call_start(phone=""):
+    """Starts/connects a live call, generates initial greeting MP3 audio and enqueues to to_customer_queue."""
+    data = request.get_json(silent=True) or {}
+    clean_phone = re.sub(r"\D", "", str(phone or data.get("phone") or data.get("roomId") or "").strip())
+    if not clean_phone and _ACTIVE_CALL_SESSIONS:
+        with _ACTIVE_CALL_SESSIONS_LOCK:
+            clean_phone = list(_ACTIVE_CALL_SESSIONS.keys())[-1]
+    if not clean_phone:
+        clean_phone = "default_caller"
+
+    greeting_text = "Assalam-o-Alaikum! Main BashFlow AI hoon, farmaiye main aapki kya madad karoon?"
+    greeting_voice = "السلام علیکم! میں بیش فلو اے آئی ہوں، فرمائیے میں آپ کی کیا مدد کروں؟"
+    audio_uri = generate_server_tts_base64(greeting_voice, lang="ur")
+    audio_b64 = audio_uri.split("base64,")[-1]
+
+    with _ACTIVE_CALL_SESSIONS_LOCK:
+        sess = _ACTIVE_CALL_SESSIONS.get(clean_phone)
+        if not sess:
+            now_ts = datetime.datetime.utcnow().isoformat() + "Z"
+            sess = {
+                "phone": clean_phone,
+                "name": "Customer",
+                "status": "connected",
+                "initiated_at": now_ts,
+                "joined_at": now_ts,
+                "ended_at": None,
+                "to_customer_queue": [],
+                "to_customer_seq": 0,
+                "to_admin_queue": [],
+                "to_admin_seq": 0
+            }
+            _ACTIVE_CALL_SESSIONS[clean_phone] = sess
+        sess["to_customer_seq"] = sess.get("to_customer_seq", 0) + 1
+        seq_id = sess["to_customer_seq"]
+        new_chunk = {
+            "seq_id": seq_id,
+            "sender": "assistant",
+            "audio": audio_b64,
+            "text": greeting_text,
+            "mimeType": "audio/mp3",
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+        }
+        if "to_customer_queue" not in sess:
+            sess["to_customer_queue"] = []
+        sess["to_customer_queue"].append(new_chunk)
+        if len(sess["to_customer_queue"]) > 60:
+            sess["to_customer_queue"] = sess["to_customer_queue"][-60:]
+
+    return jsonify({
+        "success": True,
+        "phone": clean_phone,
+        "reply_text": greeting_text,
+        "replyText": greeting_text,
+        "audio_data_uri": audio_uri,
+        "audioBase64": audio_b64
+    }), 200
 
 
 @api_v1.route("/call/end/<phone>", methods=["POST"])
@@ -4766,6 +4933,7 @@ def api_customer_latest_order_info():
     }), 200
 
 
+@api_v1.route("/voice/transcribe", methods=["POST"])
 @api_v1.route("/voice/transcribe-and-reply", methods=["POST"])
 def api_voice_transcribe_and_reply():
     """Dual-Engine speech transcription & voice reply endpoint.
