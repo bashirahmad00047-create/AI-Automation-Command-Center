@@ -971,16 +971,27 @@
 
     <!-- Hero Section -->
     <section class="hero-section">
-        <h2 class="hero-title" id="heroStoreTitle">Treasures of the Hindukush &amp; Beyond</h2>
+        <h2 class="hero-title" id="heroStoreTitle">Chitral Food &amp; Bazar</h2>
         <div class="foodpanda-delivery-badges">
             <span class="foodpanda-badge">⚡ 25-35 min Free Delivery</span>
             <span class="foodpanda-badge blue">📍 Live Bike Rider GPS Tracking</span>
-            <span class="foodpanda-badge amber">🛡️ 100% Authentic Northern Treasures</span>
+            <span class="foodpanda-badge amber">🛡️ 100% Authentic Restaurants &amp; Bazar</span>
         </div>
-        <p class="hero-subtitle" id="heroStoreSubtitle">Authentic Chitrali Shawls, Pattu Caps, Pure Organic Honey, Walnuts, Gemstones &amp; Daily Essentials direct to your doorstep.</p>
+
+        <!-- Foodpanda Restaurants & Chitral Local Bazar Dual Experience Switcher -->
+        <div class="store-experience-tabs" style="display:flex; justify-content:center; gap:10px; margin: 0 auto 16px; flex-wrap:wrap; max-width:680px;">
+            <button type="button" id="tabFoodpanda" class="exp-tab-btn" onclick="switchExperience('foodpanda')" style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:9999px; font-weight:800; font-size:0.92rem; cursor:pointer; border:2px solid #059669; background:#059669; color:#fff; transition:all 0.2s; box-shadow:0 4px 12px rgba(5,150,105,0.25);">
+                <span>🐼 Foodpanda Restaurants &amp; Fast Delivery</span>
+            </button>
+            <button type="button" id="tabChitralBazar" class="exp-tab-btn" onclick="switchExperience('bazar')" style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:9999px; font-weight:800; font-size:0.92rem; cursor:pointer; border:2px solid #d97706; background:#fff; color:#92400e; transition:all 0.2s;">
+                <span>🏔️ Chitral Local Bazar</span>
+            </button>
+        </div>
+
+        <p class="hero-subtitle" id="heroStoreSubtitle">Order delicious Biryani, Shinwari Karahi, Burgers, Pizza, pure Sidr Honey, Walnuts &amp; authentic Chitrali treasures delivered straight to your door.</p>
         <div class="search-wrapper">
             <span class="search-icon">🔍</span>
-            <input type="text" id="searchInput" class="search-input" placeholder="Search dry fruits, shawls, honey, kurta, shoes..." oninput="handleSearch(this.value)">
+            <input type="text" id="searchInput" class="search-input" placeholder="Search biryani, karahi, burger, honey, shawls, walnuts..." oninput="handleSearch(this.value)">
         </div>
     </section>
 
@@ -1473,14 +1484,26 @@
             const cat = (category || 'Item').toUpperCase();
             const title = (name || 'Product').slice(0, 24);
             const palettes = {
+                'KARAHI': ['#991b1b', '#ef4444', '🍲'],
+                'BIRYANI': ['#c2410c', '#f97316', '🍛'],
+                'BURGER': ['#d97706', '#f59e0b', '🍔'],
+                'PIZZA': ['#b91c1c', '#f87171', '🍕'],
+                'FAST FOOD': ['#d97706', '#f59e0b', '🍟'],
+                'CAFE': ['#78350f', '#b45309', '☕'],
+                'CHAI': ['#78350f', '#b45309', '☕'],
+                'BEVERAGE': ['#0284c7', '#38bdf8', '🥤'],
                 'HONEY': ['#d97706', '#fbbf24', '🍯'],
                 'DRY FRUITS': ['#b45309', '#f59e0b', '🥜'],
-                'HANDICRAFTS': ['#047857', '#10b981', '🧣'],
-                'GEMSTONES': ['#4338ca', '#6366f1', '💎'],
+                'NUTS': ['#b45309', '#f59e0b', '🥜'],
+                'CRAFT': ['#047857', '#10b981', '🧣'],
+                'HANDICRAFT': ['#047857', '#10b981', '🧣'],
+                'SHAWL': ['#047857', '#10b981', '🧣'],
+                'PAKOL': ['#047857', '#10b981', '🧢'],
+                'GEM': ['#4338ca', '#6366f1', '💎'],
+                'MINERAL': ['#4338ca', '#6366f1', '💎'],
+                'GROCERY': ['#15803d', '#22c55e', '🛒'],
                 'APPAREL': ['#0284c7', '#38bdf8', '👔'],
                 'FOOTWEAR': ['#7c2d12', '#ea580c', '👞'],
-                'ELECTRONICS': ['#4f46e5', '#818cf8', '🎧'],
-                'GROCERY': ['#15803d', '#22c55e', '🍯'],
                 'FASHION': ['#be185d', '#ec4899', '👗']
             };
             let matchedKey = Object.keys(palettes).find(k => cat.includes(k)) || 'HANDICRAFTS';
@@ -1563,15 +1586,45 @@
         // Dynamically build category pills from active loaded products
         function renderCategoryNav() {
             const nav = document.getElementById('categoryNav');
-            const distinct = [...new Set(catalogProducts.map(p => p.category).filter(Boolean))];
+            let pool = catalogProducts;
+            if (activeExperience === 'foodpanda') {
+                pool = pool.filter(p => {
+                    const c = (p.category || '').toLowerCase();
+                    return c.includes('food') || c.includes('burger') || c.includes('biryani') || c.includes('karahi') || c.includes('pizza') || c.includes('bakery') || c.includes('cafe') || c.includes('desi');
+                });
+            } else if (activeExperience === 'bazar') {
+                pool = pool.filter(p => {
+                    const c = (p.category || '').toLowerCase();
+                    return c.includes('honey') || c.includes('craft') || c.includes('shawl') || c.includes('pakol') || c.includes('fruit') || c.includes('nut') || c.includes('gem') || c.includes('mineral') || c.includes('apparel') || c.includes('footwear');
+                });
+            }
+
+            const distinct = [...new Set(pool.map(p => p.category).filter(Boolean))];
             
             const icons = {
-                'HONEY': '🍯', 'DRY FRUITS': '🥜', 'HANDICRAFTS': '🧣',
-                'GEMSTONES': '💎', 'APPAREL': '👔', 'FOOTWEAR': '👞',
-                'ELECTRONICS': '⚡', 'GROCERY': '🛒', 'FASHION': '👗'
+                'FAST FOOD': '🍔',
+                'BURGER': '🍔',
+                'DESI': '🍲',
+                'BIRYANI': '🍲',
+                'KARAHI': '🍲',
+                'PIZZA': '🍕',
+                'BAKERY': '🍕',
+                'HONEY': '🍯',
+                'CRAFT': '🧣',
+                'SHAWL': '🧣',
+                'PAKOL': '🧣',
+                'DRY FRUIT': '🥜',
+                'NUTS': '🥜',
+                'WALNUT': '🥜',
+                'CAFE': '☕',
+                'CHAI': '☕',
+                'BEVERAGE': '☕',
+                'GEM': '💎',
+                'MINERAL': '💎',
+                'GROCERY': '🛒'
             };
 
-            let html = `<button class="category-pill ${currentFilter === 'All' ? 'active' : ''}" onclick="filterCategory('All')">🌟 All Products</button>`;
+            let html = `<button class="category-pill ${currentFilter === 'All' ? 'active' : ''}" onclick="filterCategory('All')">🌟 All</button>`;
             distinct.forEach(cat => {
                 let u = cat.toUpperCase();
                 let iconKey = Object.keys(icons).find(k => u.includes(k));
@@ -1587,13 +1640,21 @@
             const counter = document.getElementById('productCounter');
 
             let filtered = catalogProducts.filter(p => {
+                const cat = (p.category || '').toLowerCase();
+                let matchesExp = true;
+                if (activeExperience === 'foodpanda') {
+                    matchesExp = cat.includes('food') || cat.includes('burger') || cat.includes('biryani') || cat.includes('karahi') || cat.includes('pizza') || cat.includes('bakery') || cat.includes('cafe') || cat.includes('desi');
+                } else if (activeExperience === 'bazar') {
+                    matchesExp = cat.includes('honey') || cat.includes('craft') || cat.includes('shawl') || cat.includes('pakol') || cat.includes('fruit') || cat.includes('nut') || cat.includes('gem') || cat.includes('mineral') || cat.includes('apparel') || cat.includes('footwear');
+                }
+
                 const matchesCat = (currentFilter === 'All') || (p.category && p.category.toLowerCase().includes(currentFilter.toLowerCase()));
                 const matchesSearch = !searchQuery || (
                     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                     (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
                     (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()))
                 );
-                return matchesCat && matchesSearch;
+                return matchesExp && matchesCat && matchesSearch;
             });
 
             counter.textContent = `${filtered.length} product${filtered.length === 1 ? '' : 's'} available`;
@@ -1611,22 +1672,34 @@
                 const fallbackDataUri = generateProductSvg(p.name, p.category);
                 const imgSrc = p.image_url && p.image_url.trim() ? p.image_url : fallbackDataUri;
 
+                const delTime = p.delivery_time || (p.category && (p.category.includes('Karahi') || p.category.includes('Burger') || p.category.includes('Biryani')) ? '20-30 mins' : '2-3 Days');
+                const ratingScore = p.rating || '4.8';
+                const ratingCount = p.rating_count || '250+';
+
                 return `
                     <div class="product-card">
                         <div class="product-img-wrapper">
-                            <img src="${imgSrc}" alt="${safeName}" class="product-img" onerror="handleProductImgError(this, '${safeName}', '${safeCat}');">
+                            <img src="${imgSrc}" alt="${safeName}" class="product-img" referrerpolicy="no-referrer" loading="lazy" onerror="handleProductImgError(this, '${safeName}', '${safeCat}');">
                             <span class="category-tag">${p.category || 'General'}</span>
                             <span class="stock-badge ${p.stock_status === 'out_of_stock' ? 'out-of-stock' : ''}">
                                 ${p.stock_status === 'out_of_stock' ? 'Out of Stock' : 'In Stock'}
                             </span>
                         </div>
                         <div class="product-body">
-                            ${p.seller_name ? `
-                                <div style="font-size:0.75rem; color:#b45309; font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:4px;">
-                                    <span>&#127978;</span> Sold by: ${p.seller_name} ${p.seller_city ? `(&#128205; ${p.seller_city})` : ''}
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:6px;">
+                                <div style="font-size:0.75rem; color:#b45309; font-weight:700; display:flex; align-items:center; gap:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                    <span>🍽️</span> ${p.seller_name || 'Verified Kitchen / Store'} ${p.seller_city ? `(${p.seller_city})` : ''}
                                 </div>
-                            ` : ''}
+                                <div style="font-size:0.72rem; color:#059669; font-weight:800; background:#ecfdf5; border:1px solid #a7f3d0; padding:2px 6px; border-radius:4px; white-space:nowrap;">
+                                    ⚡ ${delTime}
+                                </div>
+                            </div>
                             <h4 class="product-name">${p.name}</h4>
+                            <div style="font-size:0.75rem; color:#f59e0b; font-weight:700; margin-bottom:6px; display:flex; align-items:center; gap:4px;">
+                                <span>⭐ ${ratingScore}</span>
+                                <span style="color:#6b7280; font-weight:500;">(${ratingCount})</span>
+                                <span style="color:#059669; margin-left:6px; font-weight:700;">• Free Delivery</span>
+                            </div>
                             <p class="product-desc">${p.description || 'Authentic quality product from our verified catalog.'}</p>
                             ${p.seller_phone && p.contact_mode === 'smart_broker' ? `
                                 <div style="margin-bottom: 8px;">
@@ -1647,6 +1720,35 @@
                     </div>
                 `;
             }).join('');
+        }
+
+        let activeExperience = 'all';
+
+        function switchExperience(exp) {
+            const tabFp = document.getElementById('tabFoodpanda');
+            const tabBz = document.getElementById('tabChitralBazar');
+            if (activeExperience === exp) {
+                activeExperience = 'all';
+                currentFilter = 'All';
+                if (tabFp) { tabFp.style.background = '#059669'; tabFp.style.color = '#fff'; }
+                if (tabBz) { tabBz.style.background = '#fff'; tabBz.style.color = '#92400e'; }
+                document.getElementById('gridSectionTitle').textContent = 'Featured Products';
+            } else {
+                activeExperience = exp;
+                if (exp === 'foodpanda') {
+                    currentFilter = 'All';
+                    if (tabFp) { tabFp.style.background = '#059669'; tabFp.style.color = '#fff'; }
+                    if (tabBz) { tabBz.style.background = '#fff'; tabBz.style.color = '#92400e'; }
+                    document.getElementById('gridSectionTitle').textContent = '🐼 Foodpanda Fast Delivery';
+                } else {
+                    currentFilter = 'All';
+                    if (tabFp) { tabFp.style.background = '#fff'; tabFp.style.color = '#065f46'; }
+                    if (tabBz) { tabBz.style.background = '#d97706'; tabBz.style.color = '#fff'; }
+                    document.getElementById('gridSectionTitle').textContent = '🏔️ Chitral Local Bazar';
+                }
+            }
+            renderCategoryNav();
+            renderProducts();
         }
 
         function filterCategory(cat) {
@@ -1722,7 +1824,7 @@
                 const src = it.image_url && it.image_url.trim() ? it.image_url : fallbackUri;
                 return `
                     <div class="cart-item-row">
-                        <img src="${src}" alt="${it.name}" class="cart-item-img" onerror="this.onerror=null;this.src=generateProductSvg('${safeName}','Item');">
+                        <img src="${src}" alt="${it.name}" class="cart-item-img" referrerpolicy="no-referrer" loading="lazy" onerror="this.onerror=null;this.src=generateProductSvg('${safeName}','Item');">
                         <div class="cart-item-info">
                             <div class="cart-item-title">${it.name}</div>
                             <div class="cart-item-price">PKR ${(it.price * it.quantity).toLocaleString()}</div>

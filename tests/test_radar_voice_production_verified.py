@@ -156,13 +156,17 @@ def test_public_track_portal_rendering(client):
 
 
 def test_csp_allows_map_tiles_and_cdns(client):
-    """Verify CSP headers explicitly allow unpkg, cdnjs, cartocdn, and OpenStreetMap tiles."""
+    """Verify CSP headers explicitly allow unpkg, cdnjs, cartocdn, OpenStreetMap tiles, and HTTPS image sources."""
     res = client.get("/track/ORD-AUTO-TEST-001")
     assert res.status_code == 200
     csp = res.headers.get("Content-Security-Policy", "")
     assert "cartocdn.com" in csp
     assert "unpkg.com" in csp
     assert "openstreetmap.org" in csp
+    # Explicit assertion: CSP img-src allows https: so external store photos never get blocked
+    assert "img-src" in csp
+    assert "https:" in csp
+    assert "images.unsplash.com" in csp
 
 
 def test_sequential_voice_queue_delivery(client):
@@ -552,3 +556,82 @@ def test_indrive_ride_request_bidding_and_tracking(client):
     assert ride_id in page_html
     assert "InDrive Fare Offer" in page_html
 
+
+
+def test_live_voice_call_resilience_and_empty_turn(client):
+    """Verify live voice call handles empty turns and audio blobs gracefully without 400 or Speech text error."""
+    import base64
+    from unittest.mock import patch
+
+    # 1. Empty turn / silence ping: must return 200 with empty_turn=True, never 400
+    res_empty = client.post("/api/v1/live-voice-call", json={})
+    assert res_empty.status_code == 200
+    json_empty = res_empty.get_json()
+    assert json_empty.get("success") is True
+    assert json_empty.get("empty_turn") is True
+
+    # 2. AudioBase64 without text: must return 200, forward to admin queue, never return 400 or Speech text error
+    dummy_audio_b64 = base64.b64encode(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00D\xac\x00\x00\x88X\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00").decode("ascii")
+    test_phone = "923209350858"
+    with patch("whatsapp_service.WhatsAppService._transcribe_audio", return_value=None), \
+         patch("whatsapp_service.WhatsAppService._synthesize_edge_tts", return_value=b"fake_mp3_audio"):
+        res_audio = client.post("/api/v1/live-voice-call", json={
+            "audioBase64": dummy_audio_b64,
+            "phone": test_phone,
+            "text": ""
+        })
+    # Explicit assertion: handles audio-only payloads (when browser speech-to-text text is empty) without returning error
+    assert res_audio.status_code == 200
+    json_audio = res_audio.get_json()
+    assert json_audio.get("success") is True
+    assert json_audio.get("error") is None
+    assert "Speech text is required" not in str(json_audio)
+    assert json_audio.get("replyText") is not None
+
+    # 3. Verify Admin audio queue received the customer chunk
+    from api_v1 import _ACTIVE_CALL_SESSIONS, _ACTIVE_CALL_SESSIONS_LOCK
+    with _ACTIVE_CALL_SESSIONS_LOCK:
+        sess = _ACTIVE_CALL_SESSIONS.get(test_phone)
+        assert sess is not None
+        assert len(sess.get("to_admin_queue", [])) > 0
+
+
+def test_foodpanda_store_catalog_and_hd_images(client):
+    """Verify Foodpanda restaurant and artisan catalog items have real HD photos, delivery badges, and ratings."""
+    # 1. API Catalog test
+    res = client.get("/api/v1/store/products")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data.get("success") is True
+    prods = data.get("products", [])
+    assert len(prods) >= 12
+
+    names = [p["name"] for p in prods]
+    assert "Pure Chitrali Sidr Mountain Honey (500g)" in names
+    assert "Special Chicken Dum Biryani" in names
+    assert "Peshawari Shinwari Mutton Karahi (Half kg)" in names
+    assert "Gourmet Smash Beef Burger & Fries" in names
+
+    # Verify Honey Jar image is genuine glass jar (not watermelon)
+    honey_prod = next(p for p in prods if p["name"] == "Pure Chitrali Sidr Mountain Honey (500g)")
+    assert "photo-1471943311424-646960669fbc" in honey_prod["image_url"]
+    assert honey_prod.get("delivery_time") is not None
+    assert honey_prod.get("rating") is not None
+
+    # Verify popular foodpanda & local categories
+    cats = [p.get("category", "") for p in prods]
+    assert any("Fast Food" in c or "Burger" in c for c in cats)
+    assert any("Desi" in c or "Biryani" in c for c in cats)
+    assert any("Pizza" in c or "Bakery" in c for c in cats)
+    assert any("Honey" in c for c in cats)
+    assert any("Craft" in c or "Shawl" in c for c in cats)
+    assert any("Dry Fruit" in c or "Fruit" in c for c in cats)
+
+    # 2. Render /store page
+    page = client.get("/store")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert "foodpanda-delivery-badges" in html
+    assert "referrerpolicy=\"no-referrer\"" in html
+    assert "Foodpanda Restaurants" in html
+    assert "Chitral Local Bazar" in html

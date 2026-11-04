@@ -470,7 +470,21 @@
         }
 
         function logOnScreenError(msg) {
-            console.error('[Voice Call Error]', msg);
+            console.warn('[Voice Call Notice]', msg);
+            const lower = String(msg || '').toLowerCase();
+            if (
+                lower.includes('speech') ||
+                lower.includes('text is required') ||
+                lower.includes('no-speech') ||
+                lower.includes('aborted') ||
+                lower.includes('network') ||
+                lower.includes('not-allowed') ||
+                lower.includes('service-not-allowed') ||
+                lower.includes('greeting') ||
+                lower.includes('failed to get ai')
+            ) {
+                return;
+            }
             const tb = document.getElementById('transcriptBox');
             if (tb) {
                 tb.innerHTML += `<div style="color: #ef4444; font-size: 11px; margin-top: 4px;">⚠️ ${escapeHtml(msg)}</div>`;
@@ -1171,83 +1185,106 @@
             reader.readAsDataURL(audioBlob);
         }
 
+        let isRecognitionRunning = false;
+        let speechRecognitionSupported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+        let recognitionRestartTimer = null;
+
         function startPrimarySpeechRecognition() {
             const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRec) {
+                speechRecognitionSupported = false;
                 console.warn('[Notice] Web Speech API not supported; using MediaRecorder fallback.');
                 return;
             }
 
             try {
                 if (recognition) {
-                    try { recognition.stop(); } catch (_) {}
+                    try { recognition.abort(); } catch (_) {}
                 }
                 recognition = new SpeechRec();
                 recognition.continuous = true;
                 recognition.interimResults = true;
                 recognition.lang = currentLanguage;
 
+                recognition.onstart = () => {
+                    isRecognitionRunning = true;
+                };
+
                 recognition.onresult = (event) => {
-            // Customer is speaking: immediately interrupt any AI playback
-            stopIncomingAiAudio();
-            isCustomerSpeaking = true;
+                    // Customer is speaking: immediately interrupt any AI playback
+                    stopIncomingAiAudio();
+                    isCustomerSpeaking = true;
 
-            let interim = '';
-            let final = '';
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) {
-                    final += event.results[i][0].transcript;
-                } else {
-                    interim += event.results[i][0].transcript;
-                }
-            }
+                    let interim = '';
+                    let final = '';
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            final += event.results[i][0].transcript;
+                        } else {
+                            interim += event.results[i][0].transcript;
+                        }
+                    }
 
-            const activeChunk = (final || interim).trim();
-            if (activeChunk) {
-                pendingTranscript = (pendingTranscript + ' ' + activeChunk).trim();
-                const tb = document.getElementById('transcriptBox');
-                if (tb) {
-                    tb.innerHTML = `<div style="color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(pendingTranscript)}</div>`;
-                    tb.scrollTop = tb.scrollHeight;
-                }
-                setStatus('🟢 Listening... (Hearing voice)');
+                    const activeChunk = (final || interim).trim();
+                    if (activeChunk) {
+                        pendingTranscript = (pendingTranscript + ' ' + activeChunk).trim();
+                        const tb = document.getElementById('transcriptBox');
+                        if (tb) {
+                            tb.innerHTML = `<div style="color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(pendingTranscript)}</div>`;
+                            tb.scrollTop = tb.scrollHeight;
+                        }
+                        setStatus('🟢 Listening... (Hearing voice)');
 
-                // 1.8-second silence buffer before dispatching full turn to AI
-                if (speechDebounceTimer) clearTimeout(speechDebounceTimer);
-                speechDebounceTimer = setTimeout(() => {
-                    finalizeAndSendCustomerTurn();
-                }, 1800);
-            }
-        };
-
-
+                        // 1.8-second silence buffer before dispatching full turn to AI
+                        if (speechDebounceTimer) clearTimeout(speechDebounceTimer);
+                        speechDebounceTimer = setTimeout(() => {
+                            finalizeAndSendCustomerTurn();
+                        }, 1800);
+                    }
+                };
 
                 recognition.onerror = (e) => {
-                    console.warn('[Speech recognition error]', e && e.error);
-                    if (e && e.error === 'not-allowed') {
-                        setStatus('💬 Tap to Speak or Type');
-                    } else {
-                        // Auto restart on transient error as long as call is active
-                        restartRecognition();
+                    const errType = e && e.error ? String(e.error) : '';
+                    console.warn('[Speech recognition notice]:', errType);
+                    if (errType === 'not-allowed' || errType === 'service-not-allowed') {
+                        speechRecognitionSupported = false;
+                        try { recognition.abort(); } catch (_) {}
+                        setStatus('🟢 Listening... (Speak now or Tap to Speak)');
+                    } else if (errType === 'network') {
+                        if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
+                        recognitionRestartTimer = setTimeout(() => {
+                            restartRecognition();
+                        }, 3000);
                     }
                 };
 
                 recognition.onend = () => {
-                    restartRecognition();
+                    isRecognitionRunning = false;
+                    if (isCallActive && !isMuted && !isAiSpeaking && speechRecognitionSupported) {
+                        if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
+                        recognitionRestartTimer = setTimeout(() => {
+                            restartRecognition();
+                        }, 400);
+                    }
                 };
 
-                recognition.start();
+                try {
+                    recognition.start();
+                } catch (startErr) {
+                    console.debug('[Speech start notice]:', startErr);
+                }
             } catch (recErr) {
                 console.warn('[Speech init notice]', recErr);
             }
         }
 
         function restartRecognition() {
-            if (isCallActive && !isMuted && !isAiSpeaking && recognition) {
-                try {
-                    recognition.start();
-                } catch (_) {}
+            if (!speechRecognitionSupported || !isCallActive || isMuted || isAiSpeaking || isRecognitionRunning || !recognition) {
+                return;
             }
+            try {
+                recognition.start();
+            } catch (_) {}
         }
 
         // ===================================================================
@@ -1303,6 +1340,10 @@
                 }
 
                 if (data && data.success && isCallActive) {
+                    if (data.empty_turn) {
+                        setStatus('🟢 Listening... (Speak now)');
+                        return;
+                    }
                     const reply = data.replyText || data.reply_text || 'Jee bilkul.';
                     callHistory.push({ role: 'assistant', text: reply });
 
@@ -1318,12 +1359,11 @@
                     const outAudioB64 = data.audioBase64 || data.audio_base64 || (data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio\/\w+;base64,/, '') : '');
                     speakAIResponse(reply, outAudioB64);
                 } else {
-                    const errMsg = (data && data.error) || 'Failed to get AI voice response';
-                    logOnScreenError(errMsg);
+                    console.warn('[Voice Call Response Notice]', data && data.error);
                     setStatus('🟢 Listening... (Speak now)');
                 }
             } catch (err) {
-                logOnScreenError('Network call error: ' + err.message);
+                console.warn('[Network call notice]', err && err.message);
                 setStatus('🟢 Listening... (Speak now)');
             }
         }

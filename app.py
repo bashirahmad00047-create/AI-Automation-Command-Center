@@ -445,9 +445,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.socket.io https://unpkg.com https://cdnjs.cloudflare.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com https://cdnjs.cloudflare.com; "
             "font-src 'self' https://fonts.gstatic.com data:; "
-            "img-src 'self' data: blob: https: http:; "
+            "img-src 'self' data: blob: https: http: https://images.unsplash.com https://*.unsplash.com https://plus.unsplash.com; "
             "frame-src 'self' https://www.openstreetmap.org https://*.openstreetmap.org; "
-            "media-src 'self' data: blob:; "
+            "media-src 'self' data: blob: https: http:; "
             "connect-src 'self' ws: wss: https://cdn.socket.io https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.basemaps.cartocdn.com https://basemaps.cartocdn.com https://*.cartocdn.com https://unpkg.com https://cdnjs.cloudflare.com;"
         )
         response.headers["Content-Security-Policy"] = csp

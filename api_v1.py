@@ -4034,20 +4034,82 @@ def api_live_voice_call():
                 reply_text = "Assalam o Alaikum! This is BashFlow AI, how may I assist you today?"
                 voice_text = "Assalam o Alaikum! This is BashFlow AI, how may I assist you today?"
         else:
+            raw_audio_bytes = b""
             if not user_text and audio_in_b64:
                 try:
                     raw_b64 = str(audio_in_b64)
                     if "," in raw_b64:
                         raw_b64 = raw_b64.split(",", 1)[1]
                     raw_audio_bytes = base64.b64decode(raw_b64)
-                    transcribed = WhatsAppService._transcribe_audio(raw_audio_bytes, organization_id=org_id)
-                    if transcribed and transcribed.strip():
-                        user_text = transcribed.strip()
+                    if raw_audio_bytes:
+                        transcribed = WhatsAppService._transcribe_audio(raw_audio_bytes, organization_id=org_id)
+                        if transcribed and transcribed.strip():
+                            user_text = transcribed.strip()
                 except Exception as tr_err:
                     logger.warning(f"Live voice call audio transcription notice: {tr_err}")
 
+            # Forward customer voice/text chunk to Admin queue so Admin Dashboard keeps monitoring
+            phone_param = str(data.get("phone") or request.args.get("phone") or "").strip()
+            clean_call_phone = re.sub(r"\D", "", phone_param)
+            if not clean_call_phone and _ACTIVE_CALL_SESSIONS:
+                with _ACTIVE_CALL_SESSIONS_LOCK:
+                    clean_call_phone = list(_ACTIVE_CALL_SESSIONS.keys())[-1]
+
+            if clean_call_phone and (audio_in_b64 or user_text):
+                try:
+                    with _ACTIVE_CALL_SESSIONS_LOCK:
+                        sess = _ACTIVE_CALL_SESSIONS.get(clean_call_phone)
+                        if not sess:
+                            now_ts = datetime.datetime.utcnow().isoformat() + "Z"
+                            sess = {
+                                "phone": clean_call_phone,
+                                "name": "Customer",
+                                "status": "connected",
+                                "initiated_at": now_ts,
+                                "joined_at": now_ts,
+                                "ended_at": None,
+                                "to_customer_queue": [],
+                                "to_customer_seq": 0,
+                                "to_admin_queue": [],
+                                "to_admin_seq": 0
+                            }
+                            _ACTIVE_CALL_SESSIONS[clean_call_phone] = sess
+                        sess["to_admin_seq"] = sess.get("to_admin_seq", 0) + 1
+                        if "to_admin_queue" not in sess:
+                            sess["to_admin_queue"] = []
+                        sess["to_admin_queue"].append({
+                            "seq_id": sess["to_admin_seq"],
+                            "sender": "customer",
+                            "audio": str(audio_in_b64 or ""),
+                            "text": str(user_text or ""),
+                            "mimeType": "audio/webm",
+                            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+                        })
+                        if len(sess["to_admin_queue"]) > 60:
+                            sess["to_admin_queue"] = sess["to_admin_queue"][-60:]
+                except Exception as _q_err:
+                    logger.debug(f"Queue audio to admin notice: {_q_err}")
+
+            # If user_text is still empty: NEVER throw 400 or "Speech text is required"
             if not user_text:
-                return jsonify({"success": False, "error": "Speech text is required"}), 400
+                if audio_in_b64:
+                    # User spoke/transmitted audio, but words were too quiet or unintelligible
+                    user_text = "[Voice Audio Received]"
+                    reply_text = "Jee, main sun raha hoon. Barahe karam dobara boliye ya apna sawal batayein."
+                    voice_text = "جی، میں سن رہا ہوں۔ براہ کرم دوبارہ بولیے یا اپنا سوال بتائیں۔"
+                    ai_raw = reply_text
+                else:
+                    # Empty turn / ping: return 200 with empty turn
+                    return jsonify({
+                        "success": True,
+                        "empty_turn": True,
+                        "user_text": "",
+                        "replyText": "",
+                        "reply_text": "",
+                        "audioBase64": "",
+                        "audio_base64": "",
+                        "audio_data_uri": ""
+                    }), 200
 
             # Conversational spoken prompt enriched with Chitral & Pakistan store catalog
             system_prompt = (
@@ -4056,13 +4118,20 @@ def api_live_voice_call():
                 "1. Spoken Conversational Tone: Speak naturally, warmly, and politely like a real human on the phone. Never sound robotic, bookish, or formal.\n"
                 "2. Extreme Brevity: Deliver at most 1 to 2 short sentences (maximum 20-25 words total) so the customer can reply easily. Never use lists, bullets, asterisks, hashtags, or markdown.\n"
                 "3. Language: If the user speaks in Urdu, Roman Urdu, or Hindi, reply warmly in natural conversational Roman Urdu / Urdu. If in English, reply in natural conversational English.\n"
-                "4. Live Product Catalog Knowledge:\n"
-                "   - Pure Mountain Sidr Honey (Chitral / Karakoram) - PKR 3,500/kg (100% pure organic raw honey)\n"
-                "   - Authentic Handmade Chitrali Wool Shawl (Patti) - PKR 6,500 (Pure warm sheep wool, traditional embroidery)\n"
-                "   - Traditional Chitrali Pakol Cap (Topi) - PKR 1,500 (Pure rolled wool cap)\n"
-                "   - Natural Green Tourmaline Gemstones & Minerals - from PKR 12,000 (Certified natural raw/cut from Chitral & Skardu mines)\n"
-                "   - Mountain Dry Fruits & Walnuts - PKR 2,200/kg (Fresh high altitude harvest)\n"
-                "   - Delivery & Payment: Cash on Delivery (COD) available nationwide in Pakistan. Fast delivery in 2-4 working days.\n"
+                "4. Live Product & Food Catalog Knowledge (Foodpanda Delivery in Chitral: 20-30 mins, Nationwide Courier 2-3 Days):\n"
+                "   - Special Chicken Dum Biryani: PKR 480 (Aromatic basmati rice with spiced chicken & mint raita)\n"
+                "   - Peshawari Shinwari Mutton Karahi: PKR 1,850/half kg (Tender mountain lamb in fresh tomatoes & ginger)\n"
+                "   - Gourmet Smash Beef Burger & Fries: PKR 650 (Double beef patty, cheddar, brioche bun, fries)\n"
+                "   - Fresh Crispy Zinger Burger: PKR 520 (Crispy spicy chicken fillet with fries)\n"
+                "   - Cheesy Chicken Tikka Woodfired Pizza: PKR 1,250 (100% mozzarella, smoky chicken tikka)\n"
+                "   - Royal Karak Doodh Patti Chai: PKR 140 (Fresh cardamom brewed tea)\n"
+                "   - Pure Chitrali Sidr Mountain Honey: PKR 2,800/500g jar (100% raw unpasteurized wild honey)\n"
+                "   - Handwoven Chitrali Pattu Wool Shawl: PKR 6,500 (Pure sheep wool chugha)\n"
+                "   - Traditional Chitrali Pakol Cap with Feather: PKR 1,400\n"
+                "   - Kagzi Thin-Shell Mountain Walnuts: PKR 1,600/kg (Hand-crackable organic walnuts)\n"
+                "   - Sun-Dried Mountain Apricots: PKR 1,200/kg (Sweet tree-ripened organic)\n"
+                "   - Natural Green Tourmaline Gemstones: from PKR 12,000\n"
+                "   - Payment: Cash on Delivery (COD) and JazzCash / EasyPaisa available.\n"
                 "5. Always answer directly, state the exact price if asked, and politely offer to book their order or confirm their delivery address.\n"
                 "6. NO REPEATED GREETINGS: Do NOT say \"Assalam o Alaikum\" or repeat greetings if already greeted in previous conversation turns. Answer the customer inquiry directly."
             )
@@ -9022,18 +9091,114 @@ def api_business_template_save():
 VERIFIED_CHITRAL_PRODUCTS = [
     {
         "name": "Pure Chitrali Sidr Mountain Honey (500g)",
-        "category": "Pure Mountain Honey",
+        "category": "Mountain Honey",
         "description": "100% pure, unpasteurized wild berry Sidr honey harvested from pristine valleys of Chitral. Known for exceptional antibacterial, digestive, and medicinal qualities.",
         "sku": "CHIT-HONEY-001",
         "price": 2800.0,
         "seller_price": 2500.0,
         "platform_commission": 300.0,
-        "image_url": "https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=600&q=80",
+        "image_url": "https://images.unsplash.com/photo-1471943311424-646960669fbc?auto=format&fit=crop&w=600&q=80",
         "stock_quantity": 45,
         "stock_status": "in_stock",
         "seller_name": "Tirich Mir Honey Apiary",
         "seller_phone": "+923001234567",
         "seller_city": "Chitral Town",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Special Chicken Dum Biryani",
+        "category": "Desi & Biryani",
+        "description": "Fragrant aged long-grain basmati rice layered with tender spiced chicken, saffron, potatoes, and signature aromatic Chitral spices. Served with fresh mint raita.",
+        "sku": "CHIT-FOOD-002",
+        "price": 480.0,
+        "seller_price": 420.0,
+        "platform_commission": 60.0,
+        "image_url": "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 100,
+        "stock_status": "in_stock",
+        "seller_name": "Shahi Dastarkhwan Restaurant",
+        "seller_phone": "+923023456789",
+        "seller_city": "Ataliq Bazar",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Peshawari Shinwari Mutton Karahi (Half kg)",
+        "category": "Desi & Biryani",
+        "description": "Authentic Shinwari-style fresh mountain lamb wok karahi prepared in natural animal fat and clarified butter with fresh tomatoes, ginger, and green chilies.",
+        "sku": "CHIT-FOOD-003",
+        "price": 1850.0,
+        "seller_price": 1650.0,
+        "platform_commission": 200.0,
+        "image_url": "https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 30,
+        "stock_status": "in_stock",
+        "seller_name": "Khyber Shinwari BBQ & Karahi",
+        "seller_phone": "+923339876543",
+        "seller_city": "Airport Road",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Gourmet Smash Beef Burger & Fries",
+        "category": "Fast Food & Burgers",
+        "description": "Double smashed premium prime beef patty, melted cheddar cheese, caramelized onions, house truffle mayo in a toasted butter brioche bun. Served with seasoned crispy fries.",
+        "sku": "CHIT-FOOD-004",
+        "price": 650.0,
+        "seller_price": 570.0,
+        "platform_commission": 80.0,
+        "image_url": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 50,
+        "stock_status": "in_stock",
+        "seller_name": "Chitral Burger Lab & Grill",
+        "seller_phone": "+923145556677",
+        "seller_city": "Main Shahi Bazar",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Fresh Crispy Zinger Burger Meal",
+        "category": "Fast Food & Burgers",
+        "description": "Crispy fried spicy chicken fillet, crunchy iceberg lettuce, signature zesty mayo inside a sesame seed bun. Comes with golden fries and chilled beverage.",
+        "sku": "CHIT-FOOD-005",
+        "price": 520.0,
+        "seller_price": 450.0,
+        "platform_commission": 70.0,
+        "image_url": "https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 75,
+        "stock_status": "in_stock",
+        "seller_name": "Chitral Fried & Broast",
+        "seller_phone": "+923129871122",
+        "seller_city": "Ataliq Bridge",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Cheesy Chicken Tikka Woodfired Pizza",
+        "category": "Pizza & Bakery",
+        "description": "Crisp thin-crust Italian style pizza topped with smoky chicken tikka chunks, 100% mozzarella cheese, fresh bell peppers, olives, and marinara sauce.",
+        "sku": "CHIT-FOOD-006",
+        "price": 1250.0,
+        "seller_price": 1100.0,
+        "platform_commission": 150.0,
+        "image_url": "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 40,
+        "stock_status": "in_stock",
+        "seller_name": "Italiano Stone Crust Pizza",
+        "seller_phone": "+923218765432",
+        "seller_city": "College Road",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Fresh Artisan Walnut Cake & Bakery Treats",
+        "category": "Pizza & Bakery",
+        "description": "Rich freshly baked Chitral mountain walnut sponge cake layered with delicate cream and roasted crushed nuts. Perfect dessert pairing.",
+        "sku": "CHIT-BAKE-009",
+        "price": 850.0,
+        "seller_price": 750.0,
+        "platform_commission": 100.0,
+        "image_url": "https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 35,
+        "stock_status": "in_stock",
+        "seller_name": "Hindukush Sweet Bakers",
+        "seller_phone": "+923334445566",
+        "seller_city": "Ataliq Bazar",
         "contact_mode": "smart_broker"
     },
     {
@@ -9070,7 +9235,7 @@ VERIFIED_CHITRAL_PRODUCTS = [
     },
     {
         "name": "Kagzi Thin-Shell Mountain Walnuts (1kg)",
-        "category": "Dry Fruits & Nuts",
+        "category": "Dry Fruits",
         "description": "Crisp, oil-rich organic Kagzi walnuts from Garam Chashma. Can be cracked open by hand. Bursting with natural Omega-3 and mountain nutrients.",
         "sku": "CHIT-WALNUT-004",
         "price": 1600.0,
@@ -9082,6 +9247,38 @@ VERIFIED_CHITRAL_PRODUCTS = [
         "seller_name": "Garam Chashma Organic Farms",
         "seller_phone": "+923335557799",
         "seller_city": "Garam Chashma",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Sun-Dried Organic Chitrali Apricots (1kg)",
+        "category": "Dry Fruits",
+        "description": "Naturally tree-ripened and solar dried organic golden apricots from Mastuj Valley. Packed with potassium, iron, and natural mountain sweetness.",
+        "sku": "CHIT-APRICOT-007",
+        "price": 1200.0,
+        "seller_price": 1050.0,
+        "platform_commission": 150.0,
+        "image_url": "https://images.unsplash.com/photo-1595231776515-ddffb1f4eb73?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 65,
+        "stock_status": "in_stock",
+        "seller_name": "Mastuj Valley Orchards",
+        "seller_phone": "+923331122445",
+        "seller_city": "Mastuj, Chitral",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Royal Karak Doodh Patti Chai & Cardamom",
+        "category": "Cafe & Beverages",
+        "description": "Freshly brewed rich, slow-simmered Karak tea infused with green cardamom pods, pure milk, and mountain sugar. The ultimate warm pick-me-up.",
+        "sku": "CHIT-CHAI-008",
+        "price": 140.0,
+        "seller_price": 110.0,
+        "platform_commission": 30.0,
+        "image_url": "https://images.unsplash.com/photo-1544787219-7f47ccb76574?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 150,
+        "stock_status": "in_stock",
+        "seller_name": "Chai Khana & Bakers",
+        "seller_phone": "+923456677889",
+        "seller_city": "Shahi Qila Chowk",
         "contact_mode": "smart_broker"
     },
     {
@@ -9104,7 +9301,7 @@ VERIFIED_CHITRAL_PRODUCTS = [
 
 
 def ensure_seed_products():
-    """Guarantees all 5 verified Chitrali authentic products exist and have valid URLs in the database."""
+    """Guarantees authentic Foodpanda restaurants and Chitrali catalog items exist with working HD photos."""
     try:
         from models import Product, Organization
         from database import db
@@ -9127,7 +9324,23 @@ def ensure_seed_products():
 
         for item in VERIFIED_CHITRAL_PRODUCTS:
             existing = Product.query.filter((Product.sku == item["sku"]) | (Product.name == item["name"])).first()
-            if not existing:
+            if existing:
+                # Update existing rows so legacy placeholders or bad URLs are fixed permanently
+                existing.image_url = item["image_url"]
+                existing.category = item["category"]
+                existing.description = item["description"]
+                existing.price = item["price"]
+                existing.seller_price = item["seller_price"]
+                existing.platform_commission = item["platform_commission"]
+                existing.seller_name = item["seller_name"]
+                existing.seller_phone = item["seller_phone"]
+                existing.seller_city = item["seller_city"]
+                existing.stock_status = item.get("stock_status", "in_stock")
+                existing.stock_quantity = item.get("stock_quantity", 50)
+                existing.is_active = True
+                existing.is_approved = True
+                existing.contact_mode = item.get("contact_mode", "smart_broker")
+            else:
                 prod = Product(
                     id=generate_uuid("prd"),
                     organization_id=org_id,
@@ -9151,6 +9364,18 @@ def ensure_seed_products():
                     contact_mode=item["contact_mode"]
                 )
                 db.session.add(prod)
+
+        # Deactivate obsolete duplicate legacy rows if any exist
+        try:
+            old_dupes = Product.query.filter(
+                Product.name == "Pure Mountain Sidr Honey 1kg",
+                Product.sku != "CHIT-HONEY-001"
+            ).all()
+            for od in old_dupes:
+                od.is_active = False
+        except Exception:
+            pass
+
         db.session.commit()
     except Exception as e:
         logger.warning(f"ensure_seed_products notice: {e}")
@@ -9183,6 +9408,8 @@ def api_store_products():
             # Respect seller approval status
             if hasattr(p, 'is_approved') and p.is_approved is False:
                 continue
+            cat_lower = (p.category or "").lower()
+            is_food = any(k in cat_lower for k in ["biryani", "karahi", "burger", "food", "cafe", "beverage", "chai", "pizza"])
             results.append({
                 "id": p.id,
                 "name": p.name,
@@ -9192,6 +9419,7 @@ def api_store_products():
                 "price": float(p.price or 0.0),
                 "currency": p.currency or "PKR",
                 "image_url": p.image_url or "",
+                "unit": getattr(p, "unit", "item") or "item",
                 "stock_quantity": int(p.stock_quantity or 0),
                 "stock_status": p.stock_status or "in_stock",
                 "seller_name": getattr(p, 'seller_name', None) or "Chitral Bazar Official",
@@ -9199,7 +9427,10 @@ def api_store_products():
                 "seller_city": getattr(p, 'seller_city', None) or "Chitral",
                 "seller_price": float(p.seller_price) if getattr(p, 'seller_price', None) is not None else float(p.price or 0.0),
                 "platform_commission": float(getattr(p, 'platform_commission', 0.0) or 0.0),
-                "contact_mode": getattr(p, 'contact_mode', 'smart_broker') or "smart_broker"
+                "contact_mode": getattr(p, 'contact_mode', 'smart_broker') or "smart_broker",
+                "delivery_time": "20-30 mins" if is_food else "2-3 Days",
+                "rating": "4.9" if ("honey" in p.name.lower() or "karahi" in p.name.lower() or "biryani" in p.name.lower()) else "4.8",
+                "rating_count": "450+" if is_food else "180+"
             })
         return jsonify({"success": True, "products": results, "count": len(results)}), 200
     except Exception as e:
