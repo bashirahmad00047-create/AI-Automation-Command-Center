@@ -2004,7 +2004,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         application.logger.warning(f"Could not start Keep-Alive service: {_ka_err}")
 
     # Start WhatsApp Baileys Bridge background subprocess non-blocking
-    if not application.config.get("TESTING"):
+    if not application.config.get("TESTING") and not os.environ.get("SKIP_WA_BRIDGE_INIT"):
         try:
             threading.Thread(target=start_wa_bridge_subprocess, args=(application,), daemon=True, name="BridgeSubprocessInit").start()
         except Exception as _bridge_err:

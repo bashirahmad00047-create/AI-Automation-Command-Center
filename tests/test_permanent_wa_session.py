@@ -145,6 +145,77 @@ class TestPermanentWASession(unittest.TestCase):
         # Check DB session was cleared
         self.assertIsNone(WASessionStore.query.filter_by(id=1).first())
 
+    def test_06_unauthenticated_creds_never_overwrite_db(self):
+        """CRITICAL: Unlinked / unauthenticated QR keypair must NEVER overwrite DB permanent session."""
+        from wa_bridge_manager import is_authenticated_session, backup_wa_session_to_db
+        # 1. Ensure authenticated session is saved in DB
+        backup_wa_session_to_db()
+        saved_before = WASessionStore.query.filter_by(id=1).first()
+        self.assertIsNotNone(saved_before)
+        orig_zip = saved_before.zip_b64
+
+        # 2. Create unauthenticated temp directory (registered: False, no user jid)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_dir = os.path.join(tmpdir, "baileys_auth")
+            os.makedirs(auth_dir, exist_ok=True)
+            with open(os.path.join(auth_dir, "creds.json"), "w", encoding="utf-8") as f:
+                json.dump({"registered": False, "noiseKey": {"private": "abc", "public": "def"}}, f)
+
+            # Verification: is_authenticated_session must return False
+            self.assertFalse(is_authenticated_session(auth_dir))
+
+            # Backup attempt on unauthenticated creds MUST return False
+            success = backup_wa_session_to_db(tmpdir)
+            self.assertFalse(success, "backup_wa_session_to_db must refuse to backup unauthenticated creds")
+
+        # 3. Verify original session in DB was preserved intact
+        saved_after = WASessionStore.query.filter_by(id=1).first()
+        self.assertEqual(saved_after.zip_b64, orig_zip, "DB session must remain untouched")
+
+    def test_07_restore_overwrites_unauthenticated_local_creds(self):
+        """When local folder has unauthenticated creds, restore MUST overwrite them with DB session."""
+        from wa_bridge_manager import is_authenticated_session, restore_wa_session_from_db
+        # Ensure authenticated session in DB
+        backup_wa_session_to_db()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_dir = os.path.join(tmpdir, "baileys_auth")
+            os.makedirs(auth_dir, exist_ok=True)
+            creds_path = os.path.join(auth_dir, "creds.json")
+            # Write unauthenticated placeholder
+            with open(creds_path, "w", encoding="utf-8") as f:
+                json.dump({"registered": False, "dummy": True}, f)
+
+            self.assertFalse(is_authenticated_session(auth_dir))
+
+            # Restoration must detect local creds are unauthenticated and restore from DB
+            restored = restore_wa_session_from_db(tmpdir)
+            self.assertTrue(restored, "Restoration must succeed")
+            self.assertTrue(is_authenticated_session(auth_dir), "Restored creds must be authenticated")
+
+    def test_08_extract_phone_from_creds(self):
+        """Verify phone number is cleanly extracted from credentials."""
+        from wa_bridge_manager import extract_phone_from_creds
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_dir = os.path.join(tmpdir, "baileys_auth")
+            os.makedirs(auth_dir, exist_ok=True)
+            with open(os.path.join(auth_dir, "creds.json"), "w", encoding="utf-8") as f:
+                json.dump({"me": {"id": "923001234567:5@s.whatsapp.net", "name": "Test"}}, f)
+
+            phone = extract_phone_from_creds(auth_dir)
+            self.assertEqual(phone, "923001234567")
+
+    def test_09_multitier_tenant_fallback(self):
+        """Verify resilient multi-tier fallback restores session even with custom tenant."""
+        from wa_bridge_manager import restore_wa_session_from_db, is_authenticated_session
+        backup_wa_session_to_db(tenant_id="default")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            restored = restore_wa_session_from_db(tmpdir, tenant_id="tenant-custom-tenant-99")
+            self.assertTrue(restored, "Should fallback to available DB session")
+            target_auth = os.path.join(tmpdir, "baileys_auth")
+            self.assertTrue(is_authenticated_session(target_auth))
+
 
 if __name__ == "__main__":
     unittest.main()

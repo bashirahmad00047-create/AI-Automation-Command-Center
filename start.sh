@@ -34,7 +34,7 @@ mkdir -p "$AUTH_DIR" 2>/dev/null || true
 
 # 1. Synchronously restore WhatsApp Baileys credentials from Database BEFORE starting bridge!
 echo "[start.sh] Synchronously restoring WhatsApp credentials from Database into $AUTH_DIR..."
-python -c "from wa_bridge_manager import restore_wa_session_from_db; restore_wa_session_from_db()" >> wa_bridge.log 2>&1 || true
+SKIP_WA_BRIDGE_INIT="1" python -c "from wa_bridge_manager import restore_wa_session_from_db; res = restore_wa_session_from_db(); print('[start.sh] Permanent session restored from DB:', res)" >> wa_bridge.log 2>&1 || true
 
 # 2. Start WhatsApp Baileys bridge in background with 192MB max heap to protect Render 512MB RAM
 (

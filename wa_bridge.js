@@ -118,13 +118,14 @@ function resolveAuthDir() {
     process.env.PERSISTENT_DATA_DIR,
     '/var/data',
     '/data',
-    '/mnt/data'
+    '/mnt/data',
+    '/opt/render/project/src/baileys_auth'
   ].filter(Boolean);
 
   for (const mount of candidateMounts) {
     try {
       if (fs.existsSync(mount)) {
-        const candidateAuth = path.join(mount, 'baileys_auth');
+        const candidateAuth = mount.endsWith('baileys_auth') ? mount : path.join(mount, 'baileys_auth');
         return candidateAuth;
       }
     } catch (_) {}
@@ -143,12 +144,34 @@ function getBackendBaseUrl() {
   return `http://127.0.0.1:${pythonPort}`;
 }
 
+/**
+ * Checks whether the Baileys auth folder contains an authenticated, linked WhatsApp session.
+ * Never considers temporary unlinked QR keypairs as authenticated.
+ */
+function isAuthenticatedCreds(dir) {
+  try {
+    const credsPath = path.join(dir, 'creds.json');
+    if (!fs.existsSync(credsPath) || fs.statSync(credsPath).size < 50) return false;
+    const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+    return Boolean(creds && (creds.registered === true || (creds.me && creds.me.id)));
+  } catch (_) {
+    return false;
+  }
+}
+
 let sessionBackupDebounce = null;
 function triggerSessionBackup() {
   if (sessionBackupDebounce) return;
+  // GUARD: Only backup if the session is verified to be authenticated
+  if (!isAuthenticatedCreds(AUTH_DIR) && (!sock?.user?.id)) {
+    return;
+  }
   sessionBackupDebounce = setTimeout(async () => {
     sessionBackupDebounce = null;
     try {
+      if (!isAuthenticatedCreds(AUTH_DIR) && (!sock?.user?.id)) {
+        return;
+      }
       const tenantId = process.env.TENANT_ID || 'default';
       const backupUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-backup`;
       const res = await fetch(backupUrl, {
@@ -159,7 +182,7 @@ function triggerSessionBackup() {
       });
       const data = await res.json().catch(() => null);
       if (data && data.success) {
-        console.log(`[WhatsApp Bridge] Session credentials for tenant '${tenantId}' permanently saved to Database!`);
+        console.log(`[WhatsApp Bridge] Permanent session credentials for tenant '${tenantId}' saved to Database!`);
       }
     } catch (e) {
       console.warn('[WhatsApp Bridge] Session backup notice:', e.message);
@@ -181,24 +204,50 @@ function triggerSessionClear() {
 }
 
 async function tryRestoreFromPythonBackend() {
+  // 1. Immediate direct Python database restore (zero HTTP latency, runs directly before Flask binds port)
+  try {
+    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    const pyScript = "import os; os.environ['SKIP_WA_BRIDGE_INIT']='1'; from wa_bridge_manager import restore_wa_session_from_db; res = restore_wa_session_from_db(); print('CLI_RESTORE=' + str(res))";
+    const cliOutput = execSync(`${pythonCmd} -c "${pyScript}"`, {
+      cwd: path.resolve(__dirname),
+      timeout: 10000,
+      encoding: 'utf8',
+      env: process.env
+    });
+    if (cliOutput && cliOutput.includes('CLI_RESTORE=True')) {
+      console.log('[WhatsApp Bridge] Restored permanent session directly from PostgreSQL via Python CLI!');
+      return true;
+    }
+  } catch (_) {}
+
+  // 2. Poll Python HTTP session-restore endpoint while Gunicorn finishes booting
   const tenantId = encodeURIComponent(process.env.TENANT_ID || 'default');
-  for (let attempt = 1; attempt <= 4; attempt++) {
+  const maxAttempts = 10;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const restoreUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-restore?tenant_id=${tenantId}`;
       const res = await fetch(restoreUrl, {
         method: 'GET',
         headers: { 'X-Internal-Bridge': '1' },
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(6000)
       });
       if (res.ok) {
         const data = await res.json().catch(() => null);
         if (data && data.restored) {
           console.log(`[WhatsApp Bridge] Permanent session restored from Database on attempt ${attempt}!`);
           return true;
+        } else if (data && data.success && !data.restored) {
+          // Backend is online and explicitly reported no session found in DB
+          console.log('[WhatsApp Bridge] Python backend online; no saved WhatsApp session in Database.');
+          return false;
         }
       }
-    } catch (_) {}
-    if (attempt < 4) await new Promise(r => setTimeout(r, 1200));
+    } catch (_) {
+      if (attempt <= 2 || attempt === maxAttempts) {
+        console.log(`[WhatsApp Bridge] Waiting for Python backend to initialize (attempt ${attempt}/${maxAttempts})...`);
+      }
+    }
+    if (attempt < maxAttempts) await new Promise(r => setTimeout(r, 1500));
   }
   return false;
 }
@@ -599,14 +648,18 @@ async function startWhatsAppBridge() {
       fs.mkdirSync(AUTH_DIR, { recursive: true });
     }
 
-    // Query DB for session credentials if local creds are absent or corrupted
+    // Query DB for session credentials if local creds are absent, unauthenticated, or corrupted
     const credsCheckPath = path.join(AUTH_DIR, 'creds.json');
     let credsNeedRestore = false;
     if (!fs.existsSync(credsCheckPath) || fs.statSync(credsCheckPath).size < 20) {
       credsNeedRestore = true;
     } else {
       try {
-        JSON.parse(fs.readFileSync(credsCheckPath, 'utf8'));
+        const parsed = JSON.parse(fs.readFileSync(credsCheckPath, 'utf8'));
+        if (!parsed.registered && (!parsed.me || !parsed.me.id)) {
+          console.log('[WhatsApp Bridge] Local creds.json is not authenticated yet. Checking DB for saved session...');
+          credsNeedRestore = true;
+        }
       } catch (e) {
         console.warn('[WhatsApp Bridge] Existing creds.json is invalid JSON. Purging and re-fetching from database...');
         try { fs.unlinkSync(credsCheckPath); } catch (_) {}
@@ -713,13 +766,15 @@ async function startWhatsAppBridge() {
       getMessage: async (key) => undefined
     });
 
-    // Safely persist session credentials
+    // Safely persist session credentials (only sync to DB once authenticated)
     sock.ev.on('creds.update', async () => {
       try {
         if (typeof saveCreds === 'function') {
           await saveCreds();
         }
-        triggerSessionBackup();
+        if (isAuthenticatedCreds(AUTH_DIR) || Boolean(sock?.user?.id)) {
+          triggerSessionBackup();
+        }
       } catch (saveErr) {
         console.error('[WhatsApp Bridge] Failed to save creds:', saveErr.message);
       }
@@ -781,16 +836,9 @@ async function startWhatsAppBridge() {
         console.warn(`[WhatsApp Bridge] Connection closed (code: ${statusCode}, isLoggedOut: ${isLoggedOut}).`);
 
         if (isLoggedOut) {
-          console.warn('[WhatsApp Bridge] True user logout detected (code 401). Clearing auth directory & DB store...');
-          try {
-            if (fs.existsSync(AUTH_DIR)) {
-              fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-              fs.mkdirSync(AUTH_DIR, { recursive: true });
-            }
-          } catch (rmErr) {
-            console.error('[WhatsApp Bridge] Failed to clean auth directory:', rmErr.message);
-          }
-          triggerSessionClear();
+          console.warn('[WhatsApp Bridge] Disconnect notice (code 401). Preserving DB backup; resetting in-memory socket for re-connection...');
+          // DO NOT delete DB session here: transient 401 during Render redeploy / rolling restart must not destroy DB backup!
+          // Explicit logout is handled exclusively by POST /disconnect endpoint.
           currentQr = null;
           currentQrUrl = null;
           currentQrSvg = null;
@@ -2369,7 +2417,8 @@ const server = app.listen(PORT, BIND_HOST, () => {
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.warn(`[Bridge Server] Port ${PORT} already bound by an active bridge instance.`);
+    console.warn(`[Bridge Server] Port ${PORT} already bound by an active bridge instance. Exiting redundant process.`);
+    process.exit(0);
   } else {
     console.error('[Bridge Server] Server error:', err);
   }
