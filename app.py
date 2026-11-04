@@ -20,6 +20,7 @@ except Exception:
 import datetime
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -1186,7 +1187,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/api/v1/call/<phone>/join", methods=["POST"])
     def route_call_join(phone):
         from api_v1 import api_call_join
-        return api_call_join(phone)
+        clean = re.sub(r"\D", "", str(phone or "").strip())
+        return api_call_join(clean)
 
     @application.route("/api/call/status/<phone>", methods=["GET"])
     @application.route("/api/call/<phone>/status", methods=["GET"])
@@ -1194,7 +1196,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/api/v1/call/<phone>/status", methods=["GET"])
     def route_call_status(phone):
         from api_v1 import api_call_status
-        return api_call_status(phone)
+        clean = re.sub(r"\D", "", str(phone or "").strip())
+        return api_call_status(clean)
 
     @application.route("/api/call/audio/<phone>", methods=["GET", "POST"])
     @application.route("/api/call/<phone>/audio", methods=["GET", "POST"])
@@ -1202,7 +1205,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/api/v1/call/<phone>/audio", methods=["GET", "POST"])
     def route_call_audio(phone):
         from api_v1 import api_call_audio
-        return api_call_audio(phone)
+        clean = re.sub(r"\D", "", str(phone or "").strip())
+        return api_call_audio(clean)
 
     @application.route("/api/call/end/<phone>", methods=["POST"])
     @application.route("/api/call/<phone>/end", methods=["POST"])
@@ -1210,7 +1214,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/api/v1/call/<phone>/end", methods=["POST"])
     def route_call_end(phone):
         from api_v1 import api_call_end
-        return api_call_end(phone)
+        clean = re.sub(r"\D", "", str(phone or "").strip())
+        return api_call_end(clean)
 
     @application.route("/api/customer-latest-order-info", methods=["GET"])
     @application.route("/api/v1/customer-latest-order-info", methods=["GET"])

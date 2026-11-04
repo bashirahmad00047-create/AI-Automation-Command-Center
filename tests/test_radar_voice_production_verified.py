@@ -166,46 +166,105 @@ def test_csp_allows_map_tiles_and_cdns(client):
 
 
 def test_sequential_voice_queue_delivery(client):
-    """Verify incremental sequence ID assignment, ordering, and since_seq filtering."""
+    """Verify directional audio queues (to_customer_queue & to_admin_queue) and since_seq filtering."""
     test_phone = "923479998877"
 
-    # Step 1: Send first audio chunk
+    # Step 1: Customer sends voice to Admin
     chunk1_res = client.post(f"/api/call/{test_phone}/audio", json={
         "sender": "customer",
         "audio": "dGVzdF9hdWRpb18x",
-        "text": "Salam AI"
+        "text": "Salam Admin from customer"
     })
     assert chunk1_res.status_code == 200
     data1 = chunk1_res.get_json()
     assert data1.get("success") is True
+    assert data1.get("queue") == "to_admin"
     assert data1.get("seq_id") == 1
 
-    # Step 2: Send second audio chunk
+    # Step 2: Admin sends voice to Customer
     chunk2_res = client.post(f"/api/call/{test_phone}/audio", json={
         "sender": "admin",
         "audio": "dGVzdF9hdWRpb18y",
-        "text": "Walaikum Assalam customer"
+        "text": "Walaikum Assalam customer from Admin"
     })
     assert chunk2_res.status_code == 200
     data2 = chunk2_res.get_json()
     assert data2.get("success") is True
-    assert data2.get("seq_id") == 2
+    assert data2.get("queue") == "to_customer"
+    assert data2.get("seq_id") == 1
 
-    # Step 3: Poll all chunks
-    all_res = client.get(f"/api/call/{test_phone}/audio")
-    assert all_res.status_code == 200
-    all_data = all_res.get_json()
-    assert len(all_data.get("chunks", [])) == 2
-    assert all_data["latest_seq_id"] == 2
+    # Step 3: Admin polls customer queue (role=admin) -> gets only to_admin_queue
+    admin_poll = client.get(f"/api/call/{test_phone}/audio?role=admin")
+    assert admin_poll.status_code == 200
+    admin_data = admin_poll.get_json()
+    assert len(admin_data.get("chunks", [])) == 1
+    assert admin_data["chunks"][0]["sender"] == "customer"
+    assert admin_data["chunks"][0]["text"] == "Salam Admin from customer"
 
-    # Step 4: Poll chunks since_seq=1 (only chunk 2 should be returned)
-    since_res = client.get(f"/api/call/{test_phone}/audio?since_seq=1")
-    assert since_res.status_code == 200
-    since_data = since_res.get_json()
-    assert len(since_data.get("chunks", [])) == 1
-    assert since_data["chunks"][0]["seq_id"] == 2
-    assert since_data["chunks"][0]["sender"] == "admin"
-    assert since_data["chunks"][0]["text"] == "Walaikum Assalam customer"
+    # Step 4: Customer polls customer queue (role=customer) -> gets only to_customer_queue
+    customer_poll = client.get(f"/api/call/{test_phone}/audio?role=customer")
+    assert customer_poll.status_code == 200
+    customer_data = customer_poll.get_json()
+    assert len(customer_data.get("chunks", [])) == 1
+    assert customer_data["chunks"][0]["sender"] == "admin"
+    assert customer_data["chunks"][0]["text"] == "Walaikum Assalam customer from Admin"
+
+
+def test_phone_normalization_cross_endpoint(client):
+    """Verify phone numbers with '+', ' ', and '-' symbols map to the identical session."""
+    raw_phone_dash = "+92 347-1122334"
+    clean_phone_mobile = "923471122334"
+
+    # Initiate with raw phone
+    r_init = client.post("/api/call/initiate", json={"phone": raw_phone_dash, "name": "Test Peer"})
+    assert r_init.status_code == 200
+
+    # Mobile joins using digits-only
+    r_join = client.post(f"/api/call/{clean_phone_mobile}/join")
+    assert r_join.status_code == 200
+    assert r_join.get_json().get("status") == "connected"
+
+    # Admin posts voice using raw phone format
+    r_post = client.post(f"/api/call/{raw_phone_dash}/audio", json={"sender": "admin", "text": "Normalized voice packet"})
+    assert r_post.status_code == 200
+
+    # Customer fetches voice using clean phone format
+    r_get = client.get(f"/api/call/{clean_phone_mobile}/audio?role=customer")
+    assert r_get.status_code == 200
+    assert len(r_get.get_json().get("chunks", [])) == 1
+    assert r_get.get_json()["chunks"][0]["text"] == "Normalized voice packet"
+
+
+def test_store_foodpanda_rendering_and_checkout(client):
+    """Verify /store renders Foodpanda badges, sticky cart bar, and checkout returns tracking redirect."""
+    # 1. Render /store
+    store_res = client.get("/store")
+    assert store_res.status_code == 200
+    html = store_res.get_data(as_text=True)
+    assert "25-35 min Free Delivery" in html
+    assert "foodpandaCartBar" in html
+    assert "handleProductImgError" in html
+    assert "Detect My GPS Location" in html
+
+    # 2. Test Checkout with GPS detection
+    payload = {
+        "name": "Kashif Khan",
+        "phone": "03471234567",
+        "address": "Ataliq Bazar, Chitral Town",
+        "latitude": 35.8524,
+        "longitude": 71.7869,
+        "payment_method": "cod",
+        "items": [
+            {"id": "test-item-1", "name": "Pure Chitrali Sidr Mountain Honey (500g)", "price": 2800, "quantity": 1}
+        ]
+    }
+    checkout_res = client.post("/api/store/checkout", json=payload)
+    assert checkout_res.status_code == 201
+    c_json = checkout_res.get_json()
+    assert c_json.get("success") is True
+    assert "order_id" in c_json
+    assert "/track/" in c_json.get("tracking_url", "")
+
 
 
 

@@ -4286,8 +4286,8 @@ def api_call_status(phone):
 @api_v1.route("/call/audio/<phone>", methods=["GET", "POST"])
 @api_v1.route("/call/<phone>/audio", methods=["GET", "POST"])
 def api_call_audio(phone):
-    """Handles ordered live call voice chunks with incremental sequence IDs to prevent drops."""
-    clean_phone = re.sub(r"\D", "", phone or "")
+    """Handles directional audio queues (to_customer_queue & to_admin_queue) to prevent drops and echo."""
+    clean_phone = re.sub(r"\D", "", str(phone or "").strip())
     if not clean_phone:
         return jsonify({"success": False, "error": "Phone number is required."}), 400
 
@@ -4302,60 +4302,95 @@ def api_call_audio(phone):
                 "initiated_at": now_iso,
                 "joined_at": now_iso,
                 "ended_at": None,
-                "voice_queue": [],
-                "chunk_seq": 0
+                "to_customer_queue": [],
+                "to_customer_seq": 0,
+                "to_admin_queue": [],
+                "to_admin_seq": 0
             }
             _ACTIVE_CALL_SESSIONS[clean_phone] = sess
-        if "voice_queue" not in sess:
-            sess["voice_queue"] = []
-            sess["chunk_seq"] = 0
+
+        if "to_customer_queue" not in sess:
+            sess["to_customer_queue"] = []
+            sess["to_customer_seq"] = 0
+        if "to_admin_queue" not in sess:
+            sess["to_admin_queue"] = []
+            sess["to_admin_seq"] = 0
 
         if request.method == "POST":
             data = request.get_json(silent=True) or {}
             audio_b64 = str(data.get("audio") or data.get("audioBase64") or data.get("audio_data_uri") or "").strip()
             text = str(data.get("text") or data.get("transcript") or data.get("message") or "").strip()
-            sender = str(data.get("sender") or data.get("role") or "unknown").strip().lower()
+            sender = str(data.get("sender") or data.get("role") or "").strip().lower()
+            target = str(data.get("target") or data.get("recipient") or "").strip().lower()
             mime_type = str(data.get("mimeType") or data.get("mime_type") or "audio/webm").strip()
 
             if not audio_b64 and not text:
                 return jsonify({"success": False, "error": "Either audio or text payload is required."}), 400
 
-            sess["chunk_seq"] += 1
-            new_chunk = {
-                "seq_id": sess["chunk_seq"],
-                "sender": sender,
-                "audio": audio_b64,
-                "text": text,
-                "mimeType": mime_type,
-                "timestamp": now_iso
-            }
-            sess["voice_queue"].append(new_chunk)
-            if len(sess["voice_queue"]) > 60:
-                sess["voice_queue"] = sess["voice_queue"][-60:]
+            # Route by sender / target
+            if sender in ("admin", "ai", "assistant", "agent") or target == "customer":
+                sess["to_customer_seq"] += 1
+                seq_id = sess["to_customer_seq"]
+                new_chunk = {
+                    "seq_id": seq_id,
+                    "sender": sender or "admin",
+                    "audio": audio_b64,
+                    "text": text,
+                    "mimeType": mime_type,
+                    "timestamp": now_iso
+                }
+                sess["to_customer_queue"].append(new_chunk)
+                if len(sess["to_customer_queue"]) > 60:
+                    sess["to_customer_queue"] = sess["to_customer_queue"][-60:]
+                dest = "to_customer"
+            else:
+                sess["to_admin_seq"] += 1
+                seq_id = sess["to_admin_seq"]
+                new_chunk = {
+                    "seq_id": seq_id,
+                    "sender": sender or "customer",
+                    "audio": audio_b64,
+                    "text": text,
+                    "mimeType": mime_type,
+                    "timestamp": now_iso
+                }
+                sess["to_admin_queue"].append(new_chunk)
+                if len(sess["to_admin_queue"]) > 60:
+                    sess["to_admin_queue"] = sess["to_admin_queue"][-60:]
+                dest = "to_admin"
 
             return jsonify({
                 "success": True,
-                "seq_id": new_chunk["seq_id"],
+                "seq_id": seq_id,
+                "queue": dest,
                 "phone": clean_phone,
                 "sender": sender
             }), 200
 
-        # GET request: fetch chunks since sequence ID
+        # GET request: consumer specifies its role to read its dedicated queue
+        consumer_role = str(request.args.get("role") or request.args.get("consumer") or "customer").strip().lower()
         raw_since = request.args.get("since_seq") or request.args.get("last_seq_id") or "0"
         try:
             since_seq = int(raw_since)
         except (ValueError, TypeError):
             since_seq = 0
 
-        all_chunks = sess.get("voice_queue", [])
-        new_chunks = [c for c in all_chunks if c.get("seq_id", 0) > since_seq]
+        if consumer_role == "admin":
+            target_q = sess.get("to_admin_queue", [])
+            latest_seq = sess.get("to_admin_seq", 0)
+        else:
+            target_q = sess.get("to_customer_queue", [])
+            latest_seq = sess.get("to_customer_seq", 0)
+
+        chunks = [c for c in target_q if c.get("seq_id", 0) > since_seq]
 
         return jsonify({
             "success": True,
             "phone": clean_phone,
+            "role": consumer_role,
             "status": sess.get("status", "connected"),
-            "latest_seq_id": sess.get("chunk_seq", 0),
-            "chunks": new_chunks
+            "latest_seq_id": latest_seq,
+            "chunks": chunks
         }), 200
 
 
@@ -8587,7 +8622,7 @@ VERIFIED_CHITRAL_PRODUCTS = [
     },
     {
         "name": "Handwoven Chitrali Pattu Wool Shawl",
-        "category": "Chitrali Shawls & Caps",
+        "category": "Chitrali Crafts",
         "description": "Authentic artisan handwoven pure mountain sheep wool Pattu chugha/shawl. Warm, timeless, and crafted by master weavers in Drosh and Booni.",
         "sku": "CHIT-SHAWL-002",
         "price": 6500.0,
@@ -8603,7 +8638,7 @@ VERIFIED_CHITRAL_PRODUCTS = [
     },
     {
         "name": "Traditional Chitrali Pakol Cap with Peacock Feather",
-        "category": "Chitrali Shawls & Caps",
+        "category": "Chitrali Crafts",
         "description": "Original hand-rolled Chitrali Pakol cap made from 100% fine woolen cloth. Classic symbol of Northern Pakistan pride, comfort, and heritage.",
         "sku": "CHIT-PAKOL-003",
         "price": 1400.0,
@@ -8625,7 +8660,7 @@ VERIFIED_CHITRAL_PRODUCTS = [
         "price": 1600.0,
         "seller_price": 1400.0,
         "platform_commission": 200.0,
-        "image_url": "https://images.unsplash.com/photo-1568282377339-b9a3044a8385?auto=format&fit=crop&w=600&q=80",
+        "image_url": "https://images.unsplash.com/photo-1509358271058-acd22cc93898?auto=format&fit=crop&w=600&q=80",
         "stock_quantity": 80,
         "stock_status": "in_stock",
         "seller_name": "Garam Chashma Organic Farms",
@@ -8653,14 +8688,10 @@ VERIFIED_CHITRAL_PRODUCTS = [
 
 
 def ensure_seed_products():
-    """Guarantees at least 5 verified Chitrali authentic products exist in the database,
-    preventing /store from ever rendering 0 products."""
+    """Guarantees all 5 verified Chitrali authentic products exist and have valid URLs in the database."""
     try:
         from models import Product, Organization
         from database import db
-        active_count = Product.query.filter_by(is_active=True).count()
-        if active_count >= 5:
-            return
         
         org = Organization.query.first()
         org_id = org.id if org else "org-enterprise-default"

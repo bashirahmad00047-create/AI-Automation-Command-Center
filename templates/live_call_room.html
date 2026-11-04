@@ -1140,7 +1140,81 @@
                 recognition.interimResults = true;
                 recognition.lang = currentLanguage;
 
-                recognition.onresult = (event) => {
+                
+        // Strict Half-Duplex / Turn-Taking State
+        let isCustomerSpeaking = false;
+        let currentTurnId = 0;
+        let pendingTranscript = '';
+        let speechDebounceTimer = null;
+
+        function stopIncomingAiAudio() {
+            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
+            if (player) {
+                try {
+                    player.pause();
+                    player.currentTime = 0;
+                } catch (_) {}
+            }
+            if ('speechSynthesis' in window) {
+                try { window.speechSynthesis.cancel(); } catch (_) {}
+            }
+            customerAudioQueue = [];
+            isPlayingCustomerQueue = false;
+        }
+
+        function finalizeAndSendCustomerTurn() {
+            if (speechDebounceTimer) {
+                clearTimeout(speechDebounceTimer);
+                speechDebounceTimer = null;
+            }
+            const fullText = pendingTranscript.trim();
+            pendingTranscript = '';
+            isCustomerSpeaking = false;
+            if (!fullText || fullText.length < 2) return;
+
+            currentTurnId++;
+            const thisTurnId = currentTurnId;
+
+            // Broadcast to Admin queue so Dashboard receives customer transcript
+            broadcastLiveCallChunk('customer', null, fullText, 'text/plain');
+
+            sendLiveVoicePayload({ text: fullText, turnId: thisTurnId });
+        }
+
+        recognition.onresult = (event) => {
+            // Customer is speaking: immediately interrupt any AI playback
+            stopIncomingAiAudio();
+            isCustomerSpeaking = true;
+
+            let interim = '';
+            let final = '';
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    final += event.results[i][0].transcript;
+                } else {
+                    interim += event.results[i][0].transcript;
+                }
+            }
+
+            const activeChunk = (final || interim).trim();
+            if (activeChunk) {
+                pendingTranscript = (pendingTranscript + ' ' + activeChunk).trim();
+                const tb = document.getElementById('transcriptBox');
+                if (tb) {
+                    tb.innerHTML = `<div style="color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(pendingTranscript)}</div>`;
+                    tb.scrollTop = tb.scrollHeight;
+                }
+                setStatus('🟢 Listening... (Hearing voice)');
+
+                // 1.8-second silence buffer before dispatching full turn to AI
+                if (speechDebounceTimer) clearTimeout(speechDebounceTimer);
+                speechDebounceTimer = setTimeout(() => {
+                    finalizeAndSendCustomerTurn();
+                }, 1800);
+            }
+        };
+
+        const _unused_old_onresult = (event) => {
                     // Ignore mic feedback while AI is speaking
                     if (isAiSpeaking) return;
 
@@ -1242,6 +1316,7 @@
                 if (payload.text) bodyData.text = payload.text;
                 if (payload.audioBase64) bodyData.audioBase64 = payload.audioBase64;
 
+                const targetTurnId = payload.turnId || currentTurnId;
                 const res = await fetch('/api/v1/live-voice-call', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1249,6 +1324,12 @@
                 });
 
                 const data = await res.json();
+                // Turn lock check: discard stale replies from older turns so answers NEVER play out of order
+                if (targetTurnId !== currentTurnId) {
+                    console.log('[Turn Lock Notice: Discarded stale AI answer for turn', targetTurnId, 'currentTurn is', currentTurnId, ']');
+                    return;
+                }
+
                 if (data && data.success && isCallActive) {
                     const reply = data.replyText || data.reply_text || 'Jee bilkul.';
                     callHistory.push({ role: 'assistant', text: reply });

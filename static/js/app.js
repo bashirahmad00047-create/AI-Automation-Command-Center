@@ -12233,6 +12233,23 @@ async function sendVoiceChatQuery(payload) {
 
     if (!cleanInput && !audioPayload) return;
 
+    // Broadcast Admin's voice/text immediately to the customer's dedicated queue
+    if (liveCallActivePhone) {
+        const cleanTargetPhone = String(liveCallActivePhone).replace(/\D/g, '');
+        if (cleanTargetPhone) {
+            fetch(`/api/call/audio/${encodeURIComponent(cleanTargetPhone)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sender: 'admin',
+                    audio: audioPayload || '',
+                    text: cleanInput || '',
+                    mimeType: 'audio/webm'
+                })
+            }).catch(() => {});
+        }
+    }
+
     if (cleanInput) {
         const now = Date.now();
         if (cleanInput === lastSpokenQuerySent && (now - lastSpokenQueryTime) < 1400) {
@@ -12479,6 +12496,14 @@ function processAdminAudioQueue() {
     const player = document.getElementById('remoteVoicePlayer') || document.getElementById('liveCallAudioPlayer');
     const audioData = chunk.audio || '';
     const textData = chunk.text || '';
+
+    if (textData) {
+        const transcriptBox = document.getElementById('voiceTranscriptBox');
+        if (transcriptBox) {
+            transcriptBox.innerHTML += `<div style="margin-top: 4px; color: #cbd5e1;"><strong style="color: #10b981;">Customer:</strong> ${escapeHtml(textData)}</div>`;
+            transcriptBox.scrollTop = transcriptBox.scrollHeight;
+        }
+    }
 
     const fallbackSynth = () => {
         if (textData && 'speechSynthesis' in window) {

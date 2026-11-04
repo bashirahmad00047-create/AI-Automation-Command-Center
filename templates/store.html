@@ -314,6 +314,98 @@
             border-color: var(--primary);
         }
 
+                /* Foodpanda Style Sticky Bottom Cart Bar & Delivery Badges */
+        .foodpanda-delivery-badges {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin: 12px 0 18px;
+        }
+
+        .foodpanda-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #ecfdf5;
+            color: #065f46;
+            border: 1px solid #a7f3d0;
+            padding: 5px 12px;
+            border-radius: 9999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+
+        .foodpanda-badge.blue {
+            background: #eff6ff;
+            color: #1e40af;
+            border-color: #bfdbfe;
+        }
+
+        .foodpanda-badge.amber {
+            background: #fef3c7;
+            color: #92400e;
+            border-color: #fde68a;
+        }
+
+        .foodpanda-bottom-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #ffffff;
+            border-top: 2px solid var(--primary);
+            box-shadow: 0 -8px 25px rgba(0, 0, 0, 0.15);
+            padding: 10px 16px;
+            z-index: 90;
+            display: none;
+            justify-content: center;
+        }
+
+        .foodpanda-bottom-btn {
+            max-width: 650px;
+            width: 100%;
+            background: linear-gradient(135deg, #059669, #047857);
+            color: #ffffff;
+            border: none;
+            padding: 13px 20px;
+            border-radius: var(--radius-md);
+            font-size: 1.02rem;
+            font-weight: 800;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
+            transition: all 0.2s;
+        }
+
+        .foodpanda-bottom-btn:active {
+            transform: scale(0.98);
+        }
+
+        .foodpanda-btn-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .foodpanda-btn-count {
+            background: #ffffff;
+            color: #059669;
+            border-radius: 9999px;
+            padding: 3px 9px;
+            font-size: 0.82rem;
+            font-weight: 800;
+        }
+
+        .foodpanda-btn-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+
         /* Products Grid */
         .main-container {
             max-width: 1200px;
@@ -880,6 +972,11 @@
     <!-- Hero Section -->
     <section class="hero-section">
         <h2 class="hero-title" id="heroStoreTitle">Treasures of the Hindukush &amp; Beyond</h2>
+        <div class="foodpanda-delivery-badges">
+            <span class="foodpanda-badge">⚡ 25-35 min Free Delivery</span>
+            <span class="foodpanda-badge blue">📍 Live Bike Rider GPS Tracking</span>
+            <span class="foodpanda-badge amber">🛡️ 100% Authentic Northern Treasures</span>
+        </div>
         <p class="hero-subtitle" id="heroStoreSubtitle">Authentic Chitrali Shawls, Pattu Caps, Pure Organic Honey, Walnuts, Gemstones &amp; Daily Essentials direct to your doorstep.</p>
         <div class="search-wrapper">
             <span class="search-icon">🔍</span>
@@ -1366,6 +1463,12 @@
         let storeWhatsAppPhone = '{{ jazzcash_number or "03209350858" }}';
 
         // Robust Zero-Broken-Image Inline SVG Generator
+        function handleProductImgError(imgEl, name, category) {
+            if (!imgEl || imgEl.dataset.fallbackLoaded) return;
+            imgEl.dataset.fallbackLoaded = "true";
+            imgEl.src = generateProductSvg(name, category);
+        }
+
         function generateProductSvg(name, category) {
             const cat = (category || 'Item').toUpperCase();
             const title = (name || 'Product').slice(0, 24);
@@ -1511,7 +1614,7 @@
                 return `
                     <div class="product-card">
                         <div class="product-img-wrapper">
-                            <img src="${imgSrc}" alt="${p.name}" class="product-img" onerror="this.onerror=null;this.src=generateProductSvg('${safeName}', '${safeCat}');">
+                            <img src="${imgSrc}" alt="${safeName}" class="product-img" onerror="handleProductImgError(this, '${safeName}', '${safeCat}');">
                             <span class="category-tag">${p.category || 'General'}</span>
                             <span class="stock-badge ${p.stock_status === 'out_of_stock' ? 'out-of-stock' : ''}">
                                 ${p.stock_status === 'out_of_stock' ? 'Out of Stock' : 'In Stock'}
@@ -1775,9 +1878,11 @@
                         sellerSection.style.display = 'none';
                     }
 
-                    document.getElementById('orderSuccessOverlay').classList.add('active');
                     cart = [];
                     updateCartUI();
+                    const liveTrackUrl = data.tracking_url || `/track/${data.order_id}`;
+                    window.location.href = liveTrackUrl;
+                    return;
                 } else {
                     alert('Order placement failed: ' + (data.error || 'Server error. Please retry.'));
                 }
@@ -2167,5 +2272,19 @@
             fetchProducts();
         });
     </script>
+    <!-- Foodpanda Sticky Bottom Cart Bar -->
+    <div class="foodpanda-bottom-bar" id="foodpandaCartBar" onclick="openCheckoutModal()">
+        <button type="button" class="foodpanda-bottom-btn">
+            <div class="foodpanda-btn-left">
+                <span class="foodpanda-btn-count" id="bottomBarCount">0</span>
+                <span>View Cart &amp; Checkout</span>
+            </div>
+            <div class="foodpanda-btn-right">
+                <span id="bottomBarTotal">PKR 0</span>
+                <span>&rarr;</span>
+            </div>
+        </button>
+    </div>
+
 </body>
 </html>
