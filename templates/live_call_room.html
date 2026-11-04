@@ -3,8 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Live AI Voice Call | BashFlow</title>
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <title>Dr. Aiza Dental Clinic | Live AI Voice Call</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js">
+        function askDentalTopic(query) {
+            if (!query) return;
+            if (!isCallActive) {
+                executeJoinFlow();
+            }
+            sendLiveVoicePayload({ text: query });
+        }
+        window.askDentalTopic = askDentalTopic;
+
+    </script>
     <link rel="icon" type="image/svg+xml" href="/static/img/opsflow-icon.svg">
     <style>
         * {
@@ -27,17 +37,76 @@
         .call-card {
             width: 100%;
             max-width: 380px;
-            height: 94vh;
-            max-height: 620px;
-            background: radial-gradient(circle at 50% 15%, #131d2e 0%, #0b0f19 80%);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 28px;
-            box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(20, 184, 166, 0.2);
+            height: 95vh;
+            max-height: 640px;
+            background: radial-gradient(circle at 50% 10%, #0e1e38 0%, #080d1a 80%);
+            border: 1px solid rgba(6, 182, 212, 0.25);
+            border-radius: 30px;
+            box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(6, 182, 212, 0.3);
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             overflow: hidden;
             position: relative;
+        }
+        .dental-avatar-wrap {
+            position: relative;
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: 0 0 14px rgba(6, 182, 212, 0.5);
+            flex-shrink: 0;
+        }
+        .dental-online-dot {
+            position: absolute;
+            bottom: 1px;
+            right: 1px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #10b981;
+            border: 2px solid #080d1a;
+            box-shadow: 0 0 6px #10b981;
+        }
+        .dental-subhead {
+            font-size: 10.5px;
+            color: #06b6d4;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .dental-topics-row {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            width: 100%;
+            padding: 4px 2px 8px 2px;
+            margin-bottom: 6px;
+            scrollbar-width: none;
+        }
+        .dental-topics-row::-webkit-scrollbar { display: none; }
+        .dental-chip {
+            background: rgba(6, 182, 212, 0.12);
+            border: 1px solid rgba(6, 182, 212, 0.35);
+            color: #38bdf8;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 5px 10px;
+            border-radius: 9999px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s ease;
+        }
+        .dental-chip:hover, .dental-chip:active {
+            background: rgba(6, 182, 212, 0.25);
+            border-color: #06b6d4;
+            color: #ffffff;
+            transform: scale(0.97);
         }
         /* Header */
         .call-header {
@@ -325,27 +394,36 @@
     <div class="call-card">
         <!-- Initial Connect Overlay: Captures explicit user click to unlock AudioContext -->
         <div id="connectOverlay" class="connect-overlay">
-            <div style="font-size: 54px; margin-bottom: 16px; animation: pulseTeal 2s infinite;">🎙️</div>
-            <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 6px;">BashFlow Live AI Call</h2>
-            <p style="font-size: 13px; color: #94a3b8; max-width: 260px; line-height: 1.5; margin-bottom: 24px;">
-                Connecting you to our 100% Free Live AI Voice Assistant.
+            <div style="font-size: 58px; margin-bottom: 12px; filter: drop-shadow(0 0 16px rgba(6, 182, 212, 0.6)); animation: pulseTeal 2s infinite;">🦷</div>
+            <div class="dental-subhead" style="margin-bottom: 4px;">Dr. Aiza Dental Clinic</div>
+            <h2 style="font-size: 21px; font-weight: 800; color: #f8fafc; margin-bottom: 6px; letter-spacing: -0.3px;">Aiza — AI Receptionist</h2>
+            <p style="font-size: 12.5px; color: #94a3b8; max-width: 290px; line-height: 1.5; margin-bottom: 20px;">
+                Ask about toothache, dental checkups, scaling &amp; root canals, or book your clinic appointment instantly.
             </p>
-            <button type="button" class="btn-start-call" id="joinCallBtn" onclick="executeJoinFlow(event)">
+            <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 22px; flex-wrap: wrap;">
+                <span style="font-size: 10.5px; background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.3); color: #38bdf8; padding: 3px 9px; border-radius: 9999px;">✨ Painless RCT</span>
+                <span style="font-size: 10.5px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 3px 9px; border-radius: 9999px;">📅 Instant Booking</span>
+                <span style="font-size: 10.5px; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); color: #fbbf24; padding: 3px 9px; border-radius: 9999px;">🦷 Emergency Relief</span>
+            </div>
+            <button type="button" class="btn-start-call" id="joinCallBtn" onclick="executeJoinFlow(event)" style="background: linear-gradient(135deg, #0891b2 0%, #06b6d4 100%); box-shadow: 0 8px 26px rgba(6, 182, 212, 0.5);">
                 <span>📞</span>
-                <span id="joinCallBtnText">Tap to Join Call</span>
+                <span id="joinCallBtnText">Call Receptionist Aiza</span>
             </button>
-            <div style="font-size: 11px; color: #64748b; margin-top: 20px;">
-                Instant Two-Way Voice • Pakistani Urdu &amp; English
+            <div style="font-size: 11px; color: #64748b; margin-top: 18px;">
+                Instant Two-Way Voice • Urdu (اردو) &amp; English
             </div>
         </div>
 
         <!-- Header -->
         <div class="call-header">
             <div class="caller-info">
-                <div class="pulse-dot"></div>
+                <div class="dental-avatar-wrap">
+                    <span>👩‍⚕️</span>
+                    <span class="dental-online-dot"></span>
+                </div>
                 <div>
-                    <div class="caller-name" id="callerHeaderName">BashFlow AI Voice</div>
-                    <div class="call-status" id="callStatusLabel">Connecting...</div>
+                    <div class="caller-name" id="callerHeaderName">Aiza (AI Receptionist)</div>
+                    <div class="call-status" id="callStatusLabel">Dr. Aiza Dental Clinic</div>
                 </div>
             </div>
             <div class="call-timer" id="callTimer">00:00</div>
@@ -359,13 +437,22 @@
                 <button type="button" id="btnLangEn" class="lang-chip" onclick="switchLanguage('en-US')">🇬🇧 English</button>
             </div>
 
+            <!-- Quick Dental Topic Inquiry Chips -->
+            <div class="dental-topics-row">
+                <button type="button" class="dental-chip" onclick="askDentalTopic('Mere daant mein shadeed dard hai, appointment chahiye')">🦷 Toothache / Dard</button>
+                <button type="button" class="dental-chip" onclick="askDentalTopic('Mujhe checkup ke liye appointment book karni hai')">📅 Book Checkup</button>
+                <button type="button" class="dental-chip" onclick="askDentalTopic('Teeth scaling aur cleaning ke charges kya hain?')">✨ Teeth Cleaning</button>
+                <button type="button" class="dental-chip" onclick="askDentalTopic('Root canal treatment ke charges aur process batayein')">💎 Root Canal</button>
+                <button type="button" class="dental-chip" onclick="askDentalTopic('Kya aaj doctor available hain emergency checkup ke liye?')">⚡ Emergency</button>
+            </div>
+
             <!-- 5 Wave Bars -->
             <div class="vapi-waves" id="waveContainer" onclick="interruptAssistant()" title="Tap to interrupt assistant">
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
+                <span class="wave-bar" style="background: #06b6d4;"></span>
+                <span class="wave-bar" style="background: #06b6d4;"></span>
+                <span class="wave-bar" style="background: #06b6d4;"></span>
+                <span class="wave-bar" style="background: #06b6d4;"></span>
+                <span class="wave-bar" style="background: #06b6d4;"></span>
             </div>
 
             <div id="interruptIndicator" style="display: none; font-size: 10.5px; color: #f59e0b; margin-top: -6px; margin-bottom: 8px; cursor: pointer;" onclick="interruptAssistant()">
@@ -374,24 +461,24 @@
 
             <!-- Live Mic Volume Meter -->
             <div class="vol-meter-wrap" title="Live Microphone Volume">
-                <div id="micVolumeBar" class="vol-meter-bar"></div>
+                <div id="micVolumeBar" class="vol-meter-bar" style="background: #06b6d4; box-shadow: 0 0 8px rgba(6, 182, 212, 0.8);"></div>
             </div>
 
             <!-- Subtitle / Transcript Box -->
             <div class="transcript-box" id="transcriptBox">
-                <em style="color: #64748b;">Connecting two-way voice stream...</em>
+                <em style="color: #64748b;">Connecting to Dr. Aiza Dental Clinic...</em>
             </div>
 
             <!-- Hold or Tap to Speak Button -->
-            <button type="button" id="btnPushToTalk" class="btn-ptt">
+            <button type="button" id="btnPushToTalk" class="btn-ptt" style="background: rgba(6, 182, 212, 0.15); border-color: rgba(6, 182, 212, 0.4); color: #06b6d4;">
                 <span id="pttIcon">🎙️</span>
                 <span id="pttText">Hold or Tap to Speak</span>
             </button>
 
             <!-- Fallback text typing row -->
             <div class="text-fallback-row">
-                <input type="text" id="callTextInput" class="text-fallback-input" placeholder="Type here if mic pauses..." onkeydown="if(event.key==='Enter') sendTextInput()">
-                <button type="button" class="text-fallback-btn" onclick="sendTextInput()">Send</button>
+                <input type="text" id="callTextInput" class="text-fallback-input" placeholder="Type dental symptom or question..." onkeydown="if(event.key==='Enter') sendTextInput()">
+                <button type="button" class="text-fallback-btn" onclick="sendTextInput()" style="background: #06b6d4; color: #080d1a;">Send</button>
             </div>
         </div>
 
@@ -576,11 +663,11 @@
             unlockPersistentRemotePlayer();
             startCustomerCallAudioPolling(roomId || phone);
             startTimer();
-            setStatus('🟢 Call Connected. Listening...');
+            setStatus('🟢 In Call • Dr. Aiza Dental Clinic');
 
             const tb = document.getElementById('transcriptBox');
             if (tb) {
-                tb.innerHTML = '<div style="color: #10b981; font-weight: 600;">🟢 Call Connected. Say "Salam" or speak your question.</div>';
+                tb.innerHTML = '<div style="color: #06b6d4; font-weight: 600;">🦷 Connected with Aiza (Receptionist). Speak naturally or tap a topic.</div>';
             }
 
             if (stream) {
@@ -1093,18 +1180,20 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         is_greeting: true,
-                        persona: 'ur-PK-AsadNeural',
+                        persona: 'ur-PK-UzmaNeural',
+                        clinic: 'Dr. Aiza Dental Clinic',
+                        demo: 'dental',
                         phone: phone
                     })
                 });
                 const data = await res.json();
                 if (data && data.success && isCallActive) {
-                    const greeting = data.replyText || data.reply_text || 'Assalam o Alaikum! Main BashFlow AI bol raha hoon, main aapki kya madad kar sakta hoon?';
+                    const greeting = data.replyText || data.reply_text || 'Assalam o Alaikum! Main Dr. Aiza Dental Clinic se AI Receptionist Aiza bol rahi hoon. Main aapki dental appointment ya checkup mein kya madad kar sakti hoon?';
                     callHistory.push({ role: 'assistant', text: greeting });
 
                     const tb = document.getElementById('transcriptBox');
                     if (tb) {
-                        tb.innerHTML = `<div style="color: #14b8a6; font-weight: 600;"><strong>Assistant:</strong> ${escapeHtml(greeting)}</div>`;
+                        tb.innerHTML = `<div style="color: #06b6d4; font-weight: 600;"><strong>Aiza (Receptionist):</strong> ${escapeHtml(greeting)}</div>`;
                         tb.scrollTop = tb.scrollHeight;
                     }
 
@@ -1367,7 +1456,9 @@
 
             try {
                 const bodyData = {
-                    persona: 'ur-PK-AsadNeural',
+                    persona: 'ur-PK-UzmaNeural',
+                    clinic: 'Dr. Aiza Dental Clinic',
+                    demo: 'dental',
                     callHistory: callHistory.slice(-8),
                     phone: phone || roomId,
                     roomId: roomId || phone
@@ -1405,7 +1496,7 @@
                         const recognizedUser = data.user_text || textQuery || 'Voice input';
                         tb.innerHTML = `
                             <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(recognizedUser)}</div>
-                            <div style="color: #f8fafc;"><strong style="color: #14b8a6;">Assistant:</strong> ${escapeHtml(reply)}</div>
+                            <div style="color: #f8fafc;"><strong style="color: #06b6d4;">Aiza (Receptionist):</strong> ${escapeHtml(reply)}</div>
                         `;
                         tb.scrollTop = tb.scrollHeight;
                     }

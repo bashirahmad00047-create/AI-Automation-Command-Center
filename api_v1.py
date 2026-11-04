@@ -4023,8 +4023,14 @@ def api_live_voice_call():
         pitch_str = f"{int(pitch):+d}Hz" if (isinstance(pitch, (int, float)) or (isinstance(pitch, str) and str(pitch).replace("+","").replace("-","").isdigit())) else (str(pitch) if pitch else "+0Hz")
 
         is_greeting = bool(data.get("is_greeting"))
+        clinic_name = str(data.get("clinic") or data.get("clinicName") or "").strip()
+        is_dental = bool("aiza" in persona.lower() or "dental" in persona.lower() or "dental" in clinic_name.lower() or "aiza" in clinic_name.lower() or data.get("demo") == "dental")
+
         if is_greeting:
-            if "uzma" in persona.lower() or "female" in persona.lower():
+            if is_dental or "aiza" in persona.lower():
+                reply_text = "Assalam o Alaikum! Main Dr. Aiza Dental Clinic se AI Receptionist Aiza bol rahi hoon. Main aapki dental appointment ya checkup mein kya madad kar sakti hoon?"
+                voice_text = "السلام علیکم! میں ڈاکٹر عائزہ ڈینٹل کلینک سے اے آئی ریسپشنسٹ عائزہ بول رہی ہوں۔ میں آپ کی ڈینٹل اپائنٹمنٹ یا چیک اپ میں کیا مدد کر سکتی ہوں؟"
+            elif "uzma" in persona.lower() or "female" in persona.lower():
                 reply_text = "Assalam o Alaikum! Main BashFlow AI bol rahi hoon, main aapki kya madad kar sakti hoon?"
                 voice_text = "السلام علیکم! میں بیش فلو اے آئی بول رہی ہوں، میں آپ کی کیا مدد کر سکتی ہوں؟"
             elif "asad" in persona.lower() or "ur" in persona.lower() or "puck" in persona.lower():
@@ -4131,8 +4137,30 @@ def api_live_voice_call():
                         "audio_data_uri": ""
                     }), 200
 
-            # Conversational spoken prompt enriched with Chitral & Pakistan store catalog
-            system_prompt = (
+            # Dental Clinic Demo vs Store Catalog selection
+            if is_dental or any(w in (user_text or "").lower() for w in ["teeth", "tooth", "dentist", "dental", "scaling", "root canal", "rct", "implant", "braces", "aligner", "daant", "dard", "aiza"]):
+                system_prompt = (
+                    "You are Aiza, the highly professional, empathetic, and sweet AI Medical Receptionist at Dr. Aiza Dental Clinic & Implant Center.\n"
+                    "CRITICAL SPOKEN GUIDELINES:\n"
+                    "1. Spoken Conversational Tone: Speak naturally, warmly, empathetically, and politely like a real clinic receptionist on a phone call. Never sound robotic or formal.\n"
+                    "2. Extreme Brevity: Deliver at most 1 to 2 short conversational sentences (maximum 20-25 words total) so the patient can reply easily without long pauses. Never use bullet points, asterisks, or markdown.\n"
+                    "3. Language: If the patient speaks in Urdu or Roman Urdu, reply warmly in conversational Roman Urdu / Urdu. If in English, reply in professional conversational English.\n"
+                    "4. Clinic Treatments, Fees & Services:\n"
+                    "   - Consultation & Dental Checkup: PKR 1,000 (Detailed oral exam with intraoral camera)\n"
+                    "   - Ultrasonic Scaling & Polishing (Teeth Cleaning): PKR 3,500 (Painless stain & tartar removal)\n"
+                    "   - Painless Root Canal Treatment (RCT): PKR 8,500 per tooth (Latest rotary painless technique)\n"
+                    "   - Laser Teeth Whitening: PKR 15,000 (Instant bright smile in single 45-minute sitting)\n"
+                    "   - Composite Tooth-Colored Filling: PKR 2,500 per tooth\n"
+                    "   - Titanium Dental Implants: PKR 65,000 (Permanent natural tooth replacement with lifetime warranty)\n"
+                    "   - Invisible Aligners & Braces: Consultation available with senior orthodontist\n"
+                    "   - Emergency Toothache: Immediate relief appointment available today with Dr. Aiza\n"
+                    "   - Timings: Monday to Saturday 11:00 AM to 9:00 PM (Emergency care available 24/7)\n"
+                    "5. Appointment Booking: If the patient mentions pain, treatments, or checking in, ask which time suits them best (e.g. today evening or tomorrow) and assure them their appointment with Dr. Aiza is booked.\n"
+                    "6. NO REPEATED GREETINGS: Do NOT say Assalam o Alaikum repeatedly if already greeted."
+                )
+            else:
+                # Conversational spoken prompt enriched with Chitral & Pakistan store catalog
+                system_prompt = (
                 "You are BashFlow AI Assistant speaking directly to a valued customer on a real-time telephone call.\n"
                 "CRITICAL CALL SPOKEN GUIDELINES:\n"
                 "1. Spoken Conversational Tone: Speak naturally, warmly, and politely like a real human on the phone. Never sound robotic, bookish, or formal.\n"
