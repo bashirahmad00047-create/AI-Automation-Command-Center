@@ -663,3 +663,42 @@ def test_foodpanda_store_catalog_and_hd_images(client):
     assert "referrerpolicy=\"no-referrer\"" in html
     assert "Foodpanda Restaurants" in html
     assert "Chitral Local Bazar" in html
+
+
+def test_real_voice_server_tts_and_webaudio_vad(client):
+    """Verify server-side MP3 TTS generation, /api/call/voice non-empty audio_data_uri,
+    and live_call_room.html WebAudio VAD + AnalyserNode + MediaRecorder continuous loop.
+    """
+    from api_v1 import generate_server_tts_base64
+
+    # 1. Verify generate_server_tts_base64("Assalam o Alaikum") returns real MP3 data URI
+    tts_res = generate_server_tts_base64("Assalam o Alaikum", lang="ur")
+    assert isinstance(tts_res, str)
+    assert tts_res.startswith("data:audio/mp3;base64,")
+    assert len(tts_res) > 200
+
+    # 2. Verify /api/call/voice returns non-empty audio_data_uri upon receiving audio payload
+    test_phone = "923471234567"
+    voice_res = client.post(f"/api/call/voice/{test_phone}", json={
+        "sender": "customer",
+        "audio": "dGVzdF9yZWFsX2F1ZGlvX3BheWxvYWQ=",
+        "mimeType": "audio/webm"
+    })
+    assert voice_res.status_code == 200
+    v_json = voice_res.get_json()
+    assert v_json.get("success") is True
+    assert v_json.get("audio_data_uri") is not None
+    assert str(v_json.get("audio_data_uri")).startswith("data:audio/")
+    assert len(v_json.get("audio_data_uri")) > 50
+
+    # 3. Verify live_call_room.html contains AnalyserNode/createAnalyser, MediaRecorder, and remoteVoicePlayer loop
+    template_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "templates", "live_call_room.html"))
+    assert os.path.exists(template_path)
+    with open(template_path, "r", encoding="utf-8") as f:
+        html = f.read()
+
+    assert "createAnalyser" in html or "AnalyserNode" in html
+    assert "MediaRecorder" in html
+    assert "remoteVoicePlayer" in html
+    assert "startWebAudioVADLoop" in html
+    assert "Tap to Connect Live Call" in html

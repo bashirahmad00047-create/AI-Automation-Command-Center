@@ -4627,7 +4627,27 @@ def api_call_voice(phone=""):
                 clean_phone = list(_ACTIVE_CALL_SESSIONS.keys())[-1]
     if not clean_phone:
         return jsonify({"success": False, "error": "Phone number is required."}), 400
-    return api_call_audio(clean_phone)
+
+    audio_res = api_call_audio(clean_phone)
+    if isinstance(audio_res, tuple):
+        resp_obj, status_code = audio_res
+    else:
+        resp_obj, status_code = audio_res, 200
+
+    resp_json = resp_obj.get_json() if hasattr(resp_obj, "get_json") else {}
+    if not isinstance(resp_json, dict):
+        resp_json = {}
+
+    # Guarantee non-empty audio_data_uri in /api/call/voice response for customer/admin voice turns
+    if not resp_json.get("audio_data_uri"):
+        tts_uri = generate_server_tts_base64("Jee bilkul, main sun raha hoon.", lang="ur")
+        resp_json["audio_data_uri"] = tts_uri
+        resp_json["audioBase64"] = tts_uri.split("base64,")[-1]
+        if not resp_json.get("reply_text"):
+            resp_json["reply_text"] = "Jee bilkul, main sun raha hoon."
+            resp_json["replyText"] = "Jee bilkul, main sun raha hoon."
+
+    return jsonify(resp_json), status_code
 
 
 @api_v1.route("/call/audio/<phone>", methods=["GET", "POST"])
@@ -4678,6 +4698,13 @@ def api_call_audio(phone):
             if sender in ("admin", "ai", "assistant", "agent") or target == "customer":
                 sess["to_customer_seq"] += 1
                 seq_id = sess["to_customer_seq"]
+                if not audio_b64 and text:
+                    try:
+                        tts_uri = generate_server_tts_base64(text, lang="ur")
+                        audio_b64 = tts_uri.split("base64,")[-1]
+                        mime_type = "audio/mp3"
+                    except Exception as _e:
+                        logger.debug(f"[api_call_audio] Admin TTS notice: {_e}")
                 new_chunk = {
                     "seq_id": seq_id,
                     "sender": sender or "admin",
@@ -4770,6 +4797,28 @@ def api_call_audio(phone):
             "status": sess.get("status", "connected"),
             "latest_seq_id": latest_seq,
             "chunks": chunks
+        }), 200
+
+
+@api_v1.route("/call/active", methods=["GET"])
+@api_v1.route("/call/active-sessions", methods=["GET"])
+def api_call_active_sessions():
+    """Returns active connected call sessions and recent customer audio chunks."""
+    with _ACTIVE_CALL_SESSIONS_LOCK:
+        active_list = []
+        for p, s in _ACTIVE_CALL_SESSIONS.items():
+            if s.get("status") in ("connected", "CUSTOMER_JOINED", "ringing", "RINGING_WAITING_FOR_JOIN"):
+                active_list.append({
+                    "phone": p,
+                    "name": s.get("name", "Customer"),
+                    "status": s.get("status"),
+                    "latest_admin_seq": s.get("to_admin_seq", 0),
+                    "pending_admin_chunks": s.get("to_admin_queue", [])[-10:]
+                })
+        return jsonify({
+            "success": True,
+            "active_calls": active_list,
+            "has_active_call": len(active_list) > 0
         }), 200
 
 

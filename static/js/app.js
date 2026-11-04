@@ -5375,8 +5375,21 @@ function initWhatsAppSocket() {
                 const chunk = data.chunk || data;
                 const currentClean = String(liveCallActivePhone || '').replace(/\D/g, '');
                 const chunkRoom = String(data.roomId || data.phone || chunk.roomId || chunk.phone || '').replace(/\D/g, '');
-                if (chunkRoom && currentClean && chunkRoom !== currentClean) return;
+
                 if (chunk.sender !== 'admin') {
+                    const callerPhone = chunkRoom || currentClean;
+                    if (callerPhone) {
+                        liveCallActivePhone = callerPhone;
+                        window.roomId = callerPhone;
+                    }
+                    liveVoiceCallActive = true;
+                    // Automatically open Live Call bar/modal on laptop screen
+                    const modal = document.getElementById('liveVoiceCallModal');
+                    if (modal && modal.style.display !== 'flex') {
+                        modal.style.display = 'flex';
+                    }
+                    const statusLabel = document.getElementById('voiceCallStatusLabel');
+                    if (statusLabel) statusLabel.textContent = '📞 Live Call Connected (Customer Speaking)';
                     enqueueAdminAudioChunk(chunk);
                 }
             });
@@ -12495,7 +12508,7 @@ let lastAdminSeqId = 0;
 let adminAudioPollInterval = null;
 
 function unlockAdminRemoteVoicePlayer() {
-    const player = document.getElementById('remoteVoicePlayer') || document.getElementById('liveCallAudioPlayer');
+    const player = document.getElementById('adminRemoteVoicePlayer') || document.getElementById('remoteVoicePlayer') || document.getElementById('liveCallAudioPlayer');
     if (!player) return;
     try {
         player.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
@@ -12601,6 +12614,47 @@ function processAdminAudioQueue() {
         fallbackSynth();
     } else { advance(); }
 }
+
+let globalActiveCallPoller = null;
+function startGlobalActiveCallPoller() {
+    if (globalActiveCallPoller) clearInterval(globalActiveCallPoller);
+    globalActiveCallPoller = setInterval(async () => {
+        try {
+            const phoneToPoll = liveCallActivePhone || '';
+            const pollUrl = phoneToPoll
+                ? `/api/call/audio/${encodeURIComponent(phoneToPoll)}?since_seq=${lastAdminSeqId}&role=admin&t=${Date.now()}`
+                : `/api/call/active?t=${Date.now()}`;
+            const res = await fetch(pollUrl);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.active_calls && Array.isArray(data.active_calls) && data.active_calls.length > 0) {
+                const firstCall = data.active_calls[0];
+                if (!liveCallActivePhone && firstCall.phone) {
+                    liveCallActivePhone = firstCall.phone;
+                    window.roomId = firstCall.phone;
+                }
+                const modal = document.getElementById('liveVoiceCallModal');
+                if (modal && modal.style.display !== 'flex') {
+                    modal.style.display = 'flex';
+                }
+                if (Array.isArray(firstCall.pending_admin_chunks)) {
+                    firstCall.pending_admin_chunks.forEach(c => {
+                        if (c.sender !== 'admin') {
+                            enqueueAdminAudioChunk(c);
+                        }
+                    });
+                }
+            } else if (data.success && Array.isArray(data.chunks)) {
+                data.chunks.forEach(c => {
+                    if (c.sender !== 'admin') {
+                        enqueueAdminAudioChunk(c);
+                    }
+                });
+            }
+        } catch (_) {}
+    }, 1000);
+}
+try { startGlobalActiveCallPoller(); } catch (_) {}
 
 function startAdminAudioPolling(phoneNum) {
     if (adminAudioPollInterval) clearInterval(adminAudioPollInterval);
