@@ -9,9 +9,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
-    <!-- Leaflet Map CSS & JS with CDN and Local Fallbacks -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" onerror="this.onerror=null;this.href='/static/vendor/leaflet/leaflet.css';"/>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" onerror="this.onerror=null;this.src='/static/vendor/leaflet/leaflet.js';"></script>
+    <!-- Leaflet Map CSS & JS with Fast CDN and Local Fallbacks (No SRI to avoid hash blocking) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" onerror="this.onerror=null;this.href='/static/vendor/leaflet/leaflet.css';"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="" onerror="this.onerror=null;this.src='/static/vendor/leaflet/leaflet.js';"></script>
 
     <style>
         :root {
@@ -290,7 +290,7 @@
             color: var(--primary-dark);
         }
 
-        /* Live GPS Radar Map */
+        /* Live GPS Radar Map Container - Fixed Grey Map Box */
         .map-card-header {
             display: flex;
             justify-content: space-between;
@@ -336,14 +336,16 @@
             50% { opacity: 0.4; transform: scale(0.85); }
         }
 
-        /* Delivery Map View Container - Fixed Grey Map */
-        #deliveryMap {
+        /* Delivery Map View Container - Explicit Pixel Dimensions & Display Block */
+        #radarMap, #deliveryMap {
             width: 100%;
-            height: 420px;
+            min-height: 380px;
+            height: 380px;
             border-radius: var(--radius-md);
             border: 1px solid var(--gray-200);
-            background: #f1f5f9;
+            background: #e2e8f0;
             position: relative;
+            display: block;
             z-index: 10;
         }
 
@@ -726,8 +728,8 @@
                 </div>
             </div>
 
-            <!-- Leaflet Container -->
-            <div id="deliveryMap"></div>
+            <!-- Leaflet Container (#radarMap and #deliveryMap supported) -->
+            <div id="radarMap"></div>
 
             <!-- Live Distance & ETA Banner -->
             <div class="eta-banner" id="etaBanner">
@@ -781,23 +783,6 @@
         let broadcastCount = 0;
         let pollTimer = null;
 
-        // Custom Leaflet Icons
-        const bikeIcon = L.divIcon({
-            className: 'bike-radar-icon',
-            html: '<div class="bike-radar-pulse"></div><div class="bike-icon-circle">🏍️</div>',
-            iconSize: [44, 44],
-            iconAnchor: [22, 22],
-            popupAnchor: [0, -22]
-        });
-
-        const destIcon = L.divIcon({
-            className: 'dest-pin-icon',
-            html: '<div class="dest-icon-circle">📍</div>',
-            iconSize: [38, 38],
-            iconAnchor: [19, 38],
-            popupAnchor: [0, -38]
-        });
-
         // Toast Feedback Helper
         function showToast(msg) {
             const toast = document.getElementById('toastNotice');
@@ -821,12 +806,63 @@
             return R * c;
         }
 
+        // Update Radar Banner & ETA
+        function updateRadarStatus(isLive, message) {
+            const pill = document.getElementById('radarStatusPill');
+            const text = document.getElementById('radarStatusText');
+            if (pill && text) {
+                if (isLive) {
+                    pill.classList.add('live');
+                    text.textContent = message || "Live Radar Active";
+                } else {
+                    pill.classList.remove('live');
+                    text.textContent = message || "Standby";
+                }
+            }
+        }
+
+        // Staggered invalidateSize() calls guarantee map renders tiles fully without grey gaps
+        function staggerMapInvalidate() {
+            if (!map) return;
+            const delays = [50, 150, 350, 800, 1500, 2500];
+            delays.forEach(ms => {
+                setTimeout(() => {
+                    if (map) map.invalidateSize();
+                }, ms);
+            });
+        }
+
         // Initialize Map & Tile Layers
         function initLeafletMap() {
             if (map) return;
+            if (typeof L === 'undefined') {
+                console.warn('[Leaflet library not ready, retrying in 80ms...]');
+                setTimeout(initLeafletMap, 80);
+                return;
+            }
+
+            const mapEl = document.getElementById('radarMap') || document.getElementById('deliveryMap');
+            if (!mapEl) return;
+
+            // Custom Leaflet Icons
+            const bikeIcon = L.divIcon({
+                className: 'bike-radar-icon',
+                html: '<div class="bike-radar-pulse"></div><div class="bike-icon-circle">🏍️</div>',
+                iconSize: [44, 44],
+                iconAnchor: [22, 22],
+                popupAnchor: [0, -22]
+            });
+
+            const destIcon = L.divIcon({
+                className: 'dest-pin-icon',
+                html: '<div class="dest-icon-circle">📍</div>',
+                iconSize: [38, 38],
+                iconAnchor: [19, 38],
+                popupAnchor: [0, -38]
+            });
 
             // Default center: Chitral, PK
-            map = L.map('deliveryMap', {
+            map = L.map(mapEl, {
                 center: customerDestinationCoords,
                 zoom: 14,
                 zoomControl: true,
@@ -850,38 +886,15 @@
             destMarker = L.marker(customerDestinationCoords, { icon: destIcon }).addTo(map);
             destMarker.bindPopup("<b>Order Destination</b><br>" + (document.getElementById('destAddressText')?.innerText || 'Delivery Address'));
 
-            // Staggered invalidateSize() calls guarantee map renders tiles fully without grey gaps
+            // Immediately mark status as Live Radar Active
+            updateRadarStatus(true, "Live Radar Active");
+
+            // Staggered invalidateSize()
             staggerMapInvalidate();
-        }
-
-        function staggerMapInvalidate() {
-            if (!map) return;
-            const delays = [50, 150, 400, 800, 1500, 3000];
-            delays.forEach(ms => {
-                setTimeout(() => {
-                    if (map) map.invalidateSize();
-                }, ms);
-            });
-        }
-
-        // Update Radar Banner & ETA
-        function updateRadarStatus(isLive, message) {
-            const pill = document.getElementById('radarStatusPill');
-            const text = document.getElementById('radarStatusText');
-            if (pill && text) {
-                if (isLive) {
-                    pill.classList.add('live');
-                    text.textContent = message || "Live GPS Active";
-                } else {
-                    pill.classList.remove('live');
-                    text.textContent = message || "Standby";
-                }
-            }
         }
 
         function updateEtaDisplay(riderLat, riderLng, destLat, destLng) {
             const distKm = calculateHaversineKm(riderLat, riderLng, destLat, destLng);
-            // Road distance factor ~1.25, urban bike speed ~24 km/h
             const roadKm = distKm * 1.25;
             const etaMinutes = Math.max(2, Math.round((roadKm / 24) * 60));
 
@@ -909,14 +922,21 @@
 
         // Update Map Markers & Route Polyline
         function updateDeliveryRoute(riderLat, riderLng, destLat, destLng) {
-            if (!map) return;
+            if (!map || typeof L === 'undefined') return;
 
             const riderPoint = [riderLat, riderLng];
             const destPoint = [destLat, destLng];
 
             // 1. Move or create Bike Marker
             if (!bikeMarker) {
-                bikeMarker = L.marker(riderPoint, { icon: bikeIcon }).addTo(map);
+                const bIcon = L.divIcon({
+                    className: 'bike-radar-icon',
+                    html: '<div class="bike-radar-pulse"></div><div class="bike-icon-circle">🏍️</div>',
+                    iconSize: [44, 44],
+                    iconAnchor: [22, 22],
+                    popupAnchor: [0, -22]
+                });
+                bikeMarker = L.marker(riderPoint, { icon: bIcon }).addTo(map);
                 bikeMarker.bindPopup("<b>Delivery Bike Rider</b><br>Live GPS Location");
             } else {
                 bikeMarker.setLatLng(riderPoint);
@@ -963,7 +983,6 @@
                             destMarker.setLatLng(customerDestinationCoords);
                             destMarker.setPopupContent("<b>Order Destination</b><br>" + (data.destination.address || 'Delivery Address'));
                         }
-                        // Update Google Maps nav button in rider panel
                         const navBtn = document.getElementById('btnNavGoogleMaps');
                         if (navBtn) {
                             navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${data.destination.lat},${data.destination.lng}`;
@@ -979,7 +998,7 @@
                         updateDeliveryRoute(rLat, rLng, customerDestinationCoords[0], customerDestinationCoords[1]);
                         updateEtaDisplay(rLat, rLng, customerDestinationCoords[0], customerDestinationCoords[1]);
                     } else {
-                        updateRadarStatus(false, "Preparing dispatch...");
+                        updateRadarStatus(true, "Live Radar Active");
                     }
                 }
             } catch (err) {

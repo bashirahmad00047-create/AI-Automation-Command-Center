@@ -1423,6 +1423,7 @@ function openWfNodeModal(step, idx, displayType, icon, rule) {
     `;
 
     modal.style.display = 'flex';
+    unlockAdminRemoteVoicePlayer();
 }
 
 function closeWfNodeModal() {
@@ -12420,6 +12421,115 @@ function startWhatsAppHeaderCall() {
 }
 window.startWhatsAppHeaderCall = startWhatsAppHeaderCall;
 
+// --- Admin Live Call Audio Queue & MIME Negotiation ---
+function getAdminAudioMimeType() {
+    const candidates = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/aac',
+        'audio/ogg'
+    ];
+    for (const t of candidates) {
+        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) {
+            return t;
+        }
+    }
+    return '';
+}
+
+let adminAudioQueue = [];
+let isAdminPlayingAudio = false;
+let lastAdminSeqId = 0;
+let adminAudioPollInterval = null;
+
+function unlockAdminRemoteVoicePlayer() {
+    const player = document.getElementById('remoteVoicePlayer') || document.getElementById('liveCallAudioPlayer');
+    if (!player) return;
+    try {
+        player.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+        const p = player.play();
+        if (p !== undefined) {
+            p.then(() => {
+                player.pause();
+                player.currentTime = 0;
+            }).catch(() => {});
+        }
+    } catch (_) {}
+}
+
+function enqueueAdminAudioChunk(chunk) {
+    if (!chunk || !chunk.seq_id) return;
+    if (chunk.seq_id <= lastAdminSeqId) return;
+    lastAdminSeqId = chunk.seq_id;
+    adminAudioQueue.push(chunk);
+    processAdminAudioQueue();
+}
+
+function processAdminAudioQueue() {
+    if (isAdminPlayingAudio || adminAudioQueue.length === 0) return;
+    isAdminPlayingAudio = true;
+    const chunk = adminAudioQueue.shift();
+
+    const advance = () => {
+        isAdminPlayingAudio = false;
+        setTimeout(processAdminAudioQueue, 40);
+    };
+
+    const player = document.getElementById('remoteVoicePlayer') || document.getElementById('liveCallAudioPlayer');
+    const audioData = chunk.audio || '';
+    const textData = chunk.text || '';
+
+    const fallbackSynth = () => {
+        if (textData && 'speechSynthesis' in window) {
+            try {
+                window.speechSynthesis.cancel();
+                const utter = new SpeechSynthesisUtterance(textData);
+                utter.lang = 'ur-PK';
+                utter.onend = () => advance();
+                utter.onerror = () => advance();
+                window.speechSynthesis.speak(utter);
+            } catch (_) { advance(); }
+        } else { advance(); }
+    };
+
+    if (audioData && String(audioData).trim()) {
+        const cleanB64 = String(audioData).trim();
+        const uri = cleanB64.startsWith('data:') ? cleanB64 : ('data:audio/mp3;base64,' + cleanB64);
+        if (player) {
+            player.src = uri;
+            player.currentTime = 0;
+            player.onended = () => advance();
+            player.onerror = () => fallbackSynth();
+            const p = player.play();
+            if (p !== undefined) {
+                p.catch(() => fallbackSynth());
+            }
+        } else { fallbackSynth(); }
+    } else if (textData) {
+        fallbackSynth();
+    } else { advance(); }
+}
+
+function startAdminAudioPolling(phoneNum) {
+    if (adminAudioPollInterval) clearInterval(adminAudioPollInterval);
+    adminAudioPollInterval = setInterval(async () => {
+        if (!liveVoiceCallActive || !phoneNum) return;
+        try {
+            const res = await fetch(`/api/call/audio/${encodeURIComponent(phoneNum)}?since_seq=${lastAdminSeqId}&role=admin&t=${Date.now()}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.success && Array.isArray(data.chunks)) {
+                data.chunks.forEach(c => {
+                    if (c.sender !== 'admin') {
+                        enqueueAdminAudioChunk(c);
+                    }
+                });
+            }
+        } catch (_) {}
+    }, 1000);
+}
+
 function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customName = null) {
     const modal = document.getElementById('liveVoiceCallModal');
     if (!modal) return;
@@ -12452,7 +12562,13 @@ function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customNa
                 modalMicAnalyser = ctx.createAnalyser();
                 modalMicAnalyser.fftSize = 256;
                 src.connect(modalMicAnalyser);
-                modalMediaRecorder = new MediaRecorder(stream);
+                const mRecMime = getAdminAudioMimeType();
+                const mRecOptions = mRecMime ? { mimeType: mRecMime } : {};
+                try {
+                    modalMediaRecorder = new MediaRecorder(stream, mRecOptions);
+                } catch (_) {
+                    modalMediaRecorder = new MediaRecorder(stream);
+                }
                 modalRecordedChunks = [];
                 modalMediaRecorder.ondataavailable = e => {
                     if (e.data && e.data.size > 0) modalRecordedChunks.push(e.data);
@@ -12628,6 +12744,7 @@ function onCustomerJoinedCall(callerName, customPhone) {
 
     liveVoiceCallActive = true;
     startLiveCallTimer();
+    startAdminAudioPolling(customPhone || liveCallActivePhone);
 
     if (statusLabel) {
         statusLabel.innerHTML = `🟢 <b>Customer Connected - Live Audio Active</b>`;
@@ -12671,6 +12788,10 @@ function startLocalAdminVoiceTest() {
 window.startLocalAdminVoiceTest = startLocalAdminVoiceTest;
 
 function stopLocalAudioAndMicTracks() {
+    if (adminAudioPollInterval) {
+        clearInterval(adminAudioPollInterval);
+        adminAudioPollInterval = null;
+    }
     liveVoiceCallActive = false;
     isLiveAiSpeaking = false;
     stopLiveCallTimer();
@@ -12899,7 +13020,13 @@ function startContinuousVoiceVAD() {
             updateModalVolume();
 
             if (!modalMediaRecorder) {
-                modalMediaRecorder = new MediaRecorder(stream);
+                const mRecMime = getAdminAudioMimeType();
+                const mRecOptions = mRecMime ? { mimeType: mRecMime } : {};
+                try {
+                    modalMediaRecorder = new MediaRecorder(stream, mRecOptions);
+                } catch (_) {
+                    modalMediaRecorder = new MediaRecorder(stream);
+                }
                 modalRecordedChunks = [];
                 modalMediaRecorder.ondataavailable = e => {
                     if (e.data && e.data.size > 0) modalRecordedChunks.push(e.data);

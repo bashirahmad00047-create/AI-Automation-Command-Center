@@ -148,10 +148,65 @@ def test_public_track_portal_rendering(client):
     res = client.get("/track/ORD-AUTO-TEST-001?role=rider")
     assert res.status_code == 200
     html = res.get_data(as_text=True)
-    assert "deliveryMap" in html
+    assert ("radarMap" in html or "deliveryMap" in html)
     assert "cartocdn.com" in html
     assert "Rider GPS Mode" in html
     assert "Customer Live View" in html
+    assert "min-height: 380px" in html
+
+
+def test_csp_allows_map_tiles_and_cdns(client):
+    """Verify CSP headers explicitly allow unpkg, cdnjs, cartocdn, and OpenStreetMap tiles."""
+    res = client.get("/track/ORD-AUTO-TEST-001")
+    assert res.status_code == 200
+    csp = res.headers.get("Content-Security-Policy", "")
+    assert "cartocdn.com" in csp
+    assert "unpkg.com" in csp
+    assert "openstreetmap.org" in csp
+
+
+def test_sequential_voice_queue_delivery(client):
+    """Verify incremental sequence ID assignment, ordering, and since_seq filtering."""
+    test_phone = "923479998877"
+
+    # Step 1: Send first audio chunk
+    chunk1_res = client.post(f"/api/call/{test_phone}/audio", json={
+        "sender": "customer",
+        "audio": "dGVzdF9hdWRpb18x",
+        "text": "Salam AI"
+    })
+    assert chunk1_res.status_code == 200
+    data1 = chunk1_res.get_json()
+    assert data1.get("success") is True
+    assert data1.get("seq_id") == 1
+
+    # Step 2: Send second audio chunk
+    chunk2_res = client.post(f"/api/call/{test_phone}/audio", json={
+        "sender": "admin",
+        "audio": "dGVzdF9hdWRpb18y",
+        "text": "Walaikum Assalam customer"
+    })
+    assert chunk2_res.status_code == 200
+    data2 = chunk2_res.get_json()
+    assert data2.get("success") is True
+    assert data2.get("seq_id") == 2
+
+    # Step 3: Poll all chunks
+    all_res = client.get(f"/api/call/{test_phone}/audio")
+    assert all_res.status_code == 200
+    all_data = all_res.get_json()
+    assert len(all_data.get("chunks", [])) == 2
+    assert all_data["latest_seq_id"] == 2
+
+    # Step 4: Poll chunks since_seq=1 (only chunk 2 should be returned)
+    since_res = client.get(f"/api/call/{test_phone}/audio?since_seq=1")
+    assert since_res.status_code == 200
+    since_data = since_res.get_json()
+    assert len(since_data.get("chunks", [])) == 1
+    assert since_data["chunks"][0]["seq_id"] == 2
+    assert since_data["chunks"][0]["sender"] == "admin"
+    assert since_data["chunks"][0]["text"] == "Walaikum Assalam customer"
+
 
 
 def test_live_rider_gps_broadcast_and_polling(client):

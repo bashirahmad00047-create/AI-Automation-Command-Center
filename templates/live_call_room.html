@@ -407,6 +407,7 @@
         </div>
     </div>
 
+    <audio id="remoteVoicePlayer" playsinline autoplay preload="auto" style="display: none;"></audio>
     <audio id="audioPlayer" preload="auto" style="display: none;"></audio>
 
     <script>
@@ -513,6 +514,8 @@
             if (overlay) overlay.style.display = 'none';
 
             isCallActive = true;
+            unlockPersistentRemotePlayer();
+            startCustomerCallAudioPolling(roomId || phone);
             startTimer();
             setStatus('🟢 Call Connected. Listening...');
 
@@ -549,6 +552,142 @@
         window.startCustomerListening = startCustomerListening;
 
         let isJoinInProgress = false;
+
+        
+        // --- Cross-Browser MIME Negotiation & Audio Queue Pipeline ---
+        function getSupportedAudioMimeType() {
+            const candidates = [
+                'audio/webm;codecs=opus',
+                'audio/webm',
+                'audio/mp4',
+                'audio/aac',
+                'audio/ogg'
+            ];
+            for (const t of candidates) {
+                if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) {
+                    return t;
+                }
+            }
+            return '';
+        }
+
+        let customerAudioQueue = [];
+        let isPlayingCustomerQueue = false;
+        let lastCustomerSeqId = 0;
+        let customerAudioPollInterval = null;
+
+        function unlockPersistentRemotePlayer() {
+            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
+            if (!player) return;
+            try {
+                // 1-frame silent 44.1kHz WAV data URI to unlock mobile autoplay
+                player.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+                const p = player.play();
+                if (p !== undefined) {
+                    p.then(() => {
+                        player.pause();
+                        player.currentTime = 0;
+                    }).catch(() => {});
+                }
+            } catch (_) {}
+        }
+
+        function enqueueCustomerAudioChunk(chunk) {
+            if (!chunk || !chunk.seq_id) return;
+            if (chunk.seq_id <= lastCustomerSeqId) return;
+            lastCustomerSeqId = chunk.seq_id;
+            customerAudioQueue.push(chunk);
+            processCustomerAudioQueue();
+        }
+
+        function fallbackTTSPlay(text, callback) {
+            if (!text || !('speechSynthesis' in window)) {
+                if (typeof callback === 'function') callback();
+                return;
+            }
+            try {
+                window.speechSynthesis.cancel();
+                const utter = new SpeechSynthesisUtterance(text);
+                utter.lang = 'ur-PK';
+                utter.rate = 1.0;
+                utter.onend = () => { if (typeof callback === 'function') callback(); };
+                utter.onerror = () => { if (typeof callback === 'function') callback(); };
+                window.speechSynthesis.speak(utter);
+            } catch (_) {
+                if (typeof callback === 'function') callback();
+            }
+        }
+
+        function processCustomerAudioQueue() {
+            if (isPlayingCustomerQueue || customerAudioQueue.length === 0) return;
+            isPlayingCustomerQueue = true;
+            const chunk = customerAudioQueue.shift();
+
+            const advanceQueue = () => {
+                isPlayingCustomerQueue = false;
+                setTimeout(processCustomerAudioQueue, 40);
+            };
+
+            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
+            const audioData = chunk.audio || '';
+            const textData = chunk.text || '';
+
+            if (audioData && String(audioData).trim()) {
+                const cleanB64 = String(audioData).trim();
+                const uri = cleanB64.startsWith('data:') ? cleanB64 : ('data:audio/mp3;base64,' + cleanB64);
+                if (player) {
+                    player.src = uri;
+                    player.currentTime = 0;
+                    player.onended = () => advanceQueue();
+                    player.onerror = () => fallbackTTSPlay(textData, advanceQueue);
+                    const p = player.play();
+                    if (p !== undefined) {
+                        p.catch(() => fallbackTTSPlay(textData, advanceQueue));
+                    }
+                } else {
+                    fallbackTTSPlay(textData, advanceQueue);
+                }
+            } else if (textData) {
+                fallbackTTSPlay(textData, advanceQueue);
+            } else {
+                advanceQueue();
+            }
+        }
+
+        function startCustomerCallAudioPolling(phoneNum) {
+            if (customerAudioPollInterval) clearInterval(customerAudioPollInterval);
+            customerAudioPollInterval = setInterval(async () => {
+                if (!isCallActive || !phoneNum) return;
+                try {
+                    const res = await fetch(`/api/call/audio/${encodeURIComponent(phoneNum)}?since_seq=${lastCustomerSeqId}&role=customer&t=${Date.now()}`);
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    if (data.success && Array.isArray(data.chunks)) {
+                        data.chunks.forEach(c => {
+                            if (c.sender !== 'customer') {
+                                enqueueCustomerAudioChunk(c);
+                            }
+                        });
+                    }
+                } catch (_) {}
+            }, 1000);
+        }
+
+        function broadcastLiveCallChunk(sender, audioPayload, textPayload, mime) {
+            const targetPhone = roomId || phone;
+            if (!targetPhone) return;
+            fetch(`/api/call/audio/${encodeURIComponent(targetPhone)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sender: sender || 'customer',
+                    audio: audioPayload || '',
+                    text: textPayload || '',
+                    mimeType: mime || 'audio/webm'
+                })
+            }).catch(() => {});
+        }
+
 
         function executeJoinFlow(e) {
             if (e && e.stopPropagation) e.stopPropagation();
@@ -945,7 +1084,13 @@
 
         function setupMediaRecorderVAD(stream) {
             try {
-                mediaRecorder = new MediaRecorder(stream);
+                const recMime = getSupportedAudioMimeType();
+                const recOptions = recMime ? { mimeType: recMime } : {};
+                try {
+                    mediaRecorder = new MediaRecorder(stream, recOptions);
+                } catch (_) {
+                    mediaRecorder = new MediaRecorder(stream);
+                }
                 recordedChunks = [];
                 mediaRecorder.ondataavailable = (e) => {
                     if (e.data && e.data.size > 0) {

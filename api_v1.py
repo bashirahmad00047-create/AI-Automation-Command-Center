@@ -4283,6 +4283,82 @@ def api_call_status(phone):
         }), 200
 
 
+@api_v1.route("/call/audio/<phone>", methods=["GET", "POST"])
+@api_v1.route("/call/<phone>/audio", methods=["GET", "POST"])
+def api_call_audio(phone):
+    """Handles ordered live call voice chunks with incremental sequence IDs to prevent drops."""
+    clean_phone = re.sub(r"\D", "", phone or "")
+    if not clean_phone:
+        return jsonify({"success": False, "error": "Phone number is required."}), 400
+
+    now_iso = datetime.datetime.utcnow().isoformat() + "Z"
+    with _ACTIVE_CALL_SESSIONS_LOCK:
+        sess = _ACTIVE_CALL_SESSIONS.get(clean_phone)
+        if not sess:
+            sess = {
+                "phone": clean_phone,
+                "name": "Customer",
+                "status": "connected",
+                "initiated_at": now_iso,
+                "joined_at": now_iso,
+                "ended_at": None,
+                "voice_queue": [],
+                "chunk_seq": 0
+            }
+            _ACTIVE_CALL_SESSIONS[clean_phone] = sess
+        if "voice_queue" not in sess:
+            sess["voice_queue"] = []
+            sess["chunk_seq"] = 0
+
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            audio_b64 = str(data.get("audio") or data.get("audioBase64") or data.get("audio_data_uri") or "").strip()
+            text = str(data.get("text") or data.get("transcript") or data.get("message") or "").strip()
+            sender = str(data.get("sender") or data.get("role") or "unknown").strip().lower()
+            mime_type = str(data.get("mimeType") or data.get("mime_type") or "audio/webm").strip()
+
+            if not audio_b64 and not text:
+                return jsonify({"success": False, "error": "Either audio or text payload is required."}), 400
+
+            sess["chunk_seq"] += 1
+            new_chunk = {
+                "seq_id": sess["chunk_seq"],
+                "sender": sender,
+                "audio": audio_b64,
+                "text": text,
+                "mimeType": mime_type,
+                "timestamp": now_iso
+            }
+            sess["voice_queue"].append(new_chunk)
+            if len(sess["voice_queue"]) > 60:
+                sess["voice_queue"] = sess["voice_queue"][-60:]
+
+            return jsonify({
+                "success": True,
+                "seq_id": new_chunk["seq_id"],
+                "phone": clean_phone,
+                "sender": sender
+            }), 200
+
+        # GET request: fetch chunks since sequence ID
+        raw_since = request.args.get("since_seq") or request.args.get("last_seq_id") or "0"
+        try:
+            since_seq = int(raw_since)
+        except (ValueError, TypeError):
+            since_seq = 0
+
+        all_chunks = sess.get("voice_queue", [])
+        new_chunks = [c for c in all_chunks if c.get("seq_id", 0) > since_seq]
+
+        return jsonify({
+            "success": True,
+            "phone": clean_phone,
+            "status": sess.get("status", "connected"),
+            "latest_seq_id": sess.get("chunk_seq", 0),
+            "chunks": new_chunks
+        }), 200
+
+
 @api_v1.route("/call/end/<phone>", methods=["POST"])
 @api_v1.route("/call/<phone>/end", methods=["POST"])
 def api_call_end(phone):

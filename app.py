@@ -447,7 +447,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "img-src 'self' data: blob: https: http:; "
             "frame-src 'self' https://www.openstreetmap.org https://*.openstreetmap.org; "
             "media-src 'self' data: blob:; "
-            "connect-src 'self' ws: wss: https://cdn.socket.io https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.basemaps.cartocdn.com https://basemaps.cartocdn.com;"
+            "connect-src 'self' ws: wss: https://cdn.socket.io https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.basemaps.cartocdn.com https://basemaps.cartocdn.com https://*.cartocdn.com https://unpkg.com https://cdnjs.cloudflare.com;"
         )
         response.headers["Content-Security-Policy"] = csp
         if application.config.get("SESSION_COOKIE_SECURE"):
@@ -1195,6 +1195,14 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     def route_call_status(phone):
         from api_v1 import api_call_status
         return api_call_status(phone)
+
+    @application.route("/api/call/audio/<phone>", methods=["GET", "POST"])
+    @application.route("/api/call/<phone>/audio", methods=["GET", "POST"])
+    @application.route("/api/v1/call/audio/<phone>", methods=["GET", "POST"])
+    @application.route("/api/v1/call/<phone>/audio", methods=["GET", "POST"])
+    def route_call_audio(phone):
+        from api_v1 import api_call_audio
+        return api_call_audio(phone)
 
     @application.route("/api/call/end/<phone>", methods=["POST"])
     @application.route("/api/call/<phone>/end", methods=["POST"])
