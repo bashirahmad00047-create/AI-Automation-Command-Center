@@ -4248,6 +4248,19 @@ def api_live_voice_call():
                 organization_id=org_id
             )
 
+        if not audio_bytes:
+            try:
+                import io
+                from gtts import gTTS
+                clean_txt = str(reply_text or voice_text or "").strip()
+                g_lang = "ur" if any('\u0600' <= ch <= '\u06FF' for ch in clean_txt) or any(w in clean_txt.lower() for w in ["salam", "aap", "jee", "hain", "kya", "karoon", "bol"]) else "en"
+                tts = gTTS(clean_txt, lang=g_lang)
+                buf = io.BytesIO()
+                tts.write_to_fp(buf)
+                audio_bytes = buf.getvalue()
+            except Exception as _gtts_err:
+                logger.debug(f"gTTS fallback notice: {_gtts_err}")
+
         audio_b64 = base64.b64encode(audio_bytes).decode("ascii") if audio_bytes else ""
         audio_data_uri = f"data:audio/mp3;base64,{audio_b64}" if audio_b64 else ""
 

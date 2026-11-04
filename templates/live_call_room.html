@@ -546,6 +546,14 @@
             if (overlay) overlay.style.display = 'none';
 
             isCallActive = true;
+            // Synchronously unlock AudioContext AND player in this direct click gesture
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!audioCtx && AudioCtx) audioCtx = new AudioCtx();
+                if (audioCtx && audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+            } catch (_) {}
             unlockPersistentRemotePlayer();
             startCustomerCallAudioPolling(roomId || phone);
             startTimer();
@@ -823,14 +831,26 @@
                             tb.innerHTML = `<span style="color:#cbd5e1;"><b>You:</b> ${escapeHtml(liveSpeech)}</span>`;
                         }
 
-                        // 1.2s Silence Detection
+                        // 1.2s Silence Detection: convert recorded real voice chunks to base64 WebM
                         if (speechDebounceTimer) clearTimeout(speechDebounceTimer);
                         speechDebounceTimer = setTimeout(() => {
                             if (liveSpeech && isCallActive && !isMuted) {
                                 currentTurnId++;
                                 turnId = currentTurnId;
-                                broadcastLiveCallChunk('customer', null, liveSpeech, 'text/plain');
-                                sendLiveVoicePayload({ text: liveSpeech, turnId: currentTurnId });
+                                if (recordedChunks && recordedChunks.length > 0) {
+                                    const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+                                    recordedChunks = [];
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => {
+                                        const base64Audio = reader.result;
+                                        broadcastLiveCallChunk('customer', base64Audio, liveSpeech, 'audio/webm');
+                                        sendLiveVoicePayload({ text: liveSpeech, audioBase64: base64Audio, turnId: currentTurnId });
+                                    };
+                                    reader.readAsDataURL(audioBlob);
+                                } else {
+                                    broadcastLiveCallChunk('customer', null, liveSpeech, 'text/plain');
+                                    sendLiveVoicePayload({ text: liveSpeech, turnId: currentTurnId });
+                                }
                             }
                         }, 1200);
                     }
@@ -951,16 +971,51 @@
                         setWaveAnimation(false);
                     };
                     player.onerror = () => {
-                        fallbackBrowserSpeech(replyText);
+                        playWithWebAudioBuffer(b64, replyText);
                     };
                     const p = player.play();
                     if (p !== undefined) {
-                        p.catch(() => fallbackBrowserSpeech(replyText));
+                        p.catch(() => playWithWebAudioBuffer(b64, replyText));
                     }
                     return;
                 }
             }
             fallbackBrowserSpeech(replyText);
+        }
+
+        function playWithWebAudioBuffer(b64, fallbackText) {
+            try {
+                const cleanB64 = b64.replace(/^data:audio\/\w+;base64,/, '');
+                const binaryString = window.atob(cleanB64);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!audioCtx && AudioCtx) audioCtx = new AudioCtx();
+                if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+                if (audioCtx) {
+                    audioCtx.decodeAudioData(bytes.buffer, (buffer) => {
+                        if (!isCallActive) return;
+                        if (currentAudioSource) {
+                            try { currentAudioSource.stop(); } catch (_) {}
+                        }
+                        const source = audioCtx.createBufferSource();
+                        source.buffer = buffer;
+                        source.connect(audioCtx.destination);
+                        currentAudioSource = source;
+                        source.onended = () => {
+                            isAiSpeaking = false;
+                            setStatus('Listening...');
+                            setWaveAnimation(false);
+                        };
+                        source.start(0);
+                    }, () => fallbackBrowserSpeech(fallbackText));
+                    return;
+                }
+            } catch (_) {}
+            fallbackBrowserSpeech(fallbackText);
         }
 
         function fallbackBrowserSpeech(text) {
