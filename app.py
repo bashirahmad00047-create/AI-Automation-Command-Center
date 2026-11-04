@@ -233,8 +233,19 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                             sess["status"] = "connected"
                             sess["joined_at"] = now_iso
                     emit("customer-joined", {"roomId": clean_room, "role": role}, room=clean_room)
+                    emit("customer-joined", {"roomId": clean_room, "role": role}, broadcast=True)
             except Exception as _e:
                 logger.debug(f"Socket join-call-room notice: {_e}")
+
+        @socketio.on("live-call-chunk")
+        def handle_socket_live_call_chunk(data):
+            try:
+                raw_room = str((data or {}).get("roomId") or (data or {}).get("phone") or "")
+                clean_room = re.sub(r"\D", "", raw_room)
+                if clean_room:
+                    emit("live-call-chunk", data, room=clean_room, include_self=False)
+            except Exception as _ce:
+                logger.debug(f"Socket live-call-chunk notice: {_ce}")
     except Exception as _sock_init_err:
         application.config["SOCKETIO"] = None
 
@@ -1198,6 +1209,17 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_call_status
         clean = re.sub(r"\D", "", str(phone or "").strip())
         return api_call_status(clean)
+
+    @application.route("/api/call/voice", methods=["POST"])
+    @application.route("/api/call/voice/<phone>", methods=["POST"])
+    @application.route("/api/call/<phone>/voice", methods=["POST"])
+    @application.route("/api/v1/call/voice", methods=["POST"])
+    @application.route("/api/v1/call/voice/<phone>", methods=["POST"])
+    @application.route("/api/v1/call/<phone>/voice", methods=["POST"])
+    def route_call_voice(phone=""):
+        from api_v1 import api_call_voice
+        clean = re.sub(r"\D", "", str(phone or "").strip())
+        return api_call_voice(clean)
 
     @application.route("/api/call/audio/<phone>", methods=["GET", "POST"])
     @application.route("/api/call/<phone>/audio", methods=["GET", "POST"])

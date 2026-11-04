@@ -652,9 +652,11 @@
         }
 
         function enqueueCustomerAudioChunk(chunk) {
-            if (!chunk || !chunk.seq_id) return;
-            if (chunk.seq_id <= lastCustomerSeqId) return;
-            lastCustomerSeqId = chunk.seq_id;
+            if (!chunk) return;
+            if (typeof chunk.seq_id === 'number') {
+                if (chunk.seq_id <= lastCustomerSeqId) return;
+                lastCustomerSeqId = chunk.seq_id;
+            }
             customerAudioQueue.push(chunk);
             processCustomerAudioQueue();
         }
@@ -693,15 +695,29 @@
 
             if (audioData && String(audioData).trim()) {
                 const cleanB64 = String(audioData).trim();
-                const uri = cleanB64.startsWith('data:') ? cleanB64 : ('data:audio/mp3;base64,' + cleanB64);
+                let mime = chunk.mimeType || 'audio/webm';
+                if (cleanB64.startsWith('SUQz') || cleanB64.startsWith('//OI') || cleanB64.startsWith('//NI')) {
+                    mime = 'audio/mp3';
+                } else if (cleanB64.startsWith('UklG')) {
+                    mime = 'audio/wav';
+                } else if (cleanB64.startsWith('GkXf')) {
+                    mime = 'audio/webm';
+                }
+                const uri = cleanB64.startsWith('data:') ? cleanB64 : (`data:${mime};base64,` + cleanB64);
                 if (player) {
                     player.src = uri;
                     player.currentTime = 0;
                     player.onended = () => advanceQueue();
-                    player.onerror = () => fallbackTTSPlay(textData, advanceQueue);
+                    player.onerror = (err) => {
+                        console.log('[Mobile Remote Voice Player Error]', err);
+                        fallbackTTSPlay(textData, advanceQueue);
+                    };
                     const p = player.play();
                     if (p !== undefined) {
-                        p.catch(() => fallbackTTSPlay(textData, advanceQueue));
+                        p.catch((err) => {
+                            console.log('[Mobile Remote Voice Player Play Exception]', err);
+                            fallbackTTSPlay(textData, advanceQueue);
+                        });
                     }
                 } else {
                     fallbackTTSPlay(textData, advanceQueue);
@@ -735,16 +751,35 @@
         function broadcastLiveCallChunk(sender, audioPayload, textPayload, mime) {
             const targetPhone = roomId || phone;
             if (!targetPhone) return;
-            fetch(`/api/call/audio/${encodeURIComponent(targetPhone)}`, {
+            const chunkData = {
+                roomId: targetPhone,
+                phone: targetPhone,
+                sender: sender || 'customer',
+                audio: audioPayload || '',
+                text: textPayload || '',
+                mimeType: mime || 'audio/webm'
+            };
+            if (socket && socket.emit) {
+                try {
+                    socket.emit('live-call-chunk', {
+                        roomId: targetPhone,
+                        phone: targetPhone,
+                        chunk: chunkData,
+                        ...chunkData
+                    });
+                } catch (_) {}
+            }
+            fetch(`/api/call/voice/${encodeURIComponent(targetPhone)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sender: sender || 'customer',
-                    audio: audioPayload || '',
-                    text: textPayload || '',
-                    mimeType: mime || 'audio/webm'
-                })
-            }).catch(() => {});
+                body: JSON.stringify(chunkData)
+            }).catch(() => {
+                fetch(`/api/call/audio/${encodeURIComponent(targetPhone)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(chunkData)
+                }).catch(() => {});
+            });
         }
 
 
@@ -757,6 +792,8 @@
             if (overlay) overlay.style.display = 'none';
 
             isCallActive = true;
+            unlockPersistentRemotePlayer();
+            startCustomerCallAudioPolling(roomId || phone);
             startTimer();
             setStatus('🟢 Call Connected. Listening...');
 
@@ -764,6 +801,9 @@
             if (tb) {
                 tb.innerHTML = '<div style="color: #10b981; font-weight: 600;">🟢 Call Connected. Say "Salam" or speak your question.</div>';
             }
+
+            // Fetch opening AI greeting so assistant speaks immediately upon joining call
+            fetchGreeting();
 
             // 2. Fire backend join notification asynchronously without blocking UI transition
             const targetPhone = roomId || phone;
@@ -775,10 +815,21 @@
                 }).catch(() => {});
             }
 
-            if (socket && socket.emit) {
-                try {
-                    socket.emit('join-call-room', { roomId: roomId, role: 'customer' });
-                } catch (_) {}
+            if (socket) {
+                if (socket.emit) {
+                    try {
+                        socket.emit('join-call-room', { roomId: roomId, role: 'customer' });
+                    } catch (_) {}
+                }
+                if (!socket._boundAudioBridgeEvents && socket.on) {
+                    socket._boundAudioBridgeEvents = true;
+                    socket.on('live-call-chunk', (data) => {
+                        const chunk = data?.chunk || data;
+                        if (chunk && chunk.sender !== 'customer') {
+                            enqueueCustomerAudioChunk(chunk);
+                        }
+                    });
+                }
             }
 
             // 3. AudioContext resume & unlock inside non-blocking try/catch
@@ -1180,6 +1231,7 @@
                 const base64Audio = reader.result;
                 currentTurnId++;
                 turnId = currentTurnId;
+                broadcastLiveCallChunk('customer', base64Audio, null, 'audio/webm');
                 sendLiveVoicePayload({ audioBase64: base64Audio, turnId: currentTurnId });
             };
             reader.readAsDataURL(audioBlob);
@@ -1316,7 +1368,9 @@
             try {
                 const bodyData = {
                     persona: 'ur-PK-AsadNeural',
-                    callHistory: callHistory.slice(-8)
+                    callHistory: callHistory.slice(-8),
+                    phone: phone || roomId,
+                    roomId: roomId || phone
                 };
                 if (payload.text) bodyData.text = payload.text;
                 if (payload.audioBase64) bodyData.audioBase64 = payload.audioBase64;
@@ -1449,6 +1503,7 @@
                         reader.onloadend = () => {
                             currentTurnId++;
                             turnId = currentTurnId;
+                            broadcastLiveCallChunk('customer', reader.result, null, 'audio/webm');
                             sendLiveVoicePayload({ audioBase64: reader.result, turnId: currentTurnId });
                         };
                         reader.readAsDataURL(blob);

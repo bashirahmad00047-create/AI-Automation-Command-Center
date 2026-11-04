@@ -5360,6 +5360,26 @@ function initWhatsAppSocket() {
                     }
                 }
             });
+            waSocket.on('customer-joined', (data) => {
+                if (!data) return;
+                const currentClean = String(liveCallActivePhone || '').replace(/\D/g, '');
+                const joinRoom = String(data.roomId || data.phone || '').replace(/\D/g, '');
+                if (currentClean && joinRoom === currentClean) {
+                    if (!liveVoiceCallActive) {
+                        onCustomerJoinedCall(liveCallActiveName || 'Customer', currentClean);
+                    }
+                }
+            });
+            waSocket.on('live-call-chunk', (data) => {
+                if (!data) return;
+                const chunk = data.chunk || data;
+                const currentClean = String(liveCallActivePhone || '').replace(/\D/g, '');
+                const chunkRoom = String(data.roomId || data.phone || chunk.roomId || chunk.phone || '').replace(/\D/g, '');
+                if (chunkRoom && currentClean && chunkRoom !== currentClean) return;
+                if (chunk.sender !== 'admin') {
+                    enqueueAdminAudioChunk(chunk);
+                }
+            });
         } catch (e) {
             console.debug('[Socket.IO notice]', e);
         }
@@ -12237,16 +12257,30 @@ async function sendVoiceChatQuery(payload) {
     if (liveCallActivePhone) {
         const cleanTargetPhone = String(liveCallActivePhone).replace(/\D/g, '');
         if (cleanTargetPhone) {
-            fetch(`/api/call/audio/${encodeURIComponent(cleanTargetPhone)}`, {
+            const chunkPayload = {
+                roomId: cleanTargetPhone,
+                phone: cleanTargetPhone,
+                sender: 'admin',
+                audio: audioPayload || '',
+                text: cleanInput || '',
+                mimeType: 'audio/webm'
+            };
+            if (waSocket && waSocket.connected) {
+                try {
+                    waSocket.emit('live-call-chunk', chunkPayload);
+                } catch (_) {}
+            }
+            fetch(`/api/call/voice/${encodeURIComponent(cleanTargetPhone)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sender: 'admin',
-                    audio: audioPayload || '',
-                    text: cleanInput || '',
-                    mimeType: 'audio/webm'
-                })
-            }).catch(() => {});
+                body: JSON.stringify(chunkPayload)
+            }).catch(() => {
+                fetch(`/api/call/audio/${encodeURIComponent(cleanTargetPhone)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(chunkPayload)
+                }).catch(() => {});
+            });
         }
     }
 
@@ -12476,9 +12510,11 @@ function unlockAdminRemoteVoicePlayer() {
 }
 
 function enqueueAdminAudioChunk(chunk) {
-    if (!chunk || !chunk.seq_id) return;
-    if (chunk.seq_id <= lastAdminSeqId) return;
-    lastAdminSeqId = chunk.seq_id;
+    if (!chunk) return;
+    if (typeof chunk.seq_id === 'number') {
+        if (chunk.seq_id <= lastAdminSeqId) return;
+        lastAdminSeqId = chunk.seq_id;
+    }
     adminAudioQueue.push(chunk);
     processAdminAudioQueue();
 }
@@ -12496,11 +12532,21 @@ function processAdminAudioQueue() {
     const player = document.getElementById('remoteVoicePlayer') || document.getElementById('liveCallAudioPlayer');
     const audioData = chunk.audio || '';
     const textData = chunk.text || '';
+    const sender = chunk.sender || 'customer';
 
     if (textData) {
         const transcriptBox = document.getElementById('voiceTranscriptBox');
         if (transcriptBox) {
-            transcriptBox.innerHTML += `<div style="margin-top: 4px; color: #cbd5e1;"><strong style="color: #10b981;">Customer:</strong> ${escapeHtml(textData)}</div>`;
+            let label = 'Customer';
+            let color = '#10b981';
+            if (sender === 'ai' || sender === 'assistant') {
+                label = 'AI Assistant';
+                color = '#a855f7';
+            } else if (sender === 'admin' || sender === 'you') {
+                label = 'You (Admin)';
+                color = '#38bdf8';
+            }
+            transcriptBox.innerHTML += `<div style="margin-top: 4px; color: #cbd5e1;"><strong style="color: ${color};">${label}:</strong> ${escapeHtml(textData)}</div>`;
             transcriptBox.scrollTop = transcriptBox.scrollHeight;
         }
     }
@@ -12520,15 +12566,29 @@ function processAdminAudioQueue() {
 
     if (audioData && String(audioData).trim()) {
         const cleanB64 = String(audioData).trim();
-        const uri = cleanB64.startsWith('data:') ? cleanB64 : ('data:audio/mp3;base64,' + cleanB64);
+        let mime = chunk.mimeType || 'audio/webm';
+        if (cleanB64.startsWith('SUQz') || cleanB64.startsWith('//OI') || cleanB64.startsWith('//NI')) {
+            mime = 'audio/mp3';
+        } else if (cleanB64.startsWith('UklG')) {
+            mime = 'audio/wav';
+        } else if (cleanB64.startsWith('GkXf')) {
+            mime = 'audio/webm';
+        }
+        const uri = cleanB64.startsWith('data:') ? cleanB64 : (`data:${mime};base64,` + cleanB64);
         if (player) {
             player.src = uri;
             player.currentTime = 0;
             player.onended = () => advance();
-            player.onerror = () => fallbackSynth();
+            player.onerror = (err) => {
+                console.log('[Remote Voice Player Error]', err);
+                fallbackSynth();
+            };
             const p = player.play();
             if (p !== undefined) {
-                p.catch(() => fallbackSynth());
+                p.catch((err) => {
+                    console.log('[Remote Voice Player Play Exception]', err);
+                    fallbackSynth();
+                });
             }
         } else { fallbackSynth(); }
     } else if (textData) {
@@ -12679,6 +12739,15 @@ async function initiateCallHandshake(phone, name) {
     // Keep Admin Microphone OFF and AI 100% SILENT while waiting
     liveVoiceCallActive = false;
     isLiveAiSpeaking = false;
+    adminAudioQueue = [];
+    isAdminPlayingAudio = false;
+    lastAdminSeqId = 0;
+    unlockAdminRemoteVoicePlayer();
+    if (waSocket && waSocket.connected && cleanPhone) {
+        try {
+            waSocket.emit('join-call-room', { roomId: cleanPhone, role: 'admin' });
+        } catch (_) {}
+    }
     stopLiveCallTimer();
     setEqualizerActive(false);
 
@@ -12719,14 +12788,22 @@ async function initiateCallHandshake(phone, name) {
         console.warn('Call initiate error:', err);
     }
 
-    // 2-second polling interval (GET /api/call/status/<phone>) while Admin Call Widget is open
+    // 1-second polling interval (GET /api/call/status/<phone>) strictly to guarantee instant voice chunk delivery
     let isConnectedLogged = false;
     callStatusPollInterval = setInterval(async () => {
         if (!cleanPhone) return;
         try {
-            const sRes = await fetch(`/api/call/status/${encodeURIComponent(cleanPhone)}`);
+            const sRes = await fetch(`/api/call/status/${encodeURIComponent(cleanPhone)}?since_seq=${lastAdminSeqId}&role=admin&t=${Date.now()}`);
             const sData = await sRes.json();
             const currentStatus = String(sData.status || '').toLowerCase();
+
+            if (sData.success && Array.isArray(sData.chunks)) {
+                sData.chunks.forEach(c => {
+                    if (c.sender !== 'admin') {
+                        enqueueAdminAudioChunk(c);
+                    }
+                });
+            }
 
             if ((currentStatus === 'connected' || sData.joined) && !isConnectedLogged) {
                 isConnectedLogged = true;
@@ -12756,7 +12833,7 @@ async function initiateCallHandshake(phone, name) {
                 }, 1500);
             }
         } catch (_) {}
-    }, 2000);
+    }, 1000);
 
     bindAdminCallWidgetButtons();
 }
@@ -12769,7 +12846,14 @@ function onCustomerJoinedCall(callerName, customPhone) {
 
     liveVoiceCallActive = true;
     startLiveCallTimer();
-    startAdminAudioPolling(customPhone || liveCallActivePhone);
+    const activeTargetPhone = customPhone || liveCallActivePhone;
+    unlockAdminRemoteVoicePlayer();
+    if (waSocket && waSocket.connected && activeTargetPhone) {
+        try {
+            waSocket.emit('join-call-room', { roomId: String(activeTargetPhone).replace(/\D/g, ''), role: 'admin' });
+        } catch (_) {}
+    }
+    startAdminAudioPolling(activeTargetPhone);
 
     if (statusLabel) {
         statusLabel.innerHTML = `🟢 <b>Customer Connected - Live Audio Active</b>`;
@@ -12868,8 +12952,14 @@ function handleAdminEndCall() {
     }
 
     if (liveCallActivePhone) {
+        const cleanPhone = String(liveCallActivePhone).replace(/\D/g, '');
+        if (waSocket && waSocket.connected) {
+            try {
+                waSocket.emit('call-ended', { roomId: cleanPhone });
+            } catch (_) {}
+        }
         try {
-            fetch(`/api/call/end/${encodeURIComponent(liveCallActivePhone)}`, {
+            fetch(`/api/call/end/${encodeURIComponent(cleanPhone)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             }).catch(() => {});

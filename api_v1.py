@@ -4077,16 +4077,36 @@ def api_live_voice_call():
                         sess["to_admin_seq"] = sess.get("to_admin_seq", 0) + 1
                         if "to_admin_queue" not in sess:
                             sess["to_admin_queue"] = []
-                        sess["to_admin_queue"].append({
+                        cust_chunk = {
                             "seq_id": sess["to_admin_seq"],
                             "sender": "customer",
                             "audio": str(audio_in_b64 or ""),
                             "text": str(user_text or ""),
                             "mimeType": "audio/webm",
                             "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
-                        })
+                        }
+                        sess["to_admin_queue"].append(cust_chunk)
                         if len(sess["to_admin_queue"]) > 60:
                             sess["to_admin_queue"] = sess["to_admin_queue"][-60:]
+                    try:
+                        from flask import current_app
+                        sock = current_app.config.get("SOCKETIO")
+                        if sock:
+                            bcast = {
+                                "phone": clean_call_phone,
+                                "roomId": clean_call_phone,
+                                "seq_id": cust_chunk["seq_id"],
+                                "sender": "customer",
+                                "audio": cust_chunk["audio"],
+                                "text": cust_chunk["text"],
+                                "mimeType": cust_chunk["mimeType"],
+                                "timestamp": cust_chunk["timestamp"],
+                                "chunk": cust_chunk
+                            }
+                            sock.emit("live-call-chunk", bcast, room=clean_call_phone)
+                            sock.emit("live-call-chunk", bcast)
+                    except Exception:
+                        pass
                 except Exception as _q_err:
                     logger.debug(f"Queue audio to admin notice: {_q_err}")
 
@@ -4212,6 +4232,41 @@ def api_live_voice_call():
 
         audio_b64 = base64.b64encode(audio_bytes).decode("ascii") if audio_bytes else ""
         audio_data_uri = f"data:audio/mp3;base64,{audio_b64}" if audio_b64 else ""
+
+        # Forward assistant voice reply to to_admin_queue & SocketIO so Admin Dashboard receives assistant speech & audio
+        target_phone = clean_call_phone or re.sub(r"\D", "", str(data.get("phone") or data.get("roomId") or request.args.get("phone") or "").strip())
+        if target_phone:
+            try:
+                with _ACTIVE_CALL_SESSIONS_LOCK:
+                    sess = _ACTIVE_CALL_SESSIONS.get(target_phone)
+                    if sess:
+                        sess["to_admin_seq"] = sess.get("to_admin_seq", 0) + 1
+                        if "to_admin_queue" not in sess:
+                            sess["to_admin_queue"] = []
+                        ai_chunk = {
+                            "seq_id": sess["to_admin_seq"],
+                            "sender": "assistant",
+                            "audio": audio_b64,
+                            "text": reply_text,
+                            "mimeType": "audio/mp3",
+                            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+                        }
+                        sess["to_admin_queue"].append(ai_chunk)
+                        if len(sess["to_admin_queue"]) > 60:
+                            sess["to_admin_queue"] = sess["to_admin_queue"][-60:]
+                try:
+                    from flask import current_app
+                    sock = current_app.config.get("SOCKETIO")
+                    if sock:
+                        sock.emit("live-call-chunk", {
+                            "phone": target_phone,
+                            "roomId": target_phone,
+                            "chunk": ai_chunk
+                        }, room=target_phone)
+                except Exception:
+                    pass
+            except Exception as _q_err:
+                logger.debug(f"Queue AI reply notice: {_q_err}")
 
         return jsonify({
             "success": True,
@@ -4384,7 +4439,7 @@ def api_call_join(phone):
 @api_v1.route("/call/status/<phone>", methods=["GET"])
 @api_v1.route("/call/<phone>/status", methods=["GET"])
 def api_call_status(phone):
-    """Admin dashboard polls this endpoint to detect when customer joins call."""
+    """Admin dashboard and customer room poll this endpoint to detect status and fetch pending audio chunks."""
     clean_phone = re.sub(r"\D", "", phone or "")
     with _ACTIVE_CALL_SESSIONS_LOCK:
         sess = _ACTIVE_CALL_SESSIONS.get(clean_phone)
@@ -4393,7 +4448,8 @@ def api_call_status(phone):
                 "success": True,
                 "status": "idle",
                 "phone": clean_phone,
-                "joined": False
+                "joined": False,
+                "chunks": []
             }), 200
 
         raw_state = sess.get("status", "ended")
@@ -4406,6 +4462,15 @@ def api_call_status(phone):
         else:
             normalized_status = str(raw_state).lower()
 
+        role = str(request.args.get("role") or "admin").strip().lower()
+        try:
+            since_seq = int(request.args.get("since_seq") or request.args.get("last_seq_id") or 0)
+        except (ValueError, TypeError):
+            since_seq = 0
+
+        target_queue = sess.get("to_admin_queue", []) if role == "admin" else sess.get("to_customer_queue", [])
+        new_chunks = [c for c in target_queue if c.get("seq_id", 0) > since_seq]
+
         return jsonify({
             "success": True,
             "status": normalized_status,
@@ -4414,8 +4479,28 @@ def api_call_status(phone):
             "name": sess.get("name"),
             "initiated_at": sess.get("initiated_at"),
             "joined_at": sess.get("joined_at"),
-            "ended_at": sess.get("ended_at")
+            "ended_at": sess.get("ended_at"),
+            "chunks": new_chunks
         }), 200
+
+
+@api_v1.route("/call/voice", methods=["POST"])
+@api_v1.route("/call/voice/<phone>", methods=["POST"])
+@api_v1.route("/call/<phone>/voice", methods=["POST"])
+def api_call_voice(phone=""):
+    """Direct, zero-dependency Base64 audio relay between customer and admin.
+    Immediately queues incoming audio to the target's queue (to_admin_queue or to_customer_queue)
+    and broadcasts via SocketIO. Never requires STT or third-party keys.
+    """
+    data = request.get_json(silent=True) or {}
+    clean_phone = re.sub(r"\D", "", str(phone or data.get("phone") or data.get("roomId") or "").strip())
+    if not clean_phone:
+        with _ACTIVE_CALL_SESSIONS_LOCK:
+            if _ACTIVE_CALL_SESSIONS:
+                clean_phone = list(_ACTIVE_CALL_SESSIONS.keys())[-1]
+    if not clean_phone:
+        return jsonify({"success": False, "error": "Phone number is required."}), 400
+    return api_call_audio(clean_phone)
 
 
 @api_v1.route("/call/audio/<phone>", methods=["GET", "POST"])
@@ -4460,7 +4545,7 @@ def api_call_audio(phone):
             mime_type = str(data.get("mimeType") or data.get("mime_type") or "audio/webm").strip()
 
             if not audio_b64 and not text:
-                return jsonify({"success": False, "error": "Either audio or text payload is required."}), 400
+                return jsonify({"success": True, "notice": "Empty audio payload received."}), 200
 
             # Route by sender / target
             if sender in ("admin", "ai", "assistant", "agent") or target == "customer":
@@ -4493,6 +4578,27 @@ def api_call_audio(phone):
                 if len(sess["to_admin_queue"]) > 60:
                     sess["to_admin_queue"] = sess["to_admin_queue"][-60:]
                 dest = "to_admin"
+
+            # Broadcast new chunk immediately over SocketIO for real-time zero-latency playback
+            try:
+                from flask import current_app
+                sock = current_app.config.get("SOCKETIO")
+                if sock:
+                    chunk_payload = {
+                        "phone": clean_phone,
+                        "roomId": clean_phone,
+                        "seq_id": seq_id,
+                        "sender": new_chunk["sender"],
+                        "audio": new_chunk["audio"],
+                        "text": new_chunk["text"],
+                        "mimeType": new_chunk["mimeType"],
+                        "timestamp": new_chunk["timestamp"],
+                        "chunk": new_chunk
+                    }
+                    sock.emit("live-call-chunk", chunk_payload, room=clean_phone)
+                    sock.emit("live-call-chunk", chunk_payload)
+            except Exception:
+                pass
 
             return jsonify({
                 "success": True,

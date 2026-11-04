@@ -213,6 +213,31 @@ def test_sequential_voice_queue_delivery(client):
     assert customer_data["chunks"][0]["sender"] == "admin"
     assert customer_data["chunks"][0]["text"] == "Walaikum Assalam customer from Admin"
 
+    # Step 5: Verify direct /api/call/voice base64 relay without STT requirement
+    voice_res1 = client.post(f"/api/call/voice/{test_phone}", json={
+        "sender": "customer",
+        "audio": "GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwEAAAAAAA",
+        "mimeType": "audio/webm"
+    })
+    assert voice_res1.status_code == 200
+    assert voice_res1.get_json().get("queue") == "to_admin"
+
+    voice_res2 = client.post(f"/api/call/voice/{test_phone}", json={
+        "sender": "admin",
+        "audio": "GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwEAAAAAAA",
+        "mimeType": "audio/webm"
+    })
+    assert voice_res2.status_code == 200
+    assert voice_res2.get_json().get("queue") == "to_customer"
+
+    # Step 6: Verify /api/call/status/<phone> returns queued audio chunks directly
+    status_admin_poll = client.get(f"/api/call/status/{test_phone}?role=admin&since_seq=1")
+    assert status_admin_poll.status_code == 200
+    status_admin_data = status_admin_poll.get_json()
+    assert "chunks" in status_admin_data
+    assert len(status_admin_data["chunks"]) >= 1
+    assert status_admin_data["chunks"][-1]["sender"] == "customer"
+
 
 def test_phone_normalization_cross_endpoint(client):
     """Verify phone numbers with '+', ' ', and '-' symbols map to the identical session."""
