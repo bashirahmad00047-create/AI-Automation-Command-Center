@@ -1776,6 +1776,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_store_checkout
         return api_store_checkout()
 
+    @application.route("/api/track/<order_id>/location", methods=["GET", "POST"])
+    @application.route("/api/v1/track/<order_id>/location", methods=["GET", "POST"])
+    def route_order_tracking_location(order_id: str):
+        from api_v1 import api_order_tracking_location
+        return api_order_tracking_location(order_id)
+
     @application.route("/track/<order_id>")
     def public_order_tracking(order_id: str):
         """Public order tracking portal with live delivery status and Leaflet radar pin."""
@@ -1786,17 +1792,19 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             ).first()
             jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
             b_name = os.environ.get("BUSINESS_NAME", "Chitral & Global Bazar")
+            role = request.args.get("role", "customer").lower().strip()
             return render_template(
                 "track.html",
                 order=order,
                 order_id=order_id,
                 business_name=b_name,
                 currency="PKR",
-                jazzcash_number=jc_num
+                jazzcash_number=jc_num,
+                initial_role=role
             )
         except Exception as e:
             application.logger.error(f"Error rendering /track/{order_id}: {e}", exc_info=True)
-            return render_template("track.html", order=None, order_id=order_id, business_name="Chitral & Global Bazar", currency="PKR", jazzcash_number="03209350858")
+            return render_template("track.html", order=None, order_id=order_id, business_name="Chitral & Global Bazar", currency="PKR", jazzcash_number="03209350858", initial_role="customer")
 
     @application.route("/api/store/order/<order_id>", methods=["GET"])
     def top_store_order_status(order_id: str):

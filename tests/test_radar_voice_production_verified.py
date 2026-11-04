@@ -141,3 +141,45 @@ def test_customer_latest_order_info_endpoint(client):
     assert data.get("success") is True
     assert "summary" in data
     assert len(data.get("summary")) > 0
+
+
+def test_public_track_portal_rendering(client):
+    """Verify /track/<order_id> renders Leaflet map, tabs, and role parameter."""
+    res = client.get("/track/ORD-AUTO-TEST-001?role=rider")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert "deliveryMap" in html
+    assert "cartocdn.com" in html
+    assert "Rider GPS Mode" in html
+    assert "Customer Live View" in html
+
+
+def test_live_rider_gps_broadcast_and_polling(client):
+    """Verify bike rider can POST live GPS coordinates and customer polling retrieves them with dispatched status."""
+    order_id = "ORD-RADAR-TEST-777"
+    post_payload = {
+        "lat": 35.8524,
+        "lng": 71.7869,
+        "accuracy": 4.0,
+        "speed": 25.5,
+        "heading": 180.0
+    }
+    # 1. Post rider location
+    post_res = client.post(f"/api/track/{order_id}/location", json=post_payload)
+    assert post_res.status_code == 200
+    post_json = post_res.get_json()
+    assert post_json.get("success") is True
+    assert post_json.get("status") == "dispatched"
+    assert post_json.get("lat") == 35.8524
+
+    # 2. Poll rider location
+    get_res = client.get(f"/api/track/{order_id}/location")
+    assert get_res.status_code == 200
+    get_json = get_res.get_json()
+    assert get_json.get("success") is True
+    assert get_json.get("has_rider") is True
+    assert get_json.get("rider", {}).get("lat") == 35.8524
+    assert get_json.get("rider", {}).get("lng") == 71.7869
+    assert "destination" in get_json
+    assert get_json["destination"]["lat"] is not None
+

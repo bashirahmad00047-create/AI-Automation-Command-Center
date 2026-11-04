@@ -3,32 +3,47 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Live Delivery Tracking | Chitral &amp; Global Bazar</title>
+    <title>Live Delivery Tracking | {{ business_name or 'Chitral & Global Bazar' }}</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';">
-    <script src="/static/vendor/leaflet/leaflet.js" onerror="this.onerror=null;this.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';"></script>
+    
+    <!-- Leaflet Map CSS & JS with CDN and Local Fallbacks -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" onerror="this.onerror=null;this.href='/static/vendor/leaflet/leaflet.css';"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" onerror="this.onerror=null;this.src='/static/vendor/leaflet/leaflet.js';"></script>
+
     <style>
         :root {
             --primary: #059669;
+            --primary-dark: #047857;
             --primary-light: #ecfdf5;
+            --primary-border: #a7f3d0;
+            --rider-blue: #2563eb;
+            --rider-light: #eff6ff;
             --dark: #0f172a;
             --gray-900: #111827;
             --gray-700: #374151;
             --gray-500: #6b7280;
+            --gray-300: #d1d5db;
             --gray-200: #e5e7eb;
             --gray-100: #f3f4f6;
-            --radius-md: 10px;
-            --radius-lg: 16px;
+            --amber-500: #f59e0b;
+            --amber-100: #fef3c7;
+            --amber-800: #92400e;
+            --radius-md: 12px;
+            --radius-lg: 18px;
+            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.08);
+            --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
         }
 
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            -webkit-tap-highlight-color: transparent;
         }
 
         body {
@@ -42,20 +57,28 @@
         .header {
             background: #ffffff;
             border-bottom: 1px solid var(--gray-200);
-            padding: 16px 20px;
+            padding: 14px 20px;
             display: flex;
             align-items: center;
             justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: var(--shadow-sm);
         }
 
         .header h1 {
             font-size: 1.15rem;
             font-weight: 800;
+            color: var(--dark);
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
-        .main-card {
-            max-width: 800px;
-            margin: 24px auto;
+        .main-container {
+            max-width: 840px;
+            margin: 20px auto;
             padding: 0 16px;
             width: 100%;
             flex: 1;
@@ -65,15 +88,100 @@
             background: #ffffff;
             border-radius: var(--radius-lg);
             border: 1px solid var(--gray-200);
-            padding: 24px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            padding: 22px;
+            margin-bottom: 18px;
+            box-shadow: var(--shadow-md);
         }
 
+        /* Role Switcher Tab Navigation */
+        .role-tabs {
+            display: flex;
+            background: var(--gray-100);
+            padding: 4px;
+            border-radius: var(--radius-md);
+            margin-bottom: 18px;
+            border: 1px solid var(--gray-200);
+            gap: 4px;
+        }
+
+        .role-tab-btn {
+            flex: 1;
+            padding: 10px 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.88rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            color: var(--gray-700);
+            background: transparent;
+            transition: all 0.2s ease;
+        }
+
+        .role-tab-btn.active {
+            background: #ffffff;
+            color: var(--dark);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+        }
+
+        .role-tab-btn.rider-tab.active {
+            color: var(--rider-blue);
+        }
+
+        /* Share Bar for Store Owner */
+        .share-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+            background: #f0fdf4;
+            border: 1px dashed var(--primary-border);
+            padding: 10px 14px;
+            border-radius: var(--radius-md);
+            margin-bottom: 16px;
+            font-size: 0.84rem;
+        }
+
+        .share-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .btn-sm-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-decoration: none;
+            cursor: pointer;
+            border: none;
+            transition: transform 0.1s, opacity 0.2s;
+        }
+        .btn-sm-action:active { transform: scale(0.97); }
+
+        .btn-copy-rider {
+            background: #ffffff;
+            color: var(--gray-700);
+            border: 1px solid var(--gray-300);
+        }
+        .btn-wa-rider {
+            background: #25D366;
+            color: #ffffff;
+        }
+
+        /* Order Meta */
         .order-meta-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 14px;
             margin-top: 16px;
             padding-top: 16px;
             border-top: 1px solid var(--gray-100);
@@ -81,35 +189,43 @@
 
         .meta-item span {
             display: block;
-            font-size: 0.78rem;
+            font-size: 0.74rem;
             color: var(--gray-500);
             font-weight: 700;
             text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .meta-item strong {
-            font-size: 1.05rem;
+            font-size: 1.02rem;
             color: var(--gray-900);
+            margin-top: 2px;
+            display: block;
         }
 
         .badge-status {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
             padding: 4px 10px;
             border-radius: 9999px;
-            font-size: 0.8rem;
+            font-size: 0.78rem;
             font-weight: 800;
             text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
-        .badge-status.confirmed { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+        .badge-status.confirmed { background: var(--primary-light); color: #065f46; border: 1px solid var(--primary-border); }
+        .badge-status.dispatched { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+        .badge-status.delivered { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
         .badge-status.paid { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
-        .badge-status.unpaid { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+        .badge-status.unpaid { background: var(--amber-100); color: var(--amber-800); border: 1px solid #fde68a; }
 
         /* Timeline */
         .timeline {
             display: flex;
             justify-content: space-between;
-            margin: 24px 0 12px;
+            margin: 22px 0 12px;
             position: relative;
         }
 
@@ -117,8 +233,8 @@
             content: "";
             position: absolute;
             top: 14px;
-            left: 20px;
-            right: 20px;
+            left: 24px;
+            right: 24px;
             height: 3px;
             background: var(--gray-200);
             z-index: 1;
@@ -132,8 +248,8 @@
         }
 
         .step-circle {
-            width: 30px;
-            height: 30px;
+            width: 32px;
+            height: 32px;
             border-radius: 50%;
             background: #ffffff;
             border: 3px solid var(--gray-200);
@@ -144,31 +260,278 @@
             font-size: 0.8rem;
             font-weight: 800;
             color: var(--gray-500);
+            transition: all 0.3s;
         }
 
         .step.active .step-circle {
             border-color: var(--primary);
             background: var(--primary);
             color: #ffffff;
+            box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.15);
+        }
+
+        .step.pulse .step-circle {
+            animation: pulse-ring 1.8s infinite;
+        }
+
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.5); }
+            70% { box-shadow: 0 0 0 10px rgba(5, 150, 105, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0); }
         }
 
         .step-label {
-            font-size: 0.75rem;
+            font-size: 0.74rem;
             font-weight: 700;
             color: var(--gray-500);
         }
 
         .step.active .step-label {
-            color: var(--primary);
+            color: var(--primary-dark);
         }
 
-        /* Map */
+        /* Live GPS Radar Map */
+        .map-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .radar-status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            background: #f1f5f9;
+            color: var(--gray-700);
+        }
+
+        .radar-status-pill.live {
+            background: #ecfdf5;
+            color: #065f46;
+            border: 1px solid #a7f3d0;
+        }
+
+        .radar-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #94a3b8;
+        }
+
+        .radar-status-pill.live .radar-dot {
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+            animation: blink 1.2s infinite ease-in-out;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        /* Delivery Map View Container - Fixed Grey Map */
         #deliveryMap {
             width: 100%;
-            height: 380px;
+            height: 420px;
             border-radius: var(--radius-md);
             border: 1px solid var(--gray-200);
+            background: #f1f5f9;
+            position: relative;
+            z-index: 10;
+        }
+
+        /* Distance & ETA Live Banner */
+        .eta-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+            background: #ecfdf5;
+            border: 1px solid var(--primary-border);
+            padding: 12px 16px;
+            border-radius: var(--radius-md);
             margin-top: 14px;
+        }
+
+        .eta-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .eta-icon {
+            font-size: 1.4rem;
+        }
+
+        .eta-text strong {
+            display: block;
+            font-size: 0.95rem;
+            color: var(--gray-900);
+        }
+
+        .eta-text span {
+            font-size: 0.76rem;
+            color: var(--gray-500);
+            font-weight: 600;
+        }
+
+        /* Rider Mode Dashboard */
+        .rider-panel {
+            display: none;
+            background: #ffffff;
+            border-radius: var(--radius-lg);
+            border: 2px solid #bfdbfe;
+            padding: 22px;
+            margin-bottom: 18px;
+            box-shadow: var(--shadow-md);
+        }
+
+        .rider-panel.active {
+            display: block;
+        }
+
+        .rider-btn-primary {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            background: #2563eb;
+            color: #ffffff;
+            padding: 14px 20px;
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: 1.05rem;
+            font-weight: 800;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+        }
+
+        .rider-btn-primary:active {
+            transform: scale(0.98);
+        }
+
+        .rider-btn-primary.broadcasting {
+            background: #dc2626;
+            box-shadow: 0 4px 12px rgba(220, 38, 38, 0.25);
+        }
+
+        .rider-nav-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            background: #059669;
+            color: #ffffff;
+            padding: 12px 18px;
+            border-radius: var(--radius-md);
+            font-size: 0.95rem;
+            font-weight: 700;
+            text-decoration: none;
+            margin-top: 10px;
+            transition: opacity 0.2s;
+        }
+
+        .rider-nav-btn:hover {
+            opacity: 0.95;
+        }
+
+        .telemetry-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 14px;
+            background: #f8fafc;
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            text-align: center;
+        }
+
+        .telemetry-item span {
+            font-size: 0.72rem;
+            color: var(--gray-500);
+            font-weight: 700;
+            text-transform: uppercase;
+            display: block;
+        }
+
+        .telemetry-item strong {
+            font-size: 1.05rem;
+            color: var(--dark);
+            margin-top: 2px;
+            display: block;
+        }
+
+        /* Marker Styles for Leaflet */
+        .bike-radar-icon {
+            text-align: center;
+            position: relative;
+        }
+
+        .bike-icon-circle {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 3px solid #2563eb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+            position: relative;
+            z-index: 2;
+        }
+
+        .bike-radar-pulse {
+            position: absolute;
+            top: -6px;
+            left: -6px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: rgba(37, 99, 235, 0.25);
+            animation: radar-pulse 2s infinite ease-out;
+            z-index: 1;
+        }
+
+        @keyframes radar-pulse {
+            0% { transform: scale(0.8); opacity: 0.9; }
+            100% { transform: scale(2.0); opacity: 0; }
+        }
+
+        .dest-icon-circle {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 3px solid #dc2626;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: 0 4px 10px rgba(220, 38, 38, 0.3);
+        }
+
+        /* WhatsApp Card */
+        .support-card {
+            text-align: center;
+            padding: 20px;
+            border-radius: var(--radius-lg);
+            background: #ffffff;
+            border: 1px solid var(--gray-200);
+            box-shadow: var(--shadow-sm);
         }
 
         .support-btn {
@@ -178,37 +541,125 @@
             background: #25D366;
             color: #ffffff;
             text-decoration: none;
-            padding: 12px 20px;
+            padding: 12px 22px;
             border-radius: var(--radius-md);
             font-weight: 700;
             font-size: 0.95rem;
-            margin-top: 14px;
+            margin-top: 12px;
             transition: opacity 0.2s;
         }
 
-        .support-btn:hover {
-            opacity: 0.92;
+        /* Toast notification */
+        #toastNotice {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--dark);
+            color: #ffffff;
+            padding: 10px 18px;
+            border-radius: 30px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            box-shadow: var(--shadow-lg);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        #toastNotice.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
         }
     </style>
 </head>
 <body>
 
     <header class="header">
-        <h1>🏔️ Chitral &amp; Global Bazar</h1>
-        <a href="/store" style="color: var(--primary); text-decoration: none; font-weight: 700; font-size: 0.9rem;">&larr; Back to Shop</a>
+        <h1>🏔️ {{ business_name or 'Chitral & Global Bazar' }}</h1>
+        <a href="/store" style="color: var(--primary); text-decoration: none; font-weight: 700; font-size: 0.88rem;">&larr; Store Home</a>
     </header>
 
-    <main class="main-card">
+    <main class="main-container">
+
+        <!-- Role Tabs Switcher -->
+        <div class="role-tabs">
+            <button type="button" class="role-tab-btn" id="tabCustomerBtn" onclick="switchRoleView('customer')">
+                <span>👤</span> Customer Live View
+            </button>
+            <button type="button" class="role-tab-btn rider-tab" id="tabRiderBtn" onclick="switchRoleView('rider')">
+                <span>🏍️</span> Rider GPS Mode
+            </button>
+        </div>
+
+        <!-- Quick Share Bar for Store Owner / Admin -->
+        <div class="share-bar">
+            <div>
+                <strong>Assign / Send to Bike Rider:</strong>
+                <span style="color: var(--gray-500); margin-left: 4px;">Rider can broadcast GPS in 1 tap</span>
+            </div>
+            <div class="share-actions">
+                <button type="button" class="btn-sm-action btn-copy-rider" onclick="copyRiderLink()">
+                    📋 Copy Rider Link
+                </button>
+                <a id="btnWhatsAppRider" href="#" target="_blank" class="btn-sm-action btn-wa-rider">
+                    💬 WhatsApp Rider
+                </a>
+            </div>
+        </div>
+
+        <!-- Rider Control Panel (Visible when Rider Mode is active) -->
+        <div class="rider-panel" id="riderPanel">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div>
+                    <span style="font-size: 0.74rem; font-weight: 800; color: var(--rider-blue); text-transform: uppercase; letter-spacing: 0.5px;">Rider GPS Dispatch Console</span>
+                    <h3 style="font-size: 1.25rem; font-weight: 800; margin-top: 2px;">Order #{{ order.order_number if order else order_id }}</h3>
+                </div>
+                <span class="badge-status dispatched" id="riderStatusBadge">GPS Standby</span>
+            </div>
+
+            <p style="font-size: 0.85rem; color: var(--gray-700); margin-bottom: 14px;">
+                Tap <strong>Start Delivery</strong> to share your live location with the customer and store. Google Maps route navigation is available below.
+            </p>
+
+            <button type="button" id="btnToggleBroadcast" class="rider-btn-primary" onclick="toggleRiderBroadcast()">
+                <span>🚀</span> <span id="btnBroadcastLabel">Start Delivery / Share Live GPS</span>
+            </button>
+
+            <!-- Navigation Button to Customer Pin -->
+            <a id="btnNavGoogleMaps" href="#" target="_blank" class="rider-nav-btn">
+                <span>🗺️</span> Navigate to Customer Destination (Google Maps)
+            </a>
+
+            <!-- Rider Telemetry Display -->
+            <div class="telemetry-grid">
+                <div class="telemetry-item">
+                    <span>GPS Accuracy</span>
+                    <strong id="telemetryAccuracy">&plusmn; -- m</strong>
+                </div>
+                <div class="telemetry-item">
+                    <span>Speed</span>
+                    <strong id="telemetrySpeed">0 km/h</strong>
+                </div>
+                <div class="telemetry-item">
+                    <span>Updates Sent</span>
+                    <strong id="telemetryCount">0</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Order Summary Card -->
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                 <div>
-                    <span style="font-size: 0.8rem; color: var(--gray-500); font-weight: 700; text-transform: uppercase;">Real-Time Order Tracking</span>
-                    <h2 style="font-size: 1.4rem; font-weight: 800; margin-top: 2px;">
+                    <span style="font-size: 0.75rem; color: var(--gray-500); font-weight: 700; text-transform: uppercase;">Real-Time Order Tracking</span>
+                    <h2 style="font-size: 1.35rem; font-weight: 800; margin-top: 2px;">
                         Order #<span id="orderNumDisplay">{{ order.order_number if order else order_id }}</span>
                     </h2>
                 </div>
-                <div>
-                    <span class="badge-status confirmed">{{ order.order_status if order else 'CONFIRMED' }}</span>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <span class="badge-status confirmed" id="displayOrderStatus">{{ order.order_status if order else 'CONFIRMED' }}</span>
                     <span class="badge-status {{ 'paid' if (order and order.payment_status == 'paid') else 'unpaid' }}">
                         {{ order.payment_status.upper() if order else 'COD' }}
                     </span>
@@ -217,19 +668,19 @@
 
             <!-- Tracking Timeline -->
             <div class="timeline">
-                <div class="step active">
+                <div class="step active" id="step1">
                     <div class="step-circle">1</div>
                     <div class="step-label">Confirmed</div>
                 </div>
-                <div class="step active">
+                <div class="step active" id="step2">
                     <div class="step-circle">2</div>
                     <div class="step-label">Preparing</div>
                 </div>
-                <div class="step">
+                <div class="step {{ 'active pulse' if (order and order.order_status|lower in ['dispatched', 'out_for_delivery']) else '' }}" id="step3">
                     <div class="step-circle">3</div>
                     <div class="step-label">Dispatched</div>
                 </div>
-                <div class="step">
+                <div class="step {{ 'active' if (order and order.order_status|lower == 'delivered') else '' }}" id="step4">
                     <div class="step-circle">4</div>
                     <div class="step-label">Delivered</div>
                 </div>
@@ -241,64 +692,487 @@
                     <strong>{{ order.customer_name if (order and order.customer_name) else 'Valued Customer' }}</strong>
                 </div>
                 <div class="meta-item">
-                    <span>WhatsApp Contact</span>
-                    <strong>{{ order.customer_phone if order else 'Registered Phone' }}</strong>
+                    <span>Contact Phone</span>
+                    <strong>{{ order.customer_phone if order else 'Registered Customer' }}</strong>
                 </div>
                 <div class="meta-item">
-                    <span>Total Amount</span>
+                    <span>Order Total</span>
                     <strong style="color: var(--primary);">PKR {{ "{:,.0f}".format(order.total_amount) if order else '0' }}</strong>
                 </div>
                 <div class="meta-item">
-                    <span>Courier / Tracking</span>
-                    <strong>{{ order.courier_name or 'TCS Express' }}</strong>
+                    <span>Courier / Delivery</span>
+                    <strong id="displayCourier">{{ order.courier_name or 'Chitral Express Bike Rider' }}</strong>
                 </div>
             </div>
 
             <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--gray-100); font-size: 0.9rem;">
-                <span style="font-size: 0.78rem; color: var(--gray-500); font-weight: 700; text-transform: uppercase; display: block;">Delivery Address</span>
-                <strong>{{ order.shipping_address if (order and order.shipping_address) else 'Chitral, Khyber Pakhtunkhwa, Pakistan' }}</strong>
+                <span style="font-size: 0.74rem; color: var(--gray-500); font-weight: 700; text-transform: uppercase; display: block;">Destination Address</span>
+                <strong id="destAddressText">{{ order.shipping_address if (order and order.shipping_address) else 'Ataliq Bazar / Chew Bazar, Chitral, Khyber Pakhtunkhwa' }}</strong>
             </div>
         </div>
 
         <!-- Live Radar Map Card -->
         <div class="card">
-            <h3 style="font-size: 1.1rem; font-weight: 800;">📍 Live Delivery Radar Map</h3>
-            <p style="font-size: 0.85rem; color: var(--gray-500); margin-top: 4px;">
-                Tracking delivery fleet GPS pin and recipient dispatch coordinates.
-            </p>
+            <div class="map-card-header">
+                <div>
+                    <h3 style="font-size: 1.15rem; font-weight: 800;">📍 Live Delivery Radar Map</h3>
+                    <p style="font-size: 0.82rem; color: var(--gray-500); margin-top: 2px;">
+                        Interactive GPS map showing live delivery bike and customer destination pin.
+                    </p>
+                </div>
+                <div class="radar-status-pill" id="radarStatusPill">
+                    <span class="radar-dot"></span>
+                    <span id="radarStatusText">Connecting radar...</span>
+                </div>
+            </div>
+
+            <!-- Leaflet Container -->
             <div id="deliveryMap"></div>
+
+            <!-- Live Distance & ETA Banner -->
+            <div class="eta-banner" id="etaBanner">
+                <div class="eta-item">
+                    <span class="eta-icon">🏍️</span>
+                    <div class="eta-text">
+                        <strong id="etaStatusHeadline">Delivery Rider En Route</strong>
+                        <span id="etaStatusSubtext">Calculating real-time distance and estimated arrival...</span>
+                    </div>
+                </div>
+                <div class="eta-item" style="text-align: right;">
+                    <div class="eta-text">
+                        <strong id="etaDistance" style="color: var(--primary);">-- km away</strong>
+                        <span id="etaMinutes">Est. Arrival: calculating</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- WhatsApp Support Card -->
-        <div class="card" style="text-align: center;">
-            <h3 style="font-size: 1.1rem; font-weight: 800;">Need Instant Assistance?</h3>
-            <p style="font-size: 0.88rem; color: var(--gray-500); margin-top: 4px;">
-                Our WhatsApp automated agent and support team are available 24/7.
+        <div class="support-card">
+            <h3 style="font-size: 1.1rem; font-weight: 800;">Need Assistance with Your Order?</h3>
+            <p style="font-size: 0.86rem; color: var(--gray-500); margin-top: 4px;">
+                Our WhatsApp automated agent and customer support are available 24/7.
             </p>
-            <a href="https://wa.me/{{ jazzcash_number or '923209350858' }}?text=Salam!%20I%20am%20inquiring%20about%20my%20Order%20%23{{ order.order_number if order else order_id }}" target="_blank" class="support-btn">
-                <span>💬</span> Chat with Support on WhatsApp
+            <a href="https://wa.me/{{ jazzcash_number or '923209350858' }}?text=Salam!%20I%20am%20inquiring%20about%20Order%20%23{{ order.order_number if order else order_id }}" target="_blank" class="support-btn">
+                <span>💬</span> Chat on WhatsApp
             </a>
         </div>
+
     </main>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initialize Leaflet Map centered on Chitral / Pakistan
-            const chitralCoords = [35.8510, 71.7864];
-            const map = L.map('deliveryMap').setView(chitralCoords, 13);
+    <!-- Floating Toast Message -->
+    <div id="toastNotice">Notification</div>
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; OpenStreetMap contributors',
-                maxZoom: 18
+    <script>
+        // Global State & Order Parameters
+        const ORDER_ID = "{{ order_id }}";
+        const INITIAL_ROLE = "{{ initial_role or 'customer' }}";
+        let currentRole = INITIAL_ROLE;
+
+        // Coordinates & Map state
+        let map = null;
+        let bikeMarker = null;
+        let destMarker = null;
+        let routePolyline = null;
+        let latestRiderCoords = null;
+        let customerDestinationCoords = [35.8659, 71.7924]; // Default Chitral Chew Bazar
+        let watchPositionId = null;
+        let isBroadcasting = false;
+        let broadcastCount = 0;
+        let pollTimer = null;
+
+        // Custom Leaflet Icons
+        const bikeIcon = L.divIcon({
+            className: 'bike-radar-icon',
+            html: '<div class="bike-radar-pulse"></div><div class="bike-icon-circle">🏍️</div>',
+            iconSize: [44, 44],
+            iconAnchor: [22, 22],
+            popupAnchor: [0, -22]
+        });
+
+        const destIcon = L.divIcon({
+            className: 'dest-pin-icon',
+            html: '<div class="dest-icon-circle">📍</div>',
+            iconSize: [38, 38],
+            iconAnchor: [19, 38],
+            popupAnchor: [0, -38]
+        });
+
+        // Toast Feedback Helper
+        function showToast(msg) {
+            const toast = document.getElementById('toastNotice');
+            if (!toast) return;
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Haversine Distance Calculation (km)
+        function calculateHaversineKm(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        // Initialize Map & Tile Layers
+        function initLeafletMap() {
+            if (map) return;
+
+            // Default center: Chitral, PK
+            map = L.map('deliveryMap', {
+                center: customerDestinationCoords,
+                zoom: 14,
+                zoomControl: true,
+                attributionControl: false
+            });
+
+            // Fast, high-contrast CartoDB Voyager tiles (never grey, loads reliably over HTTPS)
+            const cartoVoyager = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                subdomains: 'abcd',
+                maxZoom: 19
             }).addTo(map);
 
-            // Add Delivery Pin
-            const marker = L.marker(chitralCoords).addTo(map);
-            marker.bindPopup("<b>Order Destination</b><br>Chitral Hub &amp; Delivery Destination").openPopup();
+            // OpenStreetMap fallback in case CartoDB is unreachable
+            cartoVoyager.on('tileerror', function() {
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 18
+                }).addTo(map);
+            });
 
-            setTimeout(function() {
-                map.invalidateSize();
-            }, 300);
+            // Destination pin
+            destMarker = L.marker(customerDestinationCoords, { icon: destIcon }).addTo(map);
+            destMarker.bindPopup("<b>Order Destination</b><br>" + (document.getElementById('destAddressText')?.innerText || 'Delivery Address'));
+
+            // Staggered invalidateSize() calls guarantee map renders tiles fully without grey gaps
+            staggerMapInvalidate();
+        }
+
+        function staggerMapInvalidate() {
+            if (!map) return;
+            const delays = [50, 150, 400, 800, 1500, 3000];
+            delays.forEach(ms => {
+                setTimeout(() => {
+                    if (map) map.invalidateSize();
+                }, ms);
+            });
+        }
+
+        // Update Radar Banner & ETA
+        function updateRadarStatus(isLive, message) {
+            const pill = document.getElementById('radarStatusPill');
+            const text = document.getElementById('radarStatusText');
+            if (pill && text) {
+                if (isLive) {
+                    pill.classList.add('live');
+                    text.textContent = message || "Live GPS Active";
+                } else {
+                    pill.classList.remove('live');
+                    text.textContent = message || "Standby";
+                }
+            }
+        }
+
+        function updateEtaDisplay(riderLat, riderLng, destLat, destLng) {
+            const distKm = calculateHaversineKm(riderLat, riderLng, destLat, destLng);
+            // Road distance factor ~1.25, urban bike speed ~24 km/h
+            const roadKm = distKm * 1.25;
+            const etaMinutes = Math.max(2, Math.round((roadKm / 24) * 60));
+
+            const headline = document.getElementById('etaStatusHeadline');
+            const subtext = document.getElementById('etaStatusSubtext');
+            const distDisplay = document.getElementById('etaDistance');
+            const minDisplay = document.getElementById('etaMinutes');
+
+            if (headline) headline.textContent = "Rider Is On The Way 🏍️";
+            if (subtext) subtext.textContent = "Live bike GPS broadcasting every 3 seconds";
+            if (distDisplay) distDisplay.textContent = roadKm < 1 ? `${Math.round(roadKm * 1000)} m away` : `${roadKm.toFixed(1)} km away`;
+            if (minDisplay) minDisplay.textContent = `Est. Arrival: ~${etaMinutes} mins`;
+
+            // Activate Step 3 on timeline
+            const step3 = document.getElementById('step3');
+            if (step3 && !step3.classList.contains('active')) {
+                step3.classList.add('active', 'pulse');
+                const badge = document.getElementById('displayOrderStatus');
+                if (badge) {
+                    badge.textContent = "DISPATCHED";
+                    badge.className = "badge-status dispatched";
+                }
+            }
+        }
+
+        // Update Map Markers & Route Polyline
+        function updateDeliveryRoute(riderLat, riderLng, destLat, destLng) {
+            if (!map) return;
+
+            const riderPoint = [riderLat, riderLng];
+            const destPoint = [destLat, destLng];
+
+            // 1. Move or create Bike Marker
+            if (!bikeMarker) {
+                bikeMarker = L.marker(riderPoint, { icon: bikeIcon }).addTo(map);
+                bikeMarker.bindPopup("<b>Delivery Bike Rider</b><br>Live GPS Location");
+            } else {
+                bikeMarker.setLatLng(riderPoint);
+            }
+
+            // 2. Move Destination Marker
+            if (destMarker) {
+                destMarker.setLatLng(destPoint);
+            }
+
+            // 3. Draw or update dashed polyline
+            if (!routePolyline) {
+                routePolyline = L.polyline([riderPoint, destPoint], {
+                    color: '#059669',
+                    weight: 4,
+                    dashArray: '8, 8',
+                    opacity: 0.85
+                }).addTo(map);
+            } else {
+                routePolyline.setLatLngs([riderPoint, destPoint]);
+            }
+
+            // 4. Smoothly fit map bounds
+            try {
+                const bounds = L.latLngBounds([riderPoint, destPoint]);
+                map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+            } catch (err) {
+                console.warn("fitBounds notice:", err);
+            }
+        }
+
+        // Customer Live Polling (Every 3 seconds)
+        async function pollRiderLocation() {
+            try {
+                const res = await fetch(`/api/track/${ORDER_ID}/location?t=` + Date.now());
+                if (!res.ok) return;
+                const data = await res.json();
+
+                if (data.success) {
+                    // Update destination coords if available from backend
+                    if (data.destination && data.destination.lat && data.destination.lng) {
+                        customerDestinationCoords = [data.destination.lat, data.destination.lng];
+                        if (destMarker) {
+                            destMarker.setLatLng(customerDestinationCoords);
+                            destMarker.setPopupContent("<b>Order Destination</b><br>" + (data.destination.address || 'Delivery Address'));
+                        }
+                        // Update Google Maps nav button in rider panel
+                        const navBtn = document.getElementById('btnNavGoogleMaps');
+                        if (navBtn) {
+                            navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${data.destination.lat},${data.destination.lng}`;
+                        }
+                    }
+
+                    if (data.has_rider && data.rider && data.rider.lat && data.rider.lng) {
+                        const rLat = parseFloat(data.rider.lat);
+                        const rLng = parseFloat(data.rider.lng);
+                        latestRiderCoords = [rLat, rLng];
+
+                        updateRadarStatus(true, "Rider GPS Live");
+                        updateDeliveryRoute(rLat, rLng, customerDestinationCoords[0], customerDestinationCoords[1]);
+                        updateEtaDisplay(rLat, rLng, customerDestinationCoords[0], customerDestinationCoords[1]);
+                    } else {
+                        updateRadarStatus(false, "Preparing dispatch...");
+                    }
+                }
+            } catch (err) {
+                console.warn("Poll rider location notice:", err);
+            }
+        }
+
+        function startCustomerPolling() {
+            pollRiderLocation();
+            if (!pollTimer) {
+                pollTimer = setInterval(pollRiderLocation, 3000);
+            }
+        }
+
+        // Rider GPS Broadcast Flow
+        function toggleRiderBroadcast() {
+            if (isBroadcasting) {
+                stopRiderBroadcast();
+            } else {
+                startRiderBroadcast();
+            }
+        }
+
+        function startRiderBroadcast() {
+            if (!navigator.geolocation) {
+                alert("Geolocation is not supported by your device / browser.");
+                return;
+            }
+
+            const btn = document.getElementById('btnToggleBroadcast');
+            const label = document.getElementById('btnBroadcastLabel');
+            const statusBadge = document.getElementById('riderStatusBadge');
+
+            if (label) label.textContent = "Connecting GPS...";
+
+            watchPositionId = navigator.geolocation.watchPosition(
+                async function(position) {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    const accuracy = Math.round(position.coords.accuracy || 0);
+                    const speed = position.coords.speed ? Math.round(position.coords.speed * 3.6) : 0;
+                    const heading = position.coords.heading || 0;
+
+                    // Update UI telemetry
+                    const elAcc = document.getElementById('telemetryAccuracy');
+                    const elSpeed = document.getElementById('telemetrySpeed');
+                    const elCount = document.getElementById('telemetryCount');
+                    if (elAcc) elAcc.textContent = `± ${accuracy} m`;
+                    if (elSpeed) elSpeed.textContent = `${speed} km/h`;
+
+                    // POST coordinates to backend
+                    try {
+                        const postRes = await fetch(`/api/track/${ORDER_ID}/location`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                lat: lat,
+                                lng: lng,
+                                accuracy: accuracy,
+                                speed: speed,
+                                heading: heading
+                            })
+                        });
+                        const postData = await postRes.json();
+                        if (postData.success) {
+                            broadcastCount++;
+                            if (elCount) elCount.textContent = broadcastCount;
+                        }
+                    } catch (e) {
+                        console.warn("GPS post error:", e);
+                    }
+
+                    // Update map immediately
+                    updateDeliveryRoute(lat, lng, customerDestinationCoords[0], customerDestinationCoords[1]);
+                    updateEtaDisplay(lat, lng, customerDestinationCoords[0], customerDestinationCoords[1]);
+                    updateRadarStatus(true, "Rider GPS Live");
+
+                    if (!isBroadcasting) {
+                        isBroadcasting = true;
+                        if (btn) btn.classList.add('broadcasting');
+                        if (label) label.textContent = "🛑 Stop Live GPS Broadcasting";
+                        if (statusBadge) {
+                            statusBadge.textContent = "BROADCASTING";
+                            statusBadge.className = "badge-status delivered";
+                        }
+                        showToast("🟢 Live GPS broadcasting started!");
+                    }
+                },
+                function(err) {
+                    console.error("GPS Watch error:", err);
+                    alert("Unable to access GPS location. Please enable Location Services in your browser permissions.");
+                    stopRiderBroadcast();
+                },
+                {
+                    enableHighAccuracy: true,
+                    maximumAge: 2000,
+                    timeout: 10000
+                }
+            );
+        }
+
+        function stopRiderBroadcast() {
+            if (watchPositionId !== null) {
+                navigator.geolocation.clearWatch(watchPositionId);
+                watchPositionId = null;
+            }
+            isBroadcasting = false;
+            const btn = document.getElementById('btnToggleBroadcast');
+            const label = document.getElementById('btnBroadcastLabel');
+            const statusBadge = document.getElementById('riderStatusBadge');
+
+            if (btn) btn.classList.remove('broadcasting');
+            if (label) label.textContent = "🚀 Start Delivery / Share Live GPS";
+            if (statusBadge) {
+                statusBadge.textContent = "GPS Standby";
+                statusBadge.className = "badge-status dispatched";
+            }
+            showToast("GPS broadcasting stopped.");
+        }
+
+        // View Role Switching
+        function switchRoleView(role) {
+            currentRole = role;
+            const customerBtn = document.getElementById('tabCustomerBtn');
+            const riderBtn = document.getElementById('tabRiderBtn');
+            const riderPanel = document.getElementById('riderPanel');
+
+            if (role === 'rider') {
+                customerBtn.classList.remove('active');
+                riderBtn.classList.add('active');
+                riderPanel.classList.add('active');
+            } else {
+                customerBtn.classList.add('active');
+                riderBtn.classList.remove('active');
+                riderPanel.classList.remove('active');
+            }
+
+            staggerMapInvalidate();
+        }
+
+        // Sharing Utilities
+        function getRiderUrl() {
+            const url = new URL(window.location.href);
+            url.searchParams.set('role', 'rider');
+            return url.toString();
+        }
+
+        function copyRiderLink() {
+            const riderLink = getRiderUrl();
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(riderLink).then(() => {
+                    showToast("📋 Rider link copied to clipboard!");
+                }).catch(() => {
+                    prompt("Copy Rider Link:", riderLink);
+                });
+            } else {
+                prompt("Copy Rider Link:", riderLink);
+            }
+        }
+
+        function setupShareLinks() {
+            const waBtn = document.getElementById('btnWhatsAppRider');
+            if (waBtn) {
+                const link = getRiderUrl();
+                const text = encodeURIComponent(`Salam! Here is your delivery link for Order #${ORDER_ID}. Tap to share live GPS with customer:\n${link}`);
+                waBtn.href = `https://wa.me/?text=${text}`;
+            }
+
+            const navBtn = document.getElementById('btnNavGoogleMaps');
+            if (navBtn) {
+                navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${customerDestinationCoords[0]},${customerDestinationCoords[1]}`;
+            }
+        }
+
+        // Bootstrapping
+        document.addEventListener('DOMContentLoaded', function() {
+            initLeafletMap();
+            setupShareLinks();
+
+            // Set initial role view
+            const urlParams = new URLSearchParams(window.location.search);
+            const roleParam = urlParams.get('role');
+            if (roleParam === 'rider' || INITIAL_ROLE === 'rider') {
+                switchRoleView('rider');
+            } else {
+                switchRoleView('customer');
+            }
+
+            // Start customer tracking polling
+            startCustomerPolling();
+
+            // Window resize handler for zero grey map tiles
+            window.addEventListener('resize', staggerMapInvalidate);
         });
     </script>
 </body>

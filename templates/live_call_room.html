@@ -330,7 +330,7 @@
             <p style="font-size: 13px; color: #94a3b8; max-width: 260px; line-height: 1.5; margin-bottom: 24px;">
                 Connecting you to our 100% Free Live AI Voice Assistant.
             </p>
-            <button type="button" class="btn-start-call" id="joinCallBtn" onclick="startCallFromOverlay()">
+            <button type="button" class="btn-start-call" id="joinCallBtn" onclick="executeJoinFlow(event)">
                 <span>📞</span>
                 <span id="joinCallBtnText">Tap to Join Call</span>
             </button>
@@ -550,11 +550,11 @@
 
         let isJoinInProgress = false;
 
-        function executeJoinFlow() {
-            if (isJoinInProgress || isCallActive) return;
-            isJoinInProgress = true;
+        function executeJoinFlow(e) {
+            if (e && e.stopPropagation) e.stopPropagation();
+            if (isCallActive) return;
 
-            // 1. IMMEDIATELY hide the join overlay and transition UI into active call room
+            // 1. AT THE VERY FIRST LINE: IMMEDIATELY hide join overlay and show active call UI
             const overlay = document.getElementById('connectOverlay');
             if (overlay) overlay.style.display = 'none';
 
@@ -567,7 +567,7 @@
                 tb.innerHTML = '<div style="color: #10b981; font-weight: 600;">🟢 Call Connected. Say "Salam" or speak your question.</div>';
             }
 
-            // 2. Non-blocking backend join notification (never freezes UI)
+            // 2. Fire backend join notification asynchronously without blocking UI transition
             const targetPhone = roomId || phone;
             if (targetPhone) {
                 fetch('/api/call/join/' + encodeURIComponent(targetPhone), {
@@ -583,7 +583,7 @@
                 } catch (_) {}
             }
 
-            // 3. AudioContext resume & audio element unlock strictly inside user gesture
+            // 3. AudioContext resume & unlock inside non-blocking try/catch
             try {
                 const AudioCtx = window.AudioContext || window.webkitAudioContext;
                 if (!audioCtx && AudioCtx) audioCtx = new AudioCtx();
@@ -608,7 +608,7 @@
                 }
             } catch (_) {}
 
-            // 4. Request microphone with 3-second timeout fallback
+            // 4. Request microphone inside non-blocking try/catch with 3-second timeout fallback
             const getUserMediaWithTimeout = (timeoutMs = 3000) => {
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                     return Promise.reject(new Error('MediaDevices not supported'));
@@ -619,20 +619,22 @@
                 ]);
             };
 
-            getUserMediaWithTimeout(3000)
-                .then(stream => {
-                    micStream = stream;
-                    try { setupMicrophoneAnalyser(stream); } catch (_) {}
-                    try { setupMediaRecorderVAD(stream); } catch (_) {}
-                    try { startPrimarySpeechRecognition(); } catch (_) {}
-                })
-                .catch(micErr => {
-                    console.warn('[Microphone fallback notice]:', micErr);
-                    try { setupDualMicPipeline(); } catch (_) {}
-                })
-                .finally(() => {
-                    isJoinInProgress = false;
-                });
+            try {
+                getUserMediaWithTimeout(3000)
+                    .then(stream => {
+                        micStream = stream;
+                        try { setupMicrophoneAnalyser(stream); } catch (_) {}
+                        try { setupMediaRecorderVAD(stream); } catch (_) {}
+                        try { startPrimarySpeechRecognition(); } catch (_) {}
+                    })
+                    .catch(micErr => {
+                        console.warn('[Microphone fallback notice]:', micErr);
+                        try { setupDualMicPipeline(); } catch (_) {}
+                    });
+            } catch (micSyncErr) {
+                console.warn('[Microphone sync error notice]:', micSyncErr);
+                try { setupDualMicPipeline(); } catch (_) {}
+            }
         }
 
         function startCallFromOverlay() {
@@ -642,20 +644,20 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             const joinBtn = document.getElementById('joinCallBtn');
+            const overlay = document.getElementById('connectOverlay');
             if (joinBtn) {
-                let touched = false;
                 joinBtn.addEventListener('touchend', (e) => {
-                    touched = true;
-                    executeJoinFlow();
+                    executeJoinFlow(e);
                 }, { passive: true });
 
                 joinBtn.addEventListener('click', (e) => {
-                    if (touched) {
-                        touched = false;
-                        return;
-                    }
-                    executeJoinFlow();
+                    executeJoinFlow(e);
                 });
+            }
+            if (overlay) {
+                overlay.addEventListener('touchend', (e) => {
+                    executeJoinFlow(e);
+                }, { passive: true });
             }
 
             // Bind customer End Call button
@@ -1115,7 +1117,7 @@
                         tb.scrollTop = tb.scrollHeight;
                     }
 
-                    const outAudioB64 = data.audioBase64 || data.audio_base64 || (data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio/\w+;base64,/, '') : '');
+                    const outAudioB64 = data.audioBase64 || data.audio_base64 || (data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio\/\w+;base64,/, '') : '');
                     speakAIResponse(reply, outAudioB64);
                 } else {
                     const errMsg = (data && data.error) || 'Failed to get AI voice response';
@@ -1131,7 +1133,6 @@
         // ===================================================================
         // 6. HOLD OR TAP TO SPEAK BUTTON (MOBILE TOUCH & DESKTOP GESTURE PIPELINE)
         // ===================================================================
-        let isPttRecording = false;
         let pttTouchStartTime = 0;
         let pttTapMode = false;
 

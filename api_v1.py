@@ -7893,6 +7893,104 @@ def track_ecommerce_order():
     }), 200
 
 
+# --- Real-Time Order Rider GPS Broadcast & Tracking Endpoints ---
+_ACTIVE_ORDER_LOCATIONS: Dict[str, Dict[str, Any]] = {}
+_ACTIVE_ORDER_LOCATIONS_LOCK = threading.Lock()
+
+@api_v1.route("/track/<order_id>/location", methods=["GET", "POST"])
+def api_order_tracking_location(order_id: str):
+    """Handles real-time bike rider GPS broadcasting and customer tracking polling."""
+    clean_id = str(order_id or "").strip()
+    if not clean_id:
+        return jsonify({"success": False, "error": "Order ID is required."}), 400
+
+    from models import EcommerceOrder
+    order = EcommerceOrder.query.filter(
+        (EcommerceOrder.id == clean_id) | (EcommerceOrder.order_number == clean_id)
+    ).first()
+
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        try:
+            lat = float(data.get("lat") or data.get("latitude"))
+            lng = float(data.get("lng") or data.get("longitude"))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Valid numeric 'lat' and 'lng' are required."}), 400
+
+        accuracy = float(data.get("accuracy") or 0.0)
+        speed = float(data.get("speed") or 0.0)
+        heading = float(data.get("heading") or 0.0)
+        now_iso = datetime.datetime.utcnow().isoformat() + "Z"
+
+        with _ACTIVE_ORDER_LOCATIONS_LOCK:
+            _ACTIVE_ORDER_LOCATIONS[clean_id] = {
+                "lat": lat,
+                "lng": lng,
+                "accuracy": accuracy,
+                "speed": speed,
+                "heading": heading,
+                "status": "dispatched",
+                "updated_at": now_iso
+            }
+            if order and order.id != clean_id:
+                _ACTIVE_ORDER_LOCATIONS[order.id] = _ACTIVE_ORDER_LOCATIONS[clean_id]
+            if order and order.order_number != clean_id:
+                _ACTIVE_ORDER_LOCATIONS[order.order_number] = _ACTIVE_ORDER_LOCATIONS[clean_id]
+
+        if order:
+            try:
+                if str(order.order_status).lower() in ("confirmed", "pending", "preparing"):
+                    order.order_status = "dispatched"
+                if not order.tracking_url:
+                    order.tracking_url = f"/track/{clean_id}"
+                db.session.commit()
+            except Exception as _commit_err:
+                db.session.rollback()
+                logger.warning(f"Order status dispatch update notice: {_commit_err}")
+
+        return jsonify({
+            "success": True,
+            "order_id": clean_id,
+            "status": "dispatched",
+            "lat": lat,
+            "lng": lng,
+            "updated_at": now_iso
+        }), 200
+
+    # GET request: return latest rider location and customer destination
+    with _ACTIVE_ORDER_LOCATIONS_LOCK:
+        loc = _ACTIVE_ORDER_LOCATIONS.get(clean_id)
+        if not loc and order:
+            loc = _ACTIVE_ORDER_LOCATIONS.get(order.id) or _ACTIVE_ORDER_LOCATIONS.get(order.order_number)
+
+    # Destination resolution: defaults to local Chitral destination
+    dest_lat = 35.8659
+    dest_lng = 71.7924
+    dest_addr = "Chew Bazar / Danin, Chitral"
+    if order and order.shipping_address:
+        dest_addr = str(order.shipping_address).strip()
+        coord_match = re.search(r"(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)", dest_addr)
+        if coord_match:
+            try:
+                dest_lat = float(coord_match.group(1))
+                dest_lng = float(coord_match.group(2))
+            except Exception:
+                pass
+
+    return jsonify({
+        "success": True,
+        "order_id": clean_id,
+        "has_rider": bool(loc),
+        "rider": loc,
+        "destination": {
+            "lat": dest_lat,
+            "lng": dest_lng,
+            "address": dest_addr
+        },
+        "order_status": order.order_status if order else "confirmed"
+    }), 200
+
+
 # --- 3. Abandoned Cart Recovery Alerts Endpoints ---
 
 @api_v1.route("/ecommerce/carts/abandoned", methods=["GET"])
