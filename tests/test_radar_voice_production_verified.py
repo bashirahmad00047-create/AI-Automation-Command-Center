@@ -370,9 +370,12 @@ def test_live_call_room_turn_id_global_scope(client):
     # 4. Check rendered route /call/<phone>
     res = client.get("/call/923209350858")
     assert res.status_code == 200
+    assert "no-store" in res.headers.get("Cache-Control", "")
     rendered = res.get_data(as_text=True)
     assert "let currentTurnId = 0;" in rendered
     assert "let turnId = 0;" in rendered
+    assert "Tap to Send" not in rendered
+    assert "Type here if mic pauses" not in rendered
 
     # 5. Syntax validation via node -c
     js_for_node = re.sub(r"\{\{.*?\}\}", "923209350858", js_content)

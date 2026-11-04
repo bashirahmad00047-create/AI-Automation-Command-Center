@@ -4027,18 +4027,8 @@ def api_live_voice_call():
         is_dental = bool("aiza" in persona.lower() or "dental" in persona.lower() or "dental" in clinic_name.lower() or "aiza" in clinic_name.lower() or data.get("demo") == "dental")
 
         if is_greeting:
-            if is_dental or "aiza" in persona.lower():
-                reply_text = "Assalam o Alaikum! Main Dr. Aiza Dental Clinic se AI Receptionist Aiza bol rahi hoon. Main aapki dental appointment ya checkup mein kya madad kar sakti hoon?"
-                voice_text = "السلام علیکم! میں ڈاکٹر عائزہ ڈینٹل کلینک سے اے آئی ریسپشنسٹ عائزہ بول رہی ہوں۔ میں آپ کی ڈینٹل اپائنٹمنٹ یا چیک اپ میں کیا مدد کر سکتی ہوں؟"
-            elif "uzma" in persona.lower() or "female" in persona.lower():
-                reply_text = "Assalam o Alaikum! Main BashFlow AI bol rahi hoon, main aapki kya madad kar sakti hoon?"
-                voice_text = "السلام علیکم! میں بیش فلو اے آئی بول رہی ہوں، میں آپ کی کیا مدد کر سکتی ہوں؟"
-            elif "asad" in persona.lower() or "ur" in persona.lower() or "puck" in persona.lower():
-                reply_text = "Assalam o Alaikum! Main BashFlow AI bol raha hoon, main aapki kya madad kar sakta hoon?"
-                voice_text = "السلام علیکم! میں بیش فلو اے آئی بول رہا ہوں، میں آپ کی کیا مدد کر سکتا ہوں؟"
-            else:
-                reply_text = "Assalam o Alaikum! This is BashFlow AI, how may I assist you today?"
-                voice_text = "Assalam o Alaikum! This is BashFlow AI, how may I assist you today?"
+            reply_text = "Assalam-o-Alaikum! Main BashFlow AI hoon, farmaiye main aapki kya madad karoon?"
+            voice_text = "السلام علیکم! میں بیش فلو اے آئی ہوں، فرمائیے میں آپ کی کیا مدد کروں؟"
         else:
             raw_audio_bytes = b""
             if not user_text and audio_in_b64:
@@ -4137,7 +4127,7 @@ def api_live_voice_call():
                         "audio_data_uri": ""
                     }), 200
 
-            # Dental Clinic Demo vs Store Catalog selection
+            # Ultra-Fast AI Voice Receptionist System Prompt
             if is_dental or any(w in (user_text or "").lower() for w in ["teeth", "tooth", "dentist", "dental", "scaling", "root canal", "rct", "implant", "braces", "aligner", "daant", "dard", "aiza"]):
                 system_prompt = (
                     "You are Aiza, the highly professional, empathetic, and sweet AI Medical Receptionist at Dr. Aiza Dental Clinic & Implant Center.\n"

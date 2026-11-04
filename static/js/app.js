@@ -12612,7 +12612,7 @@ function startAdminAudioPolling(phoneNum) {
                 });
             }
         } catch (_) {}
-    }, 1000);
+    }, 800);
 }
 
 function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customName = null) {
@@ -12788,7 +12788,7 @@ async function initiateCallHandshake(phone, name) {
         console.warn('Call initiate error:', err);
     }
 
-    // 1-second polling interval (GET /api/call/status/<phone>) strictly to guarantee instant voice chunk delivery
+    // 800ms ultra-fast polling interval (GET /api/call/status/<phone>) to guarantee instant voice chunk delivery
     let isConnectedLogged = false;
     callStatusPollInterval = setInterval(async () => {
         if (!cleanPhone) return;
@@ -12833,7 +12833,7 @@ async function initiateCallHandshake(phone, name) {
                 }, 1500);
             }
         } catch (_) {}
-    }, 1000);
+    }, 800);
 
     bindAdminCallWidgetButtons();
 }

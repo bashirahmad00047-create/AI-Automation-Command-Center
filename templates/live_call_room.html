@@ -3,18 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dr. Aiza Dental Clinic | Live AI Voice Call</title>
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js">
-        function askDentalTopic(query) {
-            if (!query) return;
-            if (!isCallActive) {
-                executeJoinFlow();
-            }
-            sendLiveVoicePayload({ text: query });
-        }
-        window.askDentalTopic = askDentalTopic;
-
-    </script>
+    <title>BashFlow AI Receptionist | Live Call</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <link rel="icon" type="image/svg+xml" href="/static/img/opsflow-icon.svg">
     <style>
         * {
@@ -24,344 +14,200 @@
             -webkit-tap-highlight-color: transparent;
         }
         body {
-            background-color: #0b0f19;
+            background-color: #06090e;
             color: #f8fafc;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 14px;
+            padding: 12px;
             overflow: hidden;
         }
         .call-card {
             width: 100%;
             max-width: 380px;
-            height: 95vh;
-            max-height: 640px;
-            background: radial-gradient(circle at 50% 10%, #0e1e38 0%, #080d1a 80%);
-            border: 1px solid rgba(6, 182, 212, 0.25);
-            border-radius: 30px;
-            box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(6, 182, 212, 0.3);
+            height: 92vh;
+            max-height: 590px;
+            background: #0b0f17;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            border-radius: 28px;
+            box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(16, 185, 129, 0.15);
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             overflow: hidden;
             position: relative;
+            padding: 24px 20px;
         }
-        .dental-avatar-wrap {
-            position: relative;
-            width: 42px;
-            height: 42px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+        /* Top Section */
+        .call-top {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            width: 100%;
+        }
+        .lang-pill-wrap {
+            display: inline-flex;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 9999px;
+            padding: 3px;
+            margin-bottom: 22px;
+        }
+        .lang-pill-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 14px;
+            border-radius: 9999px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .lang-pill-btn.active {
+            background: #10b981;
+            color: #0b0f17;
+            font-weight: 700;
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+        }
+        .call-title {
+            font-size: 21px;
+            font-weight: 700;
+            color: #f8fafc;
+            letter-spacing: -0.3px;
+            margin-bottom: 6px;
+        }
+        .call-status-subtitle {
+            font-size: 13.5px;
+            color: #10b981;
+            font-weight: 500;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
-            box-shadow: 0 0 14px rgba(6, 182, 212, 0.5);
-            flex-shrink: 0;
+            gap: 7px;
         }
-        .dental-online-dot {
-            position: absolute;
-            bottom: 1px;
-            right: 1px;
-            width: 10px;
-            height: 10px;
+        .status-dot {
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
             background: #10b981;
-            border: 2px solid #080d1a;
-            box-shadow: 0 0 6px #10b981;
+            box-shadow: 0 0 8px #10b981;
+            animation: pulseGreen 1.8s infinite;
         }
-        .dental-subhead {
-            font-size: 10.5px;
-            color: #06b6d4;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+        @keyframes pulseGreen {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 12px #10b981; }
+            100% { transform: scale(0.9); opacity: 0.7; }
         }
-        .dental-topics-row {
-            display: flex;
-            gap: 6px;
-            overflow-x: auto;
-            width: 100%;
-            padding: 4px 2px 8px 2px;
-            margin-bottom: 6px;
-            scrollbar-width: none;
-        }
-        .dental-topics-row::-webkit-scrollbar { display: none; }
-        .dental-chip {
-            background: rgba(6, 182, 212, 0.12);
-            border: 1px solid rgba(6, 182, 212, 0.35);
-            color: #38bdf8;
-            font-size: 11px;
-            font-weight: 600;
-            padding: 5px 10px;
-            border-radius: 9999px;
-            cursor: pointer;
-            white-space: nowrap;
-            transition: all 0.2s ease;
-        }
-        .dental-chip:hover, .dental-chip:active {
-            background: rgba(6, 182, 212, 0.25);
-            border-color: #06b6d4;
-            color: #ffffff;
-            transform: scale(0.97);
-        }
-        /* Header */
-        .call-header {
-            padding: 16px 20px 12px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-            background: rgba(0, 0, 0, 0.2);
-        }
-        .caller-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .pulse-dot {
-            width: 11px;
-            height: 11px;
-            border-radius: 50%;
-            background: #14b8a6;
-            box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.7);
-            animation: pulseTeal 1.8s infinite;
-        }
-        @keyframes pulseTeal {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.7); }
-            70% { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(20, 184, 166, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(20, 184, 166, 0); }
-        }
-        .caller-name {
-            font-size: 14px;
-            font-weight: 700;
-            color: #f8fafc;
-            letter-spacing: -0.2px;
-        }
-        .call-status {
-            font-size: 11.5px;
-            color: #94a3b8;
-            margin-top: 1px;
-        }
-        .call-timer {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            font-size: 12px;
-            font-weight: 700;
-            color: #14b8a6;
-            background: rgba(20, 184, 166, 0.12);
-            border: 1px solid rgba(20, 184, 166, 0.25);
-            padding: 2px 7px;
-            border-radius: 6px;
-        }
-        /* Center Area */
-        .call-body {
+        /* Center Sound Wave Visualizer: 5 Glowing Green Vertical Bars */
+        .call-center {
             flex: 1;
             display: flex;
             flex-direction: column;
-            justify-content: center;
             align-items: center;
-            padding: 14px 18px;
-            text-align: center;
-        }
-        .lang-switch-row {
-            display: flex;
             justify-content: center;
-            gap: 6px;
-            margin-bottom: 10px;
-        }
-        .lang-chip {
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.05);
-            color: #94a3b8;
-            font-size: 10.5px;
-            font-weight: 600;
-            padding: 3px 10px;
-            border-radius: 9999px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        .lang-chip.active {
-            background: rgba(20, 184, 166, 0.2);
-            border-color: #14b8a6;
-            color: #14b8a6;
-            font-weight: 700;
+            width: 100%;
         }
         .vapi-waves {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 7px;
-            height: 64px;
-            margin-bottom: 10px;
+            gap: 10px;
+            height: 120px;
             cursor: pointer;
-            padding: 6px 16px;
-            border-radius: 14px;
-            transition: background 0.2s ease;
-        }
-        .vapi-waves:hover {
-            background: rgba(20, 184, 166, 0.05);
+            padding: 10px;
         }
         .wave-bar {
-            width: 5px;
-            height: 12px;
-            background: #14b8a6;
+            width: 6px;
+            height: 18px;
+            background: #10b981;
             border-radius: 9999px;
-            transition: height 0.2s ease, opacity 0.2s ease;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+            transition: height 0.15s ease, opacity 0.15s ease;
             opacity: 0.45;
         }
-        .vapi-waves.animating .wave-bar:nth-child(1) { animation: wavePulse 1.0s ease-in-out infinite 0.1s; }
-        .vapi-waves.animating .wave-bar:nth-child(2) { animation: wavePulse 1.0s ease-in-out infinite 0.25s; }
-        .vapi-waves.animating .wave-bar:nth-child(3) { animation: wavePulse 1.0s ease-in-out infinite 0.0s; }
-        .vapi-waves.animating .wave-bar:nth-child(4) { animation: wavePulse 1.0s ease-in-out infinite 0.3s; }
-        .vapi-waves.animating .wave-bar:nth-child(5) { animation: wavePulse 1.0s ease-in-out infinite 0.15s; }
-        @keyframes wavePulse {
-            0%, 100% { height: 10px; opacity: 0.4; }
-            50% { height: 54px; opacity: 1; box-shadow: 0 0 16px rgba(20, 184, 166, 0.85); }
+        .vapi-waves.animating .wave-bar {
+            opacity: 1;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.95);
         }
-        /* Live Mic Volume Meter */
-        .vol-meter-wrap {
-            width: 100%;
-            height: 4px;
-            background: rgba(255, 255, 255, 0.08);
-            border-radius: 9999px;
-            overflow: hidden;
-            margin-bottom: 10px;
+        .vapi-waves.animating .wave-bar:nth-child(1) { animation: soundWave 1.0s ease-in-out infinite 0.1s; }
+        .vapi-waves.animating .wave-bar:nth-child(2) { animation: soundWave 1.0s ease-in-out infinite 0.25s; }
+        .vapi-waves.animating .wave-bar:nth-child(3) { animation: soundWave 1.0s ease-in-out infinite 0.0s; }
+        .vapi-waves.animating .wave-bar:nth-child(4) { animation: soundWave 1.0s ease-in-out infinite 0.35s; }
+        .vapi-waves.animating .wave-bar:nth-child(5) { animation: soundWave 1.0s ease-in-out infinite 0.18s; }
+        @keyframes soundWave {
+            0%, 100% { height: 16px; }
+            50% { height: 82px; }
         }
-        .vol-meter-bar {
-            width: 0%;
-            height: 100%;
-            background: #14b8a6;
-            transition: width 0.06s ease;
-            box-shadow: 0 0 8px rgba(20, 184, 166, 0.8);
-        }
-        /* Subtitles Box */
-        .transcript-box {
-            width: 100%;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.07);
-            border-radius: 12px;
-            padding: 10px 12px;
-            min-height: 60px;
-            max-height: 90px;
-            overflow-y: auto;
-            font-size: 12.5px;
-            line-height: 1.4;
-            color: #cbd5e1;
-            text-align: left;
-            margin-bottom: 10px;
-        }
-        /* Push to talk button */
-        .btn-ptt {
-            width: 100%;
-            background: rgba(20, 184, 166, 0.12);
-            border: 1px solid rgba(20, 184, 166, 0.35);
-            color: #14b8a6;
-            font-size: 11.5px;
-            font-weight: 700;
-            padding: 8px 12px;
-            border-radius: 10px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            margin-bottom: 8px;
-            transition: all 0.2s ease;
-            user-select: none;
-            -webkit-user-select: none;
-            touch-action: manipulation;
-        }
-        .btn-ptt.recording {
-            background: #ef4444 !important;
-            border-color: #ef4444 !important;
-            color: #ffffff !important;
-            animation: pulseTeal 1s infinite;
-        }
-        /* Text Fallback Row */
-        .text-fallback-row {
-            width: 100%;
-            display: flex;
-            gap: 6px;
-        }
-        .text-fallback-input {
-            flex: 1;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            padding: 6px 10px;
-            color: #f8fafc;
-            font-size: 11.5px;
-            outline: none;
-        }
-        .text-fallback-btn {
-            background: #14b8a6;
-            color: #0b0f19;
-            border: none;
-            border-radius: 8px;
-            padding: 0 12px;
-            font-weight: 700;
-            font-size: 11.5px;
-            cursor: pointer;
-        }
-        /* Bottom Controls */
-        .call-footer {
-            padding: 12px 18px 16px 18px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 16px;
-            border-top: 1px solid rgba(255, 255, 255, 0.05);
-            background: rgba(0, 0, 0, 0.25);
-        }
-        .btn-circle {
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            cursor: pointer;
-            border: none;
-            transition: all 0.2s ease;
-        }
-        .btn-mic {
-            background: #14b8a6;
-            color: #0b0f19;
-            box-shadow: 0 4px 14px rgba(20, 184, 166, 0.35);
-        }
-        .btn-mic.muted {
-            background: #ef4444;
-            color: #ffffff;
-            box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
-        }
-        .btn-end {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            background: #ef4444;
-            color: #ffffff;
-            border-radius: 9999px;
-            padding: 10px 24px;
-            font-weight: 700;
+        .transcript-preview {
+            margin-top: 14px;
             font-size: 13px;
+            color: #cbd5e1;
+            max-width: 320px;
+            line-height: 1.45;
+            min-height: 40px;
+            max-height: 70px;
+            overflow-y: auto;
+            text-align: center;
+            scrollbar-width: none;
+        }
+        .transcript-preview::-webkit-scrollbar { display: none; }
+        /* Bottom: Exactly 2 Buttons */
+        .call-bottom {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 22px;
+            width: 100%;
+            padding-bottom: 6px;
+        }
+        .btn-mute-mic {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: #10b981;
+            color: #0b0f17;
             border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
             cursor: pointer;
-            box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
             transition: all 0.2s ease;
         }
-        .btn-end:active, .btn-mic:active {
+        .btn-mute-mic.muted {
+            background: #ef4444;
+            color: #ffffff;
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+        }
+        .btn-end-call-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: #ef4444;
+            color: #ffffff;
+            border: none;
+            border-radius: 9999px;
+            padding: 16px 36px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+            transition: all 0.2s ease;
+        }
+        .btn-mute-mic:active, .btn-end-call-pill:active {
             transform: scale(0.95);
         }
-        /* Initial Connect Overlay */
+        /* Connect Overlay (Initial Tap-to-Unlock for Browser Audio) */
         .connect-overlay {
             position: absolute;
             inset: 0;
-            background: rgba(11, 15, 25, 0.95);
-            backdrop-filter: blur(14px);
+            background: #0b0f17;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -369,138 +215,106 @@
             padding: 24px;
             text-align: center;
             z-index: 50;
+            border-radius: 28px;
         }
         .btn-start-call {
-            background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
             color: #ffffff;
             border: none;
             border-radius: 9999px;
-            padding: 16px 36px;
+            padding: 16px 38px;
             font-size: 16px;
             font-weight: 700;
             cursor: pointer;
-            box-shadow: 0 8px 24px rgba(20, 184, 166, 0.45);
+            box-shadow: 0 8px 28px rgba(16, 185, 129, 0.45);
             display: inline-flex;
             align-items: center;
             gap: 10px;
             transition: all 0.2s ease;
         }
-        .btn-start-call:active {
-            transform: scale(0.96);
-        }
+        .btn-start-call:active { transform: scale(0.96); }
     </style>
 </head>
 <body>
     <div class="call-card">
-        <!-- Initial Connect Overlay: Captures explicit user click to unlock AudioContext -->
+        <!-- Initial Connect Overlay: Captures initial user click to unlock AudioContext -->
         <div id="connectOverlay" class="connect-overlay">
-            <div style="font-size: 58px; margin-bottom: 12px; filter: drop-shadow(0 0 16px rgba(6, 182, 212, 0.6)); animation: pulseTeal 2s infinite;">🦷</div>
-            <div class="dental-subhead" style="margin-bottom: 4px;">Dr. Aiza Dental Clinic</div>
-            <h2 style="font-size: 21px; font-weight: 800; color: #f8fafc; margin-bottom: 6px; letter-spacing: -0.3px;">Aiza — AI Receptionist</h2>
-            <p style="font-size: 12.5px; color: #94a3b8; max-width: 290px; line-height: 1.5; margin-bottom: 20px;">
-                Ask about toothache, dental checkups, scaling &amp; root canals, or book your clinic appointment instantly.
+            <div style="font-size: 56px; margin-bottom: 16px; filter: drop-shadow(0 0 16px rgba(16, 185, 129, 0.6));">🎙️</div>
+            <h2 style="font-size: 21px; font-weight: 700; color: #f8fafc; margin-bottom: 8px;">BashFlow AI Receptionist</h2>
+            <p style="font-size: 13px; color: #94a3b8; max-width: 270px; line-height: 1.5; margin-bottom: 24px;">
+                Hands-Free Real-Time Voice Call. Speak naturally in Urdu or English.
             </p>
-            <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 22px; flex-wrap: wrap;">
-                <span style="font-size: 10.5px; background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.3); color: #38bdf8; padding: 3px 9px; border-radius: 9999px;">✨ Painless RCT</span>
-                <span style="font-size: 10.5px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 3px 9px; border-radius: 9999px;">📅 Instant Booking</span>
-                <span style="font-size: 10.5px; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); color: #fbbf24; padding: 3px 9px; border-radius: 9999px;">🦷 Emergency Relief</span>
-            </div>
-            <button type="button" class="btn-start-call" id="joinCallBtn" onclick="executeJoinFlow(event)" style="background: linear-gradient(135deg, #0891b2 0%, #06b6d4 100%); box-shadow: 0 8px 26px rgba(6, 182, 212, 0.5);">
+            <button type="button" class="btn-start-call" id="joinCallBtn" onclick="executeJoinFlow(event)">
                 <span>📞</span>
-                <span id="joinCallBtnText">Call Receptionist Aiza</span>
+                <span id="joinCallBtnText">Tap to Start Call</span>
             </button>
             <div style="font-size: 11px; color: #64748b; margin-top: 18px;">
-                Instant Two-Way Voice • Urdu (اردو) &amp; English
+                Instant Hands-Free Voice • No Typing Required
             </div>
         </div>
 
-        <!-- Header -->
-        <div class="call-header">
-            <div class="caller-info">
-                <div class="dental-avatar-wrap">
-                    <span>👩‍⚕️</span>
-                    <span class="dental-online-dot"></span>
-                </div>
-                <div>
-                    <div class="caller-name" id="callerHeaderName">Aiza (AI Receptionist)</div>
-                    <div class="call-status" id="callStatusLabel">Dr. Aiza Dental Clinic</div>
-                </div>
+        <!-- Top Header Area -->
+        <div class="call-top">
+            <!-- Language Selection Pill -->
+            <div class="lang-pill-wrap">
+                <button type="button" id="btnLangUr" class="lang-pill-btn active" onclick="switchLanguage('ur-PK')">Urdu</button>
+                <button type="button" id="btnLangEn" class="lang-pill-btn" onclick="switchLanguage('en-US')">English</button>
             </div>
-            <div class="call-timer" id="callTimer">00:00</div>
-        </div>
-
-        <!-- Center: Visualizer & Subtitles -->
-        <div class="call-body">
-            <!-- Language Selection Chips -->
-            <div class="lang-switch-row">
-                <button type="button" id="btnLangUr" class="lang-chip active" onclick="switchLanguage('ur-PK')">🇵🇰 Urdu (اردو)</button>
-                <button type="button" id="btnLangEn" class="lang-chip" onclick="switchLanguage('en-US')">🇬🇧 English</button>
-            </div>
-
-            <!-- Quick Dental Topic Inquiry Chips -->
-            <div class="dental-topics-row">
-                <button type="button" class="dental-chip" onclick="askDentalTopic('Mere daant mein shadeed dard hai, appointment chahiye')">🦷 Toothache / Dard</button>
-                <button type="button" class="dental-chip" onclick="askDentalTopic('Mujhe checkup ke liye appointment book karni hai')">📅 Book Checkup</button>
-                <button type="button" class="dental-chip" onclick="askDentalTopic('Teeth scaling aur cleaning ke charges kya hain?')">✨ Teeth Cleaning</button>
-                <button type="button" class="dental-chip" onclick="askDentalTopic('Root canal treatment ke charges aur process batayein')">💎 Root Canal</button>
-                <button type="button" class="dental-chip" onclick="askDentalTopic('Kya aaj doctor available hain emergency checkup ke liye?')">⚡ Emergency</button>
-            </div>
-
-            <!-- 5 Wave Bars -->
-            <div class="vapi-waves" id="waveContainer" onclick="interruptAssistant()" title="Tap to interrupt assistant">
-                <span class="wave-bar" style="background: #06b6d4;"></span>
-                <span class="wave-bar" style="background: #06b6d4;"></span>
-                <span class="wave-bar" style="background: #06b6d4;"></span>
-                <span class="wave-bar" style="background: #06b6d4;"></span>
-                <span class="wave-bar" style="background: #06b6d4;"></span>
-            </div>
-
-            <div id="interruptIndicator" style="display: none; font-size: 10.5px; color: #f59e0b; margin-top: -6px; margin-bottom: 8px; cursor: pointer;" onclick="interruptAssistant()">
-                ✋ Tap waves to Interrupt
-            </div>
-
-            <!-- Live Mic Volume Meter -->
-            <div class="vol-meter-wrap" title="Live Microphone Volume">
-                <div id="micVolumeBar" class="vol-meter-bar" style="background: #06b6d4; box-shadow: 0 0 8px rgba(6, 182, 212, 0.8);"></div>
-            </div>
-
-            <!-- Subtitle / Transcript Box -->
-            <div class="transcript-box" id="transcriptBox">
-                <em style="color: #64748b;">Connecting to Dr. Aiza Dental Clinic...</em>
-            </div>
-
-            <!-- Hold or Tap to Speak Button -->
-            <button type="button" id="btnPushToTalk" class="btn-ptt" style="background: rgba(6, 182, 212, 0.15); border-color: rgba(6, 182, 212, 0.4); color: #06b6d4;">
-                <span id="pttIcon">🎙️</span>
-                <span id="pttText">Hold or Tap to Speak</span>
-            </button>
-
-            <!-- Fallback text typing row -->
-            <div class="text-fallback-row">
-                <input type="text" id="callTextInput" class="text-fallback-input" placeholder="Type dental symptom or question..." onkeydown="if(event.key==='Enter') sendTextInput()">
-                <button type="button" class="text-fallback-btn" onclick="sendTextInput()" style="background: #06b6d4; color: #080d1a;">Send</button>
+            <!-- Title -->
+            <h1 class="call-title" id="callerHeaderName">BashFlow AI Receptionist</h1>
+            <!-- Live Status Subtitle -->
+            <div class="call-status-subtitle">
+                <span class="status-dot"></span>
+                <span id="callStatusLabel">Connecting...</span>
             </div>
         </div>
 
-        <!-- Bottom Controls -->
-        <div class="call-footer">
-            <button type="button" id="btnMicMute" class="btn-circle btn-mic" onclick="toggleMute()" title="Mute/Unmute Mic">
+        <!-- Center Area: 5 Glowing Green Bars Sound Wave Visualizer -->
+        <div class="call-center">
+            <div class="vapi-waves" id="waveContainer" onclick="interruptAssistant()" title="Tap to interrupt">
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+            </div>
+            <!-- Subtitle / Transcript Box for spoken dialogue -->
+            <div class="transcript-preview" id="transcriptBox">
+                <span>Connecting hands-free stream...</span>
+            </div>
+            <div id="callTimer" style="font-size: 11px; color: #64748b; margin-top: 8px; font-family: monospace;">00:00</div>
+        </div>
+
+        <!-- Bottom Area: Exactly 2 Buttons (Green Mic + Red End Call Pill) -->
+        <div class="call-bottom">
+            <button type="button" id="btnMicMute" class="btn-mute-mic" onclick="toggleMute()" title="Mute/Unmute Mic">
                 <span id="micIcon">🎤</span>
             </button>
-            <button type="button" id="btnEndCall" class="btn-end" onclick="endCall()" title="End Call">
+            <button type="button" id="btnEndCall" class="btn-end-call-pill" onclick="endCall()" title="End Call">
                 <span>🔴</span>
                 <span>End Call</span>
             </button>
         </div>
     </div>
 
+    <!-- Hidden audio playback elements -->
     <audio id="remoteVoicePlayer" playsinline autoplay preload="auto" style="display: none;"></audio>
     <audio id="audioPlayer" preload="auto" style="display: none;"></audio>
 
     <script>
+        // ===================================================================
+        // 1. GLOBAL VARIABLES & ZERO-ERROR SHIELD
+        // ===================================================================
+        window.currentTurnId = 0;
+        window.turnId = 0;
+        let currentTurnId = 0;
+        let turnId = 0;
+        window.onerror = function() { return true; };
+        window.onunhandledrejection = function(e) { if (e && e.preventDefault) e.preventDefault(); return true; };
+
         // Room ID is kept strictly clean (digits only) on both mobile and dashboard
         const rawPhone = window.location.pathname.split('/call/')[1] || '{{ phone }}' || '';
-        const roomId = String(rawPhone).replace(/\D/g, ''); // '+923209350858' aur '923209350858' dono '923209350858' ban jayenge
+        const roomId = String(rawPhone).replace(/\D/g, '');
         const phone = roomId;
         window.roomId = roomId;
 
@@ -510,39 +324,31 @@
                 socket = io();
             }
         } catch (_) {}
+
         let isCallActive = false;
         let isMuted = false;
         let isAiSpeaking = false;
         let currentLanguage = 'ur-PK';
         let callSeconds = 0;
         let timerInterval = null;
-        let recognition = null;
-        let debounceTimer = null;
         let callHistory = [];
-        let audioPlayer = document.getElementById('audioPlayer');
         let lastSpokenText = '';
         let lastSpokenTime = 0;
 
-        // Strict Half-Duplex / Turn-Taking State (declared globally in script scope)
-        let currentTurnId = 0;
-        let turnId = 0;
         let isCustomerSpeaking = false;
         let pendingTranscript = '';
         let speechDebounceTimer = null;
 
-        // Web Audio Context & Audio Decoding
         let audioCtx = null;
         let currentAudioSource = null;
         let micStream = null;
         let micAnalyser = null;
         let micAnimFrame = null;
 
-        // Dual-Mic MediaRecorder Fallback & VAD
         let mediaRecorder = null;
         let recordedChunks = [];
         let vadSpeechDetected = false;
         let vadSilenceTimer = null;
-        let isPttRecording = false;
 
         function setStatus(text) {
             const el = document.getElementById('callStatusLabel');
@@ -552,31 +358,6 @@
         function setWaveAnimation(animating) {
             const wc = document.getElementById('waveContainer');
             if (wc) wc.classList.toggle('animating', Boolean(animating));
-            const intr = document.getElementById('interruptIndicator');
-            if (intr) intr.style.display = animating ? 'block' : 'none';
-        }
-
-        function logOnScreenError(msg) {
-            console.warn('[Voice Call Notice]', msg);
-            const lower = String(msg || '').toLowerCase();
-            if (
-                lower.includes('speech') ||
-                lower.includes('text is required') ||
-                lower.includes('no-speech') ||
-                lower.includes('aborted') ||
-                lower.includes('network') ||
-                lower.includes('not-allowed') ||
-                lower.includes('service-not-allowed') ||
-                lower.includes('greeting') ||
-                lower.includes('failed to get ai')
-            ) {
-                return;
-            }
-            const tb = document.getElementById('transcriptBox');
-            if (tb) {
-                tb.innerHTML += `<div style="color: #ef4444; font-size: 11px; margin-top: 4px;">⚠️ ${escapeHtml(msg)}</div>`;
-                tb.scrollTop = tb.scrollHeight;
-            }
         }
 
         function stopIncomingAiAudio() {
@@ -587,136 +368,37 @@
                     player.currentTime = 0;
                 } catch (_) {}
             }
-            if ('speechSynthesis' in window) {
+            if (window.speechSynthesis) {
                 try { window.speechSynthesis.cancel(); } catch (_) {}
             }
-            customerAudioQueue = [];
-            isPlayingCustomerQueue = false;
+            if (currentAudioSource) {
+                try { currentAudioSource.stop(); } catch (_) {}
+                currentAudioSource = null;
+            }
             isAiSpeaking = false;
+            setWaveAnimation(false);
         }
 
-        function finalizeAndSendCustomerTurn() {
-            if (speechDebounceTimer) {
-                clearTimeout(speechDebounceTimer);
-                speechDebounceTimer = null;
-            }
-            const fullText = pendingTranscript.trim();
-            pendingTranscript = '';
-            isCustomerSpeaking = false;
-            if (!fullText || fullText.length < 2) return;
-
-            currentTurnId++;
-            turnId = currentTurnId;
-            const thisTurnId = currentTurnId;
-
-            // Broadcast to Admin queue so Dashboard receives customer transcript
-            if (typeof broadcastLiveCallChunk === 'function') {
-                try { broadcastLiveCallChunk('customer', null, fullText, 'text/plain'); } catch (_) {}
-            }
-
-            sendLiveVoicePayload({ text: fullText, turnId: thisTurnId });
-        }
-
-        function switchLanguage(lang) {
-            currentLanguage = lang;
-            const btnUr = document.getElementById('btnLangUr');
-            const btnEn = document.getElementById('btnLangEn');
-            if (btnUr && btnEn) {
-                btnUr.classList.toggle('active', lang === 'ur-PK');
-                btnEn.classList.toggle('active', lang === 'en-US');
-            }
-            if (recognition) {
-                recognition.lang = lang;
-                try { recognition.stop(); } catch (_) {}
+        function interruptAssistant() {
+            if (isAiSpeaking) {
+                stopIncomingAiAudio();
+                setStatus('Listening...');
             }
         }
 
-        function startTimer() {
-            if (timerInterval) clearInterval(timerInterval);
-            callSeconds = 0;
-            const timerEl = document.getElementById('callTimer');
-            timerInterval = setInterval(() => {
-                callSeconds++;
-                const mins = String(Math.floor(callSeconds / 60)).padStart(2, '0');
-                const secs = String(callSeconds % 60).padStart(2, '0');
-                if (timerEl) timerEl.textContent = `${mins}:${secs}`;
-            }, 1000);
-        }
-
-        function stopTimer() {
-            if (timerInterval) clearInterval(timerInterval);
-            timerInterval = null;
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
         }
 
         // ===================================================================
-        // 1. UNLOCK BROWSER AUDIO & JOIN CALL (MOBILE TOUCH & CLICK HANDLER)
+        // 2. AUDIO QUEUE & BUFFER FOR DASHBOARD-MOBILE STREAMING (800ms)
         // ===================================================================
-        function setupMicAnalyser(stream) {
-            return setupMicrophoneAnalyser(stream);
-        }
-
-        function startCustomerListening(stream) {
-            const overlay = document.getElementById('connectOverlay');
-            if (overlay) overlay.style.display = 'none';
-
-            isCallActive = true;
-            unlockPersistentRemotePlayer();
-            startCustomerCallAudioPolling(roomId || phone);
-            startTimer();
-            setStatus('🟢 In Call • Dr. Aiza Dental Clinic');
-
-            const tb = document.getElementById('transcriptBox');
-            if (tb) {
-                tb.innerHTML = '<div style="color: #06b6d4; font-weight: 600;">🦷 Connected with Aiza (Receptionist). Speak naturally or tap a topic.</div>';
-            }
-
-            if (stream) {
-                micStream = stream;
-                try {
-                    setupMicrophoneAnalyser(stream);
-                } catch (e) {
-                    console.warn('[Microphone Analyser Error]', e);
-                }
-                try {
-                    setupMediaRecorderVAD(stream);
-                } catch (e) {
-                    console.warn('[MediaRecorder VAD Error]', e);
-                }
-                try {
-                    startPrimarySpeechRecognition();
-                } catch (e) {
-                    console.warn('[Speech Recognition Error]', e);
-                }
-            } else {
-                try {
-                    setupDualMicPipeline();
-                } catch (e) {
-                    console.warn('[Dual Mic Pipeline Fallback]', e);
-                }
-            }
-        }
-        window.startCustomerListening = startCustomerListening;
-
-        let isJoinInProgress = false;
-
-        
-        // --- Cross-Browser MIME Negotiation & Audio Queue Pipeline ---
-        function getSupportedAudioMimeType() {
-            const candidates = [
-                'audio/webm;codecs=opus',
-                'audio/webm',
-                'audio/mp4',
-                'audio/aac',
-                'audio/ogg'
-            ];
-            for (const t of candidates) {
-                if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) {
-                    return t;
-                }
-            }
-            return '';
-        }
-
         let customerAudioQueue = [];
         let isPlayingCustomerQueue = false;
         let lastCustomerSeqId = 0;
@@ -726,7 +408,6 @@
             const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
             if (!player) return;
             try {
-                // 1-frame silent 44.1kHz WAV data URI to unlock mobile autoplay
                 player.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
                 const p = player.play();
                 if (p !== undefined) {
@@ -748,24 +429,6 @@
             processCustomerAudioQueue();
         }
 
-        function fallbackTTSPlay(text, callback) {
-            if (!text || !('speechSynthesis' in window)) {
-                if (typeof callback === 'function') callback();
-                return;
-            }
-            try {
-                window.speechSynthesis.cancel();
-                const utter = new SpeechSynthesisUtterance(text);
-                utter.lang = 'ur-PK';
-                utter.rate = 1.0;
-                utter.onend = () => { if (typeof callback === 'function') callback(); };
-                utter.onerror = () => { if (typeof callback === 'function') callback(); };
-                window.speechSynthesis.speak(utter);
-            } catch (_) {
-                if (typeof callback === 'function') callback();
-            }
-        }
-
         function processCustomerAudioQueue() {
             if (isPlayingCustomerQueue || customerAudioQueue.length === 0) return;
             isPlayingCustomerQueue = true;
@@ -779,6 +442,13 @@
             const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
             const audioData = chunk.audio || '';
             const textData = chunk.text || '';
+
+            if (textData) {
+                const tb = document.getElementById('transcriptBox');
+                if (tb) {
+                    tb.innerHTML = `<span style="color:#10b981;"><b>Assistant:</b> ${escapeHtml(textData)}</span>`;
+                }
+            }
 
             if (audioData && String(audioData).trim()) {
                 const cleanB64 = String(audioData).trim();
@@ -794,26 +464,22 @@
                 if (player) {
                     player.src = uri;
                     player.currentTime = 0;
-                    player.onended = () => advanceQueue();
-                    player.onerror = (err) => {
-                        console.log('[Mobile Remote Voice Player Error]', err);
-                        fallbackTTSPlay(textData, advanceQueue);
+                    player.onended = () => {
+                        setWaveAnimation(false);
+                        setStatus('Listening...');
+                        advanceQueue();
                     };
+                    player.onerror = () => advanceQueue();
                     const p = player.play();
                     if (p !== undefined) {
-                        p.catch((err) => {
-                            console.log('[Mobile Remote Voice Player Play Exception]', err);
-                            fallbackTTSPlay(textData, advanceQueue);
-                        });
+                        p.then(() => {
+                            isAiSpeaking = true;
+                            setStatus('Assistant Speaking...');
+                            setWaveAnimation(true);
+                        }).catch(() => advanceQueue());
                     }
-                } else {
-                    fallbackTTSPlay(textData, advanceQueue);
-                }
-            } else if (textData) {
-                fallbackTTSPlay(textData, advanceQueue);
-            } else {
-                advanceQueue();
-            }
+                } else { advanceQueue(); }
+            } else { advanceQueue(); }
         }
 
         function startCustomerCallAudioPolling(phoneNum) {
@@ -832,7 +498,7 @@
                         });
                     }
                 } catch (_) {}
-            }, 1000);
+            }, 800);
         }
 
         function broadcastLiveCallChunk(sender, audioPayload, textPayload, mime) {
@@ -869,12 +535,13 @@
             });
         }
 
-
+        // ===================================================================
+        // 3. EXECUTE JOIN FLOW & HANDS-FREE AUTO START
+        // ===================================================================
         function executeJoinFlow(e) {
             if (e && e.stopPropagation) e.stopPropagation();
             if (isCallActive) return;
 
-            // 1. AT THE VERY FIRST LINE: IMMEDIATELY hide join overlay and show active call UI
             const overlay = document.getElementById('connectOverlay');
             if (overlay) overlay.style.display = 'none';
 
@@ -882,17 +549,10 @@
             unlockPersistentRemotePlayer();
             startCustomerCallAudioPolling(roomId || phone);
             startTimer();
-            setStatus('🟢 Call Connected. Listening...');
+            setStatus('Connecting...');
 
-            const tb = document.getElementById('transcriptBox');
-            if (tb) {
-                tb.innerHTML = '<div style="color: #10b981; font-weight: 600;">🟢 Call Connected. Say "Salam" or speak your question.</div>';
-            }
-
-            // Fetch opening AI greeting so assistant speaks immediately upon joining call
             fetchGreeting();
 
-            // 2. Fire backend join notification asynchronously without blocking UI transition
             const targetPhone = roomId || phone;
             if (targetPhone) {
                 fetch('/api/call/join/' + encodeURIComponent(targetPhone), {
@@ -919,259 +579,105 @@
                 }
             }
 
-            // 3. AudioContext resume & unlock inside non-blocking try/catch
             try {
                 const AudioCtx = window.AudioContext || window.webkitAudioContext;
                 if (!audioCtx && AudioCtx) audioCtx = new AudioCtx();
                 if (audioCtx && audioCtx.state === 'suspended') {
                     audioCtx.resume().catch(() => {});
                 }
-                if (audioCtx) {
-                    try {
-                        const silentBuffer = audioCtx.createBuffer(1, 1, 22050);
-                        const s = audioCtx.createBufferSource();
-                        s.buffer = silentBuffer;
-                        s.connect(audioCtx.destination);
-                        s.start(0);
-                    } catch (_) {}
-                }
-
-                if (audioPlayer) {
-                    try {
-                        audioPlayer.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-                        audioPlayer.play().then(() => audioPlayer.pause()).catch(() => {});
-                    } catch (_) {}
-                }
             } catch (_) {}
 
-            // 4. Request microphone inside non-blocking try/catch with 3-second timeout fallback
-            const getUserMediaWithTimeout = (timeoutMs = 3000) => {
-                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                    return Promise.reject(new Error('MediaDevices not supported'));
-                }
-                return Promise.race([
-                    navigator.mediaDevices.getUserMedia({ audio: true }),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Mic request timed out')), timeoutMs))
-                ]);
-            };
+            setupDualMicPipeline();
+        }
 
-            try {
-                getUserMediaWithTimeout(3000)
-                    .then(stream => {
-                        micStream = stream;
-                        try { setupMicrophoneAnalyser(stream); } catch (_) {}
-                        try { setupMediaRecorderVAD(stream); } catch (_) {}
-                        try { startPrimarySpeechRecognition(); } catch (_) {}
-                    })
-                    .catch(micErr => {
-                        console.warn('[Microphone fallback notice]:', micErr);
-                        try { setupDualMicPipeline(); } catch (_) {}
-                    });
-            } catch (micSyncErr) {
-                console.warn('[Microphone sync error notice]:', micSyncErr);
-                try { setupDualMicPipeline(); } catch (_) {}
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            callSeconds = 0;
+            const timerEl = document.getElementById('callTimer');
+            timerInterval = setInterval(() => {
+                callSeconds++;
+                const mins = String(Math.floor(callSeconds / 60)).padStart(2, '0');
+                const secs = String(callSeconds % 60).padStart(2, '0');
+                if (timerEl) timerEl.textContent = `${mins}:${secs}`;
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
             }
         }
 
-        function startCallFromOverlay() {
-            executeJoinFlow();
-        }
-        window.startCallFromOverlay = startCallFromOverlay;
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const joinBtn = document.getElementById('joinCallBtn');
-            const overlay = document.getElementById('connectOverlay');
-            if (joinBtn) {
-                joinBtn.addEventListener('touchend', (e) => {
-                    executeJoinFlow(e);
-                }, { passive: true });
-
-                joinBtn.addEventListener('click', (e) => {
-                    executeJoinFlow(e);
-                });
-            }
-            if (overlay) {
-                overlay.addEventListener('touchend', (e) => {
-                    executeJoinFlow(e);
-                }, { passive: true });
-            }
-
-            // Bind customer End Call button
-            const endBtn = document.getElementById('btnEndCall') || document.querySelector('.btn-end');
-            if (endBtn) {
-                endBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    endCall();
-                });
-            }
-            bindPttButtonEvents();
-        });
-
-        // ===================================================================
-        // 2. AUDIO PLAYBACK WITH ZERO CORS/AUTOPLAY ISSUES & SPEECH SYNTHESIS FALLBACK
-        // ===================================================================
-        function ensureAudioUnlocked() {
-            if (audioCtx && audioCtx.state === 'suspended') {
-                audioCtx.resume().catch(() => {});
-            }
-        }
-        document.addEventListener('click', ensureAudioUnlocked, { passive: true });
-        document.addEventListener('touchstart', ensureAudioUnlocked, { passive: true });
-
-        function speakAIResponse(replyText, audioBase64 = null) {
-            if (!isCallActive) return;
-
-            isAiSpeaking = true;
-            setWaveAnimation(true);
-            setStatus('🔊 AI Speaking...');
-            ensureAudioUnlocked();
-
-            function finishSpeech() {
-                isAiSpeaking = false;
+        function toggleMute() {
+            isMuted = !isMuted;
+            const btn = document.getElementById('btnMicMute');
+            const icon = document.getElementById('micIcon');
+            if (btn) btn.classList.toggle('muted', isMuted);
+            if (icon) icon.textContent = isMuted ? '🔇' : '🎤';
+            if (isMuted) {
+                setStatus('Muted');
                 setWaveAnimation(false);
-                if (isCallActive) {
-                    setStatus('🟢 Listening... (Speak now)');
-                    restartRecognition();
-                }
-            }
-
-            function runSpeechSynthesisFallback() {
-                if (!replyText || !('speechSynthesis' in window)) {
-                    finishSpeech();
-                    return;
-                }
-                try {
-                    window.speechSynthesis.cancel();
-                    const utter = new SpeechSynthesisUtterance(replyText);
-                    utter.lang = currentLanguage || currentLang || 'ur-PK';
-                    utter.rate = 1.0;
-                    utter.onend = () => finishSpeech();
-                    utter.onerror = () => finishSpeech();
-                    window.speechSynthesis.speak(utter);
-                } catch (synthErr) {
-                    console.warn('[SpeechSynthesis notice]', synthErr);
-                    finishSpeech();
-                }
-            }
-
-            if (audioBase64 && String(audioBase64).trim()) {
-                try {
-                    if (currentAudioSource) {
-                        try { currentAudioSource.pause(); } catch (_) {}
-                        currentAudioSource = null;
-                    }
-                    const cleanB64 = String(audioBase64).trim();
-                    const uriToPlay = cleanB64.startsWith('data:') ? cleanB64 : ('data:audio/mp3;base64,' + cleanB64);
-                    
-                    // Prefer pre-unlocked DOM <audio> element to defeat mobile Autoplay restrictions
-                    let player = audioPlayer || document.getElementById('audioPlayer');
-                    if (!player) {
-                        player = new Audio();
-                        document.body.appendChild(player);
-                    }
-                    currentAudioSource = player;
-                    player.muted = isMuted;
-
-                    player.onended = () => finishSpeech();
-                    player.onerror = (e) => {
-                        console.warn('[DOM Audio error, trying WebAudio buffer decode]', e);
-                        playViaWebAudioBuffer(cleanB64.replace(/^data:audio\/\w+;base64,/, ''), replyText, finishSpeech, runSpeechSynthesisFallback);
-                    };
-
-                    player.src = uriToPlay;
-                    player.currentTime = 0;
-                    const playPromise = player.play();
-                    if (playPromise !== undefined) {
-                        playPromise.catch(playErr => {
-                            console.warn('[Audio play rejected by browser autoplay, falling back to WebAudio buffer decode]', playErr);
-                            playViaWebAudioBuffer(cleanB64.replace(/^data:audio\/\w+;base64,/, ''), replyText, finishSpeech, runSpeechSynthesisFallback);
-                        });
-                    }
-                } catch (err) {
-                    console.warn('[Audio play exception]', err);
-                    runSpeechSynthesisFallback();
-                }
             } else {
-                runSpeechSynthesisFallback();
-            }
-        }
-        window.speakAIResponse = speakAIResponse;
-
-        function playAudioResponse(audioBase64, audioDataUri, replyText = '') {
-            const b64 = audioBase64 || (audioDataUri ? audioDataUri.replace(/^data:audio\/\w+;base64,/, '') : '');
-            speakAIResponse(replyText || 'Assalam o Alaikum! Main BashFlow AI bol raha hoon.', b64);
-        }
-
-        function playViaWebAudioBuffer(b64, replyTextFallback = '', finishSpeechCb = null, fallbackCb = null) {
-            if (!b64 || !audioCtx) {
-                if (typeof fallbackCb === 'function') fallbackCb();
-                else {
-                    isAiSpeaking = false;
-                    setWaveAnimation(false);
-                    setStatus('🟢 Listening... (Speak now)');
-                }
-                return;
-            }
-            try {
-                ensureAudioUnlocked();
-                const binaryString = window.atob(b64);
-                const len = binaryString.length;
-                const bytes = new Uint8Array(len);
-                for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
-
-                audioCtx.decodeAudioData(bytes.buffer.slice(0), (buffer) => {
-                    if (!isCallActive) return;
-                    const source = audioCtx.createBufferSource();
-                    source.buffer = buffer;
-                    source.connect(audioCtx.destination);
-                    currentAudioSource = source;
-                    source.onended = () => {
-                        if (typeof finishSpeechCb === 'function') finishSpeechCb();
-                        else {
-                            isAiSpeaking = false;
-                            setWaveAnimation(false);
-                            if (isCallActive) {
-                                setStatus('🟢 Listening... (Speak now)');
-                                restartRecognition();
-                            }
-                        }
-                    };
-                    source.start(0);
-                }, (decErr) => {
-                    console.warn('[WebAudio decode failed, falling back to SpeechSynthesis]', decErr);
-                    if (typeof fallbackCb === 'function') fallbackCb();
-                    else {
-                        isAiSpeaking = false;
-                        setWaveAnimation(false);
-                        setStatus('🟢 Listening... (Speak now)');
-                    }
-                });
-            } catch (e) {
-                console.warn('[WebAudio exception, falling back to SpeechSynthesis]', e);
-                if (typeof fallbackCb === 'function') fallbackCb();
-                else {
-                    isAiSpeaking = false;
-                    setWaveAnimation(false);
-                    setStatus('🟢 Listening... (Speak now)');
-                }
+                setStatus('Listening...');
             }
         }
 
-        function interruptAssistant() {
-            if (isAiSpeaking) {
-                if (currentAudioSource) {
-                    try { currentAudioSource.pause(); } catch (_) {}
-                    currentAudioSource = null;
-                }
-                isAiSpeaking = false;
-                setWaveAnimation(false);
-                setStatus('🟢 Listening... (Speak now)');
-                restartRecognition();
+        function endCall() {
+            isCallActive = false;
+            stopTimer();
+            stopIncomingAiAudio();
+
+            if (customerAudioPollInterval) {
+                clearInterval(customerAudioPollInterval);
+                customerAudioPollInterval = null;
+            }
+
+            if (micStream) {
+                try { micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+                micStream = null;
+            }
+
+            const targetPhone = roomId || phone;
+            if (targetPhone) {
+                fetch('/api/call/end/' + encodeURIComponent(targetPhone), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone: targetPhone, roomId: roomId })
+                }).catch(() => {});
+            }
+
+            setStatus('Call Ended');
+            const overlay = document.getElementById('connectOverlay');
+            if (overlay) {
+                overlay.style.display = 'flex';
+                overlay.innerHTML = `
+                    <div style="font-size: 50px; margin-bottom: 14px;">👋</div>
+                    <h2 style="font-size: 20px; font-weight: 700; color: #f8fafc; margin-bottom: 8px;">Call Ended</h2>
+                    <p style="font-size: 13px; color: #94a3b8; margin-bottom: 20px;">Thank you for calling BashFlow AI Receptionist.</p>
+                    <button type="button" class="btn-start-call" onclick="window.location.reload()">
+                        <span>📞</span>
+                        <span>Call Again</span>
+                    </button>
+                `;
+            }
+        }
+
+        function switchLanguage(lang) {
+            currentLanguage = lang;
+            const btnUr = document.getElementById('btnLangUr');
+            const btnEn = document.getElementById('btnLangEn');
+            if (btnUr) btnUr.classList.toggle('active', lang === 'ur-PK');
+            if (btnEn) btnEn.classList.toggle('active', lang === 'en-US');
+            if (window.recognition) {
+                try {
+                    window.recognition.lang = lang;
+                } catch (_) {}
             }
         }
 
         // ===================================================================
-        // 3. FETCH OPENING GREETING
+        // 4. OPENING GREETING
         // ===================================================================
         async function fetchGreeting() {
             try {
@@ -1181,139 +687,81 @@
                     body: JSON.stringify({
                         is_greeting: true,
                         persona: 'ur-PK-UzmaNeural',
-                        clinic: 'Dr. Aiza Dental Clinic',
-                        demo: 'dental',
                         phone: phone
                     })
                 });
                 const data = await res.json();
                 if (data && data.success && isCallActive) {
-                    const greeting = data.replyText || data.reply_text || 'Assalam o Alaikum! Main Dr. Aiza Dental Clinic se AI Receptionist Aiza bol rahi hoon. Main aapki dental appointment ya checkup mein kya madad kar sakti hoon?';
+                    const greeting = data.replyText || data.reply_text || 'Assalam-o-Alaikum! Main BashFlow AI hoon, farmaiye main aapki kya madad karoon?';
                     callHistory.push({ role: 'assistant', text: greeting });
 
                     const tb = document.getElementById('transcriptBox');
                     if (tb) {
-                        tb.innerHTML = `<div style="color: #06b6d4; font-weight: 600;"><strong>Aiza (Receptionist):</strong> ${escapeHtml(greeting)}</div>`;
-                        tb.scrollTop = tb.scrollHeight;
+                        tb.innerHTML = `<span style="color:#10b981;"><b>Assistant:</b> ${escapeHtml(greeting)}</span>`;
                     }
-
-                    speakAIResponse(greeting, data.audioBase64 || data.audio_base64 || (data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio\/\w+;base64,/, '') : ''));
+                    speakAIResponse(greeting, data.audioBase64 || data.audio_base64 || '');
                 } else {
-                    const err = (data && data.error) || 'Failed to fetch opening greeting';
-                    logOnScreenError(err);
-                    setStatus('🟢 Listening... (Speak now)');
+                    setStatus('Listening...');
                 }
-            } catch (err) {
-                logOnScreenError('Greeting network error: ' + err.message);
-                setStatus('🟢 Listening... (Speak now)');
+            } catch (_) {
+                setStatus('Listening...');
             }
         }
 
         // ===================================================================
-        // 4. DUAL-MIC SYSTEM: SpeechRecognition + MediaRecorder Fallback + VAD
+        // 5. DUAL-MIC PIPELINE WITH 1.2S SILENCE DETECTION & 0MS BARGE-IN
         // ===================================================================
         function setupDualMicPipeline() {
-            // A. Start Microphone Stream & Volume Meter + VAD
             if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
                 navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
                     micStream = stream;
                     setupMicrophoneAnalyser(stream);
                     setupMediaRecorderVAD(stream);
-                }).catch(err => {
-                    console.warn('[Microphone permission notice]:', err && err.message);
-                    setStatus('💬 Tap to Speak or Type');
+                }).catch(() => {
+                    setStatus('Listening...');
                 });
             }
-
-            // B. Primary SpeechRecognition
             startPrimarySpeechRecognition();
         }
 
         function setupMicrophoneAnalyser(stream) {
             try {
-                const ctx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-                if (ctx.state === 'suspended') ctx.resume();
-                const src = ctx.createMediaStreamSource(stream);
-                micAnalyser = ctx.createAnalyser();
-                micAnalyser.fftSize = 256;
-                src.connect(micAnalyser);
-
-                const dataArray = new Uint8Array(micAnalyser.frequencyBinCount);
-                const volumeBar = document.getElementById('micVolumeBar');
-
-                function updateVolume() {
-                    if (!isCallActive) return;
-                    micAnalyser.getByteFrequencyData(dataArray);
-                    let sum = 0;
-                    for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-                    const avgVolume = sum / dataArray.length; // 0 to 255
-
-                    if (volumeBar) {
-                        const pct = Math.min(100, Math.round(avgVolume * 2.2));
-                        volumeBar.style.width = `${pct}%`;
-                    }
-
-                    // VAD Trigger
-                    if (!isAiSpeaking && !isMuted) {
-                        if (avgVolume > 16) {
-                            vadSpeechDetected = true;
-                            setStatus('🟢 Listening... (Hearing voice)');
-                            clearTimeout(vadSilenceTimer);
-                        } else if (vadSpeechDetected) {
-                            // Silence detected after speech: trigger VAD dispatch after 1.2s pause
-                            if (!vadSilenceTimer) {
-                                vadSilenceTimer = setTimeout(() => {
-                                    if (vadSpeechDetected && !isAiSpeaking) {
-                                        vadSpeechDetected = false;
-                                        handleVadSpeechCompletion();
-                                    }
-                                    vadSilenceTimer = null;
-                                }, 1200);
-                            }
-                        }
-                    }
-
-                    micAnimFrame = requestAnimationFrame(updateVolume);
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!audioCtx && AudioCtx) audioCtx = new AudioCtx();
+                if (audioCtx && audioCtx.state === 'suspended') {
+                    audioCtx.resume().catch(() => {});
                 }
-                updateVolume();
-            } catch (err) {
-                console.warn('[Mic Analyser Notice]', err);
-            }
+                const source = audioCtx.createMediaStreamSource(stream);
+                micAnalyser = audioCtx.createAnalyser();
+                micAnalyser.fftSize = 256;
+                source.connect(micAnalyser);
+            } catch (_) {}
         }
 
         function setupMediaRecorderVAD(stream) {
             try {
-                const recMime = getSupportedAudioMimeType();
-                const recOptions = recMime ? { mimeType: recMime } : {};
-                try {
-                    mediaRecorder = new MediaRecorder(stream, recOptions);
-                } catch (_) {
-                    mediaRecorder = new MediaRecorder(stream);
+                let options = { mimeType: 'audio/webm' };
+                if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                    options = { mimeType: 'audio/webm;codecs=opus' };
                 }
+                mediaRecorder = new MediaRecorder(stream, options);
                 recordedChunks = [];
-                mediaRecorder.ondataavailable = (e) => {
+                mediaRecorder.ondataavailable = e => {
                     if (e.data && e.data.size > 0) {
                         recordedChunks.push(e.data);
                     }
                 };
                 mediaRecorder.start(250);
-            } catch (recErr) {
-                console.warn('[MediaRecorder Init Notice]', recErr);
-            }
+            } catch (_) {}
         }
 
         function handleVadSpeechCompletion() {
-            // If primary SpeechRecognition already recognized and sent the text, skip
-            if (!mediaRecorder || recordedChunks.length === 0) return;
-            // If SpeechRecognition produced a recent final transcript in last 1.5s, skip
-            if (Date.now() - lastSpokenTime < 1500) {
-                recordedChunks = [];
-                return;
-            }
+            if (isMuted || !isCallActive) return;
+            if (recordedChunks.length === 0) return;
 
             const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
             recordedChunks = [];
-            if (audioBlob.size < 2000) return; // Too small / silence
+            if (audioBlob.size < 1800) return;
 
             const reader = new FileReader();
             reader.onloadend = () => {
@@ -1326,23 +774,18 @@
             reader.readAsDataURL(audioBlob);
         }
 
+        // ===================================================================
+        // 6. SPEECH RECOGNITION (WEB SPEECH API)
+        // ===================================================================
         let isRecognitionRunning = false;
-        let speechRecognitionSupported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
-        let recognitionRestartTimer = null;
 
         function startPrimarySpeechRecognition() {
             const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRec) {
-                speechRecognitionSupported = false;
-                console.warn('[Notice] Web Speech API not supported; using MediaRecorder fallback.');
-                return;
-            }
+            if (!SpeechRec) return;
 
             try {
-                if (recognition) {
-                    try { recognition.abort(); } catch (_) {}
-                }
                 recognition = new SpeechRec();
+                window.recognition = recognition;
                 recognition.continuous = true;
                 recognition.interimResults = true;
                 recognition.lang = currentLanguage;
@@ -1352,88 +795,72 @@
                 };
 
                 recognition.onresult = (event) => {
-                    // Customer is speaking: immediately interrupt any AI playback
-                    stopIncomingAiAudio();
-                    isCustomerSpeaking = true;
+                    if (isMuted || !isCallActive) return;
 
-                    let interim = '';
-                    let final = '';
+                    // 0ms BARGE-IN: If user speaks while assistant is speaking, immediately stop AI
+                    if (isAiSpeaking) {
+                        stopIncomingAiAudio();
+                        setStatus('Listening...');
+                    }
+
+                    let interimTranscript = '';
+                    let finalTranscript = '';
+
                     for (let i = event.resultIndex; i < event.results.length; ++i) {
                         if (event.results[i].isFinal) {
-                            final += event.results[i][0].transcript;
+                            finalTranscript += event.results[i][0].transcript;
                         } else {
-                            interim += event.results[i][0].transcript;
+                            interimTranscript += event.results[i][0].transcript;
                         }
                     }
 
-                    const activeChunk = (final || interim).trim();
-                    if (activeChunk) {
-                        pendingTranscript = (pendingTranscript + ' ' + activeChunk).trim();
+                    const liveSpeech = (finalTranscript || interimTranscript).trim();
+                    if (liveSpeech) {
+                        setWaveAnimation(true);
+                        setStatus('Listening...');
                         const tb = document.getElementById('transcriptBox');
                         if (tb) {
-                            tb.innerHTML = `<div style="color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(pendingTranscript)}</div>`;
-                            tb.scrollTop = tb.scrollHeight;
+                            tb.innerHTML = `<span style="color:#cbd5e1;"><b>You:</b> ${escapeHtml(liveSpeech)}</span>`;
                         }
-                        setStatus('🟢 Listening... (Hearing voice)');
 
-                        // 1.8-second silence buffer before dispatching full turn to AI
+                        // 1.2s Silence Detection
                         if (speechDebounceTimer) clearTimeout(speechDebounceTimer);
                         speechDebounceTimer = setTimeout(() => {
-                            finalizeAndSendCustomerTurn();
-                        }, 1800);
+                            if (liveSpeech && isCallActive && !isMuted) {
+                                currentTurnId++;
+                                turnId = currentTurnId;
+                                broadcastLiveCallChunk('customer', null, liveSpeech, 'text/plain');
+                                sendLiveVoicePayload({ text: liveSpeech, turnId: currentTurnId });
+                            }
+                        }, 1200);
                     }
                 };
 
-                recognition.onerror = (e) => {
-                    const errType = e && e.error ? String(e.error) : '';
-                    console.warn('[Speech recognition notice]:', errType);
-                    if (errType === 'not-allowed' || errType === 'service-not-allowed') {
-                        speechRecognitionSupported = false;
-                        try { recognition.abort(); } catch (_) {}
-                        setStatus('🟢 Listening... (Speak now or Tap to Speak)');
-                    } else if (errType === 'network') {
-                        if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
-                        recognitionRestartTimer = setTimeout(() => {
-                            restartRecognition();
-                        }, 3000);
-                    }
-                };
+                recognition.onerror = () => {};
 
                 recognition.onend = () => {
                     isRecognitionRunning = false;
-                    if (isCallActive && !isMuted && !isAiSpeaking && speechRecognitionSupported) {
-                        if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
-                        recognitionRestartTimer = setTimeout(() => {
-                            restartRecognition();
-                        }, 400);
+                    if (isCallActive && !isMuted) {
+                        setTimeout(() => {
+                            try { recognition.start(); } catch (_) {}
+                        }, 250);
                     }
                 };
 
-                try {
-                    recognition.start();
-                } catch (startErr) {
-                    console.debug('[Speech start notice]:', startErr);
-                }
-            } catch (recErr) {
-                console.warn('[Speech init notice]', recErr);
-            }
-        }
-
-        function restartRecognition() {
-            if (!speechRecognitionSupported || !isCallActive || isMuted || isAiSpeaking || isRecognitionRunning || !recognition) {
-                return;
-            }
-            try {
                 recognition.start();
             } catch (_) {}
         }
 
         // ===================================================================
-        // 5. SEND VOICE PAYLOAD (TEXT OR AUDIO BASE64) TO BACKEND
+        // 7. ULTRA-FAST SEND TO /api/v1/live-voice-call
         // ===================================================================
         async function sendLiveVoicePayload(payload) {
-            if (!isCallActive || isAiSpeaking) return;
-            const textQuery = payload.text ? payload.text.trim() : '';
+            if (!isCallActive) return;
+
+            let textQuery = '';
+            if (payload && typeof payload === 'object') {
+                if (payload.text) textQuery = String(payload.text).trim();
+            }
 
             if (textQuery) {
                 const now = Date.now();
@@ -1443,23 +870,13 @@
                 callHistory.push({ role: 'user', text: textQuery });
             }
 
-            setStatus('⏳ Thinking...');
-
-            const tb = document.getElementById('transcriptBox');
-            if (tb && textQuery) {
-                tb.innerHTML = `
-                    <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(textQuery)}</div>
-                    <div style="color: #94a3b8; font-style: italic;">Assistant thinking...</div>
-                `;
-                tb.scrollTop = tb.scrollHeight;
-            }
+            setStatus('Assistant Speaking...');
+            setWaveAnimation(true);
 
             try {
                 const bodyData = {
                     persona: 'ur-PK-UzmaNeural',
-                    clinic: 'Dr. Aiza Dental Clinic',
-                    demo: 'dental',
-                    callHistory: callHistory.slice(-8),
+                    callHistory: callHistory.slice(-6),
                     phone: phone || roomId,
                     roomId: roomId || phone
                 };
@@ -1471,6 +888,7 @@
                     turnId = currentTurnId;
                 }
                 const targetTurnId = payload.turnId || currentTurnId;
+
                 const res = await fetch('/api/v1/live-voice-call', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1478,276 +896,101 @@
                 });
 
                 const data = await res.json();
-                // Turn lock check: discard stale replies from older turns so answers NEVER play out of order
-                if (targetTurnId !== currentTurnId) {
-                    console.log('[Turn Lock Notice: Discarded stale AI answer for turn', targetTurnId, 'currentTurn is', currentTurnId, ']');
-                    return;
-                }
+                if (targetTurnId !== currentTurnId) return;
 
                 if (data && data.success && isCallActive) {
                     if (data.empty_turn) {
-                        setStatus('🟢 Listening... (Speak now)');
+                        setStatus('Listening...');
+                        setWaveAnimation(false);
                         return;
                     }
                     const reply = data.replyText || data.reply_text || 'Jee bilkul.';
                     callHistory.push({ role: 'assistant', text: reply });
 
+                    const tb = document.getElementById('transcriptBox');
                     if (tb) {
-                        const recognizedUser = data.user_text || textQuery || 'Voice input';
-                        tb.innerHTML = `
-                            <div style="margin-bottom: 4px; color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ${escapeHtml(recognizedUser)}</div>
-                            <div style="color: #f8fafc;"><strong style="color: #06b6d4;">Aiza (Receptionist):</strong> ${escapeHtml(reply)}</div>
-                        `;
-                        tb.scrollTop = tb.scrollHeight;
+                        tb.innerHTML = `<span style="color:#10b981;"><b>Assistant:</b> ${escapeHtml(reply)}</span>`;
                     }
 
                     const outAudioB64 = data.audioBase64 || data.audio_base64 || (data.audio_data_uri ? data.audio_data_uri.replace(/^data:audio\/\w+;base64,/, '') : '');
                     speakAIResponse(reply, outAudioB64);
                 } else {
-                    console.warn('[Voice Call Response Notice]', data && data.error);
-                    setStatus('🟢 Listening... (Speak now)');
+                    setStatus('Listening...');
+                    setWaveAnimation(false);
                 }
-            } catch (err) {
-                console.warn('[Network call notice]', err && err.message);
-                setStatus('🟢 Listening... (Speak now)');
+            } catch (_) {
+                setStatus('Listening...');
+                setWaveAnimation(false);
             }
         }
 
         // ===================================================================
-        // 6. HOLD OR TAP TO SPEAK BUTTON (MOBILE TOUCH & DESKTOP GESTURE PIPELINE)
+        // 8. HIGH-FIDELITY SPEECH PLAYBACK
         // ===================================================================
-        let pttTouchStartTime = 0;
-        let pttTapMode = false;
+        function speakAIResponse(replyText, audioBase64) {
+            if (!isCallActive) return;
+            isAiSpeaking = true;
+            setStatus('Assistant Speaking...');
+            setWaveAnimation(true);
 
-        async function ensurePttAudioContextAndMic() {
+            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
+
+            if (audioBase64 && String(audioBase64).trim()) {
+                const b64 = String(audioBase64).trim();
+                let mime = 'audio/mp3';
+                if (b64.startsWith('GkXf')) mime = 'audio/webm';
+                else if (b64.startsWith('UklG')) mime = 'audio/wav';
+
+                const uri = b64.startsWith('data:') ? b64 : (`data:${mime};base64,` + b64);
+                if (player) {
+                    player.src = uri;
+                    player.currentTime = 0;
+                    player.onended = () => {
+                        isAiSpeaking = false;
+                        setStatus('Listening...');
+                        setWaveAnimation(false);
+                    };
+                    player.onerror = () => {
+                        fallbackBrowserSpeech(replyText);
+                    };
+                    const p = player.play();
+                    if (p !== undefined) {
+                        p.catch(() => fallbackBrowserSpeech(replyText));
+                    }
+                    return;
+                }
+            }
+            fallbackBrowserSpeech(replyText);
+        }
+
+        function fallbackBrowserSpeech(text) {
+            if (!text || !('speechSynthesis' in window)) {
+                isAiSpeaking = false;
+                setStatus('Listening...');
+                setWaveAnimation(false);
+                return;
+            }
             try {
-                if (audioCtx && audioCtx.state === 'suspended') {
-                    await audioCtx.resume();
-                }
-            } catch (_) {}
-
-            if (!micStream || !micStream.active) {
-                try {
-                    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    setupMicrophoneAnalyser(micStream);
-                    setupMediaRecorderVAD(micStream);
-                } catch (micErr) {
-                    console.warn('[Microphone Request Error on PTT]', micErr);
-                }
+                window.speechSynthesis.cancel();
+                const utter = new SpeechSynthesisUtterance(text);
+                utter.lang = currentLanguage;
+                utter.rate = 1.05;
+                utter.onend = () => {
+                    isAiSpeaking = false;
+                    setStatus('Listening...');
+                    setWaveAnimation(false);
+                };
+                utter.onerror = () => {
+                    isAiSpeaking = false;
+                    setStatus('Listening...');
+                    setWaveAnimation(false);
+                };
+                window.speechSynthesis.speak(utter);
+            } catch (_) {
+                isAiSpeaking = false;
+                setStatus('Listening...');
+                setWaveAnimation(false);
             }
-
-            if (!recognition && isCallActive) {
-                startPrimarySpeechRecognition();
-            } else if (recognition) {
-                try { recognition.start(); } catch (_) {}
-            }
-        }
-
-        async function startPttAction(e) {
-            if (e && e.cancelable) e.preventDefault();
-            if (!isCallActive || isAiSpeaking) return;
-
-            // Interrupt any AI speech playback immediately upon PTT press
-            stopIncomingAiAudio();
-
-            // Ensure AudioContext and Mic strictly inside user gesture
-            await ensurePttAudioContextAndMic();
-
-            isPttRecording = true;
-            const btn = document.getElementById('btnPushToTalk');
-            const txt = document.getElementById('pttText');
-            if (btn) btn.classList.add('recording');
-            if (txt) txt.textContent = pttTapMode ? 'Tap to Send' : 'Release or Tap to Send';
-            setStatus('🟢 Recording Speech... (Speak now)');
-
-            // Reset recorded chunks and request immediate new chunk from MediaRecorder
-            recordedChunks = [];
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                try { mediaRecorder.requestData(); } catch (_) {}
-            } else if (mediaRecorder && mediaRecorder.state === 'inactive' && micStream) {
-                try { mediaRecorder.start(250); } catch (_) {}
-            }
-        }
-
-        function stopPttAction(e) {
-            if (e && e.cancelable) e.preventDefault();
-            if (!isPttRecording) return;
-            isPttRecording = false;
-            pttTapMode = false;
-
-            const btn = document.getElementById('btnPushToTalk');
-            const txt = document.getElementById('pttText');
-            if (btn) btn.classList.remove('recording');
-            if (txt) txt.textContent = 'Hold or Tap to Speak';
-            setStatus('⏳ Processing Speech...');
-
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                try { mediaRecorder.requestData(); } catch (_) {}
-            }
-
-            setTimeout(() => {
-                if (recordedChunks.length > 0) {
-                    const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-                    recordedChunks = [];
-                    if (blob.size >= 800) {
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                            currentTurnId++;
-                            turnId = currentTurnId;
-                            broadcastLiveCallChunk('customer', reader.result, null, 'audio/webm');
-                            sendLiveVoicePayload({ audioBase64: reader.result, turnId: currentTurnId });
-                        };
-                        reader.readAsDataURL(blob);
-                        return;
-                    }
-                }
-                if (isCallActive) setStatus('🟢 Listening... (Speak now)');
-            }, 250);
-        }
-
-        function startPttRecord(e) { startPttAction(e); }
-        function stopPttRecord(e) { stopPttAction(e); }
-
-        function bindPttButtonEvents() {
-            const pttBtn = document.getElementById('btnPushToTalk');
-            if (!pttBtn || pttBtn._boundPttEvents) return;
-            pttBtn._boundPttEvents = true;
-
-            // Touch events for mobile (iOS Safari / Android Chrome) with { passive: false } and e.preventDefault()
-            pttBtn.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                pttTouchStartTime = Date.now();
-                if (pttTapMode && isPttRecording) {
-                    stopPttAction(e);
-                    return;
-                }
-                startPttAction(e);
-            }, { passive: false });
-
-            pttBtn.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                const pressDuration = Date.now() - pttTouchStartTime;
-                if (pressDuration < 350) {
-                    // Tap toggle mode: stays recording until tapped again
-                    pttTapMode = true;
-                    const txt = document.getElementById('pttText');
-                    if (txt) txt.textContent = 'Tap to Send';
-                    setStatus('🟢 Listening... (Tap to Send)');
-                    return;
-                }
-                stopPttAction(e);
-            }, { passive: false });
-
-            pttBtn.addEventListener('touchcancel', (e) => {
-                e.preventDefault();
-                stopPttAction(e);
-            }, { passive: false });
-
-            // Desktop mouse events (mousedown / mouseup / mouseleave)
-            pttBtn.addEventListener('mousedown', (e) => {
-                e.preventDefault();
-                pttTouchStartTime = Date.now();
-                if (pttTapMode && isPttRecording) {
-                    stopPttAction(e);
-                    return;
-                }
-                startPttAction(e);
-            });
-
-            pttBtn.addEventListener('mouseup', (e) => {
-                e.preventDefault();
-                const pressDuration = Date.now() - pttTouchStartTime;
-                if (pressDuration < 350) {
-                    pttTapMode = true;
-                    const txt = document.getElementById('pttText');
-                    if (txt) txt.textContent = 'Tap to Send';
-                    setStatus('🟢 Listening... (Tap to Send)');
-                    return;
-                }
-                stopPttAction(e);
-            });
-
-            pttBtn.addEventListener('mouseleave', () => {
-                if (isPttRecording && !pttTapMode) {
-                    stopPttAction();
-                }
-            });
-        }
-
-        function sendTextInput() {
-            const input = document.getElementById('callTextInput');
-            if (!input || !input.value.trim()) return;
-            const text = input.value.trim();
-            input.value = '';
-            currentTurnId++;
-            turnId = currentTurnId;
-            sendLiveVoicePayload({ text: text, turnId: currentTurnId });
-        }
-
-        function toggleMute() {
-            isMuted = !isMuted;
-            const btn = document.getElementById('btnMicMute');
-            const icon = document.getElementById('micIcon');
-            if (btn) btn.classList.toggle('muted', isMuted);
-            if (icon) icon.textContent = isMuted ? '🔇' : '🎤';
-            if (isMuted) {
-                if (recognition) { try { recognition.stop(); } catch (_) {} }
-                setStatus('Mic Muted');
-            } else {
-                restartRecognition();
-                setStatus(isAiSpeaking ? '🔊 AI Speaking...' : '🟢 Listening... (Speak now)');
-            }
-        }
-
-        function syncCallEndedBeacon() {
-            const targetPhone = roomId || phone;
-            if (targetPhone) {
-                try {
-                    const url = '/api/call/end/' + encodeURIComponent(targetPhone);
-                    if (navigator.sendBeacon) {
-                        navigator.sendBeacon(url);
-                    } else {
-                        fetch(url, { method: 'POST', keepalive: true }).catch(() => {});
-                    }
-                } catch (_) {}
-            }
-        }
-
-        window.addEventListener('beforeunload', () => {
-            syncCallEndedBeacon();
-        });
-
-        window.addEventListener('pagehide', () => {
-            syncCallEndedBeacon();
-        });
-
-        function endCall() {
-            syncCallEndedBeacon();
-            isCallActive = false;
-            isAiSpeaking = false;
-            stopTimer();
-            setWaveAnimation(false);
-            if (micAnimFrame) cancelAnimationFrame(micAnimFrame);
-            if (currentAudioSource) {
-                try { currentAudioSource.pause(); } catch (_) {}
-                currentAudioSource = null;
-            }
-            if (recognition) {
-                try { recognition.stop(); } catch (_) {}
-            }
-            if (micStream) {
-                try { micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
-            }
-            setStatus('Call Ended');
-            const tb = document.getElementById('transcriptBox');
-            if (tb) tb.innerHTML = '<div style="color: #ef4444; font-weight: 700; text-align: center; padding-top: 10px;">Call Ended. Thank you!</div>';
-        }
-
-        function escapeHtml(str) {
-            if (!str) return '';
-            return String(str).replace(/[&<>"']/g, m => ({
-                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
-            }[m]));
         }
     </script>
 </body>

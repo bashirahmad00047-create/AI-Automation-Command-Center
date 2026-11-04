@@ -1251,9 +1251,14 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     def public_live_call_page(phone=""):
         """Public standalone live voice call room accessible by customer without login."""
         import re, os
+        from flask import make_response
         phone_clean = re.sub(r"\D", "", phone or "")
         b_name = os.environ.get("BUSINESS_NAME", "BashFlow Voice AI")
-        return render_template("live_call_room.html", phone=phone_clean, business_name=b_name)
+        resp = make_response(render_template("live_call_room.html", phone=phone_clean, business_name=b_name))
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 
     @application.route("/api/whatsapp/ai-health", methods=["GET"])
     @application.route("/api/v1/whatsapp/ai-health", methods=["GET"])
