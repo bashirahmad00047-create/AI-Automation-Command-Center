@@ -499,12 +499,24 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app
                 break
 
         env = os.environ.copy()
-        env["PORT"] = str(port)
-        env["WA_BRIDGE_PORT"] = str(port)
+        bridge_port = int(port or 3001)
+        flask_port = (
+            os.environ.get("PYTHON_PORT")
+            or os.environ.get("SERVER_PORT")
+            or os.environ.get("FLASK_PORT")
+            or (os.environ.get("PORT") if str(os.environ.get("PORT")) != str(bridge_port) else None)
+            or ("10000" if os.environ.get("RENDER") else "5000")
+        )
+
+        env["PORT"] = str(bridge_port)
+        env["WA_BRIDGE_PORT"] = str(bridge_port)
+        env["BRIDGE_PORT"] = str(bridge_port)
+        env["PYTHON_PORT"] = str(flask_port)
         env["AUTH_DIR"] = resolve_auth_dir(root_dir)
-        env["PYTHON_WEBHOOK_URL"] = env.get(
-            "PYTHON_WEBHOOK_URL",
-            f"http://127.0.0.1:{os.environ.get('PORT', '5000')}/api/v1/webhooks/whatsapp"
+        env["PYTHON_WEBHOOK_URL"] = (
+            os.environ.get("PYTHON_WEBHOOK_URL")
+            if (os.environ.get("PYTHON_WEBHOOK_URL") and f":{bridge_port}/" not in os.environ.get("PYTHON_WEBHOOK_URL"))
+            else f"http://127.0.0.1:{flask_port}/api/v1/webhooks/whatsapp"
         )
 
         # 5. Spawn node wa_bridge.js as detached persistent process

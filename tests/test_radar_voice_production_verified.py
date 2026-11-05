@@ -848,3 +848,73 @@ def test_head_and_options_requests_on_all_public_endpoints(client):
     assert head_call.status_code == 200
     options_call = client.options("/call/03209350858")
     assert options_call.status_code in (200, 204)
+
+
+def test_whatsapp_bridge_webhook_message_receipt_and_live_call_link(client):
+    """Verify wa_bridge.js webhook payload is received, recorded in database, and returns AI reply with Live Call Link."""
+    import time
+    test_phone = "923120009988"
+    msg_id = f"test_wam_{int(time.time()*1000)}"
+    payload = {
+        "typeWebhook": "incomingMessageReceived",
+        "instanceData": {
+            "idInstance": "baileys_bridge",
+            "wid": "923001234567@c.us"
+        },
+        "idMessage": msg_id,
+        "timestamp": int(time.time()),
+        "senderData": {
+            "chatId": f"{test_phone}@s.whatsapp.net",
+            "sender": test_phone,
+            "senderName": "Test Customer"
+        },
+        "messageData": {
+            "typeMessage": "textMessage",
+            "textMessageData": {
+                "textMessage": "Salam, kya delivery available hai?"
+            }
+        },
+        "from_phone": test_phone,
+        "from": test_phone,
+        "body": "Salam, kya delivery available hai?"
+    }
+
+    try:
+        # 1. Post to /api/v1/webhooks/whatsapp
+        res = client.post("/api/v1/webhooks/whatsapp", json=payload)
+        assert res.status_code == 200
+        data = res.get_json()
+        assert data.get("status") == "ok"
+        assert data.get("processed") >= 1
+        reply = data.get("reply")
+        assert reply is not None
+        assert f"/call/{test_phone}" in reply
+
+        # 2. Verify message recorded in DB
+        with client.application.app_context():
+            from models import WhatsAppMessage
+            inbound = WhatsAppMessage.query.filter_by(whatsapp_message_id=msg_id).first()
+            assert inbound is not None
+            assert inbound.direction == "inbound"
+            assert inbound.sender == test_phone
+
+            # Outbound reply recorded in DB
+            outbound = WhatsAppMessage.query.filter(
+                WhatsAppMessage.direction == "outbound",
+                WhatsAppMessage.recipient.like(f"%{test_phone}%")
+            ).first()
+            assert outbound is not None
+            assert f"/call/{test_phone}" in outbound.body
+    finally:
+        with client.application.app_context():
+            try:
+                from models import WhatsAppMessage, Lead
+                from database import db
+                WhatsAppMessage.query.filter(
+                    (WhatsAppMessage.sender == test_phone) | (WhatsAppMessage.recipient.like(f"%{test_phone}%"))
+                ).delete(synchronize_session=False)
+                Lead.query.filter(Lead.phone == test_phone).delete(synchronize_session=False)
+                db.session.commit()
+            except Exception:
+                pass
+

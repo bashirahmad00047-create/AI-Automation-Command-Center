@@ -6711,22 +6711,28 @@ class WhatsAppService:
             sender_name=sender_name
         )
         if order_action and order_action.get("message"):
+            base_app_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
+            live_call_url = f"{base_app_url.rstrip('/')}/call/{clean_phone}"
+            order_reply_msg = order_action["message"]
+            if not is_grp and clean_phone and "/call/" not in order_reply_msg:
+                order_reply_msg = f"{order_reply_msg}\n\n📞 *Live AI Voice Call:* {live_call_url}"
             with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
                 getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
                 if hasattr(cls, "_in_flight_phones_ts"):
                     cls._in_flight_phones_ts.pop(clean_phone, None)
-            cls.send_green_api_message(
-                organization_id=org_id,
-                to_phone=clean_phone,
-                chat_id=real_chat_id,
-                message_text=order_action["message"],
-                allow_fallback=False
-            )
+            if not kwargs.get("direct_bridge"):
+                cls.send_green_api_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    chat_id=real_chat_id,
+                    message_text=order_reply_msg,
+                    allow_fallback=False
+                )
             return {
                 "success": True,
                 "action": "order_created",
                 "order": order_action.get("order"),
-                "reply_body": order_action["message"]
+                "reply_body": order_reply_msg
             }
 
         # 2. Check for order tracking query by Order ID
@@ -6736,22 +6742,28 @@ class WhatsAppService:
             message_text=message_body
         )
         if tracking_action and tracking_action.get("message"):
+            base_app_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
+            live_call_url = f"{base_app_url.rstrip('/')}/call/{clean_phone}"
+            tracking_reply_msg = tracking_action["message"]
+            if not is_grp and clean_phone and "/call/" not in tracking_reply_msg:
+                tracking_reply_msg = f"{tracking_reply_msg}\n\n📞 *Live AI Voice Call:* {live_call_url}"
             with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
                 getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
                 if hasattr(cls, "_in_flight_phones_ts"):
                     cls._in_flight_phones_ts.pop(clean_phone, None)
-            cls.send_green_api_message(
-                organization_id=org_id,
-                to_phone=clean_phone,
-                chat_id=real_chat_id,
-                message_text=tracking_action["message"],
-                allow_fallback=False
-            )
+            if not kwargs.get("direct_bridge"):
+                cls.send_green_api_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    chat_id=real_chat_id,
+                    message_text=tracking_reply_msg,
+                    allow_fallback=False
+                )
             return {
                 "success": True,
                 "action": "order_tracked",
                 "order": tracking_action.get("order"),
-                "reply_body": tracking_action["message"]
+                "reply_body": tracking_reply_msg
             }
 
         # 3. Check for customer asking for payment options or completing a deal
@@ -6762,6 +6774,11 @@ class WhatsAppService:
             sender_name=sender_name
         )
         if payment_action and payment_action.get("message"):
+            base_app_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
+            live_call_url = f"{base_app_url.rstrip('/')}/call/{clean_phone}"
+            payment_reply_msg = payment_action["message"]
+            if not is_grp and clean_phone and "/call/" not in payment_reply_msg:
+                payment_reply_msg = f"{payment_reply_msg}\n\n📞 *Live AI Voice Call:* {live_call_url}"
             with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
                 getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
                 if hasattr(cls, "_in_flight_phones_ts"):
@@ -6787,25 +6804,26 @@ class WhatsAppService:
                             urgency_score=90,
                             lead_score=95,
                             route_department="Sales",
-                            draft_response=payment_action["message"]
+                            draft_response=payment_reply_msg
                         )
                         db.session.add(new_lead)
                         db.session.commit()
                         logger.info(f"Auto-captured CRM Lead for payment query/deal closure: {clean_phone}")
                 except Exception as lead_err:
                     logger.error(f"Failed to auto-capture CRM Lead on payment query: {lead_err}")
-            cls.send_green_api_message(
-                organization_id=org_id,
-                to_phone=clean_phone,
-                chat_id=real_chat_id,
-                message_text=payment_action["message"],
-                allow_fallback=False
-            )
+            if not kwargs.get("direct_bridge"):
+                cls.send_green_api_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    chat_id=real_chat_id,
+                    message_text=payment_reply_msg,
+                    allow_fallback=False
+                )
             return {
                 "success": True,
                 "action": "payment_instructions_dispatched",
                 "payment_info": payment_action.get("payment_info"),
-                "reply_body": payment_action["message"],
+                "reply_body": payment_reply_msg,
                 "trigger_type": payment_action.get("trigger_type")
             }
 
@@ -6924,6 +6942,11 @@ class WhatsAppService:
             clean_reply_text = re.sub(r"[*_~`#>]", "", reply_body).strip()
             if not clean_reply_text:
                 clean_reply_text = reply_body.strip()
+
+            base_app_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
+            live_call_url = f"{base_app_url.rstrip('/')}/call/{clean_phone}"
+            if not is_grp and clean_phone and "/call/" not in clean_reply_text:
+                clean_reply_text = f"{clean_reply_text}\n\n📞 *Live AI Voice Call:* {live_call_url}"
 
             # FORCE DISPATCH LOGIC:
             # Every generated AI reply is actively sent to the real WhatsApp chat ID using Green API's send methods,

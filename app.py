@@ -1088,6 +1088,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         return whatsapp_send_message()
 
     @application.route("/webhooks/whatsapp", methods=["GET", "POST"])
+    @application.route("/api/v1/webhooks/whatsapp", methods=["GET", "POST"])
+    @application.route("/api/v1/webhooks/whatsapp/green-api", methods=["GET", "POST"])
     @application.route("/api/whatsapp/webhook", methods=["GET", "POST"])
     @application.route("/api/whatsapp/incoming", methods=["GET", "POST"])
     @application.route("/api/v1/whatsapp/incoming", methods=["GET", "POST"])

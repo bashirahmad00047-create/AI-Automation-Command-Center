@@ -99,9 +99,87 @@ function convertAudioToOggOpus(buffer) {
   });
 }
 // Configuration
-const PORT = process.env.WA_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001;
-const PYTHON_PORT = process.env.PORT || 5000;
-const PYTHON_WEBHOOK_URL = process.env.PYTHON_WEBHOOK_URL || `http://127.0.0.1:${PYTHON_PORT}/api/v1/webhooks/whatsapp`;
+const PORT = Number(process.env.WA_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001);
+
+function resolvePythonPort() {
+  if (process.env.PYTHON_PORT && Number(process.env.PYTHON_PORT) !== PORT) {
+    return Number(process.env.PYTHON_PORT);
+  }
+  if (process.env.SERVER_PORT && Number(process.env.SERVER_PORT) !== PORT) {
+    return Number(process.env.SERVER_PORT);
+  }
+  if (process.env.FLASK_PORT && Number(process.env.FLASK_PORT) !== PORT) {
+    return Number(process.env.FLASK_PORT);
+  }
+  if (process.env.PYTHON_WEBHOOK_URL) {
+    const match = process.env.PYTHON_WEBHOOK_URL.match(/:(\d+)\//);
+    if (match && Number(match[1]) !== PORT) {
+      return Number(match[1]);
+    }
+  }
+  if (process.env.PORT && Number(process.env.PORT) !== PORT) {
+    return Number(process.env.PORT);
+  }
+  return (process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.RENDER_EXTERNAL_URL) ? 10000 : 5000;
+}
+
+const PYTHON_PORT = resolvePythonPort();
+let PYTHON_WEBHOOK_URL = (process.env.PYTHON_WEBHOOK_URL && !process.env.PYTHON_WEBHOOK_URL.includes(`:${PORT}/`))
+  ? process.env.PYTHON_WEBHOOK_URL
+  : `http://127.0.0.1:${PYTHON_PORT}/api/v1/webhooks/whatsapp`;
+
+let detectedWorkingBackendUrl = null;
+
+async function dispatchWebhookToPython(payload) {
+  const pPort = resolvePythonPort();
+  const primaryUrl = (process.env.PYTHON_WEBHOOK_URL && !process.env.PYTHON_WEBHOOK_URL.includes(`:${PORT}/`))
+    ? process.env.PYTHON_WEBHOOK_URL
+    : `http://127.0.0.1:${pPort}/api/v1/webhooks/whatsapp`;
+
+  const candidateUrls = [
+    primaryUrl,
+    `http://127.0.0.1:${pPort}/api/v1/webhooks/whatsapp`,
+    `http://127.0.0.1:10000/api/v1/webhooks/whatsapp`,
+    `http://127.0.0.1:5000/api/v1/webhooks/whatsapp`,
+    `http://127.0.0.1:8000/api/v1/webhooks/whatsapp`,
+    `http://localhost:${pPort}/api/v1/webhooks/whatsapp`,
+    `http://127.0.0.1:${pPort}/webhooks/whatsapp`
+  ];
+  const uniqueUrls = [...new Set(candidateUrls)];
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    for (const targetUrl of uniqueUrls) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        const resp = await fetch(targetUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'WhatsApp-Baileys-Bridge/1.0',
+            'X-Internal-Bridge': '1'
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (resp.ok) {
+          const resData = await resp.json().catch(() => null);
+          detectedWorkingBackendUrl = targetUrl.split('/api/')[0] || targetUrl.split('/webhooks')[0];
+          PYTHON_WEBHOOK_URL = targetUrl;
+          console.log(`[Webhook Forward Success] Dispatched to ${targetUrl} (attempt ${attempt}) -> HTTP ${resp.status}`);
+          return resData;
+        } else {
+          console.warn(`[Webhook Forward Warning] Target ${targetUrl} returned HTTP ${resp.status}`);
+        }
+      } catch (err) {
+        // Continue to next candidate URL
+      }
+    }
+    if (attempt < 3) await new Promise(r => setTimeout(r, 800));
+  }
+  return null;
+}
 
 /**
  * Resolves the Baileys multi-file authentication storage path.
@@ -136,11 +214,12 @@ function resolveAuthDir() {
 const AUTH_DIR = resolveAuthDir();
 
 function getBackendBaseUrl() {
+  if (detectedWorkingBackendUrl) return detectedWorkingBackendUrl;
   const envUrl = process.env.PYTHON_WEBHOOK_URL;
-  if (envUrl && envUrl.includes('/api/')) {
+  if (envUrl && envUrl.includes('/api/') && !envUrl.includes(`:${PORT}/`)) {
     return envUrl.split('/api/')[0];
   }
-  const pythonPort = (process.env.PYTHON_PORT || (process.env.PORT && String(process.env.PORT) !== String(PORT) ? process.env.PORT : 5000));
+  const pythonPort = resolvePythonPort();
   return `http://127.0.0.1:${pythonPort}`;
 }
 
@@ -1482,6 +1561,18 @@ if (!text) text = '[Voice note]';
                 });
                 console.log(`[Direct Bridge Dispatch Success] Outbound PTT voice note delivered to ${finalTargetJid}: ID=${sentMsg?.key?.id}`);
                 if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
+
+                // Also deliver text message with clickable Live Call Room Link
+                if (resData.reply) {
+                  try {
+                    await sock.sendPresenceUpdate('composing', finalTargetJid);
+                    const callMsg = await sock.sendMessage(finalTargetJid, { text: String(resData.reply) });
+                    console.log(`[Direct Bridge Call Link Followup Success] Delivered live call link to ${finalTargetJid}: ID=${callMsg?.key?.id}`);
+                    if (callMsg?.key?.id) sentAiMessageIds.add(callMsg.key.id);
+                  } catch (clErr) {
+                    console.warn('[Direct Bridge Call Link Followup Error]:', clErr.message);
+                  }
+                }
               } catch (aErr) {
                 console.warn('[Direct Bridge Audio Error, falling back to text delivery]:', aErr.message);
                 if (resData.reply) {
@@ -1518,34 +1609,11 @@ if (!text) text = '[Voice note]';
 
           // FIFO Sequential Queue Dispatch (Zero Dropped Questions & Human Shield)
           enqueueContactTask(targetJid, async () => {
-            let resData = null;
-            for (let attempt = 1; attempt <= 2; attempt++) {
-              try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 28000);
-                const resp = await fetch(PYTHON_WEBHOOK_URL, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'WhatsApp-Baileys-Bridge/1.0'
-                  },
-                  body: JSON.stringify(payload),
-                  signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-                console.log(`[Webhook Forward] Dispatched to ${PYTHON_WEBHOOK_URL} (attempt ${attempt}) -> HTTP ${resp.status}`);
-                if (resp.ok) {
-                  resData = await resp.json().catch(() => null);
-                  if (resData) break;
-                }
-              } catch (e) {
-                console.warn(`[Webhook Forward Warning] Attempt ${attempt} failed: ${e.message}`);
-                if (attempt < 2) await new Promise(r => setTimeout(r, 1200));
-              }
-            }
+            const resData = await dispatchWebhookToPython(payload);
 
-            // Only deliver automated AI replies for live incoming notifications (never for history sync appends)
-            if (!isHistoryAppend && resData && (resData.reply || resData.audio_base64 || resData.image_url || resData.image_base64)) {
+            const isRecent = (Date.now() / 1000 - timestamp) < 300;
+            // Only deliver automated AI replies for live incoming notifications (never for stale history sync)
+            if ((!isHistoryAppend || isRecent) && resData && (resData.reply || resData.audio_base64 || resData.image_url || resData.image_base64)) {
               await deliverAiResponse(resData, targetJid);
             }
           });

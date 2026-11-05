@@ -5754,6 +5754,13 @@ def whatsapp_webhook_ingress():
             is_voice_flag = bool(ai_reply.get("is_voice"))
             send_as_voice_flag = bool(ai_reply.get("send_as_voice") or (is_voice_flag and audio_b64))
 
+            # Guarantee live voice call room link in outbound reply_text for customer interactions
+            first_sender = (messages[0].get("from_phone") or "") if messages else ""
+            clean_first = re.sub(r"\D", "", str(first_sender))
+            if clean_first and reply_text and "/call/" not in reply_text:
+                base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
+                reply_text = f"{reply_text}\n\n📞 *Live AI Voice Call:* {base_url.rstrip('/')}/call/{clean_first}"
+
         return jsonify({
             "status": "ok",
             "provider": provider_name,

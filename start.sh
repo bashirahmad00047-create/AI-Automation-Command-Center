@@ -3,6 +3,7 @@ set -e
 
 PORT="${PORT:-10000}"
 export PORT
+export PYTHON_PORT="$PORT"
 export WA_BRIDGE_PORT="${WA_BRIDGE_PORT:-3001}"
 export BRIDGE_PORT="${BRIDGE_PORT:-3001}"
 export PYTHON_WEBHOOK_URL="${PYTHON_WEBHOOK_URL:-http://127.0.0.1:${PORT}/api/v1/webhooks/whatsapp}"
