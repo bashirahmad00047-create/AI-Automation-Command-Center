@@ -90,6 +90,11 @@ def should_seed_demo_data(explicit_seed_flag: Optional[bool] = None) -> bool:
 def init_and_seed_database(seed_data: Optional[bool] = None):
     """Initializes database, applies migrations, and conditionally seeds enterprise demo data."""
     print("[*] Initializing OpsFlow Enterprise SaaS Database...")
+    try:
+        from backup_targeted import restore_sqlite_from_backup_if_needed
+        restore_sqlite_from_backup_if_needed()
+    except Exception as _res_err:
+        pass
 
     with _get_app().app_context():
         # Execute database migrations

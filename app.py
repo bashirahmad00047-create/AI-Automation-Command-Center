@@ -52,9 +52,12 @@ _wa_bridge_proc_lock = threading.Lock()
 
 def start_wa_bridge_subprocess(app_ref=None):
     """Spawns `node wa_bridge.js` on port 3001 as a persistent background subprocess when the server starts."""
+    if os.environ.get("WA_BRIDGE_INTERNAL") == "1" or os.environ.get("GUNICORN_STARTED") == "1":
+        # start.sh already supervises wa_bridge.js in the background
+        return
     try:
         from wa_bridge_manager import ensure_wa_bridge_running
-        ensure_wa_bridge_running(timeout_seconds=5.0, app=app_ref)
+        ensure_wa_bridge_running(timeout_seconds=3.0, app=app_ref)
     except Exception as e:
         if app_ref:
             app_ref.logger.warning(f"[WhatsApp Bridge] Failed to start bridge subprocess: {e}")
@@ -300,12 +303,6 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         def _run_db_initialization(app_ref):
             with app_ref.app_context():
                 try:
-                    from migrations_manager import run_database_migrations
-                    run_database_migrations(app_ref)
-                except Exception as _mig_err:
-                    app_ref.logger.warning(f"Auto-migration notice: {_mig_err}; falling back to db.create_all()")
-
-                try:
                     db.session.rollback()
                 except Exception:
                     pass
@@ -313,6 +310,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     db.create_all()
                 except Exception as _create_err:
                     app_ref.logger.warning(f"db.create_all() notice: {_create_err}")
+
+                try:
+                    from migrations_manager import run_database_migrations
+                    run_database_migrations(app_ref)
+                except Exception as _mig_err:
+                    app_ref.logger.warning(f"Auto-migration notice: {_mig_err}; continuing")
 
                 try:
                     from models import LoginAttempt
@@ -412,6 +415,37 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     app_ref.logger.warning(f"Storage init_db check: {_st_err}")
 
                 try:
+                    from models import EcommerceOrder, Organization
+                    existing_radar = EcommerceOrder.query.filter(
+                        (EcommerceOrder.id == "ORD-FLEET-RADAR") | (EcommerceOrder.order_number == "ORD-FLEET-RADAR")
+                    ).first()
+                    if not existing_radar:
+                        org = Organization.query.first()
+                        org_id = org.id if org else "org-enterprise-default"
+                        radar_order = EcommerceOrder(
+                            id="ORD-FLEET-RADAR",
+                            organization_id=org_id,
+                            order_number="ORD-FLEET-RADAR",
+                            customer_phone="03209350858",
+                            customer_name="Chitral Fleet Radar",
+                            total_amount=1500.0,
+                            currency="PKR",
+                            order_status="shipped",
+                            tracking_number="TRK-FLEET-001",
+                            courier_name="InDrive Motorbike Courier",
+                            notes="Live fleet tracking radar pin"
+                        )
+                        radar_order.set_items([{"name": "Fleet Radar Express Dispatch", "price": 1500, "quantity": 1}])
+                        db.session.add(radar_order)
+                        db.session.commit()
+                except Exception as _radar_err:
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+                    app_ref.logger.warning(f"ORD-FLEET-RADAR auto-seed notice: {_radar_err}")
+
+                try:
                     from wa_bridge_manager import start_wa_session_auto_backup
                     start_wa_session_auto_backup(app=app_ref)
                 except Exception as _wa_bk_err:
@@ -423,15 +457,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         application.config["AUTOMATION_ENGINE"] = engine_instance
 
         if not is_cli_migration:
-            if is_testing:
-                _run_db_initialization(application)
-            else:
-                threading.Thread(
-                    target=_run_db_initialization,
-                    args=(application,),
-                    daemon=True,
-                    name="AsyncDbBootstrap"
-                ).start()
+            _run_db_initialization(application)
 
 
     # Register API v1 Blueprint
@@ -1856,15 +1882,23 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/track/<order_id>")
     def public_order_tracking(order_id: str):
         """Public order tracking portal with live delivery status and Leaflet radar pin."""
+        order = None
+        ride = None
         try:
             from models import EcommerceOrder, RideRequest
             order = EcommerceOrder.query.filter(
                 (EcommerceOrder.id == order_id) | (EcommerceOrder.order_number == order_id)
             ).first()
-            ride = None
             if not order:
                 ride = RideRequest.query.filter_by(id=order_id).first()
+        except Exception as _track_db_err:
+            application.logger.warning(f"Tracking DB lookup notice for {order_id}: {_track_db_err}")
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
 
+        try:
             jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
             b_name = os.environ.get("BUSINESS_NAME", "Chitral & Global Bazar")
             role = request.args.get("role", "customer").lower().strip()

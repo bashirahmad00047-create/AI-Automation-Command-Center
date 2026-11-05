@@ -24,33 +24,49 @@ def restore_sqlite_from_backup_if_needed(
 ) -> bool:
     """Restores SQLite database file on container boot if primary DB file is missing
     or empty, preventing loss of orders, leads, and WhatsApp sessions across Render redeploys.
+    Restores to both project root and instance/ folders to guarantee complete compatibility.
     """
     raw_db_url = os.environ.get("DATABASE_URL", "").strip()
     if raw_db_url and not raw_db_url.startswith("sqlite"):
         # External PostgreSQL is active, no SQLite restore needed
         return False
 
-    target_db = db_path or os.path.join(BASE_DIR, "opsflow_saas.db")
     candidates = backup_candidates or [
         os.path.join(BASE_DIR, "opsflow_saas_online_backup.db"),
         os.path.join(BASE_DIR, "opsflow_saas_backup.db"),
     ]
 
-    current_size = os.path.getsize(target_db) if os.path.exists(target_db) else 0
-    if current_size >= 100000:
-        logger.debug(f"[SQLite Restore] Primary DB already exists ({current_size} bytes). No restore needed.")
-        return False
+    target_paths = [db_path] if db_path else [
+        os.path.join(BASE_DIR, "opsflow_saas.db"),
+        os.path.join(BASE_DIR, "instance", "opsflow_saas.db"),
+    ]
 
-    for bpath in candidates:
-        if os.path.exists(bpath) and os.path.getsize(bpath) > 100000:
-            try:
-                shutil.copy2(bpath, target_db)
-                restored_size = os.path.getsize(target_db)
-                logger.info(f"[SQLite Restore] Successfully restored database from '{bpath}' ({restored_size} bytes) -> '{target_db}'")
-                return True
-            except Exception as e:
-                logger.warning(f"[SQLite Restore] Failed copying '{bpath}': {e}")
-    return False
+    restored_any = False
+    for target_db in target_paths:
+        target_dir = os.path.dirname(target_db)
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
+
+        current_size = os.path.getsize(target_db) if os.path.exists(target_db) else 0
+        if current_size < 100000:
+            for bpath in candidates:
+                if os.path.exists(bpath) and os.path.getsize(bpath) > 100000:
+                    try:
+                        shutil.copy2(bpath, target_db)
+                        logger.info(f"[SQLite Restore] Successfully restored database from '{bpath}' ({os.path.getsize(target_db)} bytes) -> '{target_db}'")
+                        restored_any = True
+                        break
+                    except Exception as e:
+                        logger.warning(f"[SQLite Restore] Failed copying '{bpath}' to '{target_db}': {e}")
+
+    # Immediately unpack WhatsApp session credentials from restored DB so restored=True on boot
+    try:
+        from wa_bridge_manager import restore_wa_session_from_db
+        restore_wa_session_from_db()
+    except Exception as _wa_err:
+        logger.debug(f"[SQLite Restore] Post-restore WhatsApp session unpack note: {_wa_err}")
+
+    return restored_any
 
 
 def sync_sqlite_snapshot(
@@ -64,11 +80,22 @@ def sync_sqlite_snapshot(
     if raw_db_url and not raw_db_url.startswith("sqlite"):
         return False
 
-    source_path = db_path or os.path.join(BASE_DIR, "opsflow_saas.db")
     dest_path = backup_path or os.path.join(BASE_DIR, "opsflow_saas_online_backup.db")
 
-    if not os.path.exists(source_path) or os.path.getsize(source_path) < 10000:
+    if db_path:
+        source_candidates = [db_path]
+    else:
+        source_candidates = [
+            os.path.join(BASE_DIR, "instance", "opsflow_saas.db"),
+            os.path.join(BASE_DIR, "opsflow_saas.db"),
+        ]
+
+    # Select the largest existing active SQLite database
+    valid_sources = [p for p in source_candidates if os.path.exists(p) and os.path.getsize(p) >= 10000]
+    if not valid_sources:
         return False
+
+    source_path = max(valid_sources, key=lambda p: os.path.getsize(p))
 
     try:
         src = sqlite3.connect(source_path, timeout=10.0)
@@ -77,7 +104,7 @@ def sync_sqlite_snapshot(
             src.backup(dst, pages=100, sleep=0.01)
         dst.close()
         src.close()
-        logger.debug(f"[SQLite Snapshot] Successfully synced snapshot to '{dest_path}'")
+        logger.debug(f"[SQLite Snapshot] Successfully synced snapshot from '{source_path}' to '{dest_path}'")
         return True
     except Exception as e:
         logger.warning(f"[SQLite Snapshot] Error syncing snapshot: {e}")

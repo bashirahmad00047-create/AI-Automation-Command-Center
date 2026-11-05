@@ -14,4 +14,5 @@ baileys_auth
 wa_bridge.log
 .pytest_cache
 *.db
+!opsflow_saas_online_backup.db
 *.sqlite3
