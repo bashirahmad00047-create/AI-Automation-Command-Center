@@ -660,8 +660,8 @@ async function resolveSender(msg, activeSock) {
   }
 
   // FALLBACK: Clean sender ID from remoteJid (handles @lid and non-standard JIDs safely without dropping)
-  const cleanSenderId = (remoteJid && remoteJid.includes('@')) ? remoteJid.split('@')[0].split(':')[0] : (bestName || 'WhatsApp Contact');
-  const fallbackName = bestName || (cleanSenderId ? `+${cleanSenderId}` : 'WhatsApp Contact');
+  const cleanSenderId = (remoteJid && remoteJid.includes('@')) ? remoteJid.split('@')[0].split(':')[0] : (bestName || 'WhatsApp User');
+  const fallbackName = bestName || (cleanSenderId ? `+${cleanSenderId}` : 'WhatsApp User');
   return {
     phone: cleanSenderId,
     displayName: fallbackName,
@@ -721,30 +721,68 @@ function normalizeJid(chatId) {
 /**
  * Extracts plain text from various Baileys message types, unwrapping nested structures.
  */
-function extractMessageText(message) {
-  if (!message) return '';
+function extractMessageText(message, rootMessage) {
+  if (!message && !rootMessage) return '';
   const unwrapped = unwrapMessage(message) || message;
-  if (!unwrapped) return '';
 
-  return (
-    unwrapped.conversation ||
-    unwrapped.extendedTextMessage?.text ||
-    unwrapped.imageMessage?.caption ||
-    unwrapped.videoMessage?.caption ||
-    unwrapped.documentMessage?.caption ||
-    unwrapped.documentWithCaptionMessage?.message?.documentMessage?.caption ||
-    unwrapped.buttonsResponseMessage?.selectedDisplayText ||
-    unwrapped.buttonsResponseMessage?.selectedButtonId ||
-    unwrapped.templateButtonReplyMessage?.selectedDisplayText ||
-    unwrapped.templateButtonReplyMessage?.selectedId ||
-    unwrapped.listResponseMessage?.title ||
-    unwrapped.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    unwrapped.interactiveResponseMessage?.body?.text ||
-    unwrapped.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
-    (unwrapped.locationMessage ? `[Location: ${unwrapped.locationMessage.degreesLatitude}, ${unwrapped.locationMessage.degreesLongitude}${unwrapped.locationMessage.name ? ` - ${unwrapped.locationMessage.name}` : ''}]` : '') ||
-    (unwrapped.liveLocationMessage ? `[Live Location: ${unwrapped.liveLocationMessage.degreesLatitude}, ${unwrapped.liveLocationMessage.degreesLongitude}]` : '') ||
+  let text = (
+    unwrapped?.conversation ||
+    unwrapped?.extendedTextMessage?.text ||
+    unwrapped?.imageMessage?.caption ||
+    unwrapped?.videoMessage?.caption ||
+    unwrapped?.documentMessage?.caption ||
+    unwrapped?.documentWithCaptionMessage?.message?.documentMessage?.caption ||
+    unwrapped?.buttonsResponseMessage?.selectedDisplayText ||
+    unwrapped?.buttonsResponseMessage?.selectedButtonId ||
+    unwrapped?.templateButtonReplyMessage?.selectedDisplayText ||
+    unwrapped?.templateButtonReplyMessage?.selectedId ||
+    unwrapped?.listResponseMessage?.title ||
+    unwrapped?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    unwrapped?.interactiveResponseMessage?.body?.text ||
+    unwrapped?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+    (unwrapped?.locationMessage ? `[Location: ${unwrapped.locationMessage.degreesLatitude}, ${unwrapped.locationMessage.degreesLongitude}${unwrapped.locationMessage.name ? ` - ${unwrapped.locationMessage.name}` : ''}]` : '') ||
+    (unwrapped?.liveLocationMessage ? `[Live Location: ${unwrapped.liveLocationMessage.degreesLatitude}, ${unwrapped.liveLocationMessage.degreesLongitude}]` : '') ||
     ''
   ).trim();
+
+  // Fallback to reading text from root message container if unwrapped object has no text
+  if (!text && rootMessage) {
+    const root = rootMessage;
+    text = (
+      root.conversation ||
+      root.extendedTextMessage?.text ||
+      root.imageMessage?.caption ||
+      root.videoMessage?.caption ||
+      root.documentMessage?.caption ||
+      root.documentWithCaptionMessage?.message?.documentMessage?.caption ||
+      root.buttonsResponseMessage?.selectedDisplayText ||
+      root.buttonsResponseMessage?.selectedButtonId ||
+      root.templateButtonReplyMessage?.selectedDisplayText ||
+      root.templateButtonReplyMessage?.selectedId ||
+      root.listResponseMessage?.title ||
+      root.listResponseMessage?.singleSelectReply?.selectedRowId ||
+      root.interactiveResponseMessage?.body?.text ||
+      root.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+      (root.locationMessage ? `[Location: ${root.locationMessage.degreesLatitude}, ${root.locationMessage.degreesLongitude}${root.locationMessage.name ? ` - ${root.locationMessage.name}` : ''}]` : '') ||
+      (root.liveLocationMessage ? `[Live Location: ${root.liveLocationMessage.degreesLatitude}, ${root.liveLocationMessage.degreesLongitude}]` : '') ||
+      ''
+    ).trim();
+  }
+
+  return text;
+}
+
+// In-Memory Message Store for Baileys Decryption Retries (Guarantees no blank (no text) decryption failures)
+const inMemoryMessageStore = new Map();
+const MAX_STORED_MESSAGES = 1000;
+
+function storeMessageForRetry(key, message) {
+  if (!key || !key.id || !message) return;
+  inMemoryMessageStore.set(key.id, message);
+  if (inMemoryMessageStore.size > MAX_STORED_MESSAGES) {
+    const oldestKey = inMemoryMessageStore.keys().next().value;
+    inMemoryMessageStore.delete(oldestKey);
+  }
 }
 
 /**
@@ -886,7 +924,12 @@ async function startWhatsAppBridge() {
       keepAliveIntervalMs: 30000,
       retryRequestDelayMs: 250,
       browser: Browsers.macOS('Desktop'),
-      getMessage: async (key) => ({ conversation: '' })
+      getMessage: async (key) => {
+        if (key && key.id && inMemoryMessageStore.has(key.id)) {
+          return inMemoryMessageStore.get(key.id);
+        }
+        return undefined;
+      }
     });
 
     // Safely persist session credentials (only sync to DB once authenticated)
@@ -1189,6 +1232,9 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
         const isHistoryAppend = (type === 'append');
 
         for (const msg of messages) {
+          if (msg.key && msg.message) {
+            storeMessageForRetry(msg.key, msg.message);
+          }
           const ownPhone = sock?.user?.id ? cleanPhoneNumber(sock.user.id.split(':')[0]) : '';
           const ownLid = sock?.user?.lid ? sock.user.lid.split(':')[0].split('@')[0] : '';
           const remoteJid = msg.key?.remoteJid || '';
@@ -1260,7 +1306,7 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
           
           // 1. Unwrap ephemeral/viewOnce containers before extracting text:
           const unwrappedMsg = unwrapMessage(msg.message) || msg.message?.ephemeralMessage?.message || msg.message?.viewOnceMessage?.message || msg.message;
-          let text = extractMessageText(unwrappedMsg);
+          let text = extractMessageText(unwrappedMsg, msg.message);
           let isVoice = false;
           let isAudio = false;
           let isImage = false;
@@ -1517,10 +1563,7 @@ if (!text) text = '[Voice note]';
           if (remoteJid?.endsWith('@g.us')) {
             targetJid = remoteJid;
           } else if (remoteJid?.endsWith('@lid')) {
-            const resolvedPhone = cleanPhoneNumber(senderPhone) || lidToPhoneMap.get(remoteJid);
-            targetJid = (resolvedPhone && resolvedPhone.length <= 13 && (resolvedPhone.startsWith('92') || resolvedPhone.length >= 10))
-              ? `${resolvedPhone}@s.whatsapp.net`
-              : remoteJid;
+            targetJid = remoteJid;
           } else {
             const senderDigits = cleanPhoneNumber(senderPhone) || cleanPhoneNumber(remoteJid);
             targetJid = senderDigits ? `${senderDigits}@s.whatsapp.net` : (remoteJid?.endsWith('@s.whatsapp.net') ? remoteJid : replyJid);
@@ -1529,7 +1572,7 @@ if (!text) text = '[Voice note]';
           // Function to deliver response with presence and jitter delay
           const deliverAiResponse = async (resData, finalTargetJid) => {
             if (!resData || (!resData.reply && !resData.audio_base64 && !resData.image_url && !resData.image_base64)) return;
-            let target = target;
+            let target = finalTargetJid || remoteJid;
             if (target && target.endsWith('@c.us')) {
               target = target.replace('@c.us', '@s.whatsapp.net');
             }
@@ -1617,13 +1660,16 @@ if (!text) text = '[Voice note]';
                 console.log(`[Direct Bridge Dispatch Success] Outbound PTT voice note delivered to ${target}: ID=${sentMsg?.key?.id}`);
                 if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
 
-                // Also deliver text message with clickable Live Call Room Link
-                if (resData.reply) {
+                // Deliver follow-up call link text only if specifically requested
+                if (resData.reply && resData.send_followup_call_link) {
                   try {
                     await sock.sendPresenceUpdate('composing', target);
                     const callMsg = await sock.sendMessage(target, { text: String(resData.reply) });
                     console.log(`[Direct Bridge Call Link Followup Success] Delivered live call link to ${target}: ID=${callMsg?.key?.id}`);
-                    if (callMsg?.key?.id) sentAiMessageIds.add(callMsg.key.id);
+                    if (callMsg?.key?.id) {
+                      sentAiMessageIds.add(callMsg.key.id);
+                      storeMessageForRetry(callMsg.key, callMsg.message);
+                    }
                   } catch (clErr) {
                     console.warn('[Direct Bridge Call Link Followup Error]:', clErr.message);
                   }

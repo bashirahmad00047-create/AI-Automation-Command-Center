@@ -409,6 +409,11 @@ def start_bridge_poll_sync_daemon(app=None, check_interval: float = 5.0):
                                 from api_v1 import process_inbound_whatsapp_payload
                                 for msg_data in messages:
                                     msg_id = msg_data.get("idMessage")
+                                    if msg_id:
+                                        from models import WhatsAppMessage
+                                        committed = WhatsAppMessage.query.filter_by(whatsapp_message_id=msg_id).first()
+                                        if committed is not None:
+                                            continue
                                     if msg_id and not WhatsAppService.is_duplicate_message(msg_id):
                                         logger.info(f"[Bridge Poll Sync] Recovering missed message {msg_id} via Dual Delivery...")
                                         try:
@@ -471,8 +476,15 @@ def is_port_reachable(host: str = "127.0.0.1", port: int = 3001, timeout: float 
         return False
 
 
-def kill_stale_bridge_processes(port: int = 3001) -> None:
-    """Kills any stale wa_bridge node process or process bound to the bridge port."""
+def kill_stale_bridge_processes(port: int = 3001, force: bool = False) -> None:
+    """Kills any stale wa_bridge node process or process bound to the bridge port,
+    ONLY if the bridge port is NOT responsive/healthy (or if force=True).
+    Booting Gunicorn workers must NEVER kill an already active and healthy bridge process!
+    """
+    if not force and is_port_reachable("127.0.0.1", port, timeout=0.4):
+        logger.info(f"[WA Bridge] Port {port} is active and healthy. Preserving running bridge process.")
+        return
+
     global _bridge_proc
     if _bridge_proc is not None:
         try:

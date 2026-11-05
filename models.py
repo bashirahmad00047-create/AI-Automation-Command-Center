@@ -504,13 +504,11 @@ def format_phone_display(phone: Optional[str]) -> str:
         return ""
     if any(c.isalpha() for c in raw):
         return raw
-    if raw.lower().endswith("@lid"):
-        return "WhatsApp Contact"
     clean = "".join(filter(str.isdigit, raw))
+    if raw.lower().endswith("@lid") or len(clean) > 13:
+        return f"WhatsApp (+{clean[-4:]})" if len(clean) >= 4 else "WhatsApp User"
     if not clean or len(clean) < 7:
         return raw
-    if len(clean) > 13 and (clean.startswith("91") or clean.startswith("98")):
-        return "WhatsApp Contact"
     if clean.startswith("03") and len(clean) == 11:
         clean = "92" + clean[1:]
     if clean.startswith("92") and len(clean) == 12:

@@ -6714,11 +6714,7 @@ class WhatsAppService:
             sender_name=sender_name
         )
         if order_action and order_action.get("message"):
-            base_app_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
-            live_call_url = f"{base_app_url.rstrip('/')}/call/{clean_phone}"
             order_reply_msg = order_action["message"]
-            if not is_grp and clean_phone and "/call/" not in order_reply_msg:
-                order_reply_msg = f"{order_reply_msg}\n\n📞 *Live AI Voice Call:* {live_call_url}"
             with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
                 getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
                 if hasattr(cls, "_in_flight_phones_ts"):
@@ -6745,11 +6741,7 @@ class WhatsAppService:
             message_text=message_body
         )
         if tracking_action and tracking_action.get("message"):
-            base_app_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
-            live_call_url = f"{base_app_url.rstrip('/')}/call/{clean_phone}"
             tracking_reply_msg = tracking_action["message"]
-            if not is_grp and clean_phone and "/call/" not in tracking_reply_msg:
-                tracking_reply_msg = f"{tracking_reply_msg}\n\n📞 *Live AI Voice Call:* {live_call_url}"
             with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
                 getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
                 if hasattr(cls, "_in_flight_phones_ts"):
@@ -6777,11 +6769,7 @@ class WhatsAppService:
             sender_name=sender_name
         )
         if payment_action and payment_action.get("message"):
-            base_app_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
-            live_call_url = f"{base_app_url.rstrip('/')}/call/{clean_phone}"
             payment_reply_msg = payment_action["message"]
-            if not is_grp and clean_phone and "/call/" not in payment_reply_msg:
-                payment_reply_msg = f"{payment_reply_msg}\n\n📞 *Live AI Voice Call:* {live_call_url}"
             with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
                 getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
                 if hasattr(cls, "_in_flight_phones_ts"):
@@ -6949,10 +6937,11 @@ class WhatsAppService:
             base_app_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
             if "localhost" in base_app_url or "127.0.0.1" in base_app_url:
                 base_app_url = "https://ai-automation-command-center-4.onrender.com"
-            call_phone_slug = clean_phone or (str(raw_chat).split("@")[0] if raw_chat else "customer")
-            live_call_url = f"{base_app_url.rstrip('/')}/call/{call_phone_slug}"
-            if not is_grp and call_phone_slug and "/call/" not in clean_reply_text:
-                clean_reply_text = f"{clean_reply_text}\n\n📞 *Live AI Voice Call:* {live_call_url}"
+            call_phone_slug = clean_phone or (str(raw_chat).split("@")[0] if raw_chat else "")
+            if not is_grp and call_phone_slug and cls.should_attach_call_link(message_body, call_phone_slug, is_group=is_grp):
+                live_call_url = f"{base_app_url.rstrip('/')}/call/{call_phone_slug}"
+                if "/call/" not in clean_reply_text:
+                    clean_reply_text = f"{clean_reply_text}\n\n📞 *Live AI Voice Call:* {live_call_url}"
 
             # FORCE DISPATCH LOGIC:
             # Every generated AI reply is actively sent to the real WhatsApp chat ID using Green API's send methods,
@@ -7247,6 +7236,34 @@ class WhatsAppService:
                     cls._in_flight_phones_ts.pop(clean_phone, None)
 
     @classmethod
+    def should_attach_call_link(cls, message_body: str, clean_phone: str, is_group: bool = False) -> bool:
+        """Determines whether a Live Voice Call link should be attached to the AI response.
+        Attaches ONLY for:
+        1. Explicit customer requests for call/voice (e.g. 'call', 'voice', 'baat', 'phone').
+        2. Customer greetings/initial inquiries (e.g. 'hi', 'hello', 'salam', 'assalam').
+        Strictly never attaches to follow-up transactional turns (orders, tracking, payments)
+        to prevent hijacking the conversation flow.
+        """
+        if is_group:
+            return False
+        clean_p = re.sub(r"\D", "", str(clean_phone or ""))
+        if not clean_p or len(clean_p) < 7:
+            return False
+        text = str(message_body or "").strip().lower()
+        if not text:
+            return True
+        call_keywords = (
+            "call", "calling", "phone", "voice", "audio", "baat", "bol", "bolna",
+            "rabta", "talk", "speak", "live call", "livecall", "voice call"
+        )
+        if any(re.search(rf"\b{re.escape(kw)}\b", text) for kw in call_keywords):
+            return True
+        greeting_keywords = ("hi", "hello", "salam", "assalam", "assalam-o-alaikum", "hey", "aao")
+        if any(text.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", text) for kw in greeting_keywords):
+            return True
+        return False
+
+    @classmethod
     def format_phone_number(cls, phone: str) -> str:
         """Formats phone number to international E.164 digits, stripping @s.whatsapp.net, @c.us,
         and device indices like :0 or :1, strictly preserving Pakistani numbers and preventing wrongful +91 prefixes.
@@ -7291,13 +7308,11 @@ class WhatsAppService:
             raw = raw[:-15]
         if any(c.isalpha() for c in raw):
             return raw
-        if raw.lower().endswith("@lid"):
-            return "WhatsApp Contact"
         clean = "".join(filter(str.isdigit, raw))
+        if raw.lower().endswith("@lid") or len(clean) > 13:
+            return f"WhatsApp (+{clean[-4:]})" if len(clean) >= 4 else "WhatsApp User"
         if not clean or len(clean) < 7:
             return raw
-        if len(clean) > 13 and (clean.startswith("91") or clean.startswith("98")):
-            return "WhatsApp Contact"
         if clean.startswith("03") and len(clean) == 11:
             clean = "92" + clean[1:]
         elif clean.startswith("3") and len(clean) == 10:
@@ -8964,13 +8979,21 @@ class WhatsAppService:
                 except Exception:
                     pass
 
-            # 2. In-flight debounce check: Short 30s window to prevent rapid duplicate concurrent webhook bursts
+            # 2. Check in-memory committed processed cache
             last_seen = cls._processed_message_ids.get(clean_id)
-            if last_seen and (now - last_seen) < 30:
+            if last_seen and (now - last_seen) < 3600:
                 return True
 
-            cls._processed_message_ids[clean_id] = now
             return False
+
+    @classmethod
+    def mark_message_processed(cls, message_id: str) -> None:
+        """Marks a message ID as processed in memory only AFTER successful DB commit."""
+        if not message_id:
+            return
+        clean_id = str(message_id).strip()
+        with cls._processed_ids_lock:
+            cls._processed_message_ids[clean_id] = time.time()
 
     @classmethod
     def extract_google_maps_links(cls, text: Optional[str]) -> List[str]:
@@ -9303,6 +9326,18 @@ class WhatsAppService:
                 clean_b64 = str(b64_val).split(",")[-1].strip()
                 m_url = f"data:audio/ogg;base64,{clean_b64}"
 
+        if not body and isinstance(raw_payload, dict):
+            body = (
+                raw_payload.get("body")
+                or raw_payload.get("message")
+                or raw_payload.get("text")
+                or (raw_payload.get("textMessageData", {}).get("textMessage") if isinstance(raw_payload.get("textMessageData"), dict) else None)
+                or (raw_payload.get("extendedTextMessageData", {}).get("text") if isinstance(raw_payload.get("extendedTextMessageData"), dict) else None)
+                or ""
+            )
+        if not body and (message_type in ("audio", "voice", "audioMessage", "voiceMessage", "ptt") or m_url):
+            body = "🎤 Voice message"
+
         # Clean giant Base64 strings from raw_payload before json.dumps to keep DB lean & fast
         safe_payload = None
         if isinstance(raw_payload, dict):
@@ -9335,8 +9370,7 @@ class WhatsAppService:
                 db.session.add(msg)
                 db.session.commit()
                 if whatsapp_message_id:
-                    with cls._processed_ids_lock:
-                        cls._processed_message_ids[str(whatsapp_message_id).strip()] = time.time()
+                    cls.mark_message_processed(whatsapp_message_id)
 
                 # Real-time WebSocket / Socket.IO broadcast to frontend dashboard
                 try:

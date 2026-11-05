@@ -1045,3 +1045,109 @@ def test_whatsapp_incoming_message_triggers_call_link_and_ai_reply(client):
                 db.session.commit()
             except Exception:
                 pass
+
+def test_whatsapp_standard_and_lid_messages_saved_and_rendered_when_call_link_fails(client, monkeypatch):
+    """Verify that standard and @lid messages save and render real text in the UI even if the call-link generator fails."""
+    import time
+    from whatsapp_service import WhatsAppService
+
+    # 1. Simulate call link generator failure
+    def fail_call_link(*args, **kwargs):
+        raise RuntimeError("Simulated Call Link Generator Down / Network Failure")
+
+    monkeypatch.setattr(WhatsAppService, "should_attach_call_link", fail_call_link)
+
+    std_phone = "923123456789"
+    lid_phone = "247287691354239"
+    lid_jid = f"{lid_phone}@lid"
+    std_msg_id = f"test_fail_std_{int(time.time()*1000)}"
+    lid_msg_id = f"test_fail_lid_{int(time.time()*1000)}"
+
+    std_text = "Where is my food delivery rider?"
+    lid_text = "Check my order status please"
+
+    std_payload = {
+        "typeWebhook": "incomingMessageReceived",
+        "instanceData": {"idInstance": "baileys_bridge", "wid": "923001234567@c.us"},
+        "idMessage": std_msg_id,
+        "timestamp": int(time.time()),
+        "senderData": {
+            "chatId": f"{std_phone}@s.whatsapp.net",
+            "sender": std_phone,
+            "senderName": "Test Standard Buyer"
+        },
+        "messageData": {
+            "typeMessage": "textMessage",
+            "textMessageData": {"textMessage": std_text}
+        },
+        "from_phone": std_phone,
+        "from": std_phone,
+        "body": std_text
+    }
+
+    lid_payload = {
+        "typeWebhook": "incomingMessageReceived",
+        "instanceData": {"idInstance": "baileys_bridge", "wid": "923001234567@c.us"},
+        "idMessage": lid_msg_id,
+        "timestamp": int(time.time()),
+        "senderData": {
+            "chatId": lid_jid,
+            "sender": lid_phone,
+            "senderName": "Test LID Buyer"
+        },
+        "messageData": {
+            "typeMessage": "textMessage",
+            "textMessageData": {"textMessage": lid_text}
+        },
+        "remoteJid": lid_jid,
+        "chatId": lid_jid,
+        "from_phone": lid_phone,
+        "from": lid_phone,
+        "body": lid_text
+    }
+
+    try:
+        # Ingest both messages - both must succeed with HTTP 200 despite call link generator failure
+        r_std = client.post("/api/v1/webhooks/whatsapp", json=std_payload)
+        assert r_std.status_code == 200
+        assert r_std.get_json().get("status") == "ok"
+
+        r_lid = client.post("/api/v1/webhooks/whatsapp", json=lid_payload)
+        assert r_lid.status_code == 200
+        assert r_lid.get_json().get("status") == "ok"
+
+        # Verify UI endpoint /api/v1/whatsapp/messages returns both messages with real text
+        r_ui = client.get("/api/v1/whatsapp/messages?limit=50")
+        assert r_ui.status_code == 200
+        ui_data = r_ui.get_json()
+        messages = ui_data.get("messages", [])
+
+        # Find saved standard message in UI payload
+        std_rendered = next((m for m in messages if m.get("whatsapp_message_id") == std_msg_id), None)
+        assert std_rendered is not None, "Standard message must be returned in UI messages list"
+        assert std_rendered.get("body") == std_text
+        assert std_rendered.get("body") != "(no text)"
+        assert std_rendered.get("sender_name") == "Test Standard Buyer"
+
+        # Find saved LID message in UI payload
+        lid_rendered = next((m for m in messages if m.get("whatsapp_message_id") == lid_msg_id), None)
+        assert lid_rendered is not None, "LID message must be returned in UI messages list"
+        assert lid_rendered.get("body") == lid_text
+        assert lid_rendered.get("body") != "(no text)"
+        assert lid_rendered.get("sender_name") == "Test LID Buyer"
+
+    finally:
+        with client.application.app_context():
+            try:
+                from models import WhatsAppMessage, Lead
+                from database import db
+                WhatsAppMessage.query.filter(
+                    (WhatsAppMessage.sender.in_([std_phone, lid_phone, lid_jid])) |
+                    (WhatsAppMessage.recipient.like(f"%{std_phone}%")) |
+                    (WhatsAppMessage.recipient.like(f"%{lid_phone}%"))
+                ).delete(synchronize_session=False)
+                Lead.query.filter(Lead.phone.in_([std_phone, lid_phone])).delete(synchronize_session=False)
+                db.session.commit()
+            except Exception:
+                pass
+

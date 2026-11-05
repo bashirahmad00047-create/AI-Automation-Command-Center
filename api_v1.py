@@ -5480,11 +5480,10 @@ def whatsapp_webhook_verification():
 
 
 def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, direct_bridge: bool = True) -> dict:
-    """Universal synchronous processor for WhatsApp inbound payloads (Baileys bridge / Green-API).
-    1. Immediately records message to WhatsAppMessage and commits (Socket.IO emit to frontend).
-    2. Auto-ingests CRM Lead / customer contact info.
-    3. Triggers AI Auto-Responder synchronously and attaches https://ai-automation-command-center-4.onrender.com/call/<phone> link.
-    Returns the parsed response dict.
+    """Universal decoupled processor for WhatsApp inbound payloads.
+    1. Synchronously saves and commits incoming message to WhatsAppMessage table first.
+    2. Synchronously updates CRM Leads.
+    3. Executes AI Auto-Responder in an isolated try-except block so errors never block saving.
     """
     messages = WhatsAppService.parse_green_api_payload(payload)
     if not messages:
@@ -5494,7 +5493,9 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
     processed_count = 0
     ai_reply = None
     engine = get_engine()
+    saved_items = []
 
+    # STEP 1: Synchronous Message Persistence & DB Commit
     for msg in messages:
         msg_id = msg.get("message_id")
         if msg_id and WhatsAppService.is_duplicate_message(msg_id):
@@ -5508,12 +5509,22 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
             or msg.get("mediaUrl")
             or msg.get("downloadUrl")
         )
+        msg_body = (
+            msg.get("body")
+            or msg.get("message")
+            or msg.get("text")
+            or (msg.get("raw", {}).get("text") if isinstance(msg.get("raw"), dict) else None)
+            or ""
+        )
+        if not msg_body and msg.get("is_audio"):
+            msg_body = "🎤 Voice message"
+
         record = WhatsAppService.record_message(
             organization_id=org_id,
             sender=msg.get("from_phone", "unknown"),
             recipient=msg.get("recipient_phone_id", "system"),
             direction="inbound",
-            body=msg.get("body", ""),
+            body=msg_body,
             media_url=media_candidate,
             status="received",
             whatsapp_message_id=msg_id,
@@ -5522,19 +5533,30 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
         )
 
         try:
+            db.session.commit()
+            if msg_id:
+                WhatsAppService.mark_message_processed(msg_id)
+        except Exception as c_err:
+            logger.error(f"Error committing inbound message to DB: {c_err}")
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
+        try:
             WhatsAppService.auto_ingest_crm_lead(
                 organization_id=org_id,
                 from_phone=msg.get("from_phone"),
                 sender_name=msg.get("sender_name"),
-                message_body=msg.get("body"),
+                message_body=msg_body,
                 location_data=msg.get("location"),
                 raw_payload=msg
             )
         except Exception as lead_err:
             logger.warning(f"Error auto-ingesting CRM lead: {lead_err}")
 
-        # Opt-out / opt-in handling
-        inbound_body_clean = (msg.get("body") or "").strip().lower()
+        # Opt-out handling
+        inbound_body_clean = str(msg_body or "").strip().lower()
         if inbound_body_clean in ("stop", "unsubscribe", "opt out", "optout", "cancel", "halt"):
             try:
                 from campaign_service import CampaignService
@@ -5547,13 +5569,19 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
             except Exception as opt_err:
                 logger.warning(f"Failed to record automatic opt-out: {opt_err}")
 
+        saved_items.append((record, msg, msg_body))
+        processed_count += 1
+
+    # STEP 2: Isolated AI Auto-Responder Execution
+    for record, msg, msg_body in saved_items:
+        msg_id = msg.get("message_id")
         rule_replied = False
         if engine:
             event_data = {
                 "from": msg.get("from_phone"),
                 "sender_name": msg.get("sender_name", ""),
-                "message": msg.get("body", ""),
-                "text": msg.get("body", ""),
+                "message": msg_body,
+                "text": msg_body,
                 "whatsapp_message_id": msg_id,
                 "recipient_phone_id": msg.get("recipient_phone_id", ""),
                 "direction": "inbound",
@@ -5576,7 +5604,7 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
         if not rule_replied:
             is_v = WhatsAppService.is_audio_message(
                 message_type=msg.get("message_type"),
-                body=msg.get("body"),
+                body=msg_body,
                 download_url=msg.get("download_url"),
                 audio_base64=msg.get("audio_base64")
             )
@@ -5585,7 +5613,7 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
                     organization_id=org_id,
                     sender_phone=msg.get("from_phone", "unknown"),
                     chat_id=msg.get("chat_id") or msg.get("from_phone"),
-                    message_body=msg.get("body", ""),
+                    message_body=msg_body,
                     sender_name=msg.get("sender_name", ""),
                     message_id=msg_id,
                     message_timestamp=msg.get("timestamp"),
@@ -5596,9 +5624,11 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
                     direct_bridge=direct_bridge
                 )
             except Exception as auto_err:
-                logger.error(f"AI Auto-Responder error: {auto_err}")
-
-        processed_count += 1
+                logger.error(f"[Isolated Auto-Responder Error] {auto_err}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
 
     reply_text = None
     audio_b64 = None
@@ -5616,14 +5646,16 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
         send_as_voice_flag = bool(ai_reply.get("send_as_voice") or (is_voice_flag and audio_b64))
 
         first_sender = (messages[0].get("from_phone") or "") if messages else ""
+        first_body = (messages[0].get("body") or "") if messages else ""
         clean_first = re.sub(r"\D", "", str(first_sender))
         if not clean_first and first_sender and "@lid" in first_sender:
             clean_first = first_sender.split("@")[0]
         if clean_first and reply_text and "/call/" not in reply_text:
-            base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
-            if "localhost" in base_url or "127.0.0.1" in base_url:
-                base_url = "https://ai-automation-command-center-4.onrender.com"
-            reply_text = f"{reply_text}\n\n📞 *Live AI Voice Call:* {base_url.rstrip('/')}/call/{clean_first}"
+            if WhatsAppService.should_attach_call_link(first_body, clean_first, is_group=False):
+                base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
+                if "localhost" in base_url or "127.0.0.1" in base_url:
+                    base_url = "https://ai-automation-command-center-4.onrender.com"
+                reply_text = f"{reply_text}\n\n📞 *Live AI Voice Call:* {base_url.rstrip('/')}/call/{clean_first}"
 
     return {
         "status": "ok",
@@ -5861,12 +5893,15 @@ def whatsapp_webhook_ingress():
             is_voice_flag = bool(ai_reply.get("is_voice"))
             send_as_voice_flag = bool(ai_reply.get("send_as_voice") or (is_voice_flag and audio_b64))
 
-            # Guarantee live voice call room link in outbound reply_text for customer interactions
             first_sender = (messages[0].get("from_phone") or "") if messages else ""
+            first_body = (messages[0].get("body") or "") if messages else ""
             clean_first = re.sub(r"\D", "", str(first_sender))
+            if not clean_first and first_sender and "@lid" in first_sender:
+                clean_first = first_sender.split("@")[0]
             if clean_first and reply_text and "/call/" not in reply_text:
-                base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
-                reply_text = f"{reply_text}\n\n📞 *Live AI Voice Call:* {base_url.rstrip('/')}/call/{clean_first}"
+                if WhatsAppService.should_attach_call_link(first_body, clean_first, is_group=False):
+                    base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
+                    reply_text = f"{reply_text}\n\n📞 *Live AI Voice Call:* {base_url.rstrip('/')}/call/{clean_first}"
 
         return jsonify({
             "status": "ok",

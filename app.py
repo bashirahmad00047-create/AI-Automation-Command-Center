@@ -282,16 +282,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             engine_opts.setdefault("connect_args", {"sslmode": "require"})
     application.config["SQLALCHEMY_ENGINE_OPTIONS"] = engine_opts
 
-    # Auto-restore SQLite database from backup if primary DB is missing
-    try:
-        from backup_targeted import restore_sqlite_from_backup_if_needed, start_periodic_sqlite_snapshot_sync
-        restore_sqlite_from_backup_if_needed()
-        if not bool(application.config.get("TESTING")):
-            start_periodic_sqlite_snapshot_sync(interval_seconds=60)
-    except Exception as _b_err:
-        application.logger.warning(f"Database auto-restore/snapshot notice: {_b_err}")
-
-    # Initialize SQLAlchemy & Database Migrations
+    # Initialize SQLAlchemy & Database Migrations immediately
     db.init_app(application)
     migrate.init_app(application, db, render_as_batch=True, compare_type=True)
 
@@ -456,8 +447,36 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         application.config["STORAGE_ENGINE"] = storage_instance
         application.config["AUTOMATION_ENGINE"] = engine_instance
 
+        def _background_render_bootstrap(app_ref):
+            with app_ref.app_context():
+                try:
+                    from backup_targeted import restore_sqlite_from_backup_if_needed, start_periodic_sqlite_snapshot_sync
+                    restore_sqlite_from_backup_if_needed()
+                    start_periodic_sqlite_snapshot_sync(interval_seconds=60)
+                except Exception as _b_err:
+                    app_ref.logger.warning(f"Background database auto-restore/snapshot notice: {_b_err}")
+
+                try:
+                    _run_db_initialization(app_ref)
+                except Exception as _init_err:
+                    app_ref.logger.warning(f"Background DB initialization notice: {_init_err}")
+
+                if not os.environ.get("SKIP_WA_BRIDGE_INIT"):
+                    try:
+                        start_wa_bridge_subprocess(app_ref)
+                    except Exception as _bridge_err:
+                        app_ref.logger.warning(f"Background WhatsApp bridge init notice: {_bridge_err}")
+
         if not is_cli_migration:
-            _run_db_initialization(application)
+            if is_testing:
+                try:
+                    from backup_targeted import restore_sqlite_from_backup_if_needed
+                    restore_sqlite_from_backup_if_needed()
+                except Exception:
+                    pass
+                _run_db_initialization(application)
+            else:
+                threading.Thread(target=_background_render_bootstrap, args=(application,), daemon=True, name="RenderBackgroundBootstrap").start()
 
 
     # Register API v1 Blueprint
@@ -2159,12 +2178,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     except Exception as _ka_err:
         application.logger.warning(f"Could not start Keep-Alive service: {_ka_err}")
 
-    # Start WhatsApp Baileys Bridge background subprocess non-blocking
-    if not application.config.get("TESTING") and not os.environ.get("SKIP_WA_BRIDGE_INIT"):
-        try:
-            threading.Thread(target=start_wa_bridge_subprocess, args=(application,), daemon=True, name="BridgeSubprocessInit").start()
-        except Exception as _bridge_err:
-            application.logger.warning(f"Could not initialize WhatsApp bridge subprocess: {_bridge_err}")
+    # WhatsApp Baileys Bridge background subprocess is managed via RenderBackgroundBootstrap
 
     return application
 

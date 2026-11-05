@@ -5573,7 +5573,7 @@ function formatWaDisplayPhone(phone) {
         return str;
     }
     if (str.endsWith('@lid') || cleanDigits.length > 13) {
-        return 'WhatsApp Contact';
+        return cleanDigits.length >= 4 ? `WhatsApp (+${cleanDigits.slice(-4)})` : 'WhatsApp User';
     }
 
     // Pakistani number: 923XXXXXXXXX (12 digits starting with 92)
@@ -5657,8 +5657,8 @@ function groupWhatsAppConversations(messages) {
         const isLid = rawPartner && (String(rawPartner).includes('@lid') || String(rawPartner).replace(/\D/g, '').length > 13);
         const resolvedPhone = m.resolved_phone || (isLid ? '' : rawPartner);
         const normKey = isGroup ? rawPartner : (resolvedPhone ? normalizeWaPhone(resolvedPhone) : (normalizeWaPhone(rawPartner) || 'Unknown'));
-        const displayPhone = isGroup ? (m.chat_name || 'WhatsApp Group') : (resolvedPhone ? formatWaDisplayPhone(resolvedPhone) : (m.sender_name || 'WhatsApp Contact'));
-        const contactName = isGroup ? (m.chat_name || 'WhatsApp Group') : (m.sender_name || (resolvedPhone ? formatWaDisplayPhone(resolvedPhone) : 'WhatsApp Contact'));
+        const displayPhone = isGroup ? (m.chat_name || 'WhatsApp Group') : (resolvedPhone ? formatWaDisplayPhone(resolvedPhone) : (m.sender_name || formatWaDisplayPhone(rawPartner)));
+        const contactName = isGroup ? (m.chat_name || 'WhatsApp Group') : (m.sender_name || (resolvedPhone ? formatWaDisplayPhone(resolvedPhone) : formatWaDisplayPhone(rawPartner)));
 
         if (!map[normKey]) {
             let initialMsg = (m.body && m.body !== '(no text)') ? m.body : (m.is_audio ? '🎙️ Voice note' : '(no text)');
