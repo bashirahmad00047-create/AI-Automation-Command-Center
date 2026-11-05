@@ -4527,9 +4527,11 @@ def api_send_voice_call_link():
         if len(clean_phone) < 7:
             return jsonify({"success": False, "error": "A valid phone number is required"}), 400
 
-        if not call_url:
-            host = request.host_url.rstrip("/")
-            call_url = f"{host}/call/{clean_phone}"
+        if not call_url or "localhost" in call_url or "127.0.0.1" in call_url:
+            base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
+            if "localhost" in base_url or "127.0.0.1" in base_url:
+                base_url = "https://ai-automation-command-center-4.onrender.com"
+            call_url = f"{base_url.rstrip('/')}/call/{clean_phone}"
 
         message_text = (
             f"Assalam-o-Alaikum {customer_name}! 📞\n\n"
@@ -4598,8 +4600,10 @@ def api_call_initiate():
         if not clean_phone or len(clean_phone) < 7:
             return jsonify({"success": False, "error": "A valid phone number is required"}), 400
 
-        host = request.host_url.rstrip("/")
-        call_url = f"{host}/call/{clean_phone}"
+        base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
+        if "localhost" in base_url or "127.0.0.1" in base_url:
+            base_url = "https://ai-automation-command-center-4.onrender.com"
+        call_url = f"{base_url.rstrip('/')}/call/{clean_phone}"
 
         with _ACTIVE_CALL_SESSIONS_LOCK:
             _ACTIVE_CALL_SESSIONS[clean_phone] = {
@@ -5531,6 +5535,165 @@ def whatsapp_webhook_verification():
     return jsonify({"error": "Forbidden: invalid verification token or mode"}), 403
 
 
+def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None) -> dict:
+    """Universal synchronous processor for WhatsApp inbound payloads (Baileys bridge / Green-API).
+    1. Immediately records message to WhatsAppMessage and commits (Socket.IO emit to frontend).
+    2. Auto-ingests CRM Lead / customer contact info.
+    3. Triggers AI Auto-Responder synchronously and attaches https://ai-automation-command-center-4.onrender.com/call/<phone> link.
+    Returns the parsed response dict.
+    """
+    messages = WhatsAppService.parse_green_api_payload(payload)
+    if not messages:
+        return {"status": "acknowledged", "provider": "green_api", "processed": 0}
+
+    org_id = target_org_id or "org-enterprise-default"
+    processed_count = 0
+    ai_reply = None
+    engine = get_engine()
+
+    for msg in messages:
+        msg_id = msg.get("message_id")
+        if msg_id and WhatsAppService.is_duplicate_message(msg_id):
+            logger.info(f"Duplicate WhatsApp message ignored: {msg_id}")
+            continue
+
+        media_candidate = (
+            msg.get("media_url")
+            or msg.get("download_url")
+            or msg.get("audio_url")
+            or msg.get("mediaUrl")
+            or msg.get("downloadUrl")
+        )
+        record = WhatsAppService.record_message(
+            organization_id=org_id,
+            sender=msg.get("from_phone", "unknown"),
+            recipient=msg.get("recipient_phone_id", "system"),
+            direction="inbound",
+            body=msg.get("body", ""),
+            media_url=media_candidate,
+            status="received",
+            whatsapp_message_id=msg_id,
+            message_type=msg.get("message_type", "text"),
+            raw_payload=msg
+        )
+
+        try:
+            WhatsAppService.auto_ingest_crm_lead(
+                organization_id=org_id,
+                from_phone=msg.get("from_phone"),
+                sender_name=msg.get("sender_name"),
+                message_body=msg.get("body"),
+                location_data=msg.get("location"),
+                raw_payload=msg
+            )
+        except Exception as lead_err:
+            logger.warning(f"Error auto-ingesting CRM lead: {lead_err}")
+
+        # Opt-out / opt-in handling
+        inbound_body_clean = (msg.get("body") or "").strip().lower()
+        if inbound_body_clean in ("stop", "unsubscribe", "opt out", "optout", "cancel", "halt"):
+            try:
+                from campaign_service import CampaignService
+                CampaignService.handle_opt_out(
+                    organization_id=org_id,
+                    phone=msg.get("from_phone", ""),
+                    channel="whatsapp",
+                    reason=f"Inbound trigger: {inbound_body_clean.upper()}"
+                )
+            except Exception as opt_err:
+                logger.warning(f"Failed to record automatic opt-out: {opt_err}")
+
+        rule_replied = False
+        if engine:
+            event_data = {
+                "from": msg.get("from_phone"),
+                "sender_name": msg.get("sender_name", ""),
+                "message": msg.get("body", ""),
+                "text": msg.get("body", ""),
+                "whatsapp_message_id": msg_id,
+                "recipient_phone_id": msg.get("recipient_phone_id", ""),
+                "direction": "inbound",
+                "record_id": record.id if record else None,
+                "provider": "green_api"
+            }
+            try:
+                engine_res = engine.ingest_event(
+                    event_name="whatsapp.message",
+                    payload=event_data,
+                    source="whatsapp_green_api_webhook",
+                    dry_run=False,
+                    organization_id=org_id
+                )
+                if WhatsAppService.engine_dispatched_reply(engine_res):
+                    rule_replied = True
+            except Exception as e:
+                logger.error(f"Error triggering engine: {e}")
+
+        if not rule_replied:
+            is_v = WhatsAppService.is_audio_message(
+                message_type=msg.get("message_type"),
+                body=msg.get("body"),
+                download_url=msg.get("download_url"),
+                audio_base64=msg.get("audio_base64")
+            )
+            try:
+                ai_reply = WhatsAppService.handle_inbound_auto_response(
+                    organization_id=org_id,
+                    sender_phone=msg.get("from_phone", "unknown"),
+                    chat_id=msg.get("chat_id") or msg.get("from_phone"),
+                    message_body=msg.get("body", ""),
+                    sender_name=msg.get("sender_name", ""),
+                    message_id=msg_id,
+                    message_timestamp=msg.get("timestamp"),
+                    is_voice=is_v,
+                    download_url=msg.get("download_url"),
+                    audio_base64=msg.get("audio_base64"),
+                    media_url=msg.get("media_url") or msg.get("download_url"),
+                    direct_bridge=True
+                )
+            except Exception as auto_err:
+                logger.error(f"AI Auto-Responder error: {auto_err}")
+
+        processed_count += 1
+
+    reply_text = None
+    audio_b64 = None
+    image_url_val = None
+    image_b64_val = None
+    is_voice_flag = False
+    send_as_voice_flag = False
+
+    if ai_reply and isinstance(ai_reply, dict):
+        reply_text = ai_reply.get("reply_body") or ai_reply.get("reply")
+        audio_b64 = ai_reply.get("audio_base64")
+        image_url_val = ai_reply.get("image_url") or ai_reply.get("imageUrl")
+        image_b64_val = ai_reply.get("image_base64") or ai_reply.get("imageBase64")
+        is_voice_flag = bool(ai_reply.get("is_voice"))
+        send_as_voice_flag = bool(ai_reply.get("send_as_voice") or (is_voice_flag and audio_b64))
+
+        first_sender = (messages[0].get("from_phone") or "") if messages else ""
+        clean_first = re.sub(r"\D", "", str(first_sender))
+        if not clean_first and first_sender and "@lid" in first_sender:
+            clean_first = first_sender.split("@")[0]
+        if clean_first and reply_text and "/call/" not in reply_text:
+            base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
+            if "localhost" in base_url or "127.0.0.1" in base_url:
+                base_url = "https://ai-automation-command-center-4.onrender.com"
+            reply_text = f"{reply_text}\n\n📞 *Live AI Voice Call:* {base_url.rstrip('/')}/call/{clean_first}"
+
+    return {
+        "status": "ok",
+        "provider": "green_api",
+        "processed": processed_count,
+        "reply": reply_text,
+        "audio_base64": audio_b64,
+        "image_url": image_url_val,
+        "image_base64": image_b64_val,
+        "is_voice": is_voice_flag,
+        "send_as_voice": send_as_voice_flag
+    }
+
+
 @api_v1.route("/webhooks/whatsapp", methods=["POST"])
 @rate_limit(limit=1200, window=60, message="Too many WhatsApp webhook requests.")
 def whatsapp_webhook_ingress():
@@ -5547,8 +5710,8 @@ def whatsapp_webhook_ingress():
         is_green_api = bool(payload.get("typeWebhook") or payload.get("instanceData"))
 
         if is_green_api:
-            messages = WhatsAppService.parse_green_api_payload(payload)
-            provider_name = "green_api"
+            res_dict = process_inbound_whatsapp_payload(payload, target_org_id=request.args.get("org_id"))
+            return jsonify(res_dict), 200
         else:
             # Meta Cloud API signature verification
             raw_body = request.get_data()

@@ -918,3 +918,130 @@ def test_whatsapp_bridge_webhook_message_receipt_and_live_call_link(client):
             except Exception:
                 pass
 
+
+
+def test_whatsapp_incoming_message_triggers_call_link_and_ai_reply(client):
+    """End-to-End Test: Verify that incoming 'Hi' messages via both standard phone and @lid JID
+    1. Are saved to database and chat history synchronously.
+    2. Trigger AI Auto-Responder with https://ai-automation-command-center-4.onrender.com/call/<phone> link.
+    3. Strictly never contain http://localhost in the call link.
+    """
+    import time
+    std_phone = "923119876543"
+    lid_phone = "247287691354238"
+    lid_jid = f"{lid_phone}@lid"
+    std_msg_id = f"test_std_{int(time.time()*1000)}"
+    lid_msg_id = f"test_lid_{int(time.time()*1000)}"
+
+    std_payload = {
+        "typeWebhook": "incomingMessageReceived",
+        "instanceData": {"idInstance": "baileys_bridge", "wid": "923001234567@c.us"},
+        "idMessage": std_msg_id,
+        "timestamp": int(time.time()),
+        "senderData": {
+            "chatId": f"{std_phone}@s.whatsapp.net",
+            "sender": std_phone,
+            "senderName": "Test Standard User"
+        },
+        "messageData": {
+            "typeMessage": "textMessage",
+            "textMessageData": {"textMessage": "Hi"}
+        },
+        "from_phone": std_phone,
+        "from": std_phone,
+        "body": "Hi"
+    }
+
+    lid_payload = {
+        "typeWebhook": "incomingMessageReceived",
+        "instanceData": {"idInstance": "baileys_bridge", "wid": "923001234567@c.us"},
+        "idMessage": lid_msg_id,
+        "timestamp": int(time.time()),
+        "senderData": {
+            "chatId": lid_jid,
+            "sender": lid_phone,
+            "senderName": "Test LID User"
+        },
+        "messageData": {
+            "typeMessage": "textMessage",
+            "textMessageData": {"textMessage": "Hi"}
+        },
+        "remoteJid": lid_jid,
+        "chatId": lid_jid,
+        "from_phone": lid_phone,
+        "from": lid_phone,
+        "body": "Hi"
+    }
+
+    try:
+        # 1. Post standard phone 'Hi' to incoming webhook endpoint
+        res_std = client.post("/api/v1/webhooks/whatsapp", json=std_payload)
+        assert res_std.status_code == 200
+        std_data = res_std.get_json()
+        assert std_data.get("status") == "ok"
+        assert std_data.get("processed") >= 1
+        std_reply = std_data.get("reply", "")
+        assert std_reply is not None
+        assert f"/call/{std_phone}" in std_reply
+        assert "https://ai-automation-command-center-4.onrender.com/call/" in std_reply
+        assert "localhost" not in std_reply
+        assert "127.0.0.1" not in std_reply
+
+        # 2. Post @lid format 'Hi' to incoming webhook endpoint
+        res_lid = client.post("/api/v1/webhooks/whatsapp", json=lid_payload)
+        assert res_lid.status_code == 200
+        lid_data = res_lid.get_json()
+        assert lid_data.get("status") == "ok"
+        assert lid_data.get("processed") >= 1
+        lid_reply = lid_data.get("reply", "")
+        assert lid_reply is not None
+        assert f"/call/{lid_phone}" in lid_reply
+        assert "https://ai-automation-command-center-4.onrender.com/call/" in lid_reply
+        assert "localhost" not in lid_reply
+        assert "127.0.0.1" not in lid_reply
+
+        # 3. Verify messages and outbound replies are committed in DB
+        with client.application.app_context():
+            from models import WhatsAppMessage
+            # Inbound standard check
+            std_in = WhatsAppMessage.query.filter_by(whatsapp_message_id=std_msg_id).first()
+            assert std_in is not None
+            assert std_in.direction == "inbound"
+            assert std_in.body == "Hi"
+
+            # Inbound LID check
+            lid_in = WhatsAppMessage.query.filter_by(whatsapp_message_id=lid_msg_id).first()
+            assert lid_in is not None
+            assert lid_in.direction == "inbound"
+            assert lid_in.body == "Hi"
+
+            # Outbound reply check
+            std_out = WhatsAppMessage.query.filter(
+                WhatsAppMessage.direction == "outbound",
+                WhatsAppMessage.recipient.like(f"%{std_phone}%")
+            ).first()
+            assert std_out is not None
+            assert "https://ai-automation-command-center-4.onrender.com/call/" in std_out.body
+            assert "localhost" not in std_out.body
+
+            lid_out = WhatsAppMessage.query.filter(
+                WhatsAppMessage.direction == "outbound",
+                WhatsAppMessage.recipient.like(f"%{lid_phone}%")
+            ).first()
+            assert lid_out is not None
+            assert "https://ai-automation-command-center-4.onrender.com/call/" in lid_out.body
+            assert "localhost" not in lid_out.body
+    finally:
+        with client.application.app_context():
+            try:
+                from models import WhatsAppMessage, Lead
+                from database import db
+                WhatsAppMessage.query.filter(
+                    (WhatsAppMessage.sender.in_([std_phone, lid_phone, lid_jid])) |
+                    (WhatsAppMessage.recipient.like(f"%{std_phone}%")) |
+                    (WhatsAppMessage.recipient.like(f"%{lid_phone}%"))
+                ).delete(synchronize_session=False)
+                Lead.query.filter(Lead.phone.in_([std_phone, lid_phone])).delete(synchronize_session=False)
+                db.session.commit()
+            except Exception:
+                pass

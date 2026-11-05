@@ -12432,8 +12432,10 @@ async function sendActiveCallLinkToWhatsApp(phoneArg = null, nameArg = null) {
     const btnText = document.getElementById('btnSendWaCallLinkText');
     if (btnText) btnText.textContent = 'Sending WhatsApp Link...';
 
-    const origin = window.location.origin || `${window.location.protocol}//${window.location.host}`;
-    const callUrl = `${origin}/call/${targetPhone}`;
+    const origin = (window.location.origin && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://ai-automation-command-center-4.onrender.com';
+    const callUrl = `${origin.replace(/\/+$/, '')}/call/${targetPhone}`;
 
     try {
         const res = await fetch('/api/v1/voice/send-call-link', {

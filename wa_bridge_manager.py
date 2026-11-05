@@ -375,6 +375,54 @@ def start_wa_session_auto_backup(root_dir: str = None, app=None):
 
 _auto_heal_started = False
 _auto_heal_lock = threading.Lock()
+_poll_sync_started = False
+_poll_sync_lock = threading.Lock()
+
+
+def start_bridge_poll_sync_daemon(app=None, check_interval: float = 2.0):
+    """Dual Delivery Guarantee: Continuously polls wa_bridge.js /messages/recent?since=...
+    every 2 seconds. Recovers any incoming message that was missed by the HTTP webhook.
+    """
+    global _poll_sync_started
+    with _poll_sync_lock:
+        if _poll_sync_started:
+            return
+        _poll_sync_started = True
+
+    def _sync_loop():
+        time.sleep(4.0)
+        last_sync = int(time.time() * 1000)
+        import urllib.request
+        while True:
+            try:
+                time.sleep(check_interval)
+                poll_url = f"http://127.0.0.1:3001/messages/recent?since={last_sync}"
+                req = urllib.request.Request(poll_url, headers={"User-Agent": "BridgePollSync/1.0"})
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                    if resp.status == 200:
+                        raw_data = resp.read().decode("utf-8")
+                        data = json.loads(raw_data)
+                        messages = data.get("messages", [])
+                        if messages:
+                            with safe_app_context(app=app):
+                                from whatsapp_service import WhatsAppService
+                                from api_v1 import process_inbound_whatsapp_payload
+                                for msg_data in messages:
+                                    msg_id = msg_data.get("idMessage")
+                                    if msg_id and not WhatsAppService.is_duplicate_message(msg_id):
+                                        logger.info(f"[Bridge Poll Sync] Recovering missed message {msg_id} via Dual Delivery...")
+                                        try:
+                                            process_inbound_whatsapp_payload(msg_data)
+                                        except Exception as p_err:
+                                            logger.warning(f"[Bridge Poll Sync] Ingestion error: {p_err}")
+                            last_sync = int(time.time() * 1000)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_sync_loop, daemon=True, name="WABridgePollSyncDaemon")
+    t.start()
+    logger.info("[WA Bridge] Dual Delivery bridge poll sync daemon active (every 2s).")
+
 
 
 def start_bridge_auto_heal_daemon(app=None, check_interval: float = 6.0):
@@ -446,6 +494,11 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app
     except Exception as h_err:
         logger.warning(f"[WA Bridge] start_bridge_auto_heal_daemon notice: {h_err}")
 
+    try:
+        start_bridge_poll_sync_daemon(app=app)
+    except Exception as s_err:
+        logger.warning(f"[WA Bridge] start_bridge_poll_sync_daemon notice: {s_err}")
+
     # 2. Check if port is already responsive
     if is_port_reachable("127.0.0.1", port, timeout=0.3):
         return True
@@ -508,15 +561,18 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app
             or ("10000" if os.environ.get("RENDER") else "5000")
         )
 
+        flask_backend_url = os.environ.get("FLASK_BACKEND_URL") or f"http://127.0.0.1:{flask_port}"
+
         env["PORT"] = str(bridge_port)
         env["WA_BRIDGE_PORT"] = str(bridge_port)
         env["BRIDGE_PORT"] = str(bridge_port)
         env["PYTHON_PORT"] = str(flask_port)
+        env["FLASK_BACKEND_URL"] = flask_backend_url
         env["AUTH_DIR"] = resolve_auth_dir(root_dir)
         env["PYTHON_WEBHOOK_URL"] = (
             os.environ.get("PYTHON_WEBHOOK_URL")
             if (os.environ.get("PYTHON_WEBHOOK_URL") and f":{bridge_port}/" not in os.environ.get("PYTHON_WEBHOOK_URL"))
-            else f"http://127.0.0.1:{flask_port}/api/v1/webhooks/whatsapp"
+            else f"{flask_backend_url}/api/v1/webhooks/whatsapp"
         )
 
         # 5. Spawn node wa_bridge.js as detached persistent process

@@ -102,6 +102,12 @@ function convertAudioToOggOpus(buffer) {
 const PORT = Number(process.env.WA_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001);
 
 function resolvePythonPort() {
+  if (process.env.FLASK_BACKEND_URL) {
+    const match = process.env.FLASK_BACKEND_URL.match(/:(\d+)/);
+    if (match && Number(match[1]) !== PORT) {
+      return Number(match[1]);
+    }
+  }
   if (process.env.PYTHON_PORT && Number(process.env.PYTHON_PORT) !== PORT) {
     return Number(process.env.PYTHON_PORT);
   }
@@ -123,22 +129,52 @@ function resolvePythonPort() {
   return (process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.RENDER_EXTERNAL_URL) ? 10000 : 5000;
 }
 
+function getFlaskBackendUrl() {
+  if (process.env.FLASK_BACKEND_URL && !process.env.FLASK_BACKEND_URL.includes(`:${PORT}`)) {
+    return process.env.FLASK_BACKEND_URL.replace(/\/+$/, '');
+  }
+  const pyPort = resolvePythonPort();
+  return `http://127.0.0.1:${pyPort}`;
+}
+
+// In-Memory Dual Delivery Sync Buffer (Last 50 Incoming Messages)
+const recentIncomingMessages = [];
+const MAX_RECENT_MESSAGES = 50;
+
+function bufferIncomingMessage(msgData) {
+  try {
+    recentIncomingMessages.push({
+      ...msgData,
+      bufferedAt: Date.now()
+    });
+    if (recentIncomingMessages.length > MAX_RECENT_MESSAGES) {
+      recentIncomingMessages.shift();
+    }
+  } catch (_) {}
+}
+
 const PYTHON_PORT = resolvePythonPort();
 let PYTHON_WEBHOOK_URL = (process.env.PYTHON_WEBHOOK_URL && !process.env.PYTHON_WEBHOOK_URL.includes(`:${PORT}/`))
   ? process.env.PYTHON_WEBHOOK_URL
-  : `http://127.0.0.1:${PYTHON_PORT}/api/v1/webhooks/whatsapp`;
+  : `${getFlaskBackendUrl()}/api/v1/webhooks/whatsapp`;
 
 let detectedWorkingBackendUrl = null;
 
 async function dispatchWebhookToPython(payload) {
+  bufferIncomingMessage(payload);
+  const flaskBase = getFlaskBackendUrl();
   const pPort = resolvePythonPort();
   const primaryUrl = (process.env.PYTHON_WEBHOOK_URL && !process.env.PYTHON_WEBHOOK_URL.includes(`:${PORT}/`))
     ? process.env.PYTHON_WEBHOOK_URL
-    : `http://127.0.0.1:${pPort}/api/v1/webhooks/whatsapp`;
+    : `${flaskBase}/api/v1/webhooks/whatsapp`;
 
   const candidateUrls = [
     primaryUrl,
+    `${flaskBase}/api/v1/webhooks/whatsapp`,
+    `${flaskBase}/api/whatsapp/webhook`,
+    `${flaskBase}/api/whatsapp/incoming`,
     `http://127.0.0.1:${pPort}/api/v1/webhooks/whatsapp`,
+    `http://127.0.0.1:${pPort}/api/whatsapp/webhook`,
     `http://127.0.0.1:10000/api/v1/webhooks/whatsapp`,
     `http://127.0.0.1:5000/api/v1/webhooks/whatsapp`,
     `http://127.0.0.1:8000/api/v1/webhooks/whatsapp`,
@@ -617,10 +653,11 @@ async function resolveSender(msg, activeSock) {
     };
   }
 
-  // FALLBACK: NEVER use bot's own number or prepend '+' to non-numeric strings!
-  const fallbackName = bestName || (remoteJid && !remoteJid.endsWith('@lid') ? remoteJid.split('@')[0] : 'WhatsApp Contact');
+  // FALLBACK: Clean sender ID from remoteJid (handles @lid and non-standard JIDs safely without dropping)
+  const cleanSenderId = (remoteJid && remoteJid.includes('@')) ? remoteJid.split('@')[0].split(':')[0] : (bestName || 'WhatsApp Contact');
+  const fallbackName = bestName || (cleanSenderId ? `+${cleanSenderId}` : 'WhatsApp Contact');
   return {
-    phone: fallbackName,
+    phone: cleanSenderId,
     displayName: fallbackName,
     replyJid: remoteJid
   };
@@ -837,12 +874,13 @@ async function startWhatsAppBridge() {
       logger: pino({ level: 'silent' }),
       printQRInTerminal: false,
       syncFullHistory: false,
-      markOnlineOnConnect: false,
+      markOnlineOnConnect: true,
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
       keepAliveIntervalMs: 30000,
+      retryRequestDelayMs: 250,
       browser: Browsers.macOS('Desktop'),
-      getMessage: async (key) => undefined
+      getMessage: async (key) => ({ conversation: '' })
     });
 
     // Safely persist session credentials (only sync to DB once authenticated)
@@ -1778,6 +1816,14 @@ app.use(express.json());
 /**
  * Health & status endpoint
  */
+app.get(['/messages/recent', '/api/messages/recent'], (req, res) => {
+  const since = Number(req.query.since) || 0;
+  const filtered = since > 0
+    ? recentIncomingMessages.filter(m => (m.bufferedAt || (m.timestamp && m.timestamp * 1000)) > since)
+    : recentIncomingMessages;
+  return res.json({ success: true, count: filtered.length, messages: filtered });
+});
+
 app.get(['/chats', '/api/chats', '/conversations', '/api/conversations'], (req, res) => {
   try {
     const list = Array.from(activeChatsMap.values()).map(c => {

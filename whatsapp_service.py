@@ -6200,7 +6200,7 @@ class WhatsAppService:
         )
         clean_phone = cls.format_phone_number(sender_phone)
         if raw_chat:
-            if raw_chat.endswith("@g.us"):
+            if raw_chat.endswith("@g.us") or raw_chat.endswith("@lid"):
                 real_chat_id = raw_chat
             elif "@" in raw_chat:
                 clean_target = cls.format_phone_number(raw_chat.split("@")[0].split(":")[0])
@@ -6208,7 +6208,10 @@ class WhatsAppService:
             else:
                 real_chat_id = f"{cls.format_phone_number(raw_chat)}@s.whatsapp.net"
         else:
-            real_chat_id = f"{clean_phone}@s.whatsapp.net" if clean_phone else str(sender_phone)
+            real_chat_id = (
+                str(sender_phone) if (str(sender_phone).endswith("@lid") or str(sender_phone).endswith("@g.us"))
+                else (f"{clean_phone}@s.whatsapp.net" if clean_phone else str(sender_phone))
+            )
         org_id = organization_id or "org-enterprise-default"
 
         # Timestamp logging (Zero-drop guarantee: incoming messages are never ignored or dropped based on age)
@@ -6944,8 +6947,11 @@ class WhatsAppService:
                 clean_reply_text = reply_body.strip()
 
             base_app_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
-            live_call_url = f"{base_app_url.rstrip('/')}/call/{clean_phone}"
-            if not is_grp and clean_phone and "/call/" not in clean_reply_text:
+            if "localhost" in base_app_url or "127.0.0.1" in base_app_url:
+                base_app_url = "https://ai-automation-command-center-4.onrender.com"
+            call_phone_slug = clean_phone or (str(raw_chat).split("@")[0] if raw_chat else "customer")
+            live_call_url = f"{base_app_url.rstrip('/')}/call/{call_phone_slug}"
+            if not is_grp and call_phone_slug and "/call/" not in clean_reply_text:
                 clean_reply_text = f"{clean_reply_text}\n\n📞 *Live AI Voice Call:* {live_call_url}"
 
             # FORCE DISPATCH LOGIC:
@@ -7058,17 +7064,29 @@ class WhatsAppService:
 
             # Send text reply unless this was an incoming voice note (inbound voice gets voice-only reply)
             if not is_voice_inbound and not direct_bridge:
-                green_dispatch_res = cls.send_green_api_message(
-                    organization_id=org_id,
-                    to_phone=clean_phone,
-                    chat_id=real_chat_id,
-                    message_text=clean_reply_text,
-                    quoted_message_id=message_id,
-                    allow_fallback=False,
-                    is_ai_response=True
-                )
-                dispatch_res = green_dispatch_res
-                logger.info(f"[Force Dispatch] send_green_api_message execution result for {real_chat_id}: {green_dispatch_res}")
+                try:
+                    dispatch_res = cls.send_message(
+                        organization_id=org_id,
+                        to_phone=clean_phone,
+                        chat_id=real_chat_id,
+                        message_text=clean_reply_text,
+                        quoted_message_id=message_id,
+                        image_url=matched_image_url,
+                        is_ai_response=True
+                    )
+                    logger.info(f"[Direct Bridge Outbound] send_message dispatched to {real_chat_id}: {dispatch_res}")
+                except Exception as b_send_err:
+                    logger.warning(f"[Direct Bridge Outbound] send_message notice: {b_send_err}")
+                    green_dispatch_res = cls.send_green_api_message(
+                        organization_id=org_id,
+                        to_phone=clean_phone,
+                        chat_id=real_chat_id,
+                        message_text=clean_reply_text,
+                        quoted_message_id=message_id,
+                        allow_fallback=False,
+                        is_ai_response=True
+                    )
+                    dispatch_res = green_dispatch_res
 
             # Outbound text dispatch fallback if not dispatched and not direct bridge
             if not direct_bridge and not dispatch_res:
@@ -7928,7 +7946,7 @@ class WhatsAppService:
                 or ""
             )
             from_phone = cls.format_phone_number(raw_phone)
-            chat_id = f"{from_phone}@s.whatsapp.net" if from_phone else (remote_jid or "")
+            chat_id = remote_jid if (str(remote_jid).endswith("@lid") or str(remote_jid).endswith("@g.us")) else (f"{from_phone}@s.whatsapp.net" if from_phone else (remote_jid or ""))
             sender_name = (
                 sender_data.get("senderName")
                 or sender_data.get("chatName")
@@ -9563,7 +9581,7 @@ class WhatsAppService:
             raise ValueError("Recipient phone number or chat ID is required.")
 
         if "@" in raw_target:
-            if raw_target.endswith("@g.us"):
+            if raw_target.endswith("@g.us") or raw_target.endswith("@lid"):
                 real_chat_id = raw_target
                 clean_to = raw_target
             else:
