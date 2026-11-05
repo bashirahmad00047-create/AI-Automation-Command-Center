@@ -161,7 +161,6 @@ let PYTHON_WEBHOOK_URL = (process.env.PYTHON_WEBHOOK_URL && !process.env.PYTHON_
 let detectedWorkingBackendUrl = null;
 
 async function dispatchWebhookToPython(payload) {
-  bufferIncomingMessage(payload);
   const flaskBase = getFlaskBackendUrl();
   const pPort = resolvePythonPort();
   const primaryUrl = (process.env.PYTHON_WEBHOOK_URL && !process.env.PYTHON_WEBHOOK_URL.includes(`:${PORT}/`))
@@ -169,25 +168,23 @@ async function dispatchWebhookToPython(payload) {
     : `${flaskBase}/api/v1/webhooks/whatsapp`;
 
   const candidateUrls = [
+    detectedWorkingBackendUrl ? `${detectedWorkingBackendUrl}/api/v1/webhooks/whatsapp` : null,
+    detectedWorkingBackendUrl ? `${detectedWorkingBackendUrl}/webhooks/whatsapp` : null,
     primaryUrl,
     `${flaskBase}/api/v1/webhooks/whatsapp`,
-    `${flaskBase}/api/whatsapp/webhook`,
-    `${flaskBase}/api/whatsapp/incoming`,
+    `${flaskBase}/webhooks/whatsapp`,
     `http://127.0.0.1:${pPort}/api/v1/webhooks/whatsapp`,
-    `http://127.0.0.1:${pPort}/api/whatsapp/webhook`,
+    `http://127.0.0.1:${pPort}/webhooks/whatsapp`,
     `http://127.0.0.1:10000/api/v1/webhooks/whatsapp`,
-    `http://127.0.0.1:5000/api/v1/webhooks/whatsapp`,
-    `http://127.0.0.1:8000/api/v1/webhooks/whatsapp`,
-    `http://localhost:${pPort}/api/v1/webhooks/whatsapp`,
-    `http://127.0.0.1:${pPort}/webhooks/whatsapp`
-  ];
+    `http://127.0.0.1:5000/api/v1/webhooks/whatsapp`
+  ].filter(Boolean);
   const uniqueUrls = [...new Set(candidateUrls)];
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
     for (const targetUrl of uniqueUrls) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
         const resp = await fetch(targetUrl, {
           method: 'POST',
           headers: {
@@ -212,8 +209,11 @@ async function dispatchWebhookToPython(payload) {
         // Continue to next candidate URL
       }
     }
-    if (attempt < 3) await new Promise(r => setTimeout(r, 800));
+    if (attempt < 2) await new Promise(r => setTimeout(r, 400));
   }
+  // Buffer for background poll sync recovery ONLY if live HTTP dispatch failed
+  bufferIncomingMessage(payload);
+  console.warn(`[Webhook Forward Failed] All targets failed for message ${payload.idMessage}. Buffered for poll recovery.`);
   return null;
 }
 
@@ -580,20 +580,26 @@ function cleanPhoneNumber(jid) {
 async function resolveSender(msg, activeSock) {
   const key = msg.key || {};
   const remoteJid = key.remoteJid || '';
-  // Check all possible real phone fields in Baileys
+  // Check all possible real phone fields in Baileys (remoteJidAlt, senderPn, participant, etc.)
   const candidateJid =
     key.remoteJidAlt ||
     key.senderPn ||
     msg.key?.senderPn ||
     msg.key?.participantPn ||
-    (key.participant?.endsWith('@s.whatsapp.net') ? key.participant : null) ||
-    msg.participant ||
+    (key.participant && key.participant.endsWith('@s.whatsapp.net') ? key.participant : null) ||
+    (key.participant && !key.participant.endsWith('@lid') ? key.participant : null) ||
+    (msg.participant && !msg.participant.endsWith('@lid') ? msg.participant : null) ||
     (remoteJid.endsWith('@s.whatsapp.net') ? remoteJid : null);
 
   let phone = null;
-  if (candidateJid && candidateJid.includes('@s.whatsapp.net')) {
-    phone = candidateJid.split('@')[0].split(':')[0];
-    if (remoteJid.endsWith('@lid')) {
+  if (candidateJid) {
+    const candDigits = cleanPhoneNumber(candidateJid);
+    if (candDigits && candDigits.length >= 10 && candDigits.length <= 13) {
+      phone = candDigits;
+    } else if (String(candidateJid).includes('@s.whatsapp.net')) {
+      phone = cleanPhoneNumber(String(candidateJid).split('@')[0].split(':')[0]);
+    }
+    if (phone && remoteJid.endsWith('@lid')) {
       lidToPhoneMap.set(remoteJid, phone);
       phoneToLidMap.set(phone, remoteJid);
     }
@@ -1252,8 +1258,8 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
             }, 1500);
           }
           
-          // 1. Unwrap ephemeral/viewOnce wrappers first:
-          const unwrappedMsg = msg.message?.ephemeralMessage?.message || msg.message?.viewOnceMessage?.message || unwrapMessage(msg.message) || msg.message;
+          // 1. Unwrap ephemeral/viewOnce containers before extracting text:
+          const unwrappedMsg = unwrapMessage(msg.message) || msg.message?.ephemeralMessage?.message || msg.message?.viewOnceMessage?.message || msg.message;
           let text = extractMessageText(unwrappedMsg);
           let isVoice = false;
           let isAudio = false;
@@ -1411,7 +1417,14 @@ if (!text) text = '[Voice note]';
             };
           }
 
-          const normalizedChatId = remoteJid.endsWith('@g.us') ? remoteJid : (remoteJid.endsWith('@lid') ? remoteJid : normalizeJid(senderPhone || remoteJid));
+          const cleanDigitsSender = cleanPhoneNumber(senderPhone);
+          const resolvedPhoneJid = (cleanDigitsSender && cleanDigitsSender.length >= 10 && cleanDigitsSender.length <= 13)
+            ? `${cleanDigitsSender}@s.whatsapp.net`
+            : null;
+
+          const normalizedChatId = remoteJid.endsWith('@g.us')
+            ? remoteJid
+            : (resolvedPhoneJid || (remoteJid.endsWith('@lid') ? remoteJid : normalizeJid(senderPhone || remoteJid)));
 
           console.log(`[Incoming Message] From: ${senderPhone} (${pushName}) | ID: ${messageId} | Chat: ${normalizedChatId} | Type: ${typeMessage} | Audio: ${Boolean(audioDataUrl || audioBase64)} | Text: "${text}"`);
 
@@ -1516,6 +1529,10 @@ if (!text) text = '[Voice note]';
           // Function to deliver response with presence and jitter delay
           const deliverAiResponse = async (resData, finalTargetJid) => {
             if (!resData || (!resData.reply && !resData.audio_base64 && !resData.image_url && !resData.image_base64)) return;
+            let target = target;
+            if (target && target.endsWith('@c.us')) {
+              target = target.replace('@c.us', '@s.whatsapp.net');
+            }
             const shouldSendVoice = Boolean(resData.audio_base64 && (resData.send_as_voice || resData.is_voice));
             const shouldSendImage = Boolean(resData.image_url || resData.image_base64);
             // Safe async human delay: 3 to 5 seconds
@@ -1527,7 +1544,7 @@ if (!text) text = '[Voice note]';
             let sentMsg = null;
             if (shouldSendImage) {
               try {
-                await sock.sendPresenceUpdate('composing', finalTargetJid);
+                await sock.sendPresenceUpdate('composing', target);
               } catch (_) {}
               await new Promise(r => setTimeout(r, jitterMs));
               const caption = resData.reply ? String(resData.reply) : '';
@@ -1535,43 +1552,43 @@ if (!text) text = '[Voice note]';
                 if (resData.image_base64) {
                   const cleanBase64 = String(resData.image_base64).replace(/^data:[^;]+;base64,/, '').trim();
                   const imgBuf = Buffer.from(cleanBase64, 'base64');
-                  sentMsg = await sock.sendMessage(finalTargetJid, { image: imgBuf, caption });
+                  sentMsg = await sock.sendMessage(target, { image: imgBuf, caption });
                 } else if (resData.image_url) {
-                  sentMsg = await sock.sendMessage(finalTargetJid, { image: { url: resData.image_url }, caption });
+                  sentMsg = await sock.sendMessage(target, { image: { url: resData.image_url }, caption });
                 }
-                console.log(`[Direct Bridge Image Dispatch] Image card delivered to ${finalTargetJid}: ID=${sentMsg?.key?.id}`);
+                console.log(`[Direct Bridge Image Dispatch] Image card delivered to ${target}: ID=${sentMsg?.key?.id}`);
                 if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
               } catch (imgErr) {
                 console.warn('[Direct Bridge Image Error, falling back to text]:', imgErr.message);
                 if (resData.reply) {
                   try {
-                    sentMsg = await sock.sendMessage(finalTargetJid, { text: String(resData.reply) });
+                    sentMsg = await sock.sendMessage(target, { text: String(resData.reply) });
                   } catch (_) {}
                 }
               } finally {
-                try { await sock.sendPresenceUpdate('paused', finalTargetJid); } catch (_) {}
+                try { await sock.sendPresenceUpdate('paused', target); } catch (_) {}
               }
             } else if (shouldSendVoice && resData.audio_base64) {
               try {
-                await sock.sendPresenceUpdate('recording', finalTargetJid);
-                console.log(`[Anti-Ban Shield] Presence 'recording' active for ${finalTargetJid} during ${jitterMs}ms jitter delay...`);
+                await sock.sendPresenceUpdate('recording', target);
+                console.log(`[Anti-Ban Shield] Presence 'recording' active for ${target} during ${jitterMs}ms jitter delay...`);
               } catch (_) {}
 
               await new Promise(r => setTimeout(r, jitterMs));
 
               let audioBuf = Buffer.from(resData.audio_base64, 'base64');
               if (!audioBuf || audioBuf.length <= 1024) {
-                console.warn(`[Direct Bridge Audio Buffer Invalid] Size=${audioBuf ? audioBuf.length : 0} bytes <= 1024. Bypassing voice and delivering text reply to ${finalTargetJid}.`);
+                console.warn(`[Direct Bridge Audio Buffer Invalid] Size=${audioBuf ? audioBuf.length : 0} bytes <= 1024. Bypassing voice and delivering text reply to ${target}.`);
                 if (resData.reply) {
                   try {
-                    await sock.sendPresenceUpdate('composing', finalTargetJid);
-                    sentMsg = await sock.sendMessage(finalTargetJid, { text: String(resData.reply) });
-                    console.log(`[Direct Bridge Text Delivery] Successfully delivered text to ${finalTargetJid}: ID=${sentMsg?.key?.id}`);
+                    await sock.sendPresenceUpdate('composing', target);
+                    sentMsg = await sock.sendMessage(target, { text: String(resData.reply) });
+                    console.log(`[Direct Bridge Text Delivery] Successfully delivered text to ${target}: ID=${sentMsg?.key?.id}`);
                     if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
                   } catch (tErr) {
                     console.error('[Direct Bridge Text Delivery Error]:', tErr.message);
                   } finally {
-                    try { await sock.sendPresenceUpdate('paused', finalTargetJid); } catch (_) {}
+                    try { await sock.sendPresenceUpdate('paused', target); } catch (_) {}
                   }
                 }
                 return;
@@ -1591,21 +1608,21 @@ if (!text) text = '[Voice note]';
               }
 
               try {
-                sentMsg = await sock.sendMessage(finalTargetJid, {
+                sentMsg = await sock.sendMessage(target, {
                   audio: audioBuf,
                   mimetype: outMime,
                   ptt: outPtt,
                   fileName: outMime.includes('ogg') ? 'voice_reply.oga' : 'voice_reply.mp4'
                 });
-                console.log(`[Direct Bridge Dispatch Success] Outbound PTT voice note delivered to ${finalTargetJid}: ID=${sentMsg?.key?.id}`);
+                console.log(`[Direct Bridge Dispatch Success] Outbound PTT voice note delivered to ${target}: ID=${sentMsg?.key?.id}`);
                 if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
 
                 // Also deliver text message with clickable Live Call Room Link
                 if (resData.reply) {
                   try {
-                    await sock.sendPresenceUpdate('composing', finalTargetJid);
-                    const callMsg = await sock.sendMessage(finalTargetJid, { text: String(resData.reply) });
-                    console.log(`[Direct Bridge Call Link Followup Success] Delivered live call link to ${finalTargetJid}: ID=${callMsg?.key?.id}`);
+                    await sock.sendPresenceUpdate('composing', target);
+                    const callMsg = await sock.sendMessage(target, { text: String(resData.reply) });
+                    console.log(`[Direct Bridge Call Link Followup Success] Delivered live call link to ${target}: ID=${callMsg?.key?.id}`);
                     if (callMsg?.key?.id) sentAiMessageIds.add(callMsg.key.id);
                   } catch (clErr) {
                     console.warn('[Direct Bridge Call Link Followup Error]:', clErr.message);
@@ -1615,32 +1632,32 @@ if (!text) text = '[Voice note]';
                 console.warn('[Direct Bridge Audio Error, falling back to text delivery]:', aErr.message);
                 if (resData.reply) {
                   try {
-                    sentMsg = await sock.sendMessage(finalTargetJid, { text: String(resData.reply) });
-                    console.log(`[Direct Bridge Fallback Text Success] Delivered text reply to ${finalTargetJid}: ID=${sentMsg?.key?.id}`);
+                    sentMsg = await sock.sendMessage(target, { text: String(resData.reply) });
+                    console.log(`[Direct Bridge Fallback Text Success] Delivered text reply to ${target}: ID=${sentMsg?.key?.id}`);
                     if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
                   } catch (fErr) {
                     console.error('[Direct Bridge Fallback Text Failed]:', fErr.message);
                   }
                 }
               } finally {
-                try { await sock.sendPresenceUpdate('paused', finalTargetJid); } catch (_) {}
+                try { await sock.sendPresenceUpdate('paused', target); } catch (_) {}
               }
             } else if (resData.reply) {
               try {
-                await sock.sendPresenceUpdate('composing', finalTargetJid);
-                console.log(`[Anti-Ban Shield] Presence 'composing' active for ${finalTargetJid} during ${jitterMs}ms jitter delay...`);
+                await sock.sendPresenceUpdate('composing', target);
+                console.log(`[Anti-Ban Shield] Presence 'composing' active for ${target} during ${jitterMs}ms jitter delay...`);
               } catch (_) {}
 
               await new Promise(r => setTimeout(r, jitterMs));
 
               try {
-                sentMsg = await sock.sendMessage(finalTargetJid, { text: String(resData.reply) });
-                console.log(`[Direct Bridge Dispatch Success] Outbound text delivered to ${finalTargetJid}: ID=${sentMsg?.key?.id}`);
+                sentMsg = await sock.sendMessage(target, { text: String(resData.reply) });
+                console.log(`[Direct Bridge Dispatch Success] Outbound text delivered to ${target}: ID=${sentMsg?.key?.id}`);
                 if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
               } catch (tErr) {
                 console.warn('[Direct Bridge Text Error]:', tErr.message);
               } finally {
-                try { await sock.sendPresenceUpdate('paused', finalTargetJid); } catch (_) {}
+                try { await sock.sendPresenceUpdate('paused', target); } catch (_) {}
               }
             }
           };

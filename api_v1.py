@@ -3722,78 +3722,22 @@ def get_session_storage_path():
 # Baileys Incoming Webhook (Enhanced)
 # ------------------------------------------
 
-@api_v1.route("/whatsapp/webhook", methods=["POST"])
+@api_v1.route("/whatsapp/webhook", methods=["GET", "POST"])
 def handle_incoming_webhook():
-    """Receives incoming Baileys webhook payloads with full message parsing.
-
-    Extracts sender phone, detects group/personal, processes voice notes,
-    and extracts text content from conversation/extendedTextMessage.
-    """
-    payload = request.get_json(force=True, silent=True)
-    if not payload:
-        return jsonify({"error": "Invalid JSON"}), 400
-
-    clean_number, is_group = extract_real_phone_number(payload)
-    if not clean_number:
-        return jsonify({"status": "ignored", "reason": "Invalid or non-personal JID"}), 200
-
-    audio_info = None
-    if "audioMessage" in payload.get("message", {}):
-        audio_info = process_and_save_voice_note(payload)
-
-    msg_box = payload.get("message", {})
-    text_content = (
-        msg_box.get("conversation")
-        or msg_box.get("extendedTextMessage", {}).get("text")
-        or ""
-    )
-
-    response_data = {
-        "status": "success",
-        "sender_phone": clean_number,
-        "is_group": is_group,
-        "text": text_content.strip() if text_content else None,
-        "audio": audio_info,
-    }
-    return jsonify(response_data), 200
+    """Universal incoming WhatsApp webhook handler (Baileys bridge & Green-API)."""
+    return whatsapp_webhook_ingress()
 
 
-@api_v1.route("/whatsapp/baileys/incoming", methods=["POST"])
+@api_v1.route("/whatsapp/baileys/incoming", methods=["GET", "POST"])
 def api_baileys_incoming_webhook():
-    """Receives incoming Baileys webhook payloads (messages, voice notes).
+    """Universal Baileys incoming webhook handler."""
+    return whatsapp_webhook_ingress()
 
-    Legacy-compatible endpoint — internally delegates to handle_incoming_webhook logic.
-    """
-    payload = request.get_json(force=True, silent=True) or {}
-    if not payload:
-        return jsonify({"status": "error", "detail": "Empty payload received"}), 400
 
-    try:
-        clean_number, is_group = extract_real_phone_number(payload)
-        if not clean_number:
-            return jsonify({"status": "ignored", "reason": "Not a valid personal WhatsApp sender"}), 200
-
-        audio_info = None
-        if "audioMessage" in payload.get("message", {}):
-            audio_info = process_and_save_voice_note(payload)
-
-        msg_box = payload.get("message", {})
-        text_content = (
-            msg_box.get("conversation")
-            or msg_box.get("extendedTextMessage", {}).get("text")
-            or ""
-        )
-
-        return jsonify({
-            "status": "success",
-            "sender_phone": clean_number,
-            "is_group": is_group,
-            "text": text_content.strip() if text_content else None,
-            "audio": audio_info,
-        }), 200
-    except Exception as exc:
-        logger.error(f"[Baileys Webhook] Processing error: {exc}", exc_info=True)
-        return jsonify({"status": "error", "detail": str(exc)}), 500
+@api_v1.route("/whatsapp/incoming", methods=["GET", "POST"])
+def api_whatsapp_incoming_route():
+    """Universal WhatsApp incoming webhook handler."""
+    return whatsapp_webhook_ingress()
 
 
 
@@ -5535,7 +5479,7 @@ def whatsapp_webhook_verification():
     return jsonify({"error": "Forbidden: invalid verification token or mode"}), 403
 
 
-def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None) -> dict:
+def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, direct_bridge: bool = True) -> dict:
     """Universal synchronous processor for WhatsApp inbound payloads (Baileys bridge / Green-API).
     1. Immediately records message to WhatsAppMessage and commits (Socket.IO emit to frontend).
     2. Auto-ingests CRM Lead / customer contact info.
@@ -5649,7 +5593,7 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None) -
                     download_url=msg.get("download_url"),
                     audio_base64=msg.get("audio_base64"),
                     media_url=msg.get("media_url") or msg.get("download_url"),
-                    direct_bridge=True
+                    direct_bridge=direct_bridge
                 )
             except Exception as auto_err:
                 logger.error(f"AI Auto-Responder error: {auto_err}")
@@ -9523,17 +9467,9 @@ def whatsapp_inbound_catalog_hook():
         return jsonify({"status": "error", "detail": str(e)}), 500
 
 # --- FIX: WHATSAPP NUMBER MAPPING & LOCATION NO-TEXT ERROR ---
-@api_v1.route("/whatsapp/messages/incoming", methods=["POST"])
+@api_v1.route("/whatsapp/messages/incoming", methods=["GET", "POST"])
 def fix_incoming_whatsapp_message():
-    try:
-        data = request.get_json(silent=True) or {}
-        sender = data.get("from") or data.get("phone") or "03461000668"
-        msg_body = data.get("message") or data.get("body") or data.get("text") or "(no text)"
-        
-        # Ensure correct active sender number mapping and handle location payloads properly
-        return jsonify({"status": "success", "sender": sender, "received_text": msg_body}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "detail": str(e)}), 500
+    return whatsapp_webhook_ingress()
 
 
 # ==============================================================================

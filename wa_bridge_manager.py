@@ -379,9 +379,9 @@ _poll_sync_started = False
 _poll_sync_lock = threading.Lock()
 
 
-def start_bridge_poll_sync_daemon(app=None, check_interval: float = 2.0):
+def start_bridge_poll_sync_daemon(app=None, check_interval: float = 5.0):
     """Dual Delivery Guarantee: Continuously polls wa_bridge.js /messages/recent?since=...
-    every 2 seconds. Recovers any incoming message that was missed by the HTTP webhook.
+    every 5 seconds. Recovers any incoming message that failed the live HTTP webhook.
     """
     global _poll_sync_started
     with _poll_sync_lock:
@@ -390,7 +390,7 @@ def start_bridge_poll_sync_daemon(app=None, check_interval: float = 2.0):
         _poll_sync_started = True
 
     def _sync_loop():
-        time.sleep(4.0)
+        time.sleep(6.0)
         last_sync = int(time.time() * 1000)
         import urllib.request
         while True:
@@ -398,7 +398,7 @@ def start_bridge_poll_sync_daemon(app=None, check_interval: float = 2.0):
                 time.sleep(check_interval)
                 poll_url = f"http://127.0.0.1:3001/messages/recent?since={last_sync}"
                 req = urllib.request.Request(poll_url, headers={"User-Agent": "BridgePollSync/1.0"})
-                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                with urllib.request.urlopen(req, timeout=2.0) as resp:
                     if resp.status == 200:
                         raw_data = resp.read().decode("utf-8")
                         data = json.loads(raw_data)
@@ -412,7 +412,7 @@ def start_bridge_poll_sync_daemon(app=None, check_interval: float = 2.0):
                                     if msg_id and not WhatsAppService.is_duplicate_message(msg_id):
                                         logger.info(f"[Bridge Poll Sync] Recovering missed message {msg_id} via Dual Delivery...")
                                         try:
-                                            process_inbound_whatsapp_payload(msg_data)
+                                            process_inbound_whatsapp_payload(msg_data, direct_bridge=False)
                                         except Exception as p_err:
                                             logger.warning(f"[Bridge Poll Sync] Ingestion error: {p_err}")
                             last_sync = int(time.time() * 1000)
@@ -421,7 +421,7 @@ def start_bridge_poll_sync_daemon(app=None, check_interval: float = 2.0):
 
     t = threading.Thread(target=_sync_loop, daemon=True, name="WABridgePollSyncDaemon")
     t.start()
-    logger.info("[WA Bridge] Dual Delivery bridge poll sync daemon active (every 2s).")
+    logger.info("[WA Bridge] Dual Delivery bridge poll sync daemon active (every 5s).")
 
 
 
@@ -471,9 +471,46 @@ def is_port_reachable(host: str = "127.0.0.1", port: int = 3001, timeout: float 
         return False
 
 
-def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app=None) -> bool:
+def kill_stale_bridge_processes(port: int = 3001) -> None:
+    """Kills any stale wa_bridge node process or process bound to the bridge port."""
+    global _bridge_proc
+    if _bridge_proc is not None:
+        try:
+            if _bridge_proc.poll() is None:
+                logger.info(f"[WA Bridge] Terminating stale bridge process (PID: {_bridge_proc.pid})...")
+                _bridge_proc.terminate()
+                try:
+                    _bridge_proc.wait(timeout=1.5)
+                except subprocess.TimeoutExpired:
+                    _bridge_proc.kill()
+        except Exception as k_err:
+            logger.debug(f"[WA Bridge] Error terminating _bridge_proc: {k_err}")
+        _bridge_proc = None
+
+    # Release port if held by a stale node process
+    try:
+        if sys.platform == "win32":
+            cmd = f'netstat -ano -p tcp | findstr /R /C:":{port} .*LISTENING"'
+            out = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode(errors="ignore")
+            for line in out.strip().splitlines():
+                parts = line.strip().split()
+                if parts:
+                    pid = parts[-1]
+                    if pid.isdigit() and int(pid) != os.getpid():
+                        logger.info(f"[WA Bridge] Releasing port {port} held by stale PID {pid}")
+                        subprocess.run(f"taskkill /F /PID {pid}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.run(f"fuser -k {port}/tcp", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run("pkill -9 -f 'node.*wa_bridge.js'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+    time.sleep(0.3)
+
+
+def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app=None, force_restart: bool = False) -> bool:
     """Guarantees session restoration, background backup thread execution, auto-heal watchdog
-    supervisor, and checks if port 3001 is reachable; if not, spawns `node wa_bridge.js`.
+    supervisor, and checks if port 3001 is reachable; if not or if force_restart is True,
+    terminates stale processes and spawns `node wa_bridge.js`.
     """
     global _bridge_proc
     root_dir = os.path.dirname(os.path.abspath(__file__))
@@ -499,21 +536,23 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app
     except Exception as s_err:
         logger.warning(f"[WA Bridge] start_bridge_poll_sync_daemon notice: {s_err}")
 
-    # 2. Check if port is already responsive
-    if is_port_reachable("127.0.0.1", port, timeout=0.3):
+    # 2. Check if port is already responsive (unless force_restart requested)
+    if not force_restart and is_port_reachable("127.0.0.1", port, timeout=0.3):
         return True
 
     with _bridge_proc_lock:
-        if is_port_reachable("127.0.0.1", port, timeout=0.3):
+        if not force_restart and is_port_reachable("127.0.0.1", port, timeout=0.3):
             return True
 
-        if _bridge_proc is not None and _bridge_proc.poll() is None:
+        if not force_restart and _bridge_proc is not None and _bridge_proc.poll() is None:
             start_time = time.time()
             while time.time() - start_time < timeout_seconds:
                 if is_port_reachable("127.0.0.1", port, timeout=0.25):
                     return True
                 time.sleep(0.25)
-            return is_port_reachable("127.0.0.1", port, timeout=0.3)
+
+        # Stale process or port offline: clean restart
+        kill_stale_bridge_processes(port=port)
 
         bridge_script = os.path.join(root_dir, "wa_bridge.js")
         if not os.path.exists(bridge_script):

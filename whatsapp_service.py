@@ -9589,13 +9589,19 @@ class WhatsAppService:
                 real_chat_id = f"{clean_to}@s.whatsapp.net"
         else:
             clean_to = cls.format_phone_number(raw_target)
-            real_chat_id = f"{clean_to}@s.whatsapp.net"
+            if len(clean_to) > 13:
+                real_chat_id = f"{clean_to}@lid"
+            else:
+                real_chat_id = f"{clean_to}@s.whatsapp.net"
 
         if not clean_to or len(clean_to) < 7:
             digits = "".join(filter(str.isdigit, raw_target))
             if len(digits) >= 7:
                 clean_to = digits
-                real_chat_id = f"{clean_to}@s.whatsapp.net"
+                if len(clean_to) > 13:
+                    real_chat_id = f"{clean_to}@lid"
+                else:
+                    real_chat_id = f"{clean_to}@s.whatsapp.net"
             else:
                 raise ValueError(f"Invalid recipient phone number: '{to_phone or chat_id}'. Must include country code and digits.")
 
