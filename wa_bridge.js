@@ -266,12 +266,28 @@ function getBackendBaseUrl() {
 function isAuthenticatedCreds(dir) {
   try {
     const credsPath = path.join(dir, 'creds.json');
-    if (!fs.existsSync(credsPath) || fs.statSync(credsPath).size < 50) return false;
+    if (!fs.existsSync(credsPath) || fs.statSync(credsPath).size < 100) return false;
     const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-    return Boolean(creds && (creds.registered === true || (creds.me && creds.me.id)));
+    const hasNoise = Boolean(creds && creds.noiseKey && (creds.noiseKey.private || creds.noiseKey.public));
+    const hasKeys = Boolean(creds && (creds.signedIdentityKey || creds.signedPreKey));
+    const hasMeOrReg = Boolean(creds && (creds.registered === true || (creds.me && creds.me.id)));
+    return hasNoise && hasKeys && hasMeOrReg;
   } catch (_) {
     return false;
   }
+}
+
+/**
+ * Returns true only if the Baileys socket is genuinely connected and its WebSocket is actively open.
+ */
+function isSocketGenuinelyConnected() {
+  return Boolean(
+    sock &&
+    sock.user &&
+    sock.user.id &&
+    isConnected &&
+    (sock.ws?.isOpen === true || sock.ws?.readyState === 1)
+  );
 }
 
 let sessionBackupDebounce = null;
@@ -811,13 +827,15 @@ async function startWhatsAppBridge() {
     // Query DB for session credentials if local creds are absent, unauthenticated, or corrupted
     const credsCheckPath = path.join(AUTH_DIR, 'creds.json');
     let credsNeedRestore = false;
-    if (!fs.existsSync(credsCheckPath) || fs.statSync(credsCheckPath).size < 20) {
+    if (!fs.existsSync(credsCheckPath) || fs.statSync(credsCheckPath).size < 100) {
       credsNeedRestore = true;
     } else {
       try {
         const parsed = JSON.parse(fs.readFileSync(credsCheckPath, 'utf8'));
-        if (!parsed.registered && (!parsed.me || !parsed.me.id)) {
-          console.log('[WhatsApp Bridge] Local creds.json is not authenticated yet. Checking DB for saved session...');
+        const hasNoise = Boolean(parsed && parsed.noiseKey && (parsed.noiseKey.private || parsed.noiseKey.public));
+        if (!hasNoise || (!parsed.registered && (!parsed.me || !parsed.me.id))) {
+          console.log('[WhatsApp Bridge] Local creds.json lacks valid crypto keys. Purging corrupted stub and checking DB...');
+          try { fs.unlinkSync(credsCheckPath); } catch (_) {}
           credsNeedRestore = true;
         }
       } catch (e) {
@@ -1050,6 +1068,27 @@ async function startWhatsAppBridge() {
         console.log(` Python Webhook target: ${PYTHON_WEBHOOK_URL}`);
         console.log('===============================================================\n');
       }
+    });
+
+    // Real-time message delivery & read receipts listener
+    sock.ev.on('messages.update', async (updates) => {
+      try {
+        if (!updates || !Array.isArray(updates)) return;
+        for (const update of updates) {
+          const key = update.key;
+          const status = update.update?.status;
+          if (key && status) {
+            const statusStr = status >= 4 ? 'read' : (status >= 3 ? 'delivered' : 'sent');
+            dispatchWebhookToPython({
+              typeWebhook: 'messageStatus',
+              idMessage: key.id,
+              status: statusStr,
+              chatId: key.remoteJid,
+              timestamp: Math.floor(Date.now() / 1000)
+            }).catch(() => {});
+          }
+        }
+      } catch (_) {}
     });
 
     // 0. History synchronization on initial connect or reconnect (auto-syncs contacts and groups)
@@ -1304,8 +1343,47 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
             }, 1500);
           }
           
-          // 1. Unwrap ephemeral/viewOnce containers before extracting text:
-          const unwrappedMsg = unwrapMessage(msg.message) || msg.message?.ephemeralMessage?.message || msg.message?.viewOnceMessage?.message || msg.message;
+          // 1. Fully unwrap nested WhatsApp message types (ephemeral, viewOnce, documentWithCaption, protocol):
+          const rawMsg = msg.message;
+          const unwrappedMsg =
+            rawMsg?.ephemeralMessage?.message ||
+            rawMsg?.viewOnceMessage?.message ||
+            rawMsg?.viewOnceMessageV2?.message ||
+            rawMsg?.viewOnceMessageV2Extension?.message ||
+            rawMsg?.documentWithCaptionMessage?.message ||
+            rawMsg?.protocolMessage?.editedMessage ||
+            rawMsg?.editedMessage?.message?.protocolMessage?.editedMessage ||
+            rawMsg?.editedMessage?.message ||
+            unwrapMessage(rawMsg) ||
+            rawMsg;
+
+          // Decryption Error / PreKey / Bad MAC / Empty Payload Recovery
+          if (!unwrappedMsg || Object.keys(unwrappedMsg).length === 0 || msg.messageStubType) {
+            console.warn(`[WhatsApp Bridge Decryption] Message ${messageId} payload is empty (possible PreKeyError/Bad MAC). Triggering resync...`);
+            if (sock && typeof sock.resyncAppState === 'function') {
+              sock.resyncAppState(['critical_block', 'critical_unblock_low']).catch(() => {});
+            }
+            if (sock && typeof sock.sendRetryRequest === 'function' && msg.key) {
+              sock.sendRetryRequest(msg.key, sock.authState?.keys).catch(() => {});
+            }
+            continue; // Never forward empty ghost stub to Python!
+          }
+
+          // Resolve @lid identity mappings
+          if (remoteJid && remoteJid.endsWith('@lid')) {
+            if (msg.pushName) {
+              contactNamesMap.set(remoteJid, msg.pushName);
+            }
+            const candidatePhone = msg.key?.participant || msg.key?.remoteJidAlt || msg.key?.senderPn || msg.key?.participantPn;
+            if (candidatePhone) {
+              const cl = cleanPhoneNumber(candidatePhone);
+              if (cl) {
+                lidToPhoneMap.set(remoteJid, cl);
+                phoneToLidMap.set(cl, remoteJid);
+              }
+            }
+          }
+
           let text = extractMessageText(unwrappedMsg, msg.message);
           let isVoice = false;
           let isAudio = false;
@@ -1918,14 +1996,15 @@ app.get(['/chats', '/api/chats', '/conversations', '/api/conversations'], (req, 
 
 app.get(['/', '/status', '/health', '/api/status'], (req, res) => {
   try {
+    const genuinelyConnected = isSocketGenuinelyConnected();
     return res.status(200).json({
       bridge: 'WhatsApp Baileys Bridge',
-      status: isConnected ? 'connected' : (currentQr ? 'qr_ready' : (isStarting ? 'initializing' : 'waiting')),
-      connected: isConnected,
-      hasQr: !!currentQr,
-      qrUrl: currentQrUrl,
-      qr: currentQr,
-      user: sock?.user || null,
+      status: genuinelyConnected ? 'connected' : (currentQr ? 'qr_ready' : (isStarting ? 'initializing' : 'waiting')),
+      connected: genuinelyConnected,
+      hasQr: !genuinelyConnected && !!currentQr,
+      qrUrl: genuinelyConnected ? null : currentQrUrl,
+      qr: genuinelyConnected ? null : currentQr,
+      user: genuinelyConnected ? (sock?.user || null) : null,
       target_webhook: PYTHON_WEBHOOK_URL,
       uptime_seconds: Math.floor(process.uptime()),
       timestamp: new Date().toISOString()
@@ -1947,8 +2026,8 @@ app.get(['/', '/status', '/health', '/api/status'], (req, res) => {
  */
 app.get(['/qr', '/api/qr', '/wa/qr'], async (req, res) => {
   try {
-    // GUARD: If WhatsApp is already connected, return connected status immediately without resetting
-    if (isConnected || (sock?.user && !currentQr)) {
+    // GUARD: Only report connected when Baileys socket is genuinely connected with active WebSocket!
+    if (isSocketGenuinelyConnected()) {
       return res.status(200).json({
         status: 'connected',
         connected: true,
@@ -2310,8 +2389,20 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
       });
     }
 
-    const isReady = Boolean(isConnected || (sock && sock.user && !currentQr));
-    if (!sock || !isReady) {
+    // If bridge is reconnecting or socket is opening, queue and wait up to 3000ms
+    if (!isSocketGenuinelyConnected()) {
+      console.log('[Send Message Queue] Baileys socket is connecting/re-syncing. Queuing and waiting up to 3000ms...');
+      const waitStart = Date.now();
+      while (Date.now() - waitStart < 3000) {
+        await new Promise(r => setTimeout(r, 250));
+        if (isSocketGenuinelyConnected()) {
+          console.log('[Send Message Queue] Baileys socket became active during wait window!');
+          break;
+        }
+      }
+    }
+
+    if (!isSocketGenuinelyConnected()) {
       return res.status(400).json({
         success: false,
         connected: false,
@@ -2556,7 +2647,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
       success: true,
       messageId: sent?.key?.id || null,
       idMessage: sent?.key?.id || null,
-      status: 'sent',
+      status: 'delivered',
       to: jid,
       recipient: jid,
       timestamp: Math.floor(Date.now() / 1000)
@@ -2622,3 +2713,26 @@ setInterval(() => {
     }
   }
 }, 20000);
+
+// ============================================================================
+// 15-SECOND AUTOMATIC SOCKET HEARTBEAT WATCHDOG
+// ============================================================================
+setInterval(() => {
+  try {
+    const genuinelyConnected = isSocketGenuinelyConnected();
+    if (isConnected && !genuinelyConnected) {
+      console.warn('[WhatsApp Bridge Heartbeat] WebSocket connection dropped or readyState != 1. Triggering immediate auto-reconnect...');
+      isConnected = false;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => {
+        startWhatsAppBridge().catch((err) => console.error('[WhatsApp Bridge Heartbeat Reconnect Failed]:', err.message));
+      }, 1000);
+    } else if (genuinelyConnected && sock?.ws) {
+      if (typeof sock.ws.ping === 'function') {
+        try { sock.ws.ping(); } catch (_) {}
+      }
+    }
+  } catch (heartbeatErr) {
+    console.debug('[WhatsApp Bridge Heartbeat Notice]:', heartbeatErr.message);
+  }
+}, 15000);

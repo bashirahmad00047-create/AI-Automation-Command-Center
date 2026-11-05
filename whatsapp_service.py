@@ -7884,7 +7884,7 @@ class WhatsAppService:
             return messages
 
         # Handle message delivery status updates
-        if type_webhook in ("outgoingMessageStatus", "statusInstanceChanged"):
+        if type_webhook in ("outgoingMessageStatus", "statusInstanceChanged", "messageStatus"):
             msg_id = data.get("idMessage")
             status = data.get("status") or type_webhook
             if msg_id and status:
@@ -9774,7 +9774,7 @@ class WhatsAppService:
                         body=message_text,
                         message_type=saved_msg_type,
                         media_url=stored_audio_url or audio_data_url,
-                        status="sent",
+                        status="delivered",
                         whatsapp_message_id=msg_id,
                         execution_id=execution_id,
                         raw_payload={
@@ -9797,7 +9797,7 @@ class WhatsAppService:
                     )
                     return {
                         "success": True,
-                        "status": "sent",
+                        "status": "delivered",
                         "provider": "baileys_bridge",
                         "whatsapp_message_id": msg_id,
                         "message_record_id": record.id if record else None,

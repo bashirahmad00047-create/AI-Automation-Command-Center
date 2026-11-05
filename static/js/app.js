@@ -5314,11 +5314,9 @@ function initWhatsAppSocket() {
                 const transport = waSocket?.io?.engine?.transport?.name || 'standard';
                 console.log(`[Socket.IO] Real-time messaging connection established via ${transport}.`);
                 setGlobalConnectionStatus('connected');
-                updateWhatsAppConnectionUI('connected');
             });
             waSocket.on('disconnect', (reason) => {
                 console.debug('[Socket.IO notice] Disconnected:', reason);
-                updateWhatsAppConnectionUI('connected');
                 scheduleNextWhatsAppPoll(1000);
             });
             waSocket.on('connect_error', (err) => {
@@ -5327,19 +5325,16 @@ function initWhatsAppSocket() {
                 if (waSocket && waSocket.io && waSocket.io.opts) {
                     waSocket.io.opts.transports = ['polling'];
                 }
-                updateWhatsAppConnectionUI('connected');
                 scheduleNextWhatsAppPoll(1000);
             });
             waSocket.on('reconnect_attempt', (num) => {
                 waSocketReconnectAttempts = num;
-                updateWhatsAppConnectionUI('connected');
                 scheduleNextWhatsAppPoll(1000);
             });
             waSocket.on('reconnect', (num) => {
                 waSocketReconnectAttempts = 0;
                 console.log(`[Socket.IO] Reconnected successfully after ${num} attempts.`);
                 setGlobalConnectionStatus('connected');
-                updateWhatsAppConnectionUI('connected');
                 loadWhatsAppMessagesOnly();
             });
             waSocket.on('new_whatsapp_message', (msg) => {
@@ -6711,7 +6706,7 @@ async function sendWhatsAppReply() {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-            optimisticMsg.status = 'sent';
+            optimisticMsg.status = 'delivered';
             optimisticMsg.whatsapp_message_id = data.whatsapp_message_id || 'sent';
             showToast(`Delivered to ${cleanRecipient}`, 'success');
         } else {
@@ -7389,7 +7384,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                 const isOutbound = !isInbound;
                 const isSending = m.status === 'sending';
                 const isRead = m.status === 'read';
-                const isSent = m.status === 'sent' || m.status === 'received' || isRead;
+                const isSent = m.status === 'sent' || m.status === 'delivered' || m.status === 'received' || m.status === 'mock_sent' || isRead;
                 const ticks = isSending ? '🕒' : (isRead ? '<span style="color:#53bdeb;font-weight:bold;">✓✓</span>' : (isSent ? '✓✓' : '✓'));
                 let rawMedia = m.mediaUrl || m.media_url || m.audioUrl || m.audio_url || (m.raw_payload && (m.raw_payload.mediaUrl || m.raw_payload.audioUrl || m.raw_payload.audio_base64)) || '';
                 if (rawMedia && typeof rawMedia === 'string') {

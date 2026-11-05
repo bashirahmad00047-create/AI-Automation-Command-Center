@@ -104,16 +104,24 @@ def resolve_auth_dir(root_dir: str = None) -> str:
 
 def is_authenticated_session(auth_dir: str) -> bool:
     """Returns True only if the Baileys auth folder contains an authenticated,
-    linked WhatsApp session (registered: true or user jid/me present in creds.json).
-    Never considers temporary unlinked QR keypairs as authenticated.
+    linked WhatsApp session (registered: true or user jid/me present in creds.json AND valid noiseKey crypto keys).
+    Never considers temporary unlinked QR keypairs or keyless mock stubs as authenticated.
     """
     creds_file = os.path.join(auth_dir, "creds.json")
-    if not os.path.exists(creds_file) or os.path.getsize(creds_file) < 50:
+    if not os.path.exists(creds_file) or os.path.getsize(creds_file) < 100:
         return False
     try:
         with open(creds_file, "r", encoding="utf-8") as f:
             creds_data = json.load(f)
         if not isinstance(creds_data, dict):
+            return False
+        noise_key = creds_data.get("noiseKey")
+        if not noise_key or not isinstance(noise_key, dict):
+            return False
+        if not (noise_key.get("private") or noise_key.get("public")):
+            return False
+        has_keys = bool(creds_data.get("signedIdentityKey") or creds_data.get("signedPreKey"))
+        if not has_keys:
             return False
         if creds_data.get("registered") is True:
             return True
@@ -212,9 +220,18 @@ def restore_wa_session_from_db(root_dir: str = None, app=None, tenant_id: str = 
                         pass
 
                 if row and row[0]:
-                    os.makedirs(auth_dir, exist_ok=True)
                     raw_bytes = base64.b64decode(row[0])
                     with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+                        if "creds.json" in zf.namelist():
+                            try:
+                                creds_content = json.loads(zf.read("creds.json").decode("utf-8"))
+                                noise = creds_content.get("noiseKey")
+                                if not noise or not isinstance(noise, dict) or not (noise.get("private") or noise.get("public")):
+                                    logger.warning("[WA Bridge] Session in DB lacks valid noiseKey crypto keys; skipping restore to generate fresh QR.")
+                                    return False
+                            except Exception:
+                                return False
+                        os.makedirs(auth_dir, exist_ok=True)
                         zf.extractall(auth_dir)
                     extracted_count = len(os.listdir(auth_dir))
                     logger.info(f"[WA Bridge] Restored {extracted_count} permanent session files from DB (tenant '{clean_tenant}', phone: {row[2] or 'N/A'}) into {auth_dir}!")

@@ -5516,8 +5516,21 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
             or (msg.get("raw", {}).get("text") if isinstance(msg.get("raw"), dict) else None)
             or ""
         )
-        if not msg_body and msg.get("is_audio"):
-            msg_body = "🎤 Voice message"
+        if str(msg_body).strip().lower() in ("[textmessage]", "[extendedtextmessage]", "[conversation]", "[text]", "(no text)", "none", "null"):
+            msg_body = ""
+
+        if not msg_body:
+            if msg.get("is_audio") or msg.get("message_type") in ("audio", "voice", "audioMessage", "voiceMessage") or media_candidate:
+                msg_body = "🎤 Voice message"
+            elif msg.get("message_type") in ("image", "imageMessage"):
+                msg_body = "📷 Photo"
+            elif msg.get("message_type") in ("document", "documentMessage"):
+                msg_body = "📄 Document"
+            elif msg.get("location"):
+                msg_body = "📍 Shared Location"
+            else:
+                logger.info(f"Skipping empty non-content inbound message payload: {msg_id}")
+                continue
 
         record = WhatsAppService.record_message(
             organization_id=org_id,

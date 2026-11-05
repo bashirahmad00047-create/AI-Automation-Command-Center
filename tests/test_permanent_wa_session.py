@@ -42,7 +42,7 @@ class TestPermanentWASession(unittest.TestCase):
         creds_file = os.path.join(self.auth_dir, "creds.json")
         if not os.path.exists(creds_file) or os.path.getsize(creds_file) < 20:
             with open(creds_file, "w", encoding="utf-8") as f:
-                json.dump({"me": {"id": "923209350858:1@s.whatsapp.net", "name": "BashFlow"}, "account": {}}, f)
+                json.dump({"registered": True, "me": {"id": "923209350858:1@s.whatsapp.net", "name": "BashFlow"}, "noiseKey": {"private": "dGVzdF9wcml2", "public": "dGVzdF9wdWI="}, "signedIdentityKey": {"private": "dGVzdF9pZF9wcml2", "public": "dGVzdF9pZF9wdWI="}, "signedPreKey": {"keyPair": {"private": "dGVzdF9wcmVfcHJpdg==", "public": "dGVzdF9wcmVfcHVi"}, "signature": "dGVzdF9zaWc="}, "account": {}}, f)
 
         # Set up authenticated session for client
         with self.client.session_transaction() as sess:
