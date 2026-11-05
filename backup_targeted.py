@@ -102,6 +102,11 @@ def sync_sqlite_snapshot(
         dst = sqlite3.connect(dest_path, timeout=10.0)
         with dst:
             src.backup(dst, pages=100, sleep=0.01)
+            try:
+                if os.path.exists(dest_path) and os.path.getsize(dest_path) > 15000000:
+                    dst.execute("VACUUM")
+            except Exception:
+                pass
         dst.close()
         src.close()
         logger.debug(f"[SQLite Snapshot] Successfully synced snapshot from '{source_path}' to '{dest_path}'")

@@ -5785,7 +5785,7 @@ def whatsapp_voice_call_ingress():
 @rate_limit(limit=1200, window=60, message="Too many Green-API webhook requests.")
 def green_api_webhook_ingress():
     """Dedicated Production-Ready Green-API Inbound Webhook Endpoint."""
-    if request.method == "GET":
+    if request.method in ("GET", "HEAD"):
         return jsonify({
             "status": "online",
             "provider": "green_api",
@@ -6918,7 +6918,7 @@ def jazzcash_callback():
 
     success, message, txn = JazzCashService.handle_ipn_callback(params)
 
-    if request.headers.get("Accept", "").find("text/html") != -1 or request.method == "GET":
+    if request.headers.get("Accept", "").find("text/html") != -1 or request.method in ("GET", "HEAD"):
         from flask import render_template_string
         return render_template_string("""
         <!DOCTYPE html>

@@ -791,3 +791,45 @@ def test_database_connection_pooling_and_pg_options(client):
     # 3. Verify app engine options
     engine_opts = app.config.get("SQLALCHEMY_ENGINE_OPTIONS", {})
     assert engine_opts.get("pool_pre_ping") is True
+
+
+def test_head_and_options_requests_on_all_public_endpoints(client):
+    """Regression test ensuring HTTP HEAD and OPTIONS requests never return None or throw TypeError on /login, /, /health, /store, /track, /call."""
+    # 1. /login HEAD and OPTIONS
+    head_login = client.head("/login")
+    assert head_login.status_code in (200, 302)
+    options_login = client.options("/login")
+    assert options_login.status_code in (200, 204)
+
+    # 2. /health & /healthz HEAD and OPTIONS
+    head_health = client.head("/health")
+    assert head_health.status_code == 200
+    options_health = client.options("/health")
+    assert options_health.status_code in (200, 204)
+
+    head_healthz = client.head("/healthz")
+    assert head_healthz.status_code == 200
+
+    # 3. / (root) HEAD and OPTIONS
+    head_root = client.head("/")
+    assert head_root.status_code in (200, 302)
+    options_root = client.options("/")
+    assert options_root.status_code in (200, 204)
+
+    # 4. /store HEAD and OPTIONS
+    head_store = client.head("/store")
+    assert head_store.status_code == 200
+    options_store = client.options("/store")
+    assert options_store.status_code in (200, 204)
+
+    # 5. /track/<order_id> HEAD and OPTIONS
+    head_track = client.head("/track/ORD-FLEET-RADAR")
+    assert head_track.status_code == 200
+    options_track = client.options("/track/ORD-FLEET-RADAR")
+    assert options_track.status_code in (200, 204)
+
+    # 6. /call/<phone> HEAD and OPTIONS
+    head_call = client.head("/call/03209350858")
+    assert head_call.status_code == 200
+    options_call = client.options("/call/03209350858")
+    assert options_call.status_code in (200, 204)

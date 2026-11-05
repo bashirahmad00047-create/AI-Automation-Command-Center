@@ -503,6 +503,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Security Headers Middleware
     @application.after_request
     def add_security_headers(response):
+        if response is None:
+            response = application.make_response(("", 200))
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["X-XSS-Protection"] = "1; mode=block"
@@ -524,9 +526,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         return response
 
     # Ultra-fast, zero-overhead Health Check for Render & Cloud Monitors (<2ms)
-    @application.route("/health", methods=["GET"])
-    @application.route("/healthz", methods=["GET"])
+    @application.route("/health", methods=["GET", "HEAD", "OPTIONS"])
+    @application.route("/healthz", methods=["GET", "HEAD", "OPTIONS"])
     def root_health_check():
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, HEAD, OPTIONS"
+            return resp, 204
         eng = application.config.get("AUTOMATION_ENGINE")
         is_running = eng.is_running if eng else True
         return jsonify({
@@ -539,8 +545,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         }), 200
 
     # Prometheus Metrics Exporter (Grafana, K8s, Cloud Monitoring)
-    @application.route("/metrics", methods=["GET"])
+    @application.route("/metrics", methods=["GET", "HEAD", "OPTIONS"])
     def root_prometheus_metrics():
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, HEAD, OPTIONS"
+            return resp, 204
         eng = application.config.get("AUTOMATION_ENGINE")
         telemetry = eng.telemetry if eng else None
         if not telemetry:
@@ -550,9 +560,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         return exposition, 200, {"Content-Type": "text/plain; version=0.0.4; charset=utf-8"}
 
     # Frontend Dashboard View (Strict Authentication Required)
-    @application.route("/")
-    @application.route("/dashboard", endpoint="dashboard")
+    @application.route("/", methods=["GET", "HEAD", "OPTIONS"])
+    @application.route("/dashboard", endpoint="dashboard", methods=["GET", "HEAD", "OPTIONS"])
     def index():
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, HEAD, OPTIONS"
+            return resp, 204
         try:
             try:
                 db.session.rollback()
@@ -628,10 +642,15 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         return response
 
     # Top-Level Authentication Endpoints
-    @application.route("/login", methods=["GET", "POST"])
+    @application.route("/login", methods=["GET", "POST", "HEAD", "OPTIONS"])
     def top_level_login():
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, POST, HEAD, OPTIONS"
+            return resp, 204
+
         from auth import get_current_user
-        if request.method == "GET":
+        if request.method in ("GET", "HEAD"):
             try:
                 user = get_current_user()
                 if user or session.get("user_id") or session.get("is_super_admin"):
@@ -761,15 +780,26 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     return jsonify({"error": "Authentication service error. Please try again.", "code": "AUTH_ERROR"}), 500
                 return render_template("login.html", error="An error occurred during authentication. Please try again."), 500
 
-    @application.route("/register", methods=["GET", "POST"])
+        # Strict safety guarantee: never return None on HEAD, OPTIONS, or unexpected methods
+        return render_template("login.html")
+
+    @application.route("/register", methods=["GET", "POST", "HEAD", "OPTIONS"])
     def top_level_register():
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, POST, HEAD, OPTIONS"
+            return resp, 204
         if request.method == "POST":
             from api_v1 import auth_register
             return auth_register()
         return render_template("login.html")
 
-    @application.route("/logout", methods=["GET", "POST"])
+    @application.route("/logout", methods=["GET", "POST", "HEAD", "OPTIONS"])
     def top_level_logout():
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, POST, HEAD, OPTIONS"
+            return resp, 204
         from api_v1 import auth_logout
         auth_logout()
         session.clear()
@@ -778,13 +808,21 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         return redirect(url_for("top_level_login"))
 
     # Global Readiness Check (Render, K8s, Cloud Load Balancers)
-    @application.route("/ready", methods=["GET"])
+    @application.route("/ready", methods=["GET", "HEAD", "OPTIONS"])
     def root_readiness_check():
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, HEAD, OPTIONS"
+            return resp, 204
         from api_v1 import system_readiness
         return system_readiness()
 
-    @application.route("/reset-password", methods=["GET"])
+    @application.route("/reset-password", methods=["GET", "HEAD", "OPTIONS"])
     def top_level_reset_password():
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, HEAD, OPTIONS"
+            return resp, 204
         token = request.args.get("token", "")
         return render_template("index.html", reset_token=token)
 
@@ -1302,10 +1340,14 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_customer_latest_order_info
         return api_customer_latest_order_info()
 
-    @application.route("/call/<phone>", methods=["GET"])
-    @application.route("/call/", methods=["GET"])
-    @application.route("/call", methods=["GET"])
+    @application.route("/call/<phone>", methods=["GET", "HEAD", "OPTIONS"])
+    @application.route("/call/", methods=["GET", "HEAD", "OPTIONS"])
+    @application.route("/call", methods=["GET", "HEAD", "OPTIONS"])
     def public_live_call_page(phone=""):
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, HEAD, OPTIONS"
+            return resp, 204
         """Public standalone live voice call room accessible by customer without login."""
         import re, os
         from flask import make_response
@@ -1838,8 +1880,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # MODULE 1: PUBLIC E-COMMERCE STOREFRONT & ORDER TRACKING ROUTES
     # =========================================================================
 
-    @application.route("/store")
+    @application.route("/store", methods=["GET", "HEAD", "OPTIONS"])
     def public_storefront():
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, HEAD, OPTIONS"
+            return resp, 204
         """Public mobile-first e-commerce shopping storefront ('Chitral & Global Bazar'). No login required."""
         try:
             try:
@@ -1879,8 +1925,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_order_tracking_location
         return api_order_tracking_location(order_id)
 
-    @application.route("/track/<order_id>")
+    @application.route("/track/<order_id>", methods=["GET", "HEAD", "OPTIONS"])
+    @application.route("/track/<path:order_id>", methods=["GET", "HEAD", "OPTIONS"])
     def public_order_tracking(order_id: str):
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, HEAD, OPTIONS"
+            return resp, 204
         """Public order tracking portal with live delivery status and Leaflet radar pin."""
         order = None
         ride = None
@@ -2076,10 +2127,15 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             "code": "INTERNAL_SERVER_ERROR"
         }), 500
 
-    @application.route("/ping", methods=["GET"])
-    @application.route("/healthz", methods=["GET"])
-    @application.route("/api/ping", methods=["GET"])
+    @application.route("/ping", methods=["GET", "HEAD", "OPTIONS"])
+    @application.route("/healthz", methods=["GET", "HEAD", "OPTIONS"])
+    @application.route("/api/ping", methods=["GET", "HEAD", "OPTIONS"])
     def render_health_ping():
+        """Ultra-fast, zero-overhead health ping for Render keep-alive and cloud monitors."""
+        if request.method == "OPTIONS":
+            resp = application.make_response("")
+            resp.headers["Allow"] = "GET, HEAD, OPTIONS"
+            return resp, 204
         """Ultra-fast, zero-overhead health ping for Render keep-alive and cloud monitors."""
         return jsonify({
             "status": "ok",
