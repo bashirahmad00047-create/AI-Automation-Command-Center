@@ -4188,21 +4188,7 @@ def api_live_voice_call():
             audio_data_uri = generate_server_tts_base64(voice_text, lang="ur", voice=persona, rate=rate_str, pitch=pitch_str, organization_id=org_id)
             audio_b64 = audio_data_uri.split("base64,")[-1]
         else:
-            raw_audio_bytes = b""
-            if not user_text and audio_in_b64:
-                try:
-                    raw_b64 = str(audio_in_b64)
-                    if "," in raw_b64:
-                        raw_b64 = raw_b64.split(",", 1)[1]
-                    raw_audio_bytes = base64.b64decode(raw_b64)
-                    if raw_audio_bytes:
-                        transcribed = WhatsAppService._transcribe_audio(raw_audio_bytes, organization_id=org_id)
-                        if transcribed and transcribed.strip():
-                            user_text = transcribed.strip()
-                except Exception as tr_err:
-                    logger.warning(f"Live voice call audio transcription notice: {tr_err}")
-
-            # Forward customer voice/text chunk to Admin queue so Admin Dashboard keeps monitoring
+            # ZERO-LATENCY INSTANT RELAY (LINE 1): Forward customer voice chunk to Admin Dashboard BEFORE STT/LLM
             phone_param = str(data.get("phone") or request.args.get("phone") or "").strip()
             clean_call_phone = re.sub(r"\D", "", phone_param)
             if not clean_call_phone and _ACTIVE_CALL_SESSIONS:
@@ -4229,10 +4215,13 @@ def api_live_voice_call():
                             }
                             _ACTIVE_CALL_SESSIONS[clean_call_phone] = sess
                         sess["to_admin_seq"] = sess.get("to_admin_seq", 0) + 1
+                        seq_val = sess["to_admin_seq"]
                         if "to_admin_queue" not in sess:
                             sess["to_admin_queue"] = []
                         cust_chunk = {
-                            "seq_id": sess["to_admin_seq"],
+                            "seq": seq_val,
+                            "seq_id": seq_val,
+                            "chunk_id": f"{clean_call_phone}_admin_{seq_val}_{int(time.time()*1000)}",
                             "sender": "customer",
                             "audio": str(audio_in_b64 or ""),
                             "text": str(user_text or ""),
@@ -4249,6 +4238,7 @@ def api_live_voice_call():
                             bcast = {
                                 "phone": clean_call_phone,
                                 "roomId": clean_call_phone,
+                                "seq": cust_chunk["seq"],
                                 "seq_id": cust_chunk["seq_id"],
                                 "sender": "customer",
                                 "audio": cust_chunk["audio"],
@@ -4262,7 +4252,21 @@ def api_live_voice_call():
                     except Exception:
                         pass
                 except Exception as _q_err:
-                    logger.debug(f"Queue audio to admin notice: {_q_err}")
+                    logger.debug(f"[route_voice_call_ai] Admin queue early relay notice: {_q_err}")
+
+            raw_audio_bytes = b""
+            if not user_text and audio_in_b64:
+                try:
+                    raw_b64 = str(audio_in_b64)
+                    if "," in raw_b64:
+                        raw_b64 = raw_b64.split(",", 1)[1]
+                    raw_audio_bytes = base64.b64decode(raw_b64)
+                    if raw_audio_bytes:
+                        transcribed = WhatsAppService._transcribe_audio(raw_audio_bytes, organization_id=org_id)
+                        if transcribed and transcribed.strip():
+                            user_text = transcribed.strip()
+                except Exception as tr_err:
+                    logger.warning(f"Live voice call audio transcription notice: {tr_err}")
 
             # If user_text is still empty: NEVER throw 400 or "Speech text is required"
             if not user_text:
@@ -4831,6 +4835,7 @@ def api_call_audio(phone):
                         logger.debug(f"[api_call_audio] Admin TTS notice: {_e}")
                 chunk_uid = f"{clean_phone}_cust_{seq_id}_{int(time.time()*1000)}"
                 new_chunk = {
+                    "seq": seq_id,
                     "seq_id": seq_id,
                     "chunk_id": chunk_uid,
                     "id": chunk_uid,
@@ -4882,6 +4887,7 @@ def api_call_audio(phone):
                     chunk_payload = {
                         "phone": clean_phone,
                         "roomId": clean_phone,
+                        "seq": seq_id,
                         "seq_id": seq_id,
                         "sender": new_chunk["sender"],
                         "audio": new_chunk["audio"],
@@ -7833,92 +7839,9 @@ def list_ecommerce_products():
         stock_status_filter = request.args.get("stock_status")
         limit = min(int(request.args.get("limit", 100)), 500)
 
-        # Auto-seed realistic Pakistani e-commerce products if catalog is empty
+        # Ensure authentic Chitral & Global Bazar products are seeded and clean
         if Product.query.filter_by(organization_id=org.id).count() == 0:
-            demo_pak_products = [
-                {
-                    "name": "Men's Cotton Kurta",
-                    "category": "Apparel & Fashion",
-                    "description": "Premium Pakistani breathable stitched summer cotton kurta with banded collar.",
-                    "sku": "APP-KURTA-001",
-                    "barcode": "8901234567891",
-                    "image_url": "https://images.unsplash.com/photo-1597983073493-88cd35cf93b0?w=500&auto=format&fit=crop&q=60",
-                    "unit": "piece",
-                    "price": 2800.0,
-                    "currency": "PKR",
-                    "stock_quantity": 45
-                },
-                {
-                    "name": "Leather Formal Shoes",
-                    "category": "Footwear",
-                    "description": "Handcrafted pure leather Oxford dress shoes with cushioned insole and anti-slip rubber sole.",
-                    "sku": "FTW-SHOE-002",
-                    "barcode": "8901234567892",
-                    "image_url": "https://images.unsplash.com/photo-1533867617858-e7b97e060509?w=500&auto=format&fit=crop&q=60",
-                    "unit": "pair",
-                    "price": 6500.0,
-                    "currency": "PKR",
-                    "stock_quantity": 18
-                },
-                {
-                    "name": "Wireless Bluetooth Earbuds",
-                    "category": "Consumer Electronics",
-                    "description": "TWS wireless earbuds with active environmental noise cancellation, deep bass, and 30h backup.",
-                    "sku": "ELE-EARBUD-003",
-                    "barcode": "8901234567893",
-                    "image_url": "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=500&auto=format&fit=crop&q=60",
-                    "unit": "piece",
-                    "price": 3200.0,
-                    "currency": "PKR",
-                    "stock_quantity": 60
-                },
-                {
-                    "name": "Pure Organic Honey (500g)",
-                    "category": "Grocery & Gourmet",
-                    "description": "100% raw sidr wild honey harvested from Khyber mountain valleys. Lab-certified purity.",
-                    "sku": "GRO-HONEY-004",
-                    "barcode": "8901234567894",
-                    "image_url": "https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=500&auto=format&fit=crop&q=60",
-                    "unit": "jar",
-                    "price": 1950.0,
-                    "currency": "PKR",
-                    "stock_quantity": 30
-                },
-                {
-                    "name": "Embroidered Lawn Stitched Suit",
-                    "category": "Women's Fashion",
-                    "description": "3-piece designer lawn collection with embroidered chiffon dupatta and printed cambric trouser.",
-                    "sku": "APP-SUIT-005",
-                    "barcode": "8901234567895",
-                    "image_url": "https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=500&auto=format&fit=crop&q=60",
-                    "unit": "suit",
-                    "price": 4800.0,
-                    "currency": "PKR",
-                    "stock_quantity": 25
-                }
-            ]
-            for itm in demo_pak_products:
-                new_p = Product(
-                    id=generate_uuid("prd"),
-                    organization_id=org.id,
-                    name=itm["name"],
-                    category=itm["category"],
-                    description=itm["description"],
-                    sku=itm["sku"],
-                    barcode=itm["barcode"],
-                    image_url=itm["image_url"],
-                    unit=itm["unit"],
-                    price=itm["price"],
-                    currency=itm["currency"],
-                    stock_quantity=itm["stock_quantity"],
-                    stock_status="in_stock",
-                    is_active=True
-                )
-                db.session.add(new_p)
-            try:
-                db.session.commit()
-            except Exception:
-                db.session.rollback()
+            ensure_seed_products()
 
         # Base query for tenant products
         query = Product.query.filter(Product.organization_id == org.id)
@@ -9574,22 +9497,6 @@ def api_business_template_save():
 
 VERIFIED_CHITRAL_PRODUCTS = [
     {
-        "name": "Pure Chitrali Sidr Mountain Honey (500g)",
-        "category": "Mountain Honey",
-        "description": "100% pure, unpasteurized wild berry Sidr honey harvested from pristine valleys of Chitral. Known for exceptional antibacterial, digestive, and medicinal qualities.",
-        "sku": "CHIT-HONEY-001",
-        "price": 2800.0,
-        "seller_price": 2500.0,
-        "platform_commission": 300.0,
-        "image_url": "https://images.unsplash.com/photo-1471943311424-646960669fbc?auto=format&fit=crop&w=600&q=80",
-        "stock_quantity": 45,
-        "stock_status": "in_stock",
-        "seller_name": "Tirich Mir Honey Apiary",
-        "seller_phone": "+923001234567",
-        "seller_city": "Chitral Town",
-        "contact_mode": "smart_broker"
-    },
-    {
         "name": "Special Chicken Dum Biryani",
         "category": "Desi & Biryani",
         "description": "Fragrant aged long-grain basmati rice layered with tender spiced chicken, saffron, potatoes, and signature aromatic Chitral spices. Served with fresh mint raita.",
@@ -9606,19 +9513,19 @@ VERIFIED_CHITRAL_PRODUCTS = [
         "contact_mode": "smart_broker"
     },
     {
-        "name": "Peshawari Shinwari Mutton Karahi (Half kg)",
-        "category": "Desi & Biryani",
-        "description": "Authentic Shinwari-style fresh mountain lamb wok karahi prepared in natural animal fat and clarified butter with fresh tomatoes, ginger, and green chilies.",
-        "sku": "CHIT-FOOD-003",
-        "price": 1850.0,
-        "seller_price": 1650.0,
-        "platform_commission": 200.0,
-        "image_url": "https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?auto=format&fit=crop&w=600&q=80",
-        "stock_quantity": 30,
+        "name": "Crispy Zinger Burger & Fries",
+        "category": "Fast Food & Burgers",
+        "description": "Crispy fried spicy chicken fillet, crunchy iceberg lettuce, signature zesty mayo inside a sesame seed bun. Comes with golden salted fries and garlic dip.",
+        "sku": "CHIT-FOOD-005",
+        "price": 550.0,
+        "seller_price": 480.0,
+        "platform_commission": 70.0,
+        "image_url": "https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 75,
         "stock_status": "in_stock",
-        "seller_name": "Khyber Shinwari BBQ & Karahi",
-        "seller_phone": "+923339876543",
-        "seller_city": "Airport Road",
+        "seller_name": "Chitral Fried & Broast",
+        "seller_phone": "+923129871122",
+        "seller_city": "Ataliq Bridge",
         "contact_mode": "smart_broker"
     },
     {
@@ -9638,25 +9545,25 @@ VERIFIED_CHITRAL_PRODUCTS = [
         "contact_mode": "smart_broker"
     },
     {
-        "name": "Fresh Crispy Zinger Burger Meal",
-        "category": "Fast Food & Burgers",
-        "description": "Crispy fried spicy chicken fillet, crunchy iceberg lettuce, signature zesty mayo inside a sesame seed bun. Comes with golden fries and chilled beverage.",
-        "sku": "CHIT-FOOD-005",
-        "price": 520.0,
-        "seller_price": 450.0,
-        "platform_commission": 70.0,
-        "image_url": "https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=600&q=80",
-        "stock_quantity": 75,
+        "name": "Peshawari Shinwari Mutton Karahi (Half kg)",
+        "category": "Desi & Biryani",
+        "description": "Authentic Shinwari-style fresh mountain lamb wok karahi prepared in natural animal fat and clarified butter with fresh tomatoes, ginger, and green chilies.",
+        "sku": "CHIT-FOOD-003",
+        "price": 1850.0,
+        "seller_price": 1650.0,
+        "platform_commission": 200.0,
+        "image_url": "https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 30,
         "stock_status": "in_stock",
-        "seller_name": "Chitral Fried & Broast",
-        "seller_phone": "+923129871122",
-        "seller_city": "Ataliq Bridge",
+        "seller_name": "Khyber Shinwari BBQ & Karahi",
+        "seller_phone": "+923339876543",
+        "seller_city": "Airport Road",
         "contact_mode": "smart_broker"
     },
     {
-        "name": "Cheesy Chicken Tikka Woodfired Pizza",
+        "name": "Chicken Tikka Pan Pizza",
         "category": "Pizza & Bakery",
-        "description": "Crisp thin-crust Italian style pizza topped with smoky chicken tikka chunks, 100% mozzarella cheese, fresh bell peppers, olives, and marinara sauce.",
+        "description": "Crisp pan crust pizza generously loaded with smoky grilled chicken tikka cubes, 100% pure mozzarella cheese, bell peppers, sweet corn, and marinara sauce.",
         "sku": "CHIT-FOOD-006",
         "price": 1250.0,
         "seller_price": 1100.0,
@@ -9686,6 +9593,38 @@ VERIFIED_CHITRAL_PRODUCTS = [
         "contact_mode": "smart_broker"
     },
     {
+        "name": "Chitrali Special Chapli Kabab",
+        "category": "Desi & Biryani",
+        "description": "Authentic melt-in-mouth Peshawar-Chitral hand-ground beef chapli kabab fried on flat tawa with crushed pomegranate seeds, coriander, and fresh tomatoes.",
+        "sku": "CHIT-FOOD-010",
+        "price": 420.0,
+        "seller_price": 360.0,
+        "platform_commission": 60.0,
+        "image_url": "https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 80,
+        "stock_status": "in_stock",
+        "seller_name": "Chitral Royal Kabab House",
+        "seller_phone": "+923445566778",
+        "seller_city": "Shahi Bazar Chowk",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Pure Chitrali Sidr Mountain Honey (500g)",
+        "category": "Mountain Honey",
+        "description": "100% pure, unpasteurized wild berry Sidr honey harvested from pristine valleys of Chitral. Known for exceptional antibacterial, digestive, and medicinal qualities.",
+        "sku": "CHIT-HONEY-001",
+        "price": 2800.0,
+        "seller_price": 2500.0,
+        "platform_commission": 300.0,
+        "image_url": "https://images.unsplash.com/photo-1471943311424-646960669fbc?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 45,
+        "stock_status": "in_stock",
+        "seller_name": "Tirich Mir Honey Apiary",
+        "seller_phone": "+923001234567",
+        "seller_city": "Chitral Town",
+        "contact_mode": "smart_broker"
+    },
+    {
         "name": "Handwoven Chitrali Pattu Wool Shawl",
         "category": "Chitrali Crafts",
         "description": "Authentic artisan handwoven pure mountain sheep wool Pattu chugha/shawl. Warm, timeless, and crafted by master weavers in Drosh and Booni.",
@@ -9706,9 +9645,9 @@ VERIFIED_CHITRAL_PRODUCTS = [
         "category": "Chitrali Crafts",
         "description": "Original hand-rolled Chitrali Pakol cap made from 100% fine woolen cloth. Classic symbol of Northern Pakistan pride, comfort, and heritage.",
         "sku": "CHIT-PAKOL-003",
-        "price": 1400.0,
-        "seller_price": 1200.0,
-        "platform_commission": 200.0,
+        "price": 1800.0,
+        "seller_price": 1500.0,
+        "platform_commission": 300.0,
         "image_url": "https://images.unsplash.com/photo-1521369909029-2afed882baee?auto=format&fit=crop&w=600&q=80",
         "stock_quantity": 60,
         "stock_status": "in_stock",
@@ -9718,9 +9657,9 @@ VERIFIED_CHITRAL_PRODUCTS = [
         "contact_mode": "smart_broker"
     },
     {
-        "name": "Kagzi Thin-Shell Mountain Walnuts (1kg)",
+        "name": "Organic Chitrali Kagzi Walnuts 1kg",
         "category": "Dry Fruits",
-        "description": "Crisp, oil-rich organic Kagzi walnuts from Garam Chashma. Can be cracked open by hand. Bursting with natural Omega-3 and mountain nutrients.",
+        "description": "Crisp, oil-rich organic Kagzi thin-shell walnuts from Garam Chashma. Can be cracked open by hand. Bursting with natural Omega-3 and mountain nutrients.",
         "sku": "CHIT-WALNUT-004",
         "price": 1600.0,
         "seller_price": 1400.0,
@@ -9734,9 +9673,25 @@ VERIFIED_CHITRAL_PRODUCTS = [
         "contact_mode": "smart_broker"
     },
     {
-        "name": "Sun-Dried Organic Chitrali Apricots (1kg)",
+        "name": "Pure Himalayan Aftabi Shilajit 20g",
+        "category": "Mountain Honey",
+        "description": "100% organic sun-purified (Aftabi) high-altitude golden grade Himalayan/Karakoram Shilajit resin. Lab-tested purity, rich in 85+ minerals and fulvic acid.",
+        "sku": "CHIT-SHIL-011",
+        "price": 3200.0,
+        "seller_price": 2800.0,
+        "platform_commission": 400.0,
+        "image_url": "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&w=600&q=80",
+        "stock_quantity": 40,
+        "stock_status": "in_stock",
+        "seller_name": "Pamir Herbal & Shilajit Co.",
+        "seller_phone": "+923456789012",
+        "seller_city": "Mastuj, Chitral",
+        "contact_mode": "smart_broker"
+    },
+    {
+        "name": "Dried Apricots & Mulberries Pack",
         "category": "Dry Fruits",
-        "description": "Naturally tree-ripened and solar dried organic golden apricots from Mastuj Valley. Packed with potassium, iron, and natural mountain sweetness.",
+        "description": "Naturally tree-ripened sun-dried golden apricots and sweet wild mountain mulberries (Shahtoot) from Mastuj and Kalash valleys.",
         "sku": "CHIT-APRICOT-007",
         "price": 1200.0,
         "seller_price": 1050.0,
@@ -9747,38 +9702,6 @@ VERIFIED_CHITRAL_PRODUCTS = [
         "seller_name": "Mastuj Valley Orchards",
         "seller_phone": "+923331122445",
         "seller_city": "Mastuj, Chitral",
-        "contact_mode": "smart_broker"
-    },
-    {
-        "name": "Royal Karak Doodh Patti Chai & Cardamom",
-        "category": "Cafe & Beverages",
-        "description": "Freshly brewed rich, slow-simmered Karak tea infused with green cardamom pods, pure milk, and mountain sugar. The ultimate warm pick-me-up.",
-        "sku": "CHIT-CHAI-008",
-        "price": 140.0,
-        "seller_price": 110.0,
-        "platform_commission": 30.0,
-        "image_url": "https://images.unsplash.com/photo-1544787219-7f47ccb76574?auto=format&fit=crop&w=600&q=80",
-        "stock_quantity": 150,
-        "stock_status": "in_stock",
-        "seller_name": "Chai Khana & Bakers",
-        "seller_phone": "+923456677889",
-        "seller_city": "Shahi Qila Chowk",
-        "contact_mode": "smart_broker"
-    },
-    {
-        "name": "Natural Green Tourmaline Gemstone (Rough Specimen)",
-        "category": "Minerals & Gems",
-        "description": "Untreated, all-natural vibrant green tourmaline crystal matrix sourced directly from the pegmatite veins of the Chitral-Hindu Kush mountain range.",
-        "sku": "CHIT-TOURM-005",
-        "price": 12000.0,
-        "seller_price": 10500.0,
-        "platform_commission": 1500.0,
-        "image_url": "https://images.unsplash.com/photo-1615655406736-b37c4fabf923?auto=format&fit=crop&w=600&q=80",
-        "stock_quantity": 8,
-        "stock_status": "in_stock",
-        "seller_name": "Karakoram & Hindu Kush Gems",
-        "seller_phone": "+923451122334",
-        "seller_city": "Booni, Upper Chitral",
         "contact_mode": "smart_broker"
     }
 ]
@@ -9792,6 +9715,24 @@ def ensure_seed_products():
         
         org = Organization.query.first()
         org_id = org.id if org else "org-enterprise-default"
+
+        # Cleanly purge obsolete generic dummy placeholder products
+        try:
+            valid_skus = [x["sku"] for x in VERIFIED_CHITRAL_PRODUCTS]
+            Product.query.filter(
+                (Product.sku.in_(["APP-KURTA-001", "FTW-SHOE-002", "ELE-EARBUD-003", "GRO-HONEY-004", "APP-SUIT-005"])) |
+                (Product.category.in_(["Apparel & Fashion", "Footwear", "Consumer Electronics", "Women's Fashion", "Grocery & Gourmet"])) |
+                (Product.sku.is_(None)) |
+                (Product.sku.notin_(valid_skus)) |
+                (Product.name.like("%Cotton Kurta%")) |
+                (Product.name.like("%Formal Shoes%")) |
+                (Product.name.like("%Earbuds%")) |
+                (Product.name.like("%Lawn Stitched Suit%"))
+            ).delete(synchronize_session=False)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
         if not org:
             try:
                 org = Organization(

@@ -275,24 +275,39 @@ def test_store_foodpanda_rendering_and_checkout(client):
     assert "handleProductImgError" in html
     assert "Detect My GPS Location" in html
 
-    # 2. Test Checkout with GPS detection
-    payload = {
-        "name": "Kashif Khan",
-        "phone": "03471234567",
-        "address": "Ataliq Bazar, Chitral Town",
-        "latitude": 35.8524,
-        "longitude": 71.7869,
-        "payment_method": "cod",
-        "items": [
-            {"id": "test-item-1", "name": "Pure Chitrali Sidr Mountain Honey (500g)", "price": 2800, "quantity": 1}
-        ]
-    }
-    checkout_res = client.post("/api/store/checkout", json=payload)
-    assert checkout_res.status_code == 201
-    c_json = checkout_res.get_json()
-    assert c_json.get("success") is True
-    assert "order_id" in c_json
-    assert "/track/" in c_json.get("tracking_url", "")
+    # 2. Test Checkout with GPS detection (with automated teardown cleanup)
+    try:
+        payload = {
+            "name": "Kashif Khan",
+            "phone": "03471234567",
+            "address": "Ataliq Bazar, Chitral Town",
+            "latitude": 35.8524,
+            "longitude": 71.7869,
+            "payment_method": "cod",
+            "items": [
+                {"id": "test-item-1", "name": "Pure Chitrali Sidr Mountain Honey (500g)", "price": 2800, "quantity": 1}
+            ]
+        }
+        checkout_res = client.post("/api/store/checkout", json=payload)
+        assert checkout_res.status_code == 201
+        c_json = checkout_res.get_json()
+        assert c_json.get("success") is True
+        assert "order_id" in c_json
+        assert "/track/" in c_json.get("tracking_url", "")
+    finally:
+        with client.application.app_context():
+            try:
+                from models import EcommerceOrder, Lead, WhatsAppMessage
+                from database import db
+                order_id_created = c_json.get("order_id") if "c_json" in locals() and isinstance(c_json, dict) else None
+                if order_id_created:
+                    EcommerceOrder.query.filter(EcommerceOrder.order_id == order_id_created).delete(synchronize_session=False)
+                EcommerceOrder.query.filter(EcommerceOrder.customer_phone.in_(["03471234567", "923471234567"])).delete(synchronize_session=False)
+                Lead.query.filter(Lead.phone.in_(["03471234567", "923471234567"])).delete(synchronize_session=False)
+                WhatsAppMessage.query.filter(WhatsAppMessage.recipient.in_(["03471234567", "923471234567"])).delete(synchronize_session=False)
+                db.session.commit()
+            except Exception:
+                pass
 
 
 

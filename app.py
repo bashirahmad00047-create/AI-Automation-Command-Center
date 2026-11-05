@@ -1173,6 +1173,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         from api_v1 import api_whatsapp_session_restore
         return api_whatsapp_session_restore()
 
+    @application.route("/api/whatsapp/session-state", methods=["GET"])
+    @application.route("/api/v1/whatsapp/session-state", methods=["GET"])
+    def route_whatsapp_session_state():
+        from api_v1 import api_whatsapp_session_state
+        return api_whatsapp_session_state()
+
     @application.route("/api/whatsapp/pipeline-health", methods=["GET"])
     @application.route("/api/v1/whatsapp/pipeline-health", methods=["GET"])
     def route_whatsapp_pipeline_health():

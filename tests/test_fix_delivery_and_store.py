@@ -23,19 +23,29 @@ def test_store_settings_get_and_post(client):
     assert data["success"] is True
     assert "store_name" in data["settings"]
 
-    # POST settings
-    update_payload = {
-        "store_name": "Chitral Heritage Bazar Test",
-        "store_tagline": "Pure Mountain Dry Fruits & Essentials",
-        "store_phone": "03209350858",
-        "delivery_fee": "250"
-    }
-    res_post = client.post("/api/v1/store/settings", json=update_payload)
-    assert res_post.status_code == 200
-    post_data = res_post.get_json()
-    assert post_data["success"] is True
-    assert post_data["settings"]["store_name"] == "Chitral Heritage Bazar Test"
-    assert post_data["settings"]["delivery_fee"] == "250"
+    try:
+        # POST settings
+        update_payload = {
+            "store_name": "Chitral Heritage Bazar",
+            "store_tagline": "Pure Mountain Dry Fruits & Essentials",
+            "store_phone": "03209350858",
+            "delivery_fee": "250"
+        }
+        res_post = client.post("/api/v1/store/settings", json=update_payload)
+        assert res_post.status_code == 200
+        post_data = res_post.get_json()
+        assert post_data["success"] is True
+        assert post_data["settings"]["store_name"] == "Chitral Heritage Bazar"
+        assert post_data["settings"]["delivery_fee"] == "250"
+    finally:
+        # Always restore live customer-ready store branding
+        restore_payload = {
+            "store_name": "Chitral & Global Bazar",
+            "store_tagline": "Authentic Mountain Treasures, Food & Live Fleet Delivery",
+            "store_phone": "03209350858",
+            "delivery_fee": "150"
+        }
+        client.post("/api/v1/store/settings", json=restore_payload)
 
 
 def test_store_product_crud_lifecycle(client):

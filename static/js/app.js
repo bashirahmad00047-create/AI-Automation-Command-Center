@@ -12530,17 +12530,24 @@ function unlockAdminRemoteVoicePlayer() {
     } catch (_) {}
 }
 
+let lastPlayedSeq = 0;
 function enqueueAdminAudioChunk(chunk) {
     if (!chunk) return;
-    const chunkUid = chunk.chunk_id || chunk.id || (typeof chunk.seq_id === 'number' ? 'seq_' + chunk.seq_id : null) || (chunk.audio ? String(chunk.audio).slice(0, 32) : null);
+    const seqNum = typeof chunk.seq === 'number' ? chunk.seq : (typeof chunk.seq_id === 'number' ? chunk.seq_id : null);
+    if (seqNum !== null) {
+        if (seqNum <= lastPlayedSeq) return;
+        lastPlayedSeq = seqNum;
+    }
+    const chunkUid = chunk.chunk_id || chunk.id || (seqNum !== null ? 'seq_' + seqNum : null) || (chunk.audio ? String(chunk.audio).slice(0, 32) : null);
     if (chunkUid && playedAdminChunkIds.has(chunkUid)) return;
     if (chunkUid) playedAdminChunkIds.add(chunkUid);
 
-    if (typeof chunk.seq_id === 'number') {
-        if (chunk.seq_id <= lastAdminSeqId) return;
-        lastAdminSeqId = chunk.seq_id;
-    }
     adminAudioQueue.push(chunk);
+    adminAudioQueue.sort((a, b) => {
+        const seqA = typeof a.seq === 'number' ? a.seq : (typeof a.seq_id === 'number' ? a.seq_id : 0);
+        const seqB = typeof b.seq === 'number' ? b.seq : (typeof b.seq_id === 'number' ? b.seq_id : 0);
+        return seqA - seqB;
+    });
     processAdminAudioQueue();
 }
 

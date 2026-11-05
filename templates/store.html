@@ -997,7 +997,13 @@
 
     <!-- Category Nav Pills -->
     <div class="category-nav" id="categoryNav">
-        <button class="category-pill active" onclick="filterCategory('All')">🌟 All Products</button>
+        <button class="category-pill active" onclick="filterCategory('All')">🌟 All</button>
+        <button class="category-pill" onclick="filterCategory('Fast Food & Burgers')">🍔 Fast Food &amp; Burgers</button>
+        <button class="category-pill" onclick="filterCategory('Desi & Biryani')">🍲 Desi &amp; Biryani</button>
+        <button class="category-pill" onclick="filterCategory('Pizza & Bakery')">🍕 Pizza &amp; Bakery</button>
+        <button class="category-pill" onclick="filterCategory('Mountain Honey')">🍯 Mountain Honey</button>
+        <button class="category-pill" onclick="filterCategory('Chitrali Crafts')">🧣 Chitrali Crafts</button>
+        <button class="category-pill" onclick="filterCategory('Dry Fruits')">🥜 Dry Fruits</button>
     </div>
 
     <!-- Main Products Grid -->
@@ -1583,53 +1589,38 @@
             renderManagementTable();
         }
 
-        // Dynamically build category pills from active loaded products
+        // Dynamically build category pills from active loaded products in strict requested order
         function renderCategoryNav() {
             const nav = document.getElementById('categoryNav');
             let pool = catalogProducts;
             if (activeExperience === 'foodpanda') {
                 pool = pool.filter(p => {
                     const c = (p.category || '').toLowerCase();
-                    return c.includes('food') || c.includes('burger') || c.includes('biryani') || c.includes('karahi') || c.includes('pizza') || c.includes('bakery') || c.includes('cafe') || c.includes('desi');
+                    return c.includes('food') || c.includes('burger') || c.includes('biryani') || c.includes('karahi') || c.includes('pizza') || c.includes('bakery') || c.includes('desi') || c.includes('kabab');
                 });
             } else if (activeExperience === 'bazar') {
                 pool = pool.filter(p => {
                     const c = (p.category || '').toLowerCase();
-                    return c.includes('honey') || c.includes('craft') || c.includes('shawl') || c.includes('pakol') || c.includes('fruit') || c.includes('nut') || c.includes('gem') || c.includes('mineral') || c.includes('apparel') || c.includes('footwear');
+                    return c.includes('honey') || c.includes('craft') || c.includes('shawl') || c.includes('pakol') || c.includes('fruit') || c.includes('nut') || c.includes('dry') || c.includes('shilajit');
                 });
             }
 
-            const distinct = [...new Set(pool.map(p => p.category).filter(Boolean))];
-            
-            const icons = {
-                'FAST FOOD': '🍔',
-                'BURGER': '🍔',
-                'DESI': '🍲',
-                'BIRYANI': '🍲',
-                'KARAHI': '🍲',
-                'PIZZA': '🍕',
-                'BAKERY': '🍕',
-                'HONEY': '🍯',
-                'CRAFT': '🧣',
-                'SHAWL': '🧣',
-                'PAKOL': '🧣',
-                'DRY FRUIT': '🥜',
-                'NUTS': '🥜',
-                'WALNUT': '🥜',
-                'CAFE': '☕',
-                'CHAI': '☕',
-                'BEVERAGE': '☕',
-                'GEM': '💎',
-                'MINERAL': '💎',
-                'GROCERY': '🛒'
-            };
+            const ORDERED_CATEGORIES = [
+                { name: 'Fast Food & Burgers', icon: '🍔' },
+                { name: 'Desi & Biryani', icon: '🍲' },
+                { name: 'Pizza & Bakery', icon: '🍕' },
+                { name: 'Mountain Honey', icon: '🍯' },
+                { name: 'Chitrali Crafts', icon: '🧣' },
+                { name: 'Dry Fruits', icon: '🥜' }
+            ];
 
             let html = `<button class="category-pill ${currentFilter === 'All' ? 'active' : ''}" onclick="filterCategory('All')">🌟 All</button>`;
-            distinct.forEach(cat => {
-                let u = cat.toUpperCase();
-                let iconKey = Object.keys(icons).find(k => u.includes(k));
-                let icon = iconKey ? icons[iconKey] : '📦';
-                html += `<button class="category-pill ${currentFilter === cat ? 'active' : ''}" onclick="filterCategory('${cat.replace(/'/g, "\'")}')">${icon} ${cat}</button>`;
+            ORDERED_CATEGORIES.forEach(catObj => {
+                const hasProducts = pool.some(p => (p.category || '').toLowerCase() === catObj.name.toLowerCase());
+                if (hasProducts || activeExperience === 'all') {
+                    const isActive = (currentFilter === catObj.name) ? 'active' : '';
+                    html += `<button class="category-pill ${isActive}" onclick="filterCategory('${catObj.name}')">${catObj.icon} ${catObj.name}</button>`;
+                }
             });
             nav.innerHTML = html;
         }

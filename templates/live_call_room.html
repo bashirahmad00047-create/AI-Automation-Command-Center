@@ -424,17 +424,24 @@
             } catch (_) {}
         }
 
+        let lastPlayedSeq = 0;
         function enqueueCustomerAudioChunk(chunk) {
             if (!chunk) return;
-            const chunkUid = chunk.chunk_id || chunk.id || (typeof chunk.seq_id === 'number' ? 'seq_' + chunk.seq_id : null) || (chunk.audio ? String(chunk.audio).slice(0, 32) : null);
+            const seqNum = typeof chunk.seq === 'number' ? chunk.seq : (typeof chunk.seq_id === 'number' ? chunk.seq_id : null);
+            if (seqNum !== null) {
+                if (seqNum <= lastPlayedSeq) return;
+                lastPlayedSeq = seqNum;
+            }
+            const chunkUid = chunk.chunk_id || chunk.id || (seqNum !== null ? 'seq_' + seqNum : null) || (chunk.audio ? String(chunk.audio).slice(0, 32) : null);
             if (chunkUid && playedChunkIds.has(chunkUid)) return;
             if (chunkUid) playedChunkIds.add(chunkUid);
 
-            if (typeof chunk.seq_id === 'number') {
-                if (chunk.seq_id <= lastCustomerSeqId) return;
-                lastCustomerSeqId = chunk.seq_id;
-            }
             customerAudioQueue.push(chunk);
+            customerAudioQueue.sort((a, b) => {
+                const seqA = typeof a.seq === 'number' ? a.seq : (typeof a.seq_id === 'number' ? a.seq_id : 0);
+                const seqB = typeof b.seq === 'number' ? b.seq : (typeof b.seq_id === 'number' ? b.seq_id : 0);
+                return seqA - seqB;
+            });
             processCustomerAudioQueue();
         }
 
@@ -523,12 +530,15 @@
             }, 800);
         }
 
-        function broadcastLiveCallChunk(sender, audioPayload, textPayload, mime) {
+        function broadcastLiveCallChunk(sender, audioPayload, textPayload, mime, seqNum) {
             const targetPhone = roomId || phone;
             if (!targetPhone) return;
+            const sNum = typeof seqNum === 'number' ? seqNum : currentTurnId;
             const chunkData = {
                 roomId: targetPhone,
                 phone: targetPhone,
+                seq: sNum,
+                seq_id: sNum,
                 sender: sender || 'customer',
                 audio: audioPayload || '',
                 text: textPayload || '',
@@ -539,6 +549,8 @@
                     socket.emit('live-call-chunk', {
                         roomId: targetPhone,
                         phone: targetPhone,
+                        seq: sNum,
+                        seq_id: sNum,
                         chunk: chunkData,
                         ...chunkData
                     });
@@ -792,8 +804,8 @@
                                     const b64 = reader.result;
                                     currentTurnId++;
                                     turnId = currentTurnId;
-                                    broadcastLiveCallChunk('customer', b64, latestInterimTranscript || null, 'audio/webm');
-                                    sendLiveVoicePayload({ audioBase64: b64, text: latestInterimTranscript || null, turnId: currentTurnId });
+                                    broadcastLiveCallChunk('customer', b64, latestInterimTranscript || null, 'audio/webm', currentTurnId);
+                                    sendLiveVoicePayload({ audioBase64: b64, text: latestInterimTranscript || null, turnId: currentTurnId, seq: currentTurnId });
                                     latestInterimTranscript = '';
                                 };
                                 reader.readAsDataURL(audioBlob);
@@ -847,8 +859,8 @@
                     // Silence detection
                     if (userHasSpoken) {
                         silenceDurationMs += 100;
-                        if (silenceDurationMs >= 1300) {
-                            // 1.2s silence reached: dispatch recorded turn
+                        if (silenceDurationMs >= 600) {
+                            // 600ms silence reached: dispatch recorded turn immediately
                             userHasSpoken = false;
                             silenceDurationMs = 0;
                             setWaveAnimation(false);
