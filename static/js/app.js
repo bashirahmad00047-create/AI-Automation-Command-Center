@@ -7803,7 +7803,9 @@ async function loadWhatsAppDashboard() {
                     modeBadge.textContent = '● Baileys Bridge Online';
                 }
                 if (connStatus) {
-                    connStatus.innerHTML = '<span class="status-pill green" style="font-size:0.75rem;">● Connected (Baileys Bridge)</span>';
+                    connStatus.innerHTML = window._waIsConnected
+                        ? '<span class="status-pill green" style="font-size:0.75rem;">● Connected (Baileys Bridge)</span>'
+                        : '<span class="status-pill yellow" style="font-size:0.75rem;">● Awaiting QR Link</span>';
                 }
             } else if (activeProvider === 'green_api') {
                 if (idLabel) idLabel.textContent = 'Green-API Instance ID';
