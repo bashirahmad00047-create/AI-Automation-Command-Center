@@ -7521,8 +7521,10 @@ class WhatsAppService:
                 "status": data.get("status", "unknown"),
                 "connected": is_conn,
                 "type": "alreadyLogged" if is_conn else ("qrCode" if data.get("qr") or data.get("qrUrl") else data.get("status")),
+                "qr": data.get("qr"),
                 "qr_data": data.get("qr"),
-                "qrUrl": data.get("qrUrl"),
+                "qr_image": data.get("qr_image") or data.get("qrUrl") or data.get("qrImageUrl"),
+                "qrUrl": data.get("qrUrl") or data.get("qr_image"),
                 "qrImageUrl": data.get("qrUrl") or data.get("qrImageUrl"),
                 "qrSvg": data.get("qrSvg"),
                 "message": data.get("message", "QR code ready for scanning")

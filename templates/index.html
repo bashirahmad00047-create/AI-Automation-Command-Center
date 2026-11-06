@@ -12,31 +12,43 @@
         }
 
         // Global QR Modal Early Fallbacks
-        function openLinkWhatsAppQrModal() {
-            var modal = document.getElementById('linkWhatsAppQrModal');
+        function openQrModal(forceRefresh) {
+            var modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
             if (modal) {
+                modal.classList.remove('hidden');
                 modal.style.display = 'flex';
+                modal.style.zIndex = '10060';
             }
             if (typeof window.switchLinkMode === 'function') {
                 window.switchLinkMode('qr');
             }
+            var spinner = document.getElementById('qrLoadingSpinner');
+            var qrWrapper = document.getElementById('qrImageWrapper');
+            var statusText = document.getElementById('qrStatusText');
+            if (spinner) spinner.style.display = 'flex';
+            if (qrWrapper) qrWrapper.style.display = 'none';
+            if (statusText) statusText.textContent = 'Generating secure QR code...';
+
             if (typeof window.fetchBridgeQrCode === 'function') {
-                window.fetchBridgeQrCode();
+                window.fetchBridgeQrCode(Boolean(forceRefresh));
             }
         }
-        window.openLinkWhatsAppQrModal = openLinkWhatsAppQrModal;
+        window.openQrModal = openQrModal;
+        window.openLinkWhatsAppQrModal = openQrModal;
 
-        function closeLinkWhatsAppQrModal() {
-            var modal = document.getElementById('linkWhatsAppQrModal');
+        function closeQrModal() {
+            var modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
             if (modal) {
                 modal.style.display = 'none';
+                modal.classList.add('hidden');
             }
             if (window.waBridgeQrPollTimer) {
                 clearInterval(window.waBridgeQrPollTimer);
                 window.waBridgeQrPollTimer = null;
             }
         }
-        window.closeLinkWhatsAppQrModal = closeLinkWhatsAppQrModal;
+        window.closeQrModal = closeQrModal;
+        window.closeLinkWhatsAppQrModal = closeQrModal;
 
         // Global Early Tab Navigation & Fallback Controller
         function earlySwitchTab(tabId) {
@@ -253,7 +265,7 @@
                 </button>
 
                 <!-- Live WhatsApp QR Topbar Quick Action -->
-                <button type="button" class="hud-btn small primary topbar-qr-btn" onclick="openLinkWhatsAppQrModal()" title="Link WhatsApp QR Code directly on Render" style="background: #10b981; color: #fff; font-weight: 700; border: none; border-radius: 6px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);">
+                <button type="button" class="hud-btn small primary topbar-qr-btn btn-qr-sync" id="btn-link-qr" onclick="openQrModal()" title="Link WhatsApp QR Code directly on Render" style="background: #10b981; color: #fff; font-weight: 700; border: none; border-radius: 6px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);">
                     <span>📱</span> Link WhatsApp QR
                 </button>
 
@@ -371,7 +383,7 @@
                     </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <button type="button" class="hud-btn primary" id="dashLinkWhatsAppQrBtn" onclick="openLinkWhatsAppQrModal()" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); font-weight: 700; font-size: 13px; padding: 9px 18px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 15px rgba(5, 150, 105, 0.35); border: 1px solid rgba(255,255,255,0.2); cursor: pointer; color: #ffffff;">
+                    <button type="button" class="hud-btn primary btn-qr-sync" id="dashLinkWhatsAppQrBtn" onclick="openQrModal()" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); font-weight: 700; font-size: 13px; padding: 9px 18px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 15px rgba(5, 150, 105, 0.35); border: 1px solid rgba(255,255,255,0.2); cursor: pointer; color: #ffffff;">
                         <span style="font-size: 16px;">📱</span>
                         <span>Link WhatsApp QR</span>
                     </button>
@@ -1050,13 +1062,13 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                             </div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 6px;">
-                            <button type="button" class="btn btn-sm" id="waHeaderLinkQrBtn" onclick="openLinkWhatsAppQrModal()" style="background: #25D366; color: #111b21; font-weight: 700; font-size: 11.5px; padding: 4px 10px; border-radius: 6px; border: none; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; box-shadow: 0 2px 6px rgba(37,211,102,0.35);" title="Link WhatsApp QR Code">
+                            <button type="button" class="btn btn-sm btn-qr-sync" id="waHeaderLinkQrBtn" onclick="openQrModal()" style="background: #25D366; color: #111b21; font-weight: 700; font-size: 11.5px; padding: 4px 10px; border-radius: 6px; border: none; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; box-shadow: 0 2px 6px rgba(37,211,102,0.35);" title="Link WhatsApp QR Code">
                                 <span>📷</span> <span>Link WhatsApp QR</span>
                             </button>
                             <button type="button" class="wa-icon-btn" title="Sync Inbound Messages" id="btnSyncWhatsAppWeb" onclick="syncWhatsAppMessagesNow()">🔄</button>
                             <button type="button" class="wa-icon-btn" title="Start New Conversation" onclick="promptNewConversation()">➕</button>
-                            <button type="button" class="wa-icon-btn" title="Link WhatsApp QR" onclick="openLinkWhatsAppQrModal()">⚙️</button>
-                            <button type="button" class="wa-icon-btn" title="Link WhatsApp QR / Gateway Status" id="waBtnDisconnect" onclick="openLinkWhatsAppQrModal()" style="color: #ef4444; cursor: pointer;">⏻</button>
+                            <button type="button" class="wa-icon-btn btn-qr-sync" title="Link WhatsApp QR" onclick="openQrModal()">⚙️</button>
+                            <button type="button" class="wa-icon-btn btn-qr-sync" title="Link WhatsApp QR / Gateway Status" id="waBtnDisconnect" onclick="openQrModal()" style="color: #ef4444; cursor: pointer;">⏻</button>
                         </div>
                     </div>
 
@@ -5486,7 +5498,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                         <span style="font-size: 11.5px; color: #00a884;" id="qrModalSubtitle">● Live Baileys Cloud Bridge</span>
                     </div>
                 </div>
-                <button type="button" onclick="closeLinkWhatsAppQrModal()" style="background: none; border: none; font-size: 22px; color: #8696a0; cursor: pointer; padding: 4px; line-height: 1;">✕</button>
+                <button type="button" onclick="closeQrModal()" style="background: none; border: none; font-size: 22px; color: #8696a0; cursor: pointer; padding: 4px; line-height: 1;">✕</button>
             </div>
 
             <!-- Connected View (Shown when WhatsApp is already linked) -->
@@ -5500,7 +5512,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                     <button type="button" class="hud-btn danger small" onclick="disconnectWhatsAppDevice()" style="background: #ef4444; color: #fff; font-size: 12.5px; font-weight: 600; padding: 8px 18px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
                         <span>⏻</span> Disconnect / Unlink WhatsApp
                     </button>
-                    <button type="button" onclick="closeLinkWhatsAppQrModal()" class="hud-btn small" style="background: #202c33; color: #cbd5e1; font-size: 12.5px; padding: 8px 18px; border-radius: 8px; border: 1px solid #334155;">
+                    <button type="button" onclick="closeQrModal()" class="hud-btn small" style="background: #202c33; color: #cbd5e1; font-size: 12.5px; padding: 8px 18px; border-radius: 8px; border: 1px solid #334155;">
                         Close
                     </button>
                 </div>
@@ -5568,14 +5580,16 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
 
                         <div id="qrImageWrapper" style="display: none; width: 100%; text-align: center;">
                             <div style="background: #ffffff; padding: 12px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.5); margin-bottom: 14px; width: 220px; height: 220px;">
-                                <img id="bridgeQrImage" src="" alt="WhatsApp Link QR Code" style="width: 100%; height: 100%; display: block; object-fit: contain; margin: 0 auto;" />
+                                <img id="qr-code-img" class="qr-code-img" src="" alt="WhatsApp Link QR Code" style="width: 100%; height: 100%; display: block; object-fit: contain; margin: 0 auto;" />
+                                <img id="bridgeQrImage" style="display: none;" />
+                                <canvas id="qr-code-canvas" style="display: none; width: 100%; height: 100%; margin: 0 auto;"></canvas>
                                 <div id="bridgeQrSvgContainer" style="display: none; width: 100%; height: 100%; margin: 0 auto;"></div>
                             </div>
                             <div style="display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 240px; margin: 0 auto;">
                                 <button type="button" id="btnSwitchToPhonePairing" onclick="switchLinkMode('phone')" class="hud-btn outline small" style="border-color: #00a884; color: #00a884; font-weight: 600; font-size: 12.5px; padding: 8px 12px; border-radius: 8px;">
                                     📱 Log in with phone number &gt;
                                 </button>
-                                <button type="button" id="qrRefreshBtn" onclick="fetchBridgeQrCode(true)" class="hud-btn small" style="background: #202c33; color: #8696a0; border: 1px solid #2a3942; font-size: 12px; padding: 7px 12px; border-radius: 8px;">
+                                <button type="button" id="btn-qr-relink" onclick="openQrModal(true)" class="hud-btn small btn-qr-sync" style="background: #202c33; color: #8696a0; border: 1px solid #2a3942; font-size: 12px; padding: 7px 12px; border-radius: 8px;">
                                     🔄 Refresh QR
                                 </button>
                             </div>
@@ -5648,7 +5662,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 <div>
                     <span>🔒 End-to-end encrypted Baileys multi-device protocol</span>
                 </div>
-                <button type="button" onclick="closeLinkWhatsAppQrModal()" class="hud-btn small" style="background: #334155; color: #cbd5e1; font-size: 12px; padding: 5px 14px; border-radius: 6px;">
+                <button type="button" onclick="closeQrModal()" class="hud-btn small" style="background: #334155; color: #cbd5e1; font-size: 12px; padding: 5px 14px; border-radius: 6px;">
                     Close
                 </button>
             </div>

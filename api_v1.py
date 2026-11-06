@@ -2740,26 +2740,32 @@ def api_whatsapp_bridge_qr():
     """Returns the Baileys bridge QR code and pairing status for web dashboard scanning.
     Guaranteed: Always returns HTTP 200 with JSON status ('connected', 'qr_ready', or 'initializing').
     Never throws 500 Internal Server Error under any bridge state.
+    Supports ?force_refresh=true to immediately generate and return a fresh QR code.
     """
     import requests
 
-    # 1. Guard check: if bridge is already live & connected, return immediately
-    bridge_status_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://127.0.0.1:3001/status")
-    try:
-        sresp = requests.get(bridge_status_url, timeout=1.5)
-        if sresp.status_code == 200:
-            sdata = sresp.json()
-            if sdata.get("connected") or sdata.get("status") == "connected":
-                return jsonify({
-                    "status": "connected",
-                    "connected": True,
-                    "qrUrl": None,
-                    "qr": None,
-                    "message": "WhatsApp is already linked and connected.",
-                    "user": sdata.get("user")
-                }), 200
-    except Exception:
-        pass
+    force_refresh = request.args.get("force_refresh", "").lower() in ("true", "1", "yes")
+
+    # 1. Guard check: if bridge is already live & connected, and not forcing refresh, return immediately
+    if not force_refresh:
+        bridge_status_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://127.0.0.1:3001/status")
+        try:
+            sresp = requests.get(bridge_status_url, timeout=1.5)
+            if sresp.status_code == 200:
+                sdata = sresp.json()
+                if sdata.get("connected") or sdata.get("status") == "connected":
+                    return jsonify({
+                        "success": True,
+                        "status": "connected",
+                        "connected": True,
+                        "qr": None,
+                        "qr_image": None,
+                        "qrUrl": None,
+                        "message": "WhatsApp is already linked and connected.",
+                        "user": sdata.get("user")
+                    }), 200
+        except Exception:
+            pass
 
     # 2. Trigger auto-heal / supervisor launch if bridge is offline
     try:
@@ -2768,27 +2774,45 @@ def api_whatsapp_bridge_qr():
     except Exception as _mgr_err:
         logger.warning(f"[WA Bridge] Manager error: {_mgr_err}")
 
-    # 3. Fetch live QR from Node bridge (guaranteed HTTP 200 response)
+    # 3. Fetch live QR from Node bridge with optional force_refresh (guaranteed HTTP 200 response)
     bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://127.0.0.1:3001/qr")
     try:
-        resp = requests.get(bridge_url, timeout=3.5)
+        params = {"force_refresh": "true"} if force_refresh else None
+        resp = requests.get(bridge_url, params=params, timeout=5.0)
         if resp.status_code == 200 and resp.text:
             data = resp.json()
-            return jsonify(data), 200
+            is_connected = bool(data.get("connected") or data.get("status") == "connected")
+            qr_val = data.get("qr")
+            qr_img = data.get("qr_image") or data.get("qrUrl") or data.get("qrImageUrl")
+            return jsonify({
+                "success": True,
+                "status": data.get("status", "connected" if is_connected else ("qr_ready" if qr_val else "initializing")),
+                "connected": is_connected,
+                "qr": qr_val,
+                "qr_image": qr_img,
+                "qrUrl": qr_img,
+                "qrSvg": data.get("qrSvg"),
+                "message": data.get("message", "WhatsApp QR ready for scanning"),
+                "user": data.get("user")
+            }), 200
         else:
             return jsonify({
+                "success": True,
                 "status": "initializing",
                 "connected": False,
-                "qrUrl": None,
                 "qr": None,
+                "qr_image": None,
+                "qrUrl": None,
                 "message": "WhatsApp Baileys bridge is initializing... Please wait 3-5 seconds."
             }), 200
     except Exception as e:
         return jsonify({
+            "success": True,
             "status": "initializing",
             "connected": False,
-            "qrUrl": None,
             "qr": None,
+            "qr_image": None,
+            "qrUrl": None,
             "message": f"WhatsApp Baileys bridge is initializing... ({str(e)})"
         }), 200
 

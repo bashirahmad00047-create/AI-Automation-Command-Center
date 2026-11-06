@@ -5760,27 +5760,24 @@ let currentPairingCode = '';
 async function fetchBridgeQrCode(forceRefresh = false) {
     const spinner = document.getElementById('qrLoadingSpinner');
     const qrWrapper = document.getElementById('qrImageWrapper');
-    const qrImg = document.getElementById('bridgeQrImage');
+    const qrImgs = [document.getElementById('qr-code-img'), document.getElementById('bridgeQrImage')].filter(Boolean);
+    const qrCanvas = document.getElementById('qr-code-canvas');
     const qrSvg = document.getElementById('bridgeQrSvgContainer');
     const statusText = document.getElementById('qrStatusText');
     const connectedState = document.getElementById('qrConnectedState');
     const mainBody = document.getElementById('waPairingMainBody');
     const connectedNumber = document.getElementById('qrConnectedNumber');
-    const refreshBtn = document.getElementById('qrRefreshBtn');
+    const refreshBtn = document.getElementById('btn-qr-relink') || document.getElementById('qrRefreshBtn');
 
-    if (forceRefresh) {
-        if (refreshBtn) refreshBtn.textContent = '⏳ Refreshing...';
-        try {
-            await fetch('/api/whatsapp/qr/refresh', { method: 'POST' });
-        } catch (_) {
-            try { await fetch('/api/v1/whatsapp/bridge-qr-refresh', { method: 'POST' }); } catch (_) {}
-        }
+    if (forceRefresh && refreshBtn) {
+        refreshBtn.textContent = '⏳ Refreshing...';
     }
 
     try {
-        let res = await fetch('/api/whatsapp/qr');
+        const refreshParam = forceRefresh ? '?force_refresh=true' : '';
+        let res = await fetch(`/api/v1/whatsapp/qr${refreshParam}`);
         if (!res.ok) {
-            res = await fetch('/api/v1/whatsapp/qr');
+            res = await fetch(`/api/whatsapp/qr${refreshParam}`);
         }
         if (!res.ok) {
             res = await fetch('/api/v1/whatsapp/bridge-qr');
@@ -5791,12 +5788,14 @@ async function fetchBridgeQrCode(forceRefresh = false) {
         if (res.ok) {
             const data = await res.json();
             
-            // Connected state check: strictly verify data.user is present
-            const isReallyConnected = Boolean((data.connected || data.status === 'connected') && data.user);
+            // Connected state check: strictly verify data.user is present or data.connected is true
+            const isReallyConnected = Boolean((data.connected || data.status === 'connected') && (data.user || data.connected));
             if (isReallyConnected) {
                 window._waIsConnected = true;
                 const phone = data.user?.id ? data.user.id.split(':')[0] : (data.phone || data.connected_phone || '');
-                updateWhatsAppConnectionUI(true, phone);
+                if (typeof updateWhatsAppConnectionUI === 'function') {
+                    updateWhatsAppConnectionUI(true, phone);
+                }
                 if (waBridgeQrPollTimer) {
                     clearInterval(waBridgeQrPollTimer);
                     waBridgeQrPollTimer = null;
@@ -5811,14 +5810,16 @@ async function fetchBridgeQrCode(forceRefresh = false) {
                 return;
             } else {
                 window._waIsConnected = false;
-                updateWhatsAppConnectionUI(false);
+                if (typeof updateWhatsAppConnectionUI === 'function') {
+                    updateWhatsAppConnectionUI(false);
+                }
             }
 
             // Unconnected state: show main pairing body
             if (connectedState) connectedState.style.display = 'none';
             if (mainBody) mainBody.style.display = 'flex';
 
-            const qrSrc = data.qrImageUrl || data.qrUrl || data.qr_image_url || data.image;
+            const qrSrc = data.qr_image || data.qrImageUrl || data.qrUrl || data.qr_image_url || data.image;
             const qrRaw = data.qr || data.qr_code;
             const qrSvgData = data.qrSvg || data.svg;
 
@@ -5827,28 +5828,55 @@ async function fetchBridgeQrCode(forceRefresh = false) {
                 if (qrWrapper) qrWrapper.style.display = 'block';
 
                 if (qrSrc && (qrSrc.startsWith('data:image') || qrSrc.startsWith('http') || qrSrc.startsWith('/'))) {
-                    if (qrImg) {
-                        qrImg.src = qrSrc;
-                        qrImg.style.display = 'block';
-                    }
+                    qrImgs.forEach(img => {
+                        img.src = qrSrc;
+                        img.style.display = 'block';
+                    });
+                    if (qrCanvas) qrCanvas.style.display = 'none';
                     if (qrSvg) qrSvg.style.display = 'none';
                 } else if (qrSvgData) {
                     if (qrSvg) {
                         qrSvg.innerHTML = qrSvgData;
                         qrSvg.style.display = 'flex';
                     }
-                    if (qrImg) qrImg.style.display = 'none';
+                    qrImgs.forEach(img => img.style.display = 'none');
+                    if (qrCanvas) qrCanvas.style.display = 'none';
                 } else if (qrRaw) {
-                    if (qrImg) {
-                        qrImg.src = `https://quickchart.io/qr?size=220&text=${encodeURIComponent(qrRaw)}`;
-                        qrImg.style.display = 'block';
+                    let rendered = false;
+                    if (window.QRCode) {
+                        try {
+                            if (qrCanvas && typeof window.QRCode.toCanvas === 'function') {
+                                await window.QRCode.toCanvas(qrCanvas, qrRaw, { width: 220, margin: 2 });
+                                qrCanvas.style.display = 'block';
+                                qrImgs.forEach(img => img.style.display = 'none');
+                                rendered = true;
+                            } else if (typeof window.QRCode.toDataURL === 'function') {
+                                const dataUrl = await window.QRCode.toDataURL(qrRaw, { width: 220, margin: 2 });
+                                qrImgs.forEach(img => {
+                                    img.src = dataUrl;
+                                    img.style.display = 'block';
+                                });
+                                if (qrCanvas) qrCanvas.style.display = 'none';
+                                rendered = true;
+                            }
+                        } catch (qrErr) {
+                            console.warn('[QR Canvas render notice]:', qrErr.message);
+                        }
+                    }
+                    if (!rendered) {
+                        const fallbackUrl = `https://quickchart.io/qr?size=220&text=${encodeURIComponent(qrRaw)}`;
+                        qrImgs.forEach(img => {
+                            img.src = fallbackUrl;
+                            img.style.display = 'block';
+                        });
+                        if (qrCanvas) qrCanvas.style.display = 'none';
                     }
                     if (qrSvg) qrSvg.style.display = 'none';
                 }
             } else {
                 if (spinner) spinner.style.display = 'flex';
                 if (qrWrapper) qrWrapper.style.display = 'none';
-                if (statusText) statusText.textContent = data.message || 'Connecting to WhatsApp Baileys bridge...';
+                if (statusText) statusText.textContent = data.message || 'Generating secure QR code...';
             }
         }
     } catch (err) {
@@ -6045,32 +6073,56 @@ async function forceResetWhatsAppSession() {
 }
 window.forceResetWhatsAppSession = forceResetWhatsAppSession;
 
-function openLinkWhatsAppQrModal() {
-    const modal = document.getElementById('linkWhatsAppQrModal');
+async function openQrModal(forceRefresh = false) {
+    const modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
     if (!modal) {
-        console.warn('linkWhatsAppQrModal element not found');
+        console.warn('QR modal element not found');
         return;
     }
+    // a) Immediately unhide/display the QR modal element (remove hidden, set display: flex, ensure z-index: 10060/9999)
+    modal.classList.remove('hidden');
     modal.style.display = 'flex';
-    switchLinkMode('qr');
-    fetchBridgeQrCode();
+    modal.style.zIndex = '10060';
 
-    if (waBridgeQrPollTimer) clearInterval(waBridgeQrPollTimer);
-    waBridgeQrPollTimer = setInterval(() => {
-        if (modal.style.display === 'none') {
-            clearInterval(waBridgeQrPollTimer);
-            waBridgeQrPollTimer = null;
+    if (typeof switchLinkMode === 'function') {
+        switchLinkMode('qr');
+    }
+
+    // b) Show clean loading spinner ("Generating secure QR code...")
+    const spinner = document.getElementById('qrLoadingSpinner');
+    const qrWrapper = document.getElementById('qrImageWrapper');
+    const statusText = document.getElementById('qrStatusText');
+    if (spinner) spinner.style.display = 'flex';
+    if (qrWrapper) qrWrapper.style.display = 'none';
+    if (statusText) statusText.textContent = 'Generating secure QR code...';
+
+    // c) & d) Make fetch request and render QR image
+    await fetchBridgeQrCode(forceRefresh);
+
+    // e) Start a safe 3-second polling loop that refreshes the QR status until user scans it
+    if (waBridgeQrPollTimer) {
+        clearInterval(waBridgeQrPollTimer);
+        waBridgeQrPollTimer = null;
+    }
+    waBridgeQrPollTimer = setInterval(async () => {
+        if (!modal || modal.style.display === 'none' || modal.classList.contains('hidden')) {
+            if (waBridgeQrPollTimer) {
+                clearInterval(waBridgeQrPollTimer);
+                waBridgeQrPollTimer = null;
+            }
             return;
         }
-        fetchBridgeQrCode();
-    }, 3500);
+        await fetchBridgeQrCode(false);
+    }, 3000);
 }
-window.openLinkWhatsAppQrModal = openLinkWhatsAppQrModal;
+window.openQrModal = openQrModal;
+window.openLinkWhatsAppQrModal = openQrModal;
 
-function closeLinkWhatsAppQrModal() {
-    const modal = document.getElementById('linkWhatsAppQrModal');
+function closeQrModal() {
+    const modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
     if (modal) {
         modal.style.display = 'none';
+        modal.classList.add('hidden');
     }
     if (waBridgeQrPollTimer) {
         clearInterval(waBridgeQrPollTimer);
@@ -6081,7 +6133,8 @@ function closeLinkWhatsAppQrModal() {
         waPairingCodeCountdownTimer = null;
     }
 }
-window.closeLinkWhatsAppQrModal = closeLinkWhatsAppQrModal;
+window.closeQrModal = closeQrModal;
+window.closeLinkWhatsAppQrModal = closeQrModal;
 
 async function disconnectWhatsAppDevice() {
     if (!confirm('Are you sure you want to disconnect / unlink WhatsApp? You can reconnect anytime.')) return;
@@ -6090,18 +6143,18 @@ async function disconnectWhatsAppDevice() {
     } catch (_) {}
     window._waIsConnected = false;
     showToast('WhatsApp unlinked. Scan QR or enter pairing code to reconnect.', 'info');
-    closeLinkWhatsAppQrModal();
+    closeQrModal();
     loadWhatsAppDashboard();
 }
 window.disconnectWhatsAppDevice = disconnectWhatsAppDevice;
 
-// Attach click listeners on DOM ready for all QR buttons and modal backdrop
+// Attach click listeners on DOM ready for all QR buttons, modal backdrop, and Escape key
 document.addEventListener('DOMContentLoaded', () => {
-    const qrModal = document.getElementById('linkWhatsAppQrModal');
+    const qrModal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
     if (qrModal) {
         qrModal.addEventListener('click', (e) => {
             if (e.target === qrModal) {
-                closeLinkWhatsAppQrModal();
+                closeQrModal();
             }
         });
     }
@@ -6114,17 +6167,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && qrModal && qrModal.style.display === 'flex') {
-            closeLinkWhatsAppQrModal();
+        if (e.key === 'Escape' && qrModal && (qrModal.style.display === 'flex' || !qrModal.classList.contains('hidden'))) {
+            closeQrModal();
         }
     });
 
     // Wire up all Link QR buttons across navbar, subheader, green banner, and sidebar
-    const qrButtons = document.querySelectorAll('.topbar-qr-btn, #dashLinkWhatsAppQrBtn, #btnLinkWhatsAppQr, #waHeaderLinkQrBtn, [data-action="link-whatsapp-qr"]');
+    const qrSelectors = '#btn-link-qr, #btn-qr-relink, .btn-qr-sync, .topbar-qr-btn, #dashLinkWhatsAppQrBtn, #btnLinkWhatsAppQr, #waHeaderLinkQrBtn, #waHeaderQrRelinkBtn, [data-action="link-whatsapp-qr"], [onclick*="Qr"], [onclick*="qr"]';
+    const qrButtons = document.querySelectorAll(qrSelectors);
     qrButtons.forEach(btn => {
         btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            openLinkWhatsAppQrModal();
+            if (btn.tagName === 'BUTTON' || btn.tagName === 'A') {
+                e.preventDefault();
+            }
+            const isRelink = btn.id === 'btn-qr-relink' || btn.classList.contains('btn-qr-relink') || (btn.textContent && btn.textContent.includes('Refresh'));
+            openQrModal(isRelink);
         });
     });
 });
