@@ -5542,7 +5542,10 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                 </div>
                 <h4 style="margin: 0 0 8px 0; color: #00a884; font-size: 20px; font-weight: 700;">WhatsApp Connected!</h4>
                 <p id="qrConnectedNumber" style="font-size: 14px; color: #8696a0; margin: 0 0 24px 0; max-width: 440px; margin-left: auto; margin-right: auto;">Your device is active & permanently synced. Auto-closing & opening WhatsApp...</p>
-                <div style="display: flex; gap: 12px; justify-content: center;">
+                <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                    <button type="button" class="hud-btn small" onclick="openQrModal(true)" style="background: #00a884; color: #111b21; font-size: 12.5px; font-weight: 700; padding: 8px 18px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                        <span>📷</span> Scan New QR Code
+                    </button>
                     <button type="button" class="hud-btn danger small" onclick="disconnectWhatsAppDevice()" style="background: #ef4444; color: #fff; font-size: 12.5px; font-weight: 600; padding: 8px 18px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
                         <span>⏻</span> Disconnect / Unlink WhatsApp
                     </button>
@@ -5623,8 +5626,8 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                                 <button type="button" id="btnSwitchToPhonePairing" onclick="switchLinkMode('phone')" class="hud-btn outline small" style="border-color: #00a884; color: #00a884; font-weight: 600; font-size: 12.5px; padding: 8px 12px; border-radius: 8px; position: static;">
                                     📱 Log in with phone number &gt;
                                 </button>
-                                <button type="button" id="btn-qr-relink" onclick="openQrModal(true)" class="hud-btn small btn-qr-sync" style="background: #202c33; color: #8696a0; border: 1px solid #2a3942; font-size: 12px; padding: 7px 12px; border-radius: 8px; position: static;">
-                                    🔄 Refresh QR
+                                <button type="button" id="btn-qr-relink" onclick="openQrModal(true)" class="hud-btn small btn-qr-sync" style="background: rgba(239, 68, 68, 0.12); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); font-size: 12px; font-weight: 600; padding: 7px 12px; border-radius: 8px; position: static; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+                                    <span>🔄</span> Reset & Generate New QR
                                 </button>
                             </div>
                         </div>

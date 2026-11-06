@@ -41,8 +41,22 @@ const { spawn, execSync } = require('child_process');
 
 let ffmpegBinaryPath = null;
 try {
-  ffmpegBinaryPath = require('ffmpeg-static');
+  const cmd = process.platform === 'win32' ? 'where.exe ffmpeg' : 'which ffmpeg';
+  ffmpegBinaryPath = execSync(cmd).toString().trim().split(/\r?\n/)[0];
 } catch (_) {}
+
+if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
+  const commonLinuxPaths = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/bin/ffmpeg'];
+  for (const p of commonLinuxPaths) {
+    if (fs.existsSync(p)) { ffmpegBinaryPath = p; break; }
+  }
+}
+
+if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
+  try {
+    ffmpegBinaryPath = require('ffmpeg-static');
+  } catch (_) {}
+}
 
 if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
   const localFfmpeg = path.join(__dirname, 'node_modules', 'ffmpeg-static', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
@@ -51,23 +65,6 @@ if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
   }
 }
 
-if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
-  try {
-    const cmd = process.platform === 'win32' ? 'where.exe ffmpeg' : 'which ffmpeg';
-    ffmpegBinaryPath = execSync(cmd).toString().trim().split(/\r?\n/)[0];
-  } catch (_) {}
-}
-if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
-  const commonLinuxPaths = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
-  for (const p of commonLinuxPaths) {
-    if (fs.existsSync(p)) { ffmpegBinaryPath = p; break; }
-  }
-}
-
-/**
- * Converts audio buffer (MP3/WAV/etc.) to OGG Opus suitable for WhatsApp PTT voice notes.
- * Command: ffmpeg -i pipe:0 -c:a libopus -b:a 32k -vbr on -compression_level 10 -frame_duration 60 -application voip -f ogg pipe:1
- */
 function convertAudioToOggOpus(buffer) {
   return new Promise((resolve, reject) => {
     if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
@@ -888,17 +885,26 @@ function storeMessageForRetry(key, message) {
 /**
  * Initializes and manages the Baileys WhatsApp Web socket.
  */
-async function startWhatsAppBridge() {
+async function startWhatsAppBridge(skipRestore = false) {
   // GUARD: If WhatsApp is already connected and active, never destroy or recreate socket!
-  if (isConnected && sock) {
+  if (isConnected && sock && !skipRestore) {
     console.log('[WhatsApp Bridge] Guard active: WhatsApp is already connected. Skipping re-initialization.');
     return;
   }
-  if (isStarting) {
+  if (isStarting && !skipRestore) {
     console.log('[WhatsApp Bridge] Connection initialization already in progress, skipping duplicate request.');
     return;
   }
   isStarting = true;
+  if (skipRestore) {
+    try {
+      if (fs.existsSync(AUTH_DIR)) {
+        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+        fs.mkdirSync(AUTH_DIR, { recursive: true });
+      }
+    } catch (_) {}
+    triggerSessionClear();
+  }
 
   try {
     destroyOldSocket();
@@ -929,7 +935,7 @@ async function startWhatsAppBridge() {
       }
     }
 
-    if (credsNeedRestore) {
+    if (credsNeedRestore && !skipRestore) {
       try {
         console.log('[WhatsApp Bridge] Checking database for saved session credentials...');
         const restored = await tryRestoreFromPythonBackend();
@@ -1049,8 +1055,30 @@ async function startWhatsAppBridge() {
     });
 
     // Connection life-cycle handler
+    let credsWatchdogTimer = null;
+    if (state.creds && state.creds.registered && !skipRestore) {
+      credsWatchdogTimer = setTimeout(async () => {
+        if (!isConnected && !latestQr && !sock?.user?.id) {
+          console.warn('[WhatsApp Bridge Watchdog] Stale saved credentials detected (no connection after 6s). Force-wiping auth to emit fresh QR...');
+          destroyOldSocket();
+          try {
+            if (fs.existsSync(AUTH_DIR)) {
+              fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+              fs.mkdirSync(AUTH_DIR, { recursive: true });
+            }
+          } catch (_) {}
+          triggerSessionClear();
+          startWhatsAppBridge(true).catch(() => {});
+        }
+      }, 6000);
+    }
+
     sock.ev.on('connection.update', (update) => {
       const { connection, lastDisconnect, qr } = update;
+      if (credsWatchdogTimer && (connection === 'open' || qr || connection === 'close')) {
+        clearTimeout(credsWatchdogTimer);
+        credsWatchdogTimer = null;
+      }
 
       // INSTANT CONNECTED STATE SETTING ON FIRST LINE BEFORE ANY DB BACKUP OR CHAT SYNC
       if (connection === 'open') {
@@ -2116,7 +2144,7 @@ app.get(['/', '/status', '/health', '/api/status'], (req, res) => {
  * NEVER uses await sleep/poll loops. Memory state returned with zero delay.
  * Background restart is cleanly triggered via setImmediate with 15s debounce.
  */
-app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconnect'], (req, res) => {
+app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconnect'], async (req, res) => {
   try {
     const isForceRefresh = String(req.query?.force_refresh || req.query?.force || req.body?.force_refresh || '').toLowerCase() === 'true' ||
       String(req.query?.force_refresh || '').toLowerCase() === '1' ||
@@ -2140,79 +2168,72 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
       });
     }
 
-    // Trigger background restart if requested or socket is offline, with 15-second debounce
-    const now = Date.now();
-    const qrAgeMs = now - lastQrGeneratedTime;
-    const hasValidQr = Boolean((latestQr || currentQr) && qrAgeMs < 60000);
+    // When force_refresh is requested, or when reconnect endpoint is hit:
+    if (isForceRefresh) {
+      console.log('[WhatsApp Bridge] Force-refreshing QR session: destroying socket and wiping credentials...');
+      destroyOldSocket();
+      isConnected = false;
+      latestQr = null;
+      latestQrDataUrl = null;
+      currentQr = null;
+      currentQrUrl = null;
+      currentQrSvg = null;
+      isStarting = true;
 
-    // Keep Baileys socket alive for at least 60 seconds once QR is emitted; do not reset socket on polling
-    if ((isForceRefresh && !hasValidQr) || (!genuinelyConnected && !sock && !isStarting)) {
-      if (now - lastRestartTriggerTime > 60000) {
-        lastRestartTriggerTime = now;
-        console.log('[WhatsApp Bridge] Non-blocking background socket restart triggered.');
-        setImmediate(() => {
-          try {
-            isConnected = false;
-            latestQr = null;
-            latestQrDataUrl = null;
-            currentQr = null;
-            currentQrUrl = null;
-            currentQrSvg = null;
-            destroyOldSocket();
+      // 1. Wipe local AUTH_DIR completely
+      try {
+        if (fs.existsSync(AUTH_DIR)) {
+          fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+        }
+        fs.mkdirSync(AUTH_DIR, { recursive: true });
+      } catch (rmErr) {
+        console.error('[WhatsApp Bridge] Error wiping AUTH_DIR:', rmErr.message);
+      }
 
-            if (!sock?.user) {
-              try {
-                if (fs.existsSync(AUTH_DIR)) {
-                  const files = fs.readdirSync(AUTH_DIR);
-                  for (const file of files) {
-                    try { fs.unlinkSync(path.join(AUTH_DIR, file)); } catch (_) {}
-                  }
-                }
-              } catch (_) {}
-            }
+      // 2. Clear persisted session in Python DB
+      triggerSessionClear();
 
-            isStarting = false;
-            startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Background restart error:', e.message));
-          } catch (bgErr) {
-            console.error('[WhatsApp Bridge] Background restart exception:', bgErr.message);
-          }
-        });
-      } else {
-        console.log(`[WhatsApp Bridge] Restart cooldown active (${Math.round((15000 - (now - lastRestartTriggerTime)) / 1000)}s remaining), skipping duplicate restart.`);
+      // 3. Start fresh socket skipping restore
+      startWhatsAppBridge(true).catch(e => console.error('[WhatsApp Bridge] Force restart error:', e.message));
+
+      // 4. Wait up to 3.5s for fresh QR code
+      const startWait = Date.now();
+      while (!latestQr && (Date.now() - startWait < 3500)) {
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     } else if (!isStarting && !latestQr && !currentQr && !genuinelyConnected) {
+      // Non-force refresh: if no socket and no QR, trigger start
       const now = Date.now();
-      if (now - lastRestartTriggerTime > 15000) {
+      if (now - lastRestartTriggerTime > 10000) {
         lastRestartTriggerTime = now;
-        setImmediate(() => {
-          startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Auto-start on /qr error:', e.message));
-        });
+        startWhatsAppBridge(false).catch(e => console.error('[WhatsApp Bridge] Auto-start on /qr error:', e.message));
       }
     }
 
-    // INSTANT (0ms) response straight from in-memory state!
-    if (genuinelyConnected) {
-      return res.status(200).json({
-        success: true,
-        status: 'connected',
-        connected: true,
-        phone: phone,
-        qr: null,
-        qr_image: null,
-        qrUrl: null,
-        message: 'WhatsApp is already linked and connected.',
-        user: sock?.user || null
-      });
-    }
-
-    const qrDataUrl = latestQrDataUrl || currentQrUrl;
     const qrText = latestQr || currentQr;
+    let qrDataUrl = latestQrDataUrl || currentQrUrl;
+
+    if (qrText && !qrDataUrl) {
+      try {
+        qrDataUrl = await qrcode.toDataURL(qrText, {
+          errorCorrectionLevel: 'M',
+          type: 'image/png',
+          margin: 2,
+          width: 280,
+          color: { dark: '#000000', light: '#ffffff' }
+        });
+        latestQrDataUrl = qrDataUrl;
+        currentQrUrl = qrDataUrl;
+      } catch (e) {
+        console.error('[WhatsApp Bridge] Error generating QR Data URL:', e.message);
+      }
+    }
 
     return res.status(200).json({
       success: true,
       status: qrText ? 'qr_ready' : (isStarting ? 'initializing' : 'waiting'),
-      connected: false,
-      phone: null,
+      connected: isForceRefresh ? false : genuinelyConnected,
+      phone: isForceRefresh ? null : phone,
       qr: qrText || null,
       qr_image: qrDataUrl || null,
       qrUrl: qrDataUrl || null,
@@ -2235,10 +2256,6 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
   }
 });
 
-/**
- * Raw PNG QR image endpoint (serves live image/png stream directly).
- * Falls back to 1x1 transparent PNG with HTTP 200 so <img> tags never render broken icons.
- */
 app.get(['/qr.png', '/qr-image'], async (req, res) => {
   const transparentPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
   if (!currentQr) {

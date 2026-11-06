@@ -5781,8 +5781,8 @@ async function fetchBridgeQrCode(forceRefresh = false) {
             data = await res.json().catch(() => null);
         }
 
-        // Secondary check against /status endpoint to detect instant connection
-        if (!data || (!data.connected && data.status !== 'connected' && !data.phone)) {
+        // Secondary check against /status endpoint ONLY during normal polling (never when forceRefresh is requested)
+        if (!forceRefresh && !window._isForceReLinking && (!data || (!data.connected && data.status !== 'connected' && !data.phone))) {
             try {
                 const sRes = await fetch('/api/v1/whatsapp/status');
                 if (sRes.ok) {
@@ -5795,9 +5795,9 @@ async function fetchBridgeQrCode(forceRefresh = false) {
         }
 
         if (data) {
-            // Instant Connected State Check: strictly detect data.connected === true, data.status === 'connected', or data.phone
+            // Instant Connected State Check: only auto-close if NOT currently in a force-relink session
             const isReallyConnected = Boolean(data.connected === true || data.status === 'connected' || data.phone || (data.user && data.user.id));
-            if (isReallyConnected) {
+            if (isReallyConnected && !forceRefresh && !window._isForceReLinking) {
                 window._waIsConnected = true;
                 const phone = data.phone || (data.user?.id ? data.user.id.split(':')[0] : (data.connected_phone || ''));
 
@@ -5854,6 +5854,7 @@ async function fetchBridgeQrCode(forceRefresh = false) {
             const qrSvgData = data.qrSvg || data.svg;
 
             if (qrSrc || qrRaw || qrSvgData) {
+                window._isForceReLinking = false;
                 // Immediately hide loading spinner & display QR container
                 if (spinner) spinner.style.display = 'none';
                 if (qrWrapper) {
@@ -6109,6 +6110,10 @@ window.forceResetWhatsAppSession = forceResetWhatsAppSession;
 
 async function openQrModal(forceRefresh = false) {
     window._qrModalClosedByUser = false;
+    if (forceRefresh) {
+        window._isForceReLinking = true;
+        window._waIsConnected = false;
+    }
     const modals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, #waQrModal, .link-whatsapp-modal');
     if (!modals || modals.length === 0) {
         console.warn('QR modal element not found');
@@ -6166,7 +6171,7 @@ async function openQrModal(forceRefresh = false) {
     // 1. Fetch live QR from bridge
     await fetchBridgeQrCode(Boolean(forceRefresh));
 
-    // 2. Fast 2.5-second polling loop while modal is open
+    // 2. Fast 2.0-second polling loop while modal is open
     if (waBridgeQrPollTimer) {
         clearInterval(waBridgeQrPollTimer);
         waBridgeQrPollTimer = null;
@@ -6181,7 +6186,7 @@ async function openQrModal(forceRefresh = false) {
             return;
         }
         await fetchBridgeQrCode(false);
-    }, 2500);
+    }, 2000);
 }
 window.openQrModal = openQrModal;
 window.openLinkWhatsAppQrModal = openQrModal;

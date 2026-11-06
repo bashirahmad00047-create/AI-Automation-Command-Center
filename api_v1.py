@@ -2746,6 +2746,19 @@ def api_whatsapp_bridge_qr():
 
     force_refresh = request.args.get("force_refresh", "").lower() in ("true", "1", "yes")
 
+    # 0. If force_refresh is requested, proactively wipe DB session snapshot and local auth folder
+    if force_refresh:
+        try:
+            from wa_bridge_manager import clear_wa_session_in_db, resolve_auth_dir
+            clear_wa_session_in_db(tenant_id="default")
+            auth_dir = resolve_auth_dir()
+            if os.path.exists(auth_dir):
+                import shutil
+                shutil.rmtree(auth_dir, ignore_errors=True)
+                os.makedirs(auth_dir, exist_ok=True)
+        except Exception as _clr_err:
+            logger.warning(f"[WA Bridge] Session clear on force_refresh error: {_clr_err}")
+
     # 1. Guard check: if bridge is already live & connected, and not forcing refresh, return immediately
     if not force_refresh:
         bridge_status_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://127.0.0.1:3001/status")
@@ -2797,9 +2810,9 @@ def api_whatsapp_bridge_qr():
                         qr_img = None
             return jsonify({
                 "success": True,
-                "status": data.get("status", "connected" if is_connected else ("qr_ready" if qr_val else "initializing")),
-                "connected": is_connected,
-                "phone": phone_num,
+                "status": "connected" if (is_connected and not force_refresh) else ("qr_ready" if qr_val else "initializing"),
+                "connected": is_connected and not force_refresh,
+                "phone": None if force_refresh else phone_num,
                 "qr": qr_val,
                 "qr_image": qr_img,
                 "qrUrl": qr_img,
@@ -3277,8 +3290,6 @@ def api_whatsapp_pairing_code():
         }), 200
 
 
-@api_v1.route("/whatsapp/logout", methods=["POST", "DELETE"])
-@api_v1.route("/whatsapp/logout-reset", methods=["POST", "DELETE"])
 @api_v1.route("/whatsapp/logout", methods=["POST", "DELETE"])
 @api_v1.route("/whatsapp/logout-reset", methods=["POST", "DELETE"])
 @api_v1.route("/whatsapp/bridge-disconnect", methods=["POST", "DELETE"])
