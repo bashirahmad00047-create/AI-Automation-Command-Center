@@ -6221,7 +6221,7 @@ window.closeLinkWhatsAppQrModal = closeQrModal;
 async function disconnectWhatsAppDevice() {
     if (!confirm('Are you sure you want to disconnect / unlink WhatsApp? You can reconnect anytime.')) return;
     try {
-        await fetch('/api/v1/whatsapp/bridge-disconnect', { method: 'POST' });
+        try { await fetch('/api/v1/whatsapp/logout', { method: 'POST' }); } catch (_) { await fetch('/api/v1/whatsapp/bridge-disconnect', { method: 'POST' }); }
     } catch (_) {}
     window._waIsConnected = false;
     showToast('WhatsApp unlinked. Scan QR or enter pairing code to reconnect.', 'info');
@@ -7816,7 +7816,13 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
         try {
             // 1. Fetch conversations from /api/v1/whatsapp/conversations (with fallback to /api/whatsapp/conversations)
             try {
-                let convRes = await fetch('/api/v1/whatsapp/conversations');
+                let convRes = await fetch('/api/v1/whatsapp/chats');
+                if (!convRes.ok) {
+                    convRes = await fetch('/api/v1/whatsapp/conversations');
+                }
+                if (!convRes.ok) {
+                    convRes = await fetch('/api/whatsapp/chats');
+                }
                 if (!convRes.ok) {
                     convRes = await fetch('/api/whatsapp/conversations');
                 }
@@ -14469,36 +14475,49 @@ window.sendLiveTrackingLinkToCustomer = sendLiveTrackingLinkToCustomer;
 function updateWhatsAppConnectionUI(isConnected, phone) {
     window._waIsConnected = !!isConnected;
     const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
-    const phoneDisplay = cleanPhone ? ` (+${cleanPhone})` : '';
+    const phoneDisplay = cleanPhone ? ' (+' + cleanPhone + ')' : '';
 
-    const qrButtons = document.querySelectorAll('.topbar-qr-btn, #btn-link-qr, #btn-qr-relink, .btn-qr-sync, #dashLinkWhatsAppQrBtn, #btnLinkWhatsAppQr, #waHeaderLinkQrBtn, #waHeaderQrRelinkBtn, [data-action="link-whatsapp-qr"]');
-    qrButtons.forEach(btn => {
+    // Update Topbar button only
+    const topbarBtn = document.getElementById('btn-link-qr');
+    if (topbarBtn) {
         if (isConnected) {
-            btn.innerHTML = `● WhatsApp Connected${phoneDisplay}`;
-            btn.classList.add('connected');
-            btn.style.borderColor = '#00a884';
-            btn.style.color = '#fff';
-            btn.style.background = '#00a884';
-            btn.title = 'WhatsApp Gateway Active & Permanent (Click to reset/re-link)';
+            topbarBtn.innerHTML = '<span>●</span> WhatsApp Connected' + phoneDisplay;
+            topbarBtn.classList.add('connected');
+            topbarBtn.style.background = '#00a884';
+            topbarBtn.style.color = '#fff';
+            topbarBtn.title = 'WhatsApp Connected (Click to view QR / Re-Link)';
         } else {
-            btn.innerHTML = `<span>⚡</span> Link WhatsApp QR`;
-            btn.classList.remove('connected');
-            btn.style.borderColor = '';
-            btn.style.color = '';
-            btn.style.background = '';
-            btn.title = 'Link WhatsApp QR / Gateway Status';
+            topbarBtn.innerHTML = '<span>📷</span> Link WhatsApp QR';
+            topbarBtn.classList.remove('connected');
+            topbarBtn.style.background = '#10b981';
+            topbarBtn.style.color = '#fff';
+            topbarBtn.title = 'Link WhatsApp QR Code';
         }
-    });
+        topbarBtn.onclick = function() { openQrModal(true); };
+    }
 
+    // ALWAYS keep the dedicated "QR Re-Link / Sync" button in the active chat header!
+    const relinkBtn = document.getElementById('waHeaderQrRelinkBtn');
+    if (relinkBtn) {
+        relinkBtn.innerHTML = '<span>🔄</span> <span>QR Re-Link / Sync</span>';
+        relinkBtn.style.display = 'inline-flex';
+        relinkBtn.style.cursor = 'pointer';
+        relinkBtn.onclick = function() { openQrModal(true); };
+    }
+
+    // Update sidebar status cleanly without overflowing
     const sidebarStatus = document.getElementById('waSidebarStatus');
     if (sidebarStatus) {
         if (isConnected) {
-            sidebarStatus.textContent = `● WhatsApp Connected${phoneDisplay}`;
+            sidebarStatus.textContent = '● Connected' + phoneDisplay;
             sidebarStatus.style.color = '#00a884';
+            sidebarStatus.title = 'WhatsApp Connected' + phoneDisplay + ' (Click to Re-Link)';
         } else {
-            sidebarStatus.textContent = '● Awaiting QR Link';
+            sidebarStatus.textContent = '● Scan QR Code';
             sidebarStatus.style.color = '#f59e0b';
+            sidebarStatus.title = 'Click to Link WhatsApp QR';
         }
+        sidebarStatus.onclick = function() { openQrModal(true); };
     }
 }
 window.updateWhatsAppConnectionUI = updateWhatsAppConnectionUI;
