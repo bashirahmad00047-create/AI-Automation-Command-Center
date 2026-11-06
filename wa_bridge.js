@@ -2241,7 +2241,7 @@ app.get(['/qr', '/api/qr', '/wa/qr'], async (req, res) => {
     }
 
     if (!currentQr) {
-      if (!isStarting && !sock) {
+      if (!isStarting && (!sock || !isSocketGenuinelyConnected())) {
         startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Auto-start on /qr error:', e.message));
       }
       return res.status(200).json({
@@ -2357,7 +2357,7 @@ app.get('/qr.svg', async (req, res) => {
  * Force Refresh QR code endpoint
  * Resets socket, clears pending un-paired creds and immediately generates a fresh QR code.
  */
-app.all(['/refresh-qr', '/qr-refresh', '/restart-socket'], async (req, res) => {
+app.all(['/refresh-qr', '/qr-refresh', '/qr/refresh', '/api/qr/refresh', '/restart-socket'], async (req, res) => {
   console.log('[WhatsApp Bridge] Fresh QR generation requested via /refresh-qr endpoint.');
   try {
     isConnected = false;
@@ -2428,10 +2428,15 @@ app.all(['/pairing-code', '/api/pairing-code', '/request-pairing-code'], async (
       });
     }
 
-    // Ensure socket is initialized
-    if (!sock) {
+    // Ensure socket is initialized and actively open
+    if (!sock || !sock.ws || sock.ws.readyState !== 1) {
+      destroyOldSocket();
+      isStarting = false;
       await startWhatsAppBridge();
-      await new Promise(r => setTimeout(r, 1200));
+      for (let i = 0; i < 20; i++) {
+        if (sock && sock.ws && sock.ws.readyState === 1) break;
+        await new Promise(r => setTimeout(r, 200));
+      }
     }
 
     if (sock && typeof sock.requestPairingCode === 'function') {

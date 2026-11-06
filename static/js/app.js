@@ -6124,11 +6124,7 @@ document.addEventListener('DOMContentLoaded', () => {
     qrButtons.forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
-            if (window._waIsConnected) {
-                forceResetWhatsAppSession();
-            } else {
-                openLinkWhatsAppQrModal();
-            }
+            openLinkWhatsAppQrModal();
         });
     });
 });

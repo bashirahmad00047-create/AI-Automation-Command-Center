@@ -11,6 +11,33 @@
             } catch (_) {}
         }
 
+        // Global QR Modal Early Fallbacks
+        function openLinkWhatsAppQrModal() {
+            var modal = document.getElementById('linkWhatsAppQrModal');
+            if (modal) {
+                modal.style.display = 'flex';
+            }
+            if (typeof window.switchLinkMode === 'function') {
+                window.switchLinkMode('qr');
+            }
+            if (typeof window.fetchBridgeQrCode === 'function') {
+                window.fetchBridgeQrCode();
+            }
+        }
+        window.openLinkWhatsAppQrModal = openLinkWhatsAppQrModal;
+
+        function closeLinkWhatsAppQrModal() {
+            var modal = document.getElementById('linkWhatsAppQrModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+            if (window.waBridgeQrPollTimer) {
+                clearInterval(window.waBridgeQrPollTimer);
+                window.waBridgeQrPollTimer = null;
+            }
+        }
+        window.closeLinkWhatsAppQrModal = closeLinkWhatsAppQrModal;
+
         // Global Early Tab Navigation & Fallback Controller
         function earlySwitchTab(tabId) {
             if (!tabId) tabId = 'whatsapp';

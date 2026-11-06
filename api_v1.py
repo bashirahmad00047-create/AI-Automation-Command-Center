@@ -6871,7 +6871,7 @@ def keep_alive_ping_now():
     return jsonify(res), (200 if res.get("success") else 502)
 
 
-@api_v1.route("/whatsapp/qr", methods=["GET"])
+@api_v1.route("/whatsapp/green-api-qr", methods=["GET"])
 @require_auth
 def get_whatsapp_qr():
     """Returns WhatsApp Web QR pairing code or state from configured provider."""
