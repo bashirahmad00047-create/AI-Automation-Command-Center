@@ -81,6 +81,27 @@ class TestLidAndVoiceFixes(unittest.TestCase):
         self.assertIn("resolveLidToPhone", js)
         self.assertIn("923471000668", js)
         self.assertIn("resolve-lid", js)
+        self.assertIn("lastInboundJidByPhone", js)
+        self.assertIn("sendWithDualJid", js)
+
+    def test_live_call_room_3_state_machine_present(self):
+        call_html_path = os.path.join(repo_root, "templates", "live_call_room.html")
+        with open(call_html_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        self.assertIn('STATE = "LISTENING"', html)
+        self.assertIn('setHardwareMicEnabled', html)
+        self.assertIn('setCallState("PROCESSING")', html)
+        self.assertIn('setCallState("SPEAKING")', html)
+        self.assertIn('setCallState("LISTENING")', html)
+
+    def test_app_js_mock_sent_single_tick(self):
+        app_js_path = os.path.join(repo_root, "static", "js", "app.js")
+        with open(app_js_path, "r", encoding="utf-8") as f:
+            js = f.read()
+
+        self.assertIn("isDelivered = m.status === 'delivered' || m.status === 'received'", js)
+        self.assertNotIn("mock_sent' || isRead", js)
 
 
 if __name__ == "__main__":

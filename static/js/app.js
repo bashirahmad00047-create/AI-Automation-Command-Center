@@ -7384,8 +7384,8 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                 const isOutbound = !isInbound;
                 const isSending = m.status === 'sending';
                 const isRead = m.status === 'read';
-                const isSent = m.status === 'sent' || m.status === 'delivered' || m.status === 'received' || m.status === 'mock_sent' || isRead;
-                const ticks = isSending ? '🕒' : (isRead ? '<span style="color:#53bdeb;font-weight:bold;">✓✓</span>' : (isSent ? '✓✓' : '✓'));
+                const isDelivered = m.status === 'delivered' || m.status === 'received';
+                const ticks = isSending ? '🕒' : (isRead ? '<span style="color:#53bdeb;font-weight:bold;">✓✓</span>' : (isDelivered ? '✓✓' : '✓'));
                 let rawMedia = m.mediaUrl || m.media_url || m.audioUrl || m.audio_url || (m.raw_payload && (m.raw_payload.mediaUrl || m.raw_payload.audioUrl || m.raw_payload.audio_base64)) || '';
                 if (rawMedia && typeof rawMedia === 'string') {
                     rawMedia = rawMedia.trim();
@@ -12574,6 +12574,10 @@ function enqueueAdminAudioChunk(chunk) {
 
 function processAdminAudioQueue() {
     if (isAdminPlayingAudio || adminAudioQueue.length === 0) return;
+    if (window.isAiSpeaking || window.isLiveAiSpeaking || window.location.pathname.includes('/call/')) {
+        adminAudioQueue = [];
+        return;
+    }
     isAdminPlayingAudio = true;
     const chunk = adminAudioQueue.shift();
 

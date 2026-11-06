@@ -315,6 +315,19 @@
         window.onerror = function() { return true; };
         window.onunhandledrejection = function(e) { if (e && e.preventDefault) e.preventDefault(); return true; };
 
+        // Strict 3-state machine: "LISTENING" | "PROCESSING" | "SPEAKING"
+        let STATE = "LISTENING";
+        let inFlightRequest = false;
+        let currentAbortController = null;
+
+        // Hard disable robotic browser window.speechSynthesis across call page
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+            try {
+                window.speechSynthesis.speak = function() {};
+                window.speechSynthesis.cancel = function() {};
+            } catch (_) {}
+        }
+
         // Room ID is kept strictly clean (digits only) on both mobile and dashboard
         const rawPhone = window.location.pathname.split('/call/')[1] || '{{ phone }}' || '';
         const roomId = String(rawPhone).replace(/\D/g, '');
@@ -356,6 +369,14 @@
         let speechDebounceTimer = null;
         let recognition = null;
 
+        function setHardwareMicEnabled(enabled) {
+            if (micStream && micStream.getAudioTracks) {
+                micStream.getAudioTracks().forEach(t => {
+                    try { t.enabled = Boolean(enabled); } catch (_) {}
+                });
+            }
+        }
+
         function setStatus(text) {
             const el = document.getElementById('callStatusLabel');
             if (el) el.textContent = text;
@@ -364,6 +385,32 @@
         function setWaveAnimation(animating) {
             const wc = document.getElementById('waveContainer');
             if (wc) wc.classList.toggle('animating', Boolean(animating));
+        }
+
+        function setCallState(newState) {
+            STATE = newState;
+            if (STATE === "LISTENING") {
+                setStatus('Listening...');
+                setWaveAnimation(false);
+                setHardwareMicEnabled(true);
+                inFlightRequest = false;
+                window.isAiSpeaking = false;
+                isAiSpeaking = false;
+                isWaitingForServer = false;
+            } else if (STATE === "PROCESSING") {
+                setStatus('Thinking...');
+                setWaveAnimation(false);
+                setHardwareMicEnabled(false);
+                inFlightRequest = true;
+                isWaitingForServer = true;
+            } else if (STATE === "SPEAKING") {
+                setStatus('Assistant Speaking...');
+                setWaveAnimation(true);
+                setHardwareMicEnabled(false);
+                window.isAiSpeaking = true;
+                isAiSpeaking = true;
+                isWaitingForServer = false;
+            }
         }
 
         function stopIncomingAiAudio() {
@@ -445,96 +492,21 @@
             if (!chunk) return;
             const seqNum = typeof chunk.seq === 'number' ? chunk.seq : (typeof chunk.seq_id === 'number' ? chunk.seq_id : null);
             if (seqNum !== null) {
-                if (seqNum <= lastPlayedSeq) return;
-                lastPlayedSeq = seqNum;
+                if (seqNum <= lastCustomerSeqId) return;
+                lastCustomerSeqId = seqNum;
             }
-            const chunkUid = chunk.chunk_id || chunk.id || (seqNum !== null ? 'seq_' + seqNum : null) || (chunk.audio ? String(chunk.audio).slice(0, 32) : null);
-            if (chunkUid && playedChunkIds.has(chunkUid)) return;
-            if (chunkUid) playedChunkIds.add(chunkUid);
-
-            customerAudioQueue.push(chunk);
-            customerAudioQueue.sort((a, b) => {
-                const seqA = typeof a.seq === 'number' ? a.seq : (typeof a.seq_id === 'number' ? a.seq_id : 0);
-                const seqB = typeof b.seq === 'number' ? b.seq : (typeof b.seq_id === 'number' ? b.seq_id : 0);
-                return seqA - seqB;
-            });
-            processCustomerAudioQueue();
-        }
-
-        function processCustomerAudioQueue() {
-            if (isPlayingCustomerQueue || customerAudioQueue.length === 0) return;
-            isPlayingCustomerQueue = true;
-            const chunk = customerAudioQueue.shift();
-
-            const advanceQueue = () => {
-                isPlayingCustomerQueue = false;
-                setTimeout(processCustomerAudioQueue, 40);
-            };
-
-            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
-            const audioData = chunk.audio || '';
             const textData = chunk.text || '';
-
-            if (textData) {
+            if (textData && chunk.sender !== 'customer') {
                 const tb = document.getElementById('transcriptBox');
                 if (tb) {
                     tb.innerHTML = `<span style="color:#10b981;"><b>Assistant:</b> ${escapeHtml(textData)}</span>`;
                 }
             }
-
-            if (audioData && String(audioData).trim()) {
-                const cleanB64 = String(audioData).trim();
-                let mime = chunk.mimeType || 'audio/webm';
-                if (cleanB64.startsWith('SUQz') || cleanB64.startsWith('//OI') || cleanB64.startsWith('//NI')) {
-                    mime = 'audio/mp3';
-                } else if (cleanB64.startsWith('UklG')) {
-                    mime = 'audio/wav';
-                } else if (cleanB64.startsWith('GkXf')) {
-                    mime = 'audio/webm';
-                }
-                const uri = cleanB64.startsWith('data:') ? cleanB64 : (`data:${mime};base64,` + cleanB64);
-                if (player) {
-                    stopIncomingAiAudio();
-                    window.currentAiAudio = player;
-                    window.isAiSpeaking = true;
-                    isAiSpeaking = true;
-                    player.src = uri;
-                    player.currentTime = 0;
-                    player.onended = () => {
-                        setWaveAnimation(false);
-                        setStatus('Listening...');
-                        window.currentAiAudio = null;
-                        // Hard Mic Lock: resume listening only 350ms after currentAiAudio.onended
-                        setTimeout(() => {
-                            window.isAiSpeaking = false;
-                            isAiSpeaking = false;
-                            isWaitingForServer = false;
-                            if (mediaRecorder && mediaRecorder.state === 'paused') {
-                                try { mediaRecorder.resume(); } catch (_) {}
-                            }
-                        }, 350);
-                        advanceQueue();
-                    };
-                    player.onerror = () => {
-                        isAiSpeaking = false;
-                        isWaitingForServer = false;
-                        advanceQueue();
-                    };
-                    const p = player.play();
-                    if (p !== undefined) {
-                        p.then(() => {
-                            isAiSpeaking = true;
-                            setStatus('Assistant Speaking...');
-                            setWaveAnimation(true);
-                        }).catch(() => {
-                            isAiSpeaking = false;
-                            isWaitingForServer = false;
-                            advanceQueue();
-                        });
-                    }
-                } else { advanceQueue(); }
-            } else { advanceQueue(); }
+            // Audio playback via customerAudioQueue is strictly disabled in live call room
+            // The live voice engine handles direct 2-way turn playback without mixing
         }
+
+        function processCustomerAudioQueue() {}
 
         function startCustomerCallAudioPolling(phoneNum) {
             if (customerAudioPollInterval) clearInterval(customerAudioPollInterval);
@@ -846,13 +818,10 @@
 
             vadInterval = setInterval(() => {
                 if (!isCallActive || isMuted) return;
-                // Echo feedback loop fix (Hard Mic Lock): strictly ignore VAD triggers while AI is speaking
-                if (window.isAiSpeaking || isAiSpeaking || isWaitingForServer) {
+                // Strict 3-state check: ignore all VAD input when not in LISTENING state
+                if (STATE !== "LISTENING" || inFlightRequest) {
                     silenceDurationMs = 0;
                     userHasSpoken = false;
-                    if (mediaRecorder && mediaRecorder.state === 'recording') {
-                        try { mediaRecorder.pause(); } catch (_) {}
-                    }
                     return;
                 }
 
@@ -867,11 +836,6 @@
                 }
 
                 if (rms > 0.02) {
-                    // User is speaking
-                    if (isAiSpeaking) {
-                        // 0ms BARGE-IN: Immediately mute and stop AI voice
-                        stopIncomingAiAudio();
-                    }
                     setStatus('Listening to you...');
                     setWaveAnimation(true);
                     userHasSpoken = true;
@@ -885,22 +849,23 @@
                         } catch (_) {}
                     }
                 } else {
-                    // Silence detection
                     if (userHasSpoken) {
                         silenceDurationMs += 100;
-                        if (silenceDurationMs >= 600) {
-                            // 600ms silence reached: dispatch recorded turn immediately
+                        if (silenceDurationMs >= 650) {
                             userHasSpoken = false;
                             silenceDurationMs = 0;
-                            setWaveAnimation(false);
-                            setStatus('Assistant Speaking...');
+                            if (STATE !== "LISTENING" || inFlightRequest) return;
+
+                            // 650ms VAD silence reached: advance to PROCESSING and lock hardware mic
+                            setCallState("PROCESSING");
+
                             if (mediaRecorder && mediaRecorder.state === 'recording') {
                                 try {
                                     mediaRecorder.stop();
                                 } catch (_) {}
                             }
                         }
-                    } else if (!isAiSpeaking) {
+                    } else if (STATE === "LISTENING") {
                         setWaveAnimation(false);
                         setStatus('Listening...');
                     }
@@ -929,7 +894,7 @@
                 };
 
                 recognition.onresult = (event) => {
-                    if (isMuted || !isCallActive || window.isAiSpeaking || isAiSpeaking || isWaitingForServer) return;
+                    if (isMuted || !isCallActive || STATE !== "LISTENING" || inFlightRequest) return;
 
                     let interimTranscript = '';
                     let finalTranscript = '';
@@ -974,7 +939,12 @@
         // ===================================================================
         async function sendLiveVoicePayload(payload) {
             if (!isCallActive) return;
-            isWaitingForServer = true;
+            setCallState("PROCESSING");
+
+            if (currentAbortController) {
+                try { currentAbortController.abort(); } catch (_) {}
+            }
+            currentAbortController = new AbortController();
 
             let textQuery = '';
             if (payload && typeof payload === 'object') {
@@ -983,48 +953,63 @@
 
             if (textQuery) {
                 const now = Date.now();
-                if (textQuery === lastSpokenText && (now - lastSpokenTime) < 1400) return;
+                if (textQuery === lastSpokenText && (now - lastSpokenTime) < 1400) {
+                    setCallState("LISTENING");
+                    return;
+                }
                 lastSpokenText = textQuery;
                 lastSpokenTime = now;
                 callHistory.push({ role: 'user', text: textQuery });
             }
 
-            setStatus('Assistant Speaking...');
-            setWaveAnimation(true);
-
             try {
                 const bodyData = {
                     persona: 'ur-PK-UzmaNeural',
+                    rate: '+8%',
                     callHistory: callHistory.slice(-6),
                     phone: phone || roomId,
-                    roomId: roomId || phone
+                    roomId: roomId || phone,
+                    message: textQuery || payload?.text || undefined,
+                    audio_base64: payload?.audioBase64 || undefined
                 };
                 if (payload.text) bodyData.text = payload.text;
                 if (payload.audioBase64) bodyData.audioBase64 = payload.audioBase64;
 
-                if (!payload.turnId) {
-                    currentTurnId++;
-                    turnId = currentTurnId;
+                let data = null;
+                try {
+                    const res = await fetch('/api/v1/voice/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(bodyData),
+                        signal: currentAbortController.signal
+                    });
+                    if (res.ok) {
+                        data = await res.json();
+                    }
+                } catch (firstErr) {
+                    if (firstErr.name === 'AbortError') return;
                 }
-                const targetTurnId = payload.turnId || currentTurnId;
 
-                const res = await fetch('/api/v1/live-voice-call', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(bodyData)
-                });
+                if (!data || !data.success) {
+                    const fallbackRes = await fetch('/api/v1/live-voice-call', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(bodyData),
+                        signal: currentAbortController.signal
+                    });
+                    if (fallbackRes.ok) {
+                        data = await fallbackRes.json();
+                    }
+                }
 
-                const data = await res.json();
-                if (targetTurnId !== currentTurnId) return;
+                if (!isCallActive) return;
 
-                if (data && data.success && isCallActive) {
+                if (data && data.success) {
                     if (data.empty_turn) {
-                        isWaitingForServer = false;
-                        setStatus('Listening...');
-                        setWaveAnimation(false);
+                        setCallState("LISTENING");
                         return;
                     }
-                    const reply = data.replyText || data.reply_text || 'Jee bilkul.';
+                    const reply = data.reply_text || data.replyText || data.reply || 'Jee bilkul.';
                     callHistory.push({ role: 'assistant', text: reply });
 
                     const tb = document.getElementById('transcriptBox');
@@ -1033,67 +1018,80 @@
                     }
 
                     const outAudioB64 = data.audio_data_uri || data.audioBase64 || data.audio_base64 || '';
-                    speakAIResponse(reply, outAudioB64);
+                    playNeuralVoiceResponse(outAudioB64);
                 } else {
-                    setStatus('Listening...');
-                    setWaveAnimation(false);
+                    setCallState("LISTENING");
                 }
-            } catch (_) {
-                setStatus('Listening...');
-                setWaveAnimation(false);
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    setCallState("LISTENING");
+                }
             }
         }
 
         // ===================================================================
-        // 8. HIGH-FIDELITY SPEECH PLAYBACK
+        // 8. STRICT SINGLETON NEURAL VOICE PLAYBACK
         // ===================================================================
-        function speakAIResponse(replyText, audioBase64) {
+        function playNeuralVoiceResponse(audioBase64) {
             if (!isCallActive) return;
-            // Global audio singleton: stop any previous audio before playing new TTS
-            stopIncomingAiAudio();
-            window.isAiSpeaking = true;
-            isAiSpeaking = true;
-            setStatus('Assistant Speaking...');
-            setWaveAnimation(true);
+            setCallState("SPEAKING");
 
-            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
-
-            if (audioBase64 && String(audioBase64).trim()) {
-                const b64 = String(audioBase64).trim();
-                let mime = 'audio/mp3';
-                if (b64.startsWith('GkXf')) mime = 'audio/webm';
-                else if (b64.startsWith('UklG')) mime = 'audio/wav';
-
-                const uri = b64.startsWith('data:') ? b64 : (`data:${mime};base64,` + b64);
-                if (player) {
-                    window.currentAiAudio = player;
-                    player.src = uri;
-                    player.currentTime = 0;
-                    player.onended = () => {
-                        setWaveAnimation(false);
-                        setStatus('Listening...');
-                        window.currentAiAudio = null;
-                        // Hard Mic Lock: resume listening only 350ms after currentAiAudio.onended
-                        setTimeout(() => {
-                            window.isAiSpeaking = false;
-                            isAiSpeaking = false;
-                            isWaitingForServer = false;
-                            if (mediaRecorder && mediaRecorder.state === 'paused') {
-                                try { mediaRecorder.resume(); } catch (_) {}
-                            }
-                        }, 350);
-                    };
-                    player.onerror = () => {
-                        playWithWebAudioBuffer(b64, replyText);
-                    };
-                    const p = player.play();
-                    if (p !== undefined) {
-                        p.catch(() => playWithWebAudioBuffer(b64, replyText));
-                    }
-                    return;
-                }
+            // Global audio singleton: stop and destroy any previous audio
+            if (window.currentAiAudio) {
+                try {
+                    window.currentAiAudio.pause();
+                    window.currentAiAudio.currentTime = 0;
+                    window.currentAiAudio.src = "";
+                } catch (_) {}
+                window.currentAiAudio = null;
             }
-            fallbackBrowserSpeech(replyText);
+
+            if (!audioBase64 || !String(audioBase64).trim()) {
+                setTimeout(() => {
+                    if (isCallActive) setCallState("LISTENING");
+                }, 500);
+                return;
+            }
+
+            const b64 = String(audioBase64).trim();
+            let mime = 'audio/mp3';
+            if (b64.startsWith('GkXf')) mime = 'audio/webm';
+            else if (b64.startsWith('UklG')) mime = 'audio/wav';
+
+            const uri = b64.startsWith('data:') ? b64 : (`data:${mime};base64,` + b64);
+            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer') || new Audio();
+            window.currentAiAudio = player;
+            window.isAiSpeaking = true;
+
+            const onDone = () => {
+                player.onended = null;
+                player.onerror = null;
+                window.currentAiAudio = null;
+                window.isAiSpeaking = false;
+                setWaveAnimation(false);
+                setStatus('Listening...');
+
+                // Hard Mic Lock: wait 300ms to 350ms before re-enabling mic track to prevent room echo
+                setTimeout(() => {
+                    if (isCallActive) {
+                        setCallState("LISTENING");
+                    }
+                }, 300);
+            };
+
+            player.onended = onDone;
+            player.onerror = onDone;
+            player.src = uri;
+            player.currentTime = 0;
+
+            const playPromise = player.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(onDone);
+            }
+        }
+
+        function speakAIResponse(replyText, audioBase64) {
+            playNeuralVoiceResponse(audioBase64);
         }
 
         function playWithWebAudioBuffer(b64, fallbackText) {

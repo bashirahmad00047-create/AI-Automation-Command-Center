@@ -70,9 +70,10 @@ function convertAudioToOggOpus(buffer) {
       '-y',
       '-i', 'pipe:0',
       '-c:a', 'libopus',
-      '-b:a', '48k',
+      '-b:a', '32k',
       '-vbr', 'on',
       '-compression_level', '10',
+      '-frame_duration', '60',
       '-application', 'voip',
       '-f', 'ogg',
       'pipe:1'
@@ -552,6 +553,7 @@ const phoneToLidMap = new Map();
 const lastSendTimeMap = new Map();
 const lidToPhoneMap = new Map(); // Keep persisted in memory/DB
 const phoneToReplyJidMap = new Map(); // Persistent phone -> exact incoming replyJid mapping
+const lastInboundJidByPhone = new Map(); // In-memory map: clean digits/phone -> exact incoming remoteJid (@lid or @s.whatsapp.net)
 
 /**
  * Estimates audio duration in seconds from buffer headers (OGG Opus granule position or MP3 frame sync).
@@ -717,6 +719,9 @@ async function resolveSender(msg, activeSock) {
       phoneToReplyJidMap.set(cleanCand, remoteJid);
       phoneToReplyJidMap.set(`+${cleanCand}`, remoteJid);
       phoneToReplyJidMap.set(`${cleanCand}@s.whatsapp.net`, remoteJid);
+      lastInboundJidByPhone.set(cleanCand, remoteJid);
+      lastInboundJidByPhone.set(`+${cleanCand}`, remoteJid);
+      lastInboundJidByPhone.set(`${cleanCand}@s.whatsapp.net`, remoteJid);
     }
   }
 
@@ -726,6 +731,10 @@ async function resolveSender(msg, activeSock) {
       phoneToReplyJidMap.set(`+${phone}`, remoteJid);
       phoneToReplyJidMap.set(`${phone}@s.whatsapp.net`, remoteJid);
       phoneToReplyJidMap.set(remoteJid, remoteJid);
+      lastInboundJidByPhone.set(phone, remoteJid);
+      lastInboundJidByPhone.set(`+${phone}`, remoteJid);
+      lastInboundJidByPhone.set(`${phone}@s.whatsapp.net`, remoteJid);
+      lastInboundJidByPhone.set(remoteJid, remoteJid);
     }
     return {
       phone: `+${phone}`,
@@ -1622,6 +1631,22 @@ if (!text) text = '[Voice note]';
             cleanDigitsSender = '923471000668';
             senderPhone = '+923471000668';
           }
+          if (cleanDigitsSender) {
+            lastInboundJidByPhone.set(cleanDigitsSender, remoteJid);
+            lastInboundJidByPhone.set(`+${cleanDigitsSender}`, remoteJid);
+            lastInboundJidByPhone.set(`${cleanDigitsSender}@s.whatsapp.net`, remoteJid);
+          }
+          if (remoteJid) {
+            lastInboundJidByPhone.set(remoteJid, remoteJid);
+          }
+          if (cleanDigitsSender === '923471000668' || (pushName && pushName.toLowerCase().includes('bashir')) || (remoteJid && remoteJid.includes('7142'))) {
+            lastInboundJidByPhone.set('923471000668', remoteJid);
+            lastInboundJidByPhone.set('+923471000668', remoteJid);
+            lastInboundJidByPhone.set('923471000668@s.whatsapp.net', remoteJid);
+            lastInboundJidByPhone.set('7142', remoteJid);
+            lastInboundJidByPhone.set('+7142', remoteJid);
+          }
+
           const resolvedPhoneJid = (cleanDigitsSender && cleanDigitsSender.length >= 10 && cleanDigitsSender.length <= 13)
             ? `${cleanDigitsSender}@s.whatsapp.net`
             : null;
@@ -1734,78 +1759,90 @@ if (!text) text = '[Voice note]';
             }
           }
 
-          // Function to deliver response with presence and jitter delay
+          // Function to deliver response with Dual-JID Routing & Presence
           const deliverAiResponse = async (resData, finalTargetJid) => {
             if (!resData || (!resData.reply && !resData.audio_base64 && !resData.image_url && !resData.image_base64)) return;
-            let target = finalTargetJid || targetJid || remoteJid;
-            if (target && target.endsWith('@c.us')) {
-              target = target.replace('@c.us', '@s.whatsapp.net');
-            }
-            if (target && target.endsWith('@lid')) {
-              const resPh = lidToPhoneMap.get(target) || ((target.includes('7142') || (pushName && pushName.toLowerCase().includes('bashir'))) ? '923471000668' : null);
-              if (resPh) {
-                target = `${resPh}@s.whatsapp.net`;
-              }
-            }
-            if (target && target.endsWith('@c.us')) {
-              target = target.replace('@c.us', '@s.whatsapp.net');
-            }
+
+            // Dual-JID: Determine active Signal session JID vs Standard phone JID
+            const cleanTarget = cleanPhoneNumber(finalTargetJid || targetJid || senderPhone);
+            const standardJid = cleanTarget ? `${cleanTarget}@s.whatsapp.net` : (finalTargetJid || targetJid || remoteJid);
+            const mappedSessionJid = (cleanTarget && lastInboundJidByPhone.get(cleanTarget)) ||
+                                     lastInboundJidByPhone.get(senderPhone) ||
+                                     lastInboundJidByPhone.get(cleanDigitsSender) ||
+                                     (remoteJid && remoteJid.endsWith('@lid') ? remoteJid : null);
+
+            let primaryTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : standardJid;
+            let fallbackTarget = (primaryTarget === mappedSessionJid) ? standardJid : ((mappedSessionJid && mappedSessionJid !== standardJid) ? mappedSessionJid : null);
+
+            if (primaryTarget && primaryTarget.endsWith('@c.us')) primaryTarget = primaryTarget.replace('@c.us', '@s.whatsapp.net');
+            if (fallbackTarget && fallbackTarget.endsWith('@c.us')) fallbackTarget = fallbackTarget.replace('@c.us', '@s.whatsapp.net');
+
             const shouldSendVoice = Boolean(resData.audio_base64 && (resData.send_as_voice || resData.is_voice));
             const shouldSendImage = Boolean(resData.image_url || resData.image_base64);
-            // Safe async human delay: 3 to 5 seconds
-            const replyTextForDelay = resData.reply || resData.tts_text || resData.text || '';
-            const jitterMs = Math.floor(Math.random() * 2000) + 3000; // 3.0s - 5.0s range
+            const jitterMs = Math.floor(Math.random() * 2000) + 3000; // 3.0s - 5.0s human delay
 
             await acquireAntiSpamDispatchSlot();
 
+            // Helper to dispatch with primary session JID (@lid) first, falling back to standard JID (@s.whatsapp.net)
+            const sendWithDualJid = async (payload, presenceType = 'composing') => {
+              const targets = [primaryTarget, fallbackTarget].filter(Boolean);
+              let result = null;
+              let lastErr = null;
+              for (const tgt of targets) {
+                try {
+                  await sock.sendPresenceUpdate(presenceType, tgt).catch(() => {});
+                } catch (_) {}
+                try {
+                  console.log(`[Dual-JID AI Response] Attempting dispatch to ${tgt}...`);
+                  result = await sock.sendMessage(tgt, payload, { quoted: msg });
+                  if (result?.key?.id) {
+                    console.log(`[Dual-JID AI Response Success] Delivered to ${tgt} (ID: ${result.key.id})`);
+                    try { await sock.sendPresenceUpdate('paused', tgt).catch(() => {}); } catch (_) {}
+                    return result;
+                  }
+                } catch (sendErr) {
+                  console.warn(`[Dual-JID AI Response Warning] Dispatch to ${tgt} failed: ${sendErr.message}`);
+                  lastErr = sendErr;
+                  try { await sock.sendPresenceUpdate('paused', tgt).catch(() => {}); } catch (_) {}
+                }
+              }
+              if (lastErr) throw lastErr;
+              return null;
+            };
+
             let sentMsg = null;
             if (shouldSendImage) {
-              try {
-                await sock.sendPresenceUpdate('composing', target);
-              } catch (_) {}
               await new Promise(r => setTimeout(r, jitterMs));
               const caption = resData.reply ? String(resData.reply) : '';
               try {
                 if (resData.image_base64) {
                   const cleanBase64 = String(resData.image_base64).replace(/^data:[^;]+;base64,/, '').trim();
                   const imgBuf = Buffer.from(cleanBase64, 'base64');
-                  sentMsg = await sock.sendMessage(target, { image: imgBuf, caption });
+                  sentMsg = await sendWithDualJid({ image: imgBuf, caption }, 'composing');
                 } else if (resData.image_url) {
-                  sentMsg = await sock.sendMessage(target, { image: { url: resData.image_url }, caption });
+                  sentMsg = await sendWithDualJid({ image: { url: resData.image_url }, caption }, 'composing');
                 }
-                console.log(`[Direct Bridge Image Dispatch] Image card delivered to ${target}: ID=${sentMsg?.key?.id}`);
                 if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
               } catch (imgErr) {
                 console.warn('[Direct Bridge Image Error, falling back to text]:', imgErr.message);
                 if (resData.reply) {
                   try {
-                    sentMsg = await sock.sendMessage(target, { text: String(resData.reply) });
+                    sentMsg = await sendWithDualJid({ text: String(resData.reply) }, 'composing');
+                    if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
                   } catch (_) {}
                 }
-              } finally {
-                try { await sock.sendPresenceUpdate('paused', target); } catch (_) {}
               }
             } else if (shouldSendVoice && resData.audio_base64) {
-              try {
-                await sock.sendPresenceUpdate('recording', target);
-                console.log(`[Anti-Ban Shield] Presence 'recording' active for ${target} during ${jitterMs}ms jitter delay...`);
-              } catch (_) {}
-
               await new Promise(r => setTimeout(r, jitterMs));
-
               let audioBuf = Buffer.from(resData.audio_base64, 'base64');
               if (!audioBuf || audioBuf.length <= 1024) {
-                console.warn(`[Direct Bridge Audio Buffer Invalid] Size=${audioBuf ? audioBuf.length : 0} bytes <= 1024. Bypassing voice and delivering text reply to ${target}.`);
+                console.warn(`[Direct Bridge Audio Buffer Invalid] Size=${audioBuf ? audioBuf.length : 0} bytes. Delivering text reply.`);
                 if (resData.reply) {
                   try {
-                    await sock.sendPresenceUpdate('composing', target);
-                    sentMsg = await sock.sendMessage(target, { text: String(resData.reply) });
-                    console.log(`[Direct Bridge Text Delivery] Successfully delivered text to ${target}: ID=${sentMsg?.key?.id}`);
+                    sentMsg = await sendWithDualJid({ text: String(resData.reply) }, 'composing');
                     if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
                   } catch (tErr) {
                     console.error('[Direct Bridge Text Delivery Error]:', tErr.message);
-                  } finally {
-                    try { await sock.sendPresenceUpdate('paused', target); } catch (_) {}
                   }
                 }
                 return;
@@ -1813,33 +1850,29 @@ if (!text) text = '[Voice note]';
 
               let outMime = 'audio/ogg; codecs=opus';
               let outPtt = true;
-
               const isAlreadyOgg = audioBuf.slice(0, 4).toString() === 'OggS';
               if (!isAlreadyOgg) {
                 try {
                   const oggBuf = await convertAudioToOggOpus(audioBuf);
                   if (oggBuf && oggBuf.length > 0) audioBuf = oggBuf;
-                } catch (_) {
+                } catch (convErr) {
+                  console.warn('[Direct Bridge Voice] ffmpeg conversion failed, falling back to audio/mp4:', convErr.message);
                   outMime = 'audio/mp4';
                 }
               }
 
               try {
-                sentMsg = await sock.sendMessage(target, {
+                sentMsg = await sendWithDualJid({
                   audio: audioBuf,
                   mimetype: outMime,
                   ptt: outPtt,
                   fileName: outMime.includes('ogg') ? 'voice_reply.oga' : 'voice_reply.mp4'
-                });
-                console.log(`[Direct Bridge Dispatch Success] Outbound PTT voice note delivered to ${target}: ID=${sentMsg?.key?.id}`);
+                }, 'recording');
                 if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
 
-                // Deliver follow-up call link text only if specifically requested
                 if (resData.reply && resData.send_followup_call_link) {
                   try {
-                    await sock.sendPresenceUpdate('composing', target);
-                    const callMsg = await sock.sendMessage(target, { text: String(resData.reply) });
-                    console.log(`[Direct Bridge Call Link Followup Success] Delivered live call link to ${target}: ID=${callMsg?.key?.id}`);
+                    const callMsg = await sendWithDualJid({ text: String(resData.reply) }, 'composing');
                     if (callMsg?.key?.id) {
                       sentAiMessageIds.add(callMsg.key.id);
                       storeMessageForRetry(callMsg.key, callMsg.message);
@@ -1849,35 +1882,38 @@ if (!text) text = '[Voice note]';
                   }
                 }
               } catch (aErr) {
-                console.warn('[Direct Bridge Audio Error, falling back to text delivery]:', aErr.message);
-                if (resData.reply) {
+                console.warn('[Direct Bridge Audio Error, falling back to MP4 / text delivery]:', aErr.message);
+                // Fallback attempt: audio/mp4
+                let sentMp4 = false;
+                try {
+                  sentMsg = await sendWithDualJid({
+                    audio: audioBuf,
+                    mimetype: 'audio/mp4',
+                    ptt: true,
+                    fileName: 'voice_reply.mp4'
+                  }, 'recording');
+                  if (sentMsg?.key?.id) {
+                    sentAiMessageIds.add(sentMsg.key.id);
+                    sentMp4 = true;
+                  }
+                } catch (_) {}
+
+                if (!sentMp4 && resData.reply) {
                   try {
-                    sentMsg = await sock.sendMessage(target, { text: String(resData.reply) });
-                    console.log(`[Direct Bridge Fallback Text Success] Delivered text reply to ${target}: ID=${sentMsg?.key?.id}`);
+                    sentMsg = await sendWithDualJid({ text: String(resData.reply) }, 'composing');
                     if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
                   } catch (fErr) {
                     console.error('[Direct Bridge Fallback Text Failed]:', fErr.message);
                   }
                 }
-              } finally {
-                try { await sock.sendPresenceUpdate('paused', target); } catch (_) {}
               }
             } else if (resData.reply) {
-              try {
-                await sock.sendPresenceUpdate('composing', target);
-                console.log(`[Anti-Ban Shield] Presence 'composing' active for ${target} during ${jitterMs}ms jitter delay...`);
-              } catch (_) {}
-
               await new Promise(r => setTimeout(r, jitterMs));
-
               try {
-                sentMsg = await sock.sendMessage(target, { text: String(resData.reply) });
-                console.log(`[Direct Bridge Dispatch Success] Outbound text delivered to ${target}: ID=${sentMsg?.key?.id}`);
+                sentMsg = await sendWithDualJid({ text: String(resData.reply) }, 'composing');
                 if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
               } catch (tErr) {
                 console.warn('[Direct Bridge Text Error]:', tErr.message);
-              } finally {
-                try { await sock.sendPresenceUpdate('paused', target); } catch (_) {}
               }
             }
           };
@@ -2544,19 +2580,28 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
         }
       } catch (_) {}
     }
-    // Never overwrite jid with @lid for outbound deliveries! Outbound must strictly target @s.whatsapp.net
+    // Dual-JID Routing: keep jid normalized for DB/Dashboard, but resolve active session JID for socket delivery
+    const cleanTargetPhone = cleanPhoneNumber(jid) || cleanPhoneNumber(chatId);
     if (jid.endsWith('@lid')) {
       const resPh = lidToPhoneMap.get(jid) || (jid.includes('7142') ? '923471000668' : null);
       if (resPh) {
         jid = `${resPh}@s.whatsapp.net`;
       }
     }
-  if (!jid || jid.startsWith('@') || (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us') && !jid.endsWith('@lid'))) {
+    if (!jid || jid.startsWith('@') || (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us') && !jid.endsWith('@lid'))) {
       return res.status(400).json({
         success: false,
         error: `Invalid recipient JID: '${chatId}' -> '${jid}'. Outbound replies must strictly target a valid @s.whatsapp.net or @g.us JID.`
       });
     }
+
+    const mappedSessionJid = (cleanTargetPhone && lastInboundJidByPhone.get(cleanTargetPhone)) ||
+                             lastInboundJidByPhone.get(chatId) ||
+                             lastInboundJidByPhone.get(jid) ||
+                             (cleanTargetPhone ? phoneToLidMap.get(cleanTargetPhone) : null);
+
+    let primarySendTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : jid;
+    let fallbackSendTarget = (primarySendTarget === mappedSessionJid) ? jid : ((mappedSessionJid && mappedSessionJid !== jid) ? mappedSessionJid : null);
 
     // Strict guard: Do not allow sending to the bot's own linked session JID as an accidental fallback
     const botPhone = cleanPhoneNumber(sock?.user?.id || '');
@@ -2648,46 +2693,55 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
         const dur = Number(req.body?.seconds || req.body?.duration || 0) || (Buffer.isBuffer(finalAudioPayload) ? estimateAudioDuration(finalAudioPayload) : 0);
         const audioFileName = ptt ? 'voice_message.oga' : 'audio.mp4';
 
-        try {
-          sent = await sock.sendMessage(jid, {
-            audio: finalAudioPayload,
-            mimetype: mimetype,
-            ptt: ptt,
-            seconds: dur > 0 ? dur : undefined,
-            fileName: audioFileName
-          }, sendOptions);
-        } catch (firstAudioErr) {
-          console.warn('[Audio Send Warning] First attempt with quoted failed, retrying without quoted:', firstAudioErr.message);
+        const dispatchTargets = [primarySendTarget, fallbackSendTarget].filter(Boolean);
+        let audioSent = false;
+        for (const sendTgt of dispatchTargets) {
           try {
-            sent = await sock.sendMessage(jid, {
+            console.log(`[POST /send-message Audio] Attempting dispatch to ${sendTgt}...`);
+            sent = await sock.sendMessage(sendTgt, {
               audio: finalAudioPayload,
               mimetype: mimetype,
               ptt: ptt,
               seconds: dur > 0 ? dur : undefined,
               fileName: audioFileName
-            });
-          } catch (secondAudioErr) {
-            console.warn('[Audio Send Warning] Second attempt failed, retrying audio/mp4 without PTT:', secondAudioErr.message);
+            }, sendOptions);
+            if (sent?.key?.id) { audioSent = true; break; }
+          } catch (firstAudioErr) {
+            console.warn(`[Audio Send Warning] Attempt with quoted on ${sendTgt} failed, retrying without quoted: ${firstAudioErr.message}`);
             try {
-              sent = await sock.sendMessage(jid, {
+              sent = await sock.sendMessage(sendTgt, {
                 audio: finalAudioPayload,
-                mimetype: 'audio/mp4',
-                ptt: false,
+                mimetype: mimetype,
+                ptt: ptt,
                 seconds: dur > 0 ? dur : undefined,
-                fileName: 'audio.mp4'
+                fileName: audioFileName
               });
-            } catch (thirdAudioErr) {
-              console.warn('[Audio Send Warning] Third attempt failed:', thirdAudioErr.message);
+              if (sent?.key?.id) { audioSent = true; break; }
+            } catch (secondAudioErr) {
+              console.warn(`[Audio Send Warning] Attempt on ${sendTgt} failed, retrying audio/mp4: ${secondAudioErr.message}`);
+              try {
+                sent = await sock.sendMessage(sendTgt, {
+                  audio: finalAudioPayload,
+                  mimetype: 'audio/mp4',
+                  ptt: false,
+                  seconds: dur > 0 ? dur : undefined,
+                  fileName: 'audio.mp4'
+                });
+                if (sent?.key?.id) { audioSent = true; break; }
+              } catch (_) {}
             }
           }
         }
 
         if (!sent && hasText) {
           console.log('[Audio Send Fallback] Delivering text reply to WhatsApp since audio buffer dispatch failed...');
-          try {
-            sent = await sock.sendMessage(jid, { text: String(message) });
-          } catch (textFallbackErr) {
-            console.error('[Audio Send Fallback Error] Failed to send fallback text:', textFallbackErr.message);
+          for (const sendTgt of dispatchTargets) {
+            try {
+              sent = await sock.sendMessage(sendTgt, { text: String(message) });
+              if (sent?.key?.id) break;
+            } catch (textFallbackErr) {
+              console.error(`[Audio Send Fallback Error on ${sendTgt}]:`, textFallbackErr.message);
+            }
           }
         }
       } else if (hasImage) {
@@ -2705,47 +2759,56 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
           }
         }
         const caption = message !== undefined && message !== null ? String(message) : (req.body?.caption ? String(req.body.caption) : '');
+        const dispatchTargets = [primarySendTarget, fallbackSendTarget].filter(Boolean);
 
-        if (imageRaw) {
-          const cleanBase64 = String(imageRaw).replace(/^data:[^;]+;base64,/, '').trim();
-          const imageBuffer = Buffer.from(cleanBase64, 'base64');
+        for (const sendTgt of dispatchTargets) {
           try {
-            sent = await sock.sendMessage(jid, {
-              image: imageBuffer,
-              caption
-            }, sendOptions);
+            if (imageRaw) {
+              const cleanBase64 = String(imageRaw).replace(/^data:[^;]+;base64,/, '').trim();
+              const imageBuffer = Buffer.from(cleanBase64, 'base64');
+              sent = await sock.sendMessage(sendTgt, { image: imageBuffer, caption }, sendOptions);
+            } else if (imageUrl) {
+              sent = await sock.sendMessage(sendTgt, { image: { url: imageUrl }, caption }, sendOptions);
+            }
+            if (sent?.key?.id) break;
           } catch (firstImgErr) {
-            sent = await sock.sendMessage(jid, {
-              image: imageBuffer,
-              caption
-            });
-          }
-        } else if (imageUrl) {
-          try {
-            sent = await sock.sendMessage(jid, {
-              image: { url: imageUrl },
-              caption
-            }, sendOptions);
-          } catch (firstImgErr) {
-            sent = await sock.sendMessage(jid, {
-              image: { url: imageUrl },
-              caption
-            });
+            try {
+              if (imageRaw) {
+                const cleanBase64 = String(imageRaw).replace(/^data:[^;]+;base64,/, '').trim();
+                const imageBuffer = Buffer.from(cleanBase64, 'base64');
+                sent = await sock.sendMessage(sendTgt, { image: imageBuffer, caption });
+              } else if (imageUrl) {
+                sent = await sock.sendMessage(sendTgt, { image: { url: imageUrl }, caption });
+              }
+              if (sent?.key?.id) break;
+            } catch (_) {}
           }
         }
-        try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {}
+        try { await sock.sendPresenceUpdate('paused', primarySendTarget); } catch (_) {}
       } else {
         // Human Simulation: Composing presence active during jitter delay
         try {
-          await sock.sendPresenceUpdate('composing', jid);
-          console.log(`[Anti-Ban Shield] Outbound composing presence active for ${jid} during ${jitterDelayMs}ms jitter delay...`);
+          await sock.sendPresenceUpdate('composing', primarySendTarget);
+          console.log(`[Anti-Ban Shield] Outbound composing presence active for ${primarySendTarget} during ${jitterDelayMs}ms jitter delay...`);
         } catch (_) {}
 
         await new Promise(r => setTimeout(r, jitterDelayMs));
 
         const textToSend = String(message || '');
-        sent = await sock.sendMessage(jid, { text: textToSend }, sendOptions);
-        try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {}
+        const dispatchTargets = [primarySendTarget, fallbackSendTarget].filter(Boolean);
+        for (const sendTgt of dispatchTargets) {
+          try {
+            sent = await sock.sendMessage(sendTgt, { text: textToSend }, sendOptions);
+            if (sent?.key?.id) break;
+          } catch (tErr) {
+            console.warn(`[Dual-JID Send Text Error on ${sendTgt}]:`, tErr.message);
+            try {
+              sent = await sock.sendMessage(sendTgt, { text: textToSend });
+              if (sent?.key?.id) break;
+            } catch (_) {}
+          }
+        }
+        try { await sock.sendPresenceUpdate('paused', primarySendTarget); } catch (_) {}
       }
     } catch (sendErr) {
       console.error(`[Outbound Message Send Error to ${jid}]:`, sendErr);
