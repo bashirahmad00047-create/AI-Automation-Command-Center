@@ -343,51 +343,39 @@ function triggerSessionClear() {
 }
 
 async function tryRestoreFromPythonBackend() {
-  // 1. Immediate direct Python database restore (zero HTTP latency, runs directly before Flask binds port)
+  // 1. Immediate direct Python database restore (zero HTTP latency)
   try {
     const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
     const pyScript = "import os; os.environ['SKIP_WA_BRIDGE_INIT']='1'; from wa_bridge_manager import restore_wa_session_from_db; res = restore_wa_session_from_db(); print('CLI_RESTORE=' + str(res))";
     const cliOutput = execSync(`${pythonCmd} -c "${pyScript}"`, {
       cwd: path.resolve(__dirname),
-      timeout: 10000,
+      timeout: 3000,
       encoding: 'utf8',
       env: process.env
     });
     if (cliOutput && cliOutput.includes('CLI_RESTORE=True')) {
-      console.log('[WhatsApp Bridge] Restored permanent session directly from PostgreSQL via Python CLI!');
+      console.log('[WhatsApp Bridge] Restored permanent session directly from database via Python CLI!');
       return true;
     }
   } catch (_) {}
 
-  // 2. Poll Python HTTP session-restore endpoint while Gunicorn finishes booting
+  // 2. Fast single-shot HTTP session-restore check (max 2 seconds)
   const tenantId = encodeURIComponent(process.env.TENANT_ID || 'default');
-  const maxAttempts = 10;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const restoreUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-restore?tenant_id=${tenantId}`;
-      const res = await fetch(restoreUrl, {
-        method: 'GET',
-        headers: { 'X-Internal-Bridge': '1' },
-        signal: AbortSignal.timeout(6000)
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        if (data && data.restored) {
-          console.log(`[WhatsApp Bridge] Permanent session restored from Database on attempt ${attempt}!`);
-          return true;
-        } else if (data && data.success && !data.restored) {
-          // Backend is online and explicitly reported no session found in DB
-          console.log('[WhatsApp Bridge] Python backend online; no saved WhatsApp session in Database.');
-          return false;
-        }
-      }
-    } catch (_) {
-      if (attempt <= 2 || attempt === maxAttempts) {
-        console.log(`[WhatsApp Bridge] Waiting for Python backend to initialize (attempt ${attempt}/${maxAttempts})...`);
+  try {
+    const restoreUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-restore?tenant_id=${tenantId}`;
+    const res = await fetch(restoreUrl, {
+      method: 'GET',
+      headers: { 'X-Internal-Bridge': '1' },
+      signal: AbortSignal.timeout(2000)
+    });
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (data && data.restored) {
+        console.log('[WhatsApp Bridge] Permanent session restored from database!');
+        return true;
       }
     }
-    if (attempt < maxAttempts) await new Promise(r => setTimeout(r, 1500));
-  }
+  } catch (_) {}
   return false;
 }
 
@@ -905,7 +893,7 @@ async function startWhatsAppBridge() {
       fs.mkdirSync(AUTH_DIR, { recursive: true });
     }
 
-    // Query DB for session credentials if local creds are absent, unauthenticated, or corrupted
+    // Query DB for session credentials if local creds are absent or corrupted
     const credsCheckPath = path.join(AUTH_DIR, 'creds.json');
     let credsNeedRestore = false;
     if (!fs.existsSync(credsCheckPath) || fs.statSync(credsCheckPath).size < 100) {
@@ -914,13 +902,13 @@ async function startWhatsAppBridge() {
       try {
         const parsed = JSON.parse(fs.readFileSync(credsCheckPath, 'utf8'));
         const hasNoise = Boolean(parsed && parsed.noiseKey && (parsed.noiseKey.private || parsed.noiseKey.public));
-        if (!hasNoise || (!parsed.registered && (!parsed.me || !parsed.me.id))) {
-          console.log('[WhatsApp Bridge] Local creds.json lacks valid crypto keys. Purging corrupted stub and checking DB...');
+        if (!hasNoise) {
+          console.log('[WhatsApp Bridge] Local creds.json lacks valid crypto keys. Purging corrupted stub...');
           try { fs.unlinkSync(credsCheckPath); } catch (_) {}
           credsNeedRestore = true;
         }
       } catch (e) {
-        console.warn('[WhatsApp Bridge] Existing creds.json is invalid JSON. Purging and re-fetching from database...');
+        console.warn('[WhatsApp Bridge] Existing creds.json is invalid JSON. Purging...');
         try { fs.unlinkSync(credsCheckPath); } catch (_) {}
         credsNeedRestore = true;
       }
@@ -2248,8 +2236,8 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
       });
     }
 
-    // If force_refresh is requested or socket is stuck/half-open/disconnected
-    if (isForceRefresh || (!isSocketGenuinelyConnected() && (!sock || sock?.ws?.readyState !== 1))) {
+    // If force_refresh is requested or socket is stuck/half-open/disconnected or QR not yet ready
+    if (isForceRefresh || (!isSocketGenuinelyConnected() && (!sock || sock?.ws?.readyState !== 1 || !currentQr))) {
       if (isForceRefresh) {
         console.log('[WhatsApp Bridge] Force QR refresh triggered via request.');
         isConnected = false;
@@ -2272,14 +2260,14 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
 
         isStarting = false;
         startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Force start error:', e.message));
-
-        // Poll up to 2.5 seconds to capture fresh QR or connection state before sending response
-        for (let i = 0; i < 25; i++) {
-          if (currentQr || isSocketGenuinelyConnected()) break;
-          await new Promise(r => setTimeout(r, 100));
-        }
       } else if (!isStarting && !currentQr) {
         startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Auto-start on /qr error:', e.message));
+      }
+
+      // Poll up to 2.8 seconds to capture fresh QR or connection state before sending response
+      for (let i = 0; i < 28; i++) {
+        if (currentQr || isSocketGenuinelyConnected()) break;
+        await new Promise(r => setTimeout(r, 100));
       }
     }
 

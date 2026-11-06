@@ -37,7 +37,7 @@
             }
 
             if (typeof window.fetchBridgeQrCode === 'function') {
-                window.fetchBridgeQrCode(Boolean(forceRefresh));
+                window.fetchBridgeQrCode(forceRefresh !== undefined ? Boolean(forceRefresh) : true);
             }
         }
         window.openQrModal = openQrModal;

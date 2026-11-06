@@ -6161,8 +6161,12 @@ async function openQrModal(forceRefresh = false) {
         img.removeAttribute('src');
     });
 
+    // If device is not already connected, always do a fresh QR request on modal open
+    const shouldForce = forceRefresh || !window._waIsConnected;
+    let pollCount = 0;
+
     // c) & d) Make fetch request and render QR image
-    await fetchBridgeQrCode(forceRefresh);
+    await fetchBridgeQrCode(shouldForce);
 
     // e) Start a safe 3-second polling loop that refreshes the QR status until user scans it
     if (waBridgeQrPollTimer) {
@@ -6177,7 +6181,13 @@ async function openQrModal(forceRefresh = false) {
             }
             return;
         }
-        await fetchBridgeQrCode(false);
+        pollCount++;
+        // Auto-heal: If spinner is stuck for 2 consecutive polls without a QR, auto force-refresh the bridge socket
+        const autoForce = pollCount >= 2 && !window._waIsConnected;
+        if (autoForce) {
+            pollCount = 0;
+        }
+        await fetchBridgeQrCode(autoForce);
     }, 3000);
 }
 window.openQrModal = openQrModal;
