@@ -14,16 +14,28 @@
         // Global QR Modal Early Fallbacks
         function openQrModal(forceRefresh) {
             window._qrModalClosedByUser = false;
-            var modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
-            if (modal) {
-                modal.classList.remove('hidden');
-                modal.style.display = 'flex';
-                modal.style.zIndex = '10060';
-            }
+            var modals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, #waQrModal, .link-whatsapp-modal');
+            modals.forEach(function(m) {
+                m.classList.remove('hidden');
+                m.style.removeProperty('display');
+                m.style.setProperty('display', 'flex', 'important');
+                m.style.zIndex = '10060';
+            });
             var connectedState = document.getElementById('qrConnectedState');
-            if (connectedState) connectedState.style.display = 'none';
             var mainBody = document.getElementById('waPairingMainBody');
-            if (mainBody) mainBody.style.display = 'flex';
+            if (window._waIsConnected && !forceRefresh) {
+                if (connectedState) {
+                    connectedState.style.removeProperty('display');
+                    connectedState.style.setProperty('display', 'block', 'important');
+                }
+                if (mainBody) mainBody.style.display = 'none';
+            } else {
+                if (connectedState) connectedState.style.display = 'none';
+                if (mainBody) {
+                    mainBody.style.removeProperty('display');
+                    mainBody.style.setProperty('display', 'flex', 'important');
+                }
+            }
             if (typeof window.switchLinkMode === 'function') {
                 window.switchLinkMode('qr', false);
             }
@@ -34,7 +46,7 @@
             var qrImg = document.getElementById('qr-code-img');
             if (spinner) spinner.style.display = 'flex';
             if (qrWrapper) qrWrapper.style.display = 'none';
-            if (statusText) statusText.textContent = 'Generating secure QR code...';
+            if (statusText) statusText.textContent = 'Connecting to WhatsApp bridge (generating QR code)...';
             if (qrCanvas) qrCanvas.style.display = 'none';
             if (qrImg) {
                 qrImg.style.display = 'none';
@@ -42,7 +54,7 @@
             }
 
             if (typeof window.fetchBridgeQrCode === 'function') {
-                window.fetchBridgeQrCode(forceRefresh !== undefined ? Boolean(forceRefresh) : true);
+                window.fetchBridgeQrCode(forceRefresh !== undefined ? Boolean(forceRefresh) : false);
             }
         }
         window.openQrModal = openQrModal;
@@ -52,8 +64,9 @@
             window._qrModalClosedByUser = true;
             var modals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, #waQrModal, .link-whatsapp-modal');
             modals.forEach(function(m) {
-                m.style.setProperty('display', 'none', 'important');
                 m.classList.add('hidden');
+                m.style.removeProperty('display');
+                m.style.setProperty('display', 'none', 'important');
             });
             var connectedState = document.getElementById('qrConnectedState');
             if (connectedState) connectedState.style.display = 'none';

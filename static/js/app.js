@@ -5744,7 +5744,9 @@ let waPairingCodeCountdownTimer = null;
 let currentPairingCode = '';
 
 async function fetchBridgeQrCode(forceRefresh = false) {
-    if (window._qrModalClosedByUser && !forceRefresh) {
+    const primaryModal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
+    const isModalVisible = primaryModal && primaryModal.style.display !== 'none' && !primaryModal.classList.contains('hidden');
+    if (window._qrModalClosedByUser && !forceRefresh && !isModalVisible) {
         return;
     }
     const spinner = document.getElementById('qrLoadingSpinner');
@@ -6107,42 +6109,45 @@ window.forceResetWhatsAppSession = forceResetWhatsAppSession;
 
 async function openQrModal(forceRefresh = false) {
     window._qrModalClosedByUser = false;
-    const modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
-    if (!modal) {
+    const modals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, #waQrModal, .link-whatsapp-modal');
+    if (!modals || modals.length === 0) {
         console.warn('QR modal element not found');
         return;
     }
 
-    // If already genuinely connected and NOT requesting force reset, redirect directly without reopening modal
+    // Unhide all modal backdrops with !important to cleanly override any prior display: none !important
+    modals.forEach(m => {
+        m.classList.remove('hidden');
+        m.style.removeProperty('display');
+        m.style.setProperty('display', 'flex', 'important');
+        m.style.zIndex = '10060';
+    });
+
+    const connectedState = document.getElementById('qrConnectedState');
+    const mainBody = document.getElementById('waPairingMainBody');
+
+    // If genuinely connected and not forceRefresh, show connected state inside modal with unlinking option
     if (window._waIsConnected && !forceRefresh) {
-        if (typeof showHudToast === 'function') {
-            showHudToast('WhatsApp is already connected & permanent!', 'success');
+        if (connectedState) {
+            connectedState.style.removeProperty('display');
+            connectedState.style.setProperty('display', 'block', 'important');
         }
-        if (typeof switchTab === 'function') {
-            switchTab('whatsapp');
-        }
-        if (typeof loadWhatsAppDashboard === 'function') {
-            loadWhatsAppDashboard();
-        }
+        if (mainBody) mainBody.style.display = 'none';
         return;
     }
 
-    // Reset inner states before opening
-    const connectedState = document.getElementById('qrConnectedState');
-    const mainBody = document.getElementById('waPairingMainBody');
+    // Otherwise show pairing body (QR & 8-Digit Pairing Code)
     if (connectedState) connectedState.style.display = 'none';
-    if (mainBody) mainBody.style.display = 'flex';
-
-    // a) Immediately unhide/display the QR modal element (remove hidden, set display: flex, ensure z-index: 10060/9999)
-    modal.classList.remove('hidden');
-    modal.style.display = 'flex';
-    modal.style.zIndex = '10060';
+    if (mainBody) {
+        mainBody.style.removeProperty('display');
+        mainBody.style.setProperty('display', 'flex', 'important');
+    }
 
     if (typeof switchLinkMode === 'function') {
         switchLinkMode('qr', false);
     }
 
-    // b) Show clean loading spinner ("Generating secure QR code...")
+    // Show loading spinner while fresh QR is fetched
     const spinner = document.getElementById('qrLoadingSpinner');
     const qrWrapper = document.getElementById('qrImageWrapper');
     const statusText = document.getElementById('qrStatusText');
@@ -6151,23 +6156,24 @@ async function openQrModal(forceRefresh = false) {
 
     if (spinner) spinner.style.display = 'flex';
     if (qrWrapper) qrWrapper.style.display = 'none';
-    if (statusText) statusText.textContent = 'Generating secure QR code...';
+    if (statusText) statusText.textContent = 'Connecting to WhatsApp bridge (generating QR code)...';
     if (qrCanvas) qrCanvas.style.display = 'none';
     qrImgs.forEach(img => {
         img.style.display = 'none';
         img.removeAttribute('src');
     });
 
-    // 1. Initial modal open: call /api/v1/whatsapp/qr?force_refresh=true ONCE
-    await fetchBridgeQrCode(true);
+    // 1. Fetch live QR from bridge
+    await fetchBridgeQrCode(Boolean(forceRefresh));
 
-    // 2. Fast 2-second non-blocking polling loop: ALWAYS call with force_refresh=false
+    // 2. Fast 2.5-second polling loop while modal is open
     if (waBridgeQrPollTimer) {
         clearInterval(waBridgeQrPollTimer);
         waBridgeQrPollTimer = null;
     }
     waBridgeQrPollTimer = setInterval(async () => {
-        if (!modal || modal.style.display === 'none' || modal.classList.contains('hidden')) {
+        const primaryModal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
+        if (window._qrModalClosedByUser || !primaryModal || primaryModal.style.display === 'none' || primaryModal.classList.contains('hidden')) {
             if (waBridgeQrPollTimer) {
                 clearInterval(waBridgeQrPollTimer);
                 waBridgeQrPollTimer = null;
@@ -6175,7 +6181,7 @@ async function openQrModal(forceRefresh = false) {
             return;
         }
         await fetchBridgeQrCode(false);
-    }, 2000);
+    }, 2500);
 }
 window.openQrModal = openQrModal;
 window.openLinkWhatsAppQrModal = openQrModal;
@@ -6184,8 +6190,9 @@ function closeQrModal() {
     window._qrModalClosedByUser = true;
     const modals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, #waQrModal, .link-whatsapp-modal');
     modals.forEach(modal => {
-        modal.style.setProperty('display', 'none', 'important');
         modal.classList.add('hidden');
+        modal.style.removeProperty('display');
+        modal.style.setProperty('display', 'none', 'important');
     });
     const connectedState = document.getElementById('qrConnectedState');
     if (connectedState) connectedState.style.display = 'none';
@@ -6286,7 +6293,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Wire up all Link QR buttons across navbar, subheader, green banner, and sidebar
-    const qrSelectors = '#btn-link-qr, #btn-qr-relink, .btn-qr-sync, .topbar-qr-btn, #dashLinkWhatsAppQrBtn, #btnLinkWhatsAppQr, #waHeaderLinkQrBtn, #waHeaderQrRelinkBtn, [data-action="link-whatsapp-qr"], [onclick*="Qr"], [onclick*="qr"]';
+    const qrSelectors = '#btn-link-qr, #btn-qr-relink, .btn-qr-sync, .topbar-qr-btn, #dashLinkWhatsAppQrBtn, #btnLinkWhatsAppQr, #waHeaderLinkQrBtn, #waHeaderQrRelinkBtn, [data-action="link-whatsapp-qr"], button[onclick*="openQrModal"], button[onclick*="openLinkWhatsAppQrModal"]';
     const qrButtons = document.querySelectorAll(qrSelectors);
     qrButtons.forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -7363,7 +7370,8 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
         } else {
             // 'all'
             if (waHideGroupsFromAll && isGrp) {
-                return false;
+                const hasDirectChats = conversations.some(ch => !ch.isGroup && !(ch.phone && ch.phone.includes('@g.us')));
+                if (hasDirectChats) return false;
             }
             return true;
         }
@@ -7418,8 +7426,11 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                 <div style="padding: 40px 20px; text-align: center; color: #8696a0; font-size: 13px;">
                     <div style="font-size: 2.2rem; margin-bottom: 8px;">💬</div>
                     <div style="font-weight: 600; color: #e9edef; margin-bottom: 4px;">No conversations found</div>
-                    <p style="font-size: 11.5px; line-height: 1.4;">Click ➕ to start a new chat or sync to retrieve incoming messages.</p>
-                    <button type="button" class="hud-btn primary small" onclick="promptNewConversation()" style="margin-top: 10px;">➕ New Chat</button>
+                    <p style="font-size: 11.5px; line-height: 1.4;">Click ➕ to start a new chat or sync to retrieve WhatsApp messages.</p>
+                    <div style="display: flex; gap: 8px; justify-content: center; margin-top: 12px;">
+                        <button type="button" class="hud-btn primary small" onclick="promptNewConversation()">➕ New Chat</button>
+                        <button type="button" class="hud-btn small" onclick="loadWhatsAppDashboard()" style="background: #202c33; color: #00a884; border: 1px solid #2a3942; cursor: pointer;">🔄 Sync Chats</button>
+                    </div>
                 </div>
             `;
         } else {
@@ -7803,48 +7814,69 @@ async function loadWhatsAppMessagesOnly(isConfigured) {
         let messages = [];
         let backendConversations = [];
         try {
-            // First call /api/whatsapp/conversations to trigger auto-sync from Baileys & CRM Leads
+            // 1. Fetch conversations from /api/v1/whatsapp/conversations (with fallback to /api/whatsapp/conversations)
             try {
-                const convRes = await fetch('/api/whatsapp/conversations');
+                let convRes = await fetch('/api/v1/whatsapp/conversations');
+                if (!convRes.ok) {
+                    convRes = await fetch('/api/whatsapp/conversations');
+                }
                 if (convRes.ok) {
                     const cData = await convRes.json();
-                    if (cData.messages && cData.messages.length > 0) {
+                    if (Array.isArray(cData.messages) && cData.messages.length > 0) {
                         messages = cData.messages;
                     }
-                    if (cData.conversations && cData.conversations.length > 0) {
+                    if (Array.isArray(cData.conversations) && cData.conversations.length > 0) {
                         backendConversations = cData.conversations;
                     }
                 }
             } catch (_) {}
 
+            // 2. Fallback to /api/v1/whatsapp/messages if messages array was empty
             if (messages.length === 0) {
                 const msgRes = await fetch('/api/v1/whatsapp/messages?limit=150');
                 if (msgRes.ok) {
                     const msgData = await msgRes.json();
-                    messages = msgData.messages || [];
+                    if (Array.isArray(msgData.messages)) {
+                        messages = msgData.messages;
+                    }
                 }
             }
         } catch (fetchErr) {
             console.warn('[WhatsApp Messages Fetch Notice]:', fetchErr.message);
         }
 
-        // If message list is empty but backend returned conversations from Baileys WhatsApp session or CRM,
-        // synthesize message stubs so groupWhatsAppConversations & renderWhatsAppWebUI render the chat list immediately!
-        if (messages.length === 0 && backendConversations.length > 0) {
-            messages = backendConversations.map(c => ({
-                id: 'msg_conv_' + c.id,
-                sender: c.phone || c.id,
-                recipient: 'system',
-                direction: 'inbound',
-                body: c.last_message || 'Active conversation',
-                created_at: c.timestamp || new Date().toISOString(),
-                sender_name: c.name || c.phone,
-                status: (c.unread_count > 0 ? 'received' : 'read'),
-                is_group: Boolean(c.is_group)
-            }));
+        // 3. Robust Conversation Recovery: Ensure all live conversations from Baileys WhatsApp Web (/chats)
+        // and CRM Leads are represented in the messages array so chat items render immediately!
+        if (Array.isArray(backendConversations) && backendConversations.length > 0) {
+            const existingPhones = new Set(
+                messages.map(m => {
+                    const p = m.resolved_phone || (m.direction === 'inbound' ? m.sender : m.recipient) || m.chat_id || m.remote_jid;
+                    return String(p || '').replace(/\D/g, '');
+                }).filter(Boolean)
+            );
+
+            backendConversations.forEach(c => {
+                const rawP = c.phone || c.id || '';
+                const cleanDigits = String(rawP).replace(/\D/g, '');
+                if (cleanDigits && !existingPhones.has(cleanDigits)) {
+                    existingPhones.add(cleanDigits);
+                    messages.push({
+                        id: 'msg_conv_' + (c.id || cleanDigits),
+                        sender: c.phone || c.id,
+                        recipient: 'system',
+                        direction: 'inbound',
+                        body: c.last_message || 'Active conversation',
+                        created_at: c.timestamp || new Date().toISOString(),
+                        sender_name: c.name || c.phone,
+                        resolved_phone: c.phone || cleanDigits,
+                        status: (c.unread_count > 0 ? 'received' : 'read'),
+                        is_group: Boolean(c.is_group),
+                        chat_name: c.is_group ? c.name : undefined
+                    });
+                }
+            });
         }
 
-        // Real conversations only: If empty, messages remains empty array
         if (!Array.isArray(messages)) {
             messages = [];
         }
