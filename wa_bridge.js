@@ -2818,12 +2818,21 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
       });
     }
 
-    console.log(`[Outbound Message] Delivered via WhatsApp network to: ${jid} | Message ID: ${sent?.key?.id}`);
+    if (!sent || !sent.key || !sent.key.id) {
+      console.error(`[Outbound Message Failure] sock.sendMessage did not return a valid message ID for ${jid}`);
+      return res.status(502).json({
+        success: false,
+        status: 'failed',
+        error: `WhatsApp delivery failed: No message ID returned from Baileys socket for recipient ${jid}`
+      });
+    }
+
+    console.log(`[Outbound Message] Delivered via WhatsApp network to: ${jid} | Message ID: ${sent.key.id}`);
 
     return res.json({
       success: true,
-      messageId: sent?.key?.id || null,
-      idMessage: sent?.key?.id || null,
+      messageId: sent.key.id,
+      idMessage: sent.key.id,
       status: 'delivered',
       to: jid,
       recipient: jid,
