@@ -1176,7 +1176,7 @@ async function startWhatsAppBridge(skipRestore = false) {
             // Continuous auto-recovery: never halts
             clearTimeout(reconnectTimer);
             reconnectTimer = setTimeout(() => {
-              startWhatsAppBridge().catch(() => {});
+              startWhatsAppBridge(true).catch(() => {});
             }, 5000);
           });
         }, restartDelay);
@@ -2042,7 +2042,7 @@ if (!text) text = '[Voice note]';
     console.error('[WhatsApp Bridge] startWhatsAppBridge fatal error:', fatalInitErr);
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(() => {
-      startWhatsAppBridge().catch(() => {});
+      startWhatsAppBridge(true).catch(() => {});
     }, 5000);
   } finally {
     isStarting = false;
@@ -2511,7 +2511,7 @@ app.post(['/disconnect', '/logout'], async (req, res) => {
 
   clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => {
-    startWhatsAppBridge().catch(() => {});
+    startWhatsAppBridge(true).catch(() => {});
   }, 1000);
 
   return res.json({
@@ -2930,7 +2930,7 @@ setInterval(() => {
       destroyOldSocket();
       clearTimeout(reconnectTimer);
       reconnectTimer = setTimeout(() => {
-        startWhatsAppBridge().catch(() => {});
+        startWhatsAppBridge(true).catch(() => {});
       }, 1000);
     }
   }
