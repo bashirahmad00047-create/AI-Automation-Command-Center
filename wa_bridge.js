@@ -369,9 +369,19 @@ let isConnected = false;
 let currentQr = null;
 let currentQrUrl = null;
 let currentQrSvg = null;
+let latestQr = null;
+let latestQrDataUrl = null;
 let isStarting = false;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
+let lastRestartTriggerTime = 0;
+
+function getConnectedPhone() {
+  if (sock?.user?.id) {
+    return sock.user.id.split(':')[0].replace(/\D/g, '');
+  }
+  return null;
+}
 
 // ============================================================================
 // ADVANCED WHATSAPP ANTI-BAN ENGINE (HUMAN SIMULATION SHIELD)
@@ -1021,9 +1031,20 @@ async function startWhatsAppBridge() {
     sock.ev.on('connection.update', (update) => {
       const { connection, lastDisconnect, qr } = update;
 
+      // INSTANT CONNECTED STATE SETTING ON FIRST LINE BEFORE ANY DB BACKUP OR CHAT SYNC
+      if (connection === 'open' || sock?.user?.id) {
+        isConnected = true;
+        latestQr = null;
+        latestQrDataUrl = null;
+        currentQr = null;
+        currentQrUrl = null;
+        currentQrSvg = null;
+      }
+
       // Display QR code in terminal when generated & pre-generate data URL and SVG
       if (qr) {
         currentQr = qr;
+        latestQr = qr;
         console.log('\n===============================================================');
         console.log('  SCAN THIS QR CODE IN WHATSAPP TO LINK FOR FREE');
         console.log('  Steps: WhatsApp -> Settings/Menu -> Linked Devices -> Link a Device');
@@ -1037,28 +1058,29 @@ async function startWhatsAppBridge() {
         }
         console.log('===============================================================\n');
 
-        // Convert raw Baileys QR string into base64 Data URI using qrcode.toDataURL()
+        // Immediately pre-generate base64 Data URI in memory using qrcode.toDataURL()
         qrcode.toDataURL(qr, {
           errorCorrectionLevel: 'M',
           type: 'image/png',
           margin: 2,
-          width: 220,
+          width: 240,
           color: { dark: '#000000', light: '#ffffff' }
         }).then((url) => {
+          latestQrDataUrl = url;
           currentQrUrl = url;
         }).catch((err) => {
-          console.error('[Bridge QR] Error generating QR Data URL:', err);
+          console.error('[Bridge QR] Error generating QR Data URL:', err.message);
         });
 
         // Pre-generate SVG string
         qrcode.toString(qr, {
           type: 'svg',
           margin: 2,
-          width: 220
+          width: 240
         }).then((svg) => {
           currentQrSvg = svg;
         }).catch((err) => {
-          console.error('[Bridge QR] Error generating QR SVG:', err);
+          console.error('[Bridge QR] Error generating QR SVG:', err.message);
         });
       }
 
@@ -1108,11 +1130,13 @@ async function startWhatsAppBridge() {
         }, restartDelay);
       } else if (connection === 'open') {
         isConnected = true;
-        reconnectAttempts = 0;
-        triggerSessionBackup();
+        latestQr = null;
+        latestQrDataUrl = null;
         currentQr = null;
         currentQrUrl = null;
         currentQrSvg = null;
+        reconnectAttempts = 0;
+        triggerSessionBackup();
         const userPhone = sock?.user?.id ? sock.user.id.split(':')[0] : 'Linked Number';
         console.log('\n===============================================================');
         console.log(` [WhatsApp Bridge] Connected successfully! Auto-recovery active.`);
@@ -2171,13 +2195,17 @@ app.get(['/chats', '/api/chats', '/conversations', '/api/conversations'], (req, 
 app.get(['/', '/status', '/health', '/api/status'], (req, res) => {
   try {
     const genuinelyConnected = isSocketGenuinelyConnected();
+    const phone = getConnectedPhone();
     return res.status(200).json({
+      success: true,
       bridge: 'WhatsApp Baileys Bridge',
-      status: genuinelyConnected ? 'connected' : (currentQr ? 'qr_ready' : (isStarting ? 'initializing' : 'waiting')),
+      status: genuinelyConnected ? 'connected' : (latestQr ? 'qr_ready' : (isStarting ? 'initializing' : 'waiting')),
       connected: genuinelyConnected,
-      hasQr: !genuinelyConnected && !!currentQr,
-      qrUrl: genuinelyConnected ? null : currentQrUrl,
-      qr: genuinelyConnected ? null : currentQr,
+      phone: phone,
+      hasQr: !genuinelyConnected && Boolean(latestQr || currentQr),
+      qrUrl: genuinelyConnected ? null : (latestQrDataUrl || currentQrUrl),
+      qr_image: genuinelyConnected ? null : (latestQrDataUrl || currentQrUrl),
+      qr: genuinelyConnected ? null : (latestQr || currentQr),
       user: genuinelyConnected ? (sock?.user || null) : null,
       target_webhook: PYTHON_WEBHOOK_URL,
       uptime_seconds: Math.floor(process.uptime()),
@@ -2185,6 +2213,7 @@ app.get(['/', '/status', '/health', '/api/status'], (req, res) => {
     });
   } catch (err) {
     return res.status(200).json({
+      success: true,
       bridge: 'WhatsApp Baileys Bridge',
       status: 'initializing',
       connected: false,
@@ -2195,23 +2224,26 @@ app.get(['/', '/status', '/health', '/api/status'], (req, res) => {
 });
 
 /**
- * QR Code status & reconnect endpoint (for inspection and live dashboard linking)
- * Handles force_refresh=true by cleanly resetting dead or half-open sockets,
- * clearing unauthenticated temporary credentials, and returning fresh QR immediately.
- * ALWAYS returns HTTP 200 with clean state, NEVER 500 or 503.
+ * 100% NON-BLOCKING QR Code status & reconnect endpoint (INSTANT <10ms RESPONSE).
+ * NEVER uses await sleep/poll loops. Memory state returned with zero delay.
+ * Background restart is cleanly triggered via setImmediate with 15s debounce.
  */
-app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconnect'], async (req, res) => {
+app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconnect'], (req, res) => {
   try {
     const isForceRefresh = String(req.query?.force_refresh || req.query?.force || req.body?.force_refresh || '').toLowerCase() === 'true' ||
       String(req.query?.force_refresh || '').toLowerCase() === '1' ||
       req.path.includes('reconnect');
 
+    const genuinelyConnected = isSocketGenuinelyConnected();
+    const phone = getConnectedPhone();
+
     // If socket is already fully connected and not requesting force refresh, return connected immediately
-    if (isSocketGenuinelyConnected() && !isForceRefresh) {
+    if (genuinelyConnected && !isForceRefresh) {
       return res.status(200).json({
         success: true,
         status: 'connected',
         connected: true,
+        phone: phone,
         qr: null,
         qr_image: null,
         qrUrl: null,
@@ -2220,46 +2252,59 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
       });
     }
 
-    // If force_refresh is requested or socket is stuck/half-open/disconnected or QR not yet ready
-    if (isForceRefresh || (!isSocketGenuinelyConnected() && (!sock || sock?.ws?.readyState !== 1 || !currentQr))) {
-      if (isForceRefresh) {
-        console.log('[WhatsApp Bridge] Force QR refresh triggered via request.');
-        isConnected = false;
-        currentQr = null;
-        currentQrUrl = null;
-        currentQrSvg = null;
-        destroyOldSocket();
-
-        // If not already authenticated, remove pending auth stubs so a new QR keypair is generated
-        if (!sock?.user) {
+    // Trigger background restart if requested or socket is offline, with 15-second debounce
+    if (isForceRefresh || (!genuinelyConnected && !sock && !isStarting)) {
+      const now = Date.now();
+      if (now - lastRestartTriggerTime > 15000) {
+        lastRestartTriggerTime = now;
+        console.log('[WhatsApp Bridge] Non-blocking background socket restart triggered.');
+        setImmediate(() => {
           try {
-            if (fs.existsSync(AUTH_DIR)) {
-              const files = fs.readdirSync(AUTH_DIR);
-              for (const file of files) {
-                try { fs.unlinkSync(path.join(AUTH_DIR, file)); } catch (_) {}
-              }
+            isConnected = false;
+            latestQr = null;
+            latestQrDataUrl = null;
+            currentQr = null;
+            currentQrUrl = null;
+            currentQrSvg = null;
+            destroyOldSocket();
+
+            if (!sock?.user) {
+              try {
+                if (fs.existsSync(AUTH_DIR)) {
+                  const files = fs.readdirSync(AUTH_DIR);
+                  for (const file of files) {
+                    try { fs.unlinkSync(path.join(AUTH_DIR, file)); } catch (_) {}
+                  }
+                }
+              } catch (_) {}
             }
-          } catch (_) {}
-        }
 
-        isStarting = false;
-        startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Force start error:', e.message));
-      } else if (!isStarting && !currentQr) {
-        startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Auto-start on /qr error:', e.message));
+            isStarting = false;
+            startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Background restart error:', e.message));
+          } catch (bgErr) {
+            console.error('[WhatsApp Bridge] Background restart exception:', bgErr.message);
+          }
+        });
+      } else {
+        console.log(`[WhatsApp Bridge] Restart cooldown active (${Math.round((15000 - (now - lastRestartTriggerTime)) / 1000)}s remaining), skipping duplicate restart.`);
       }
-
-      // Poll up to 1.5 seconds to capture fresh QR or connection state before sending response
-      for (let i = 0; i < 15; i++) {
-        if (currentQr || isSocketGenuinelyConnected()) break;
-        await new Promise(r => setTimeout(r, 100));
+    } else if (!isStarting && !latestQr && !currentQr && !genuinelyConnected) {
+      const now = Date.now();
+      if (now - lastRestartTriggerTime > 15000) {
+        lastRestartTriggerTime = now;
+        setImmediate(() => {
+          startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Auto-start on /qr error:', e.message));
+        });
       }
     }
 
-    if (isSocketGenuinelyConnected()) {
+    // INSTANT (0ms) response straight from in-memory state!
+    if (genuinelyConnected) {
       return res.status(200).json({
         success: true,
         status: 'connected',
         connected: true,
+        phone: phone,
         qr: null,
         qr_image: null,
         qrUrl: null,
@@ -2268,55 +2313,20 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
       });
     }
 
-    if (!currentQr) {
-      return res.status(200).json({
-        success: true,
-        status: isStarting ? 'initializing' : 'waiting',
-        connected: false,
-        qr: null,
-        qr_image: null,
-        qrUrl: null,
-        message: isStarting ? 'WhatsApp Baileys bridge is initializing pairing session...' : 'Generating secure QR code...'
-      });
-    }
-
-    // Ensure currentQrUrl is ready (base64 Data URI)
-    let dataUrl = currentQrUrl;
-    if (!dataUrl) {
-      try {
-        dataUrl = await qrcode.toDataURL(currentQr, {
-          errorCorrectionLevel: 'M',
-          type: 'image/png',
-          margin: 2,
-          width: 220,
-          color: { dark: '#000000', light: '#ffffff' }
-        });
-        currentQrUrl = dataUrl;
-      } catch (e) {
-        console.error('[Bridge QR] Inline data URL generation error:', e.message);
-      }
-    }
-
-    let svgData = currentQrSvg;
-    if (!svgData) {
-      try {
-        svgData = await qrcode.toString(currentQr, { type: 'svg', margin: 2, width: 220 });
-        currentQrSvg = svgData;
-      } catch (e) {
-        // ignore
-      }
-    }
+    const qrDataUrl = latestQrDataUrl || currentQrUrl;
+    const qrText = latestQr || currentQr;
 
     return res.status(200).json({
       success: true,
-      status: 'qr_ready',
+      status: qrText ? 'qr_ready' : (isStarting ? 'initializing' : 'waiting'),
       connected: false,
-      qr: currentQr,
-      qr_image: dataUrl,
-      qrUrl: dataUrl,
-      qrImageUrl: dataUrl,
-      qrSvg: svgData,
-      message: 'QR code ready for scanning'
+      phone: null,
+      qr: qrText || null,
+      qr_image: qrDataUrl || null,
+      qrUrl: qrDataUrl || null,
+      qrImageUrl: qrDataUrl || null,
+      qrSvg: currentQrSvg || null,
+      message: qrText ? 'QR code ready for scanning' : (isStarting ? 'WhatsApp Baileys bridge is initializing pairing session...' : 'Generating secure QR code...')
     });
   } catch (err) {
     console.error('[Bridge QR] Error handling /qr request:', err.message);
@@ -2324,6 +2334,7 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
       success: true,
       status: 'initializing',
       connected: false,
+      phone: null,
       qr: null,
       qr_image: null,
       qrUrl: null,

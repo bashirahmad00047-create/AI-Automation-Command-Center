@@ -7513,13 +7513,15 @@ class WhatsAppService:
         """Fetches WhatsApp Web pairing QR code from local Baileys bridge."""
         import requests
         try:
-            resp = requests.get("http://127.0.0.1:3001/qr", timeout=3.0)
+            resp = requests.get("http://127.0.0.1:3001/qr", timeout=12.0)
             data = resp.json() if resp.text else {}
             is_conn = bool(data.get("connected") or data.get("status") == "connected")
+            phone = data.get("phone") or (data.get("user", {}).get("id", "").split(":")[0] if data.get("user") else None)
             return {
                 "success": True,
                 "status": data.get("status", "unknown"),
                 "connected": is_conn,
+                "phone": phone,
                 "type": "alreadyLogged" if is_conn else ("qrCode" if data.get("qr") or data.get("qrUrl") else data.get("status")),
                 "qr": data.get("qr"),
                 "qr_data": data.get("qr"),
@@ -7530,12 +7532,14 @@ class WhatsAppService:
                 "message": data.get("message", "QR code ready for scanning")
             }
         except Exception as e:
+            logger.warning(f"[WA Bridge] get_green_api_qr notice: {e}")
             return {
                 "success": False,
                 "status": "waiting",
                 "connected": False,
+                "phone": None,
                 "type": "waiting",
-                "message": f"Baileys bridge initializing ({str(e)})"
+                "message": "Connecting to WhatsApp bridge (generating QR code)..."
             }
 
     @classmethod
@@ -7543,21 +7547,28 @@ class WhatsAppService:
         """Tests live connection to the local Baileys WhatsApp bridge."""
         import requests
         try:
-            resp = requests.get("http://127.0.0.1:3001/status", timeout=3.0)
+            resp = requests.get("http://127.0.0.1:3001/status", timeout=12.0)
             data = resp.json() if resp.text else {}
+            is_conn = bool(data.get("connected") or data.get("status") == "connected")
+            phone = data.get("phone") or (data.get("user", {}).get("id", "").split(":")[0] if data.get("user") else None)
             return {
-                "success": data.get("connected", False),
-                "status": data.get("status", "unknown"),
+                "success": is_conn,
+                "status": data.get("status", "connected" if is_conn else "waiting"),
+                "connected": is_conn,
+                "phone": phone,
                 "provider": "baileys_bridge",
-                "message": "Baileys WhatsApp bridge connected." if data.get("connected") else "Baileys bridge online, awaiting QR scan.",
+                "message": "Baileys WhatsApp bridge connected." if is_conn else "Baileys bridge online, awaiting QR scan.",
                 "user": data.get("user")
             }
         except Exception as e:
+            logger.warning(f"[WA Bridge] test_green_api_connection notice: {e}")
             return {
                 "success": False,
                 "status": "offline",
+                "connected": False,
+                "phone": None,
                 "provider": "baileys_bridge",
-                "message": f"Baileys bridge starting up or unreachable on port 3001 ({str(e)})"
+                "message": "Baileys bridge is initializing..."
             }
 
     @classmethod

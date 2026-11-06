@@ -2778,10 +2778,11 @@ def api_whatsapp_bridge_qr():
     bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://127.0.0.1:3001/qr")
     try:
         params = {"force_refresh": "true"} if force_refresh else None
-        resp = requests.get(bridge_url, params=params, timeout=8.0)
+        resp = requests.get(bridge_url, params=params, timeout=12.0)
         if resp.status_code == 200 and resp.text:
             data = resp.json()
             is_connected = bool(data.get("connected") or data.get("status") == "connected")
+            phone_num = data.get("phone") or (data.get("user", {}).get("id", "").split(":")[0] if data.get("user") else None)
             qr_val = data.get("qr")
             qr_img = data.get("qr_image") or data.get("qrUrl") or data.get("qrImageUrl")
             if qr_val:
@@ -2799,6 +2800,7 @@ def api_whatsapp_bridge_qr():
                 "success": True,
                 "status": data.get("status", "connected" if is_connected else ("qr_ready" if qr_val else "initializing")),
                 "connected": is_connected,
+                "phone": phone_num,
                 "qr": qr_val,
                 "qr_image": qr_img,
                 "qrUrl": qr_img,
@@ -3359,7 +3361,7 @@ def api_whatsapp_bridge_status():
 
     bridge_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://127.0.0.1:3001/status")
     try:
-        resp = requests.get(bridge_url, timeout=3.0)
+        resp = requests.get(bridge_url, timeout=12.0)
         if resp.status_code == 200 and resp.text:
             return jsonify(resp.json()), 200
     except Exception as e:

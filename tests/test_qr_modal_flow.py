@@ -1,6 +1,7 @@
 import os
 import unittest
 from unittest.mock import patch, MagicMock
+import requests
 
 class TestQrModalFlow(unittest.TestCase):
     def setUp(self):
@@ -49,7 +50,7 @@ class TestQrModalFlow(unittest.TestCase):
         self.assertIn("primaryImg.style.display = 'block'", code)
         self.assertIn("qrCanvas.style.display = 'none'", code)
 
-    def test_app_js_qr_functions_and_polling(self):
+    def test_app_js_qr_functions_and_instant_connect(self):
         app_js_path = os.path.join(self.repo_dir, "static", "js", "app.js")
         with open(app_js_path, "r", encoding="utf-8") as f:
             code = f.read()
@@ -62,9 +63,15 @@ class TestQrModalFlow(unittest.TestCase):
         self.assertIn("window.closeQrModal = closeQrModal;", code)
         self.assertIn("window.closeLinkWhatsAppQrModal = closeQrModal;", code)
 
-        # Check 3-second polling loop
-        self.assertIn("3000", code)
+        # Check 2-second fast polling loop
+        self.assertIn("2000", code)
         self.assertIn("waBridgeQrPollTimer = setInterval", code)
+
+        # Check instant auto-close and load chats on connected
+        self.assertIn("closeQrModal()", code)
+        self.assertIn("loadWhatsAppDashboard()", code)
+        self.assertIn("window.loadWhatsAppChats", code)
+        self.assertIn("updateWhatsAppConnectionUI(true, phone)", code)
 
         # Check safe element retrieval
         self.assertIn("document.getElementById('qr-code-img')", code)
@@ -75,18 +82,27 @@ class TestQrModalFlow(unittest.TestCase):
         self.assertIn("#btn-qr-relink", code)
         self.assertIn(".btn-qr-sync", code)
 
-    def test_wa_bridge_qr_and_reconnect(self):
+    def test_wa_bridge_non_blocking_qr_and_instant_connect(self):
         bridge_path = os.path.join(self.repo_dir, "wa_bridge.js")
         with open(bridge_path, "r", encoding="utf-8") as f:
             code = f.read()
 
-        self.assertIn("['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconnect']", code)
-        self.assertIn("isForceRefresh", code)
-        self.assertIn("destroyOldSocket()", code)
-        self.assertIn("startWhatsAppBridge()", code)
-        self.assertIn("qr_image", code)
+        # Check non-blocking design
+        self.assertIn("setImmediate", code)
+        self.assertIn("lastRestartTriggerTime", code)
+        self.assertIn("latestQrDataUrl", code)
+        self.assertIn("getConnectedPhone", code)
 
-    def test_flask_api_whatsapp_qr_endpoint(self):
+        # Check connection.update first-line instant connected state
+        self.assertIn("if (connection === 'open' || sock?.user?.id) {", code)
+        self.assertIn("latestQr = null;", code)
+        self.assertIn("latestQrDataUrl = null;", code)
+
+        # Verify no blocking sleep loop in /qr
+        self.assertNotIn("for (let i = 0; i < 15; i++)", code)
+        self.assertNotIn("for (let i = 0; i < 28; i++)", code)
+
+    def test_flask_api_whatsapp_qr_endpoint_and_timeout_resilience(self):
         from app import app
         client = app.test_client()
 
@@ -117,6 +133,15 @@ class TestQrModalFlow(unittest.TestCase):
             self.assertEqual(resp_refresh.status_code, 200)
             data_refresh = resp_refresh.get_json()
             self.assertTrue(data_refresh.get("success"))
+
+            # Test Timeout handling returns clean HTTP 200 without exposing socket error
+            mock_get.side_effect = requests.exceptions.Timeout("HTTPConnectionPool Read timed out")
+            resp_timeout = client.get("/api/v1/whatsapp/qr")
+            self.assertEqual(resp_timeout.status_code, 200)
+            data_timeout = resp_timeout.get_json()
+            self.assertTrue(data_timeout.get("success"))
+            self.assertEqual(data_timeout.get("status"), "initializing")
+            self.assertNotIn("HTTPConnectionPool", data_timeout.get("message", ""))
 
 if __name__ == "__main__":
     unittest.main()

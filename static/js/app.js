@@ -5785,14 +5785,30 @@ async function fetchBridgeQrCode(forceRefresh = false) {
 
         if (refreshBtn) refreshBtn.textContent = '🔄 Refresh QR';
 
+        let data = null;
         if (res.ok) {
-            const data = await res.json();
-            
-            // Connected state check: strictly verify data.user is present or data.connected is true
-            const isReallyConnected = Boolean((data.connected || data.status === 'connected') && (data.user || data.connected));
+            data = await res.json().catch(() => null);
+        }
+
+        // Secondary check against /status endpoint to detect instant connection
+        if (!data || (!data.connected && data.status !== 'connected' && !data.phone)) {
+            try {
+                const sRes = await fetch('/api/v1/whatsapp/status');
+                if (sRes.ok) {
+                    const sData = await sRes.json().catch(() => null);
+                    if (sData && (sData.connected || sData.status === 'connected' || sData.phone)) {
+                        data = Object.assign({}, data || {}, sData);
+                    }
+                }
+            } catch (_) {}
+        }
+
+        if (data) {
+            // Instant Connected State Check: strictly detect data.connected === true, data.status === 'connected', or data.phone
+            const isReallyConnected = Boolean(data.connected === true || data.status === 'connected' || data.phone || (data.user && data.user.id));
             if (isReallyConnected) {
                 window._waIsConnected = true;
-                const phone = data.user?.id ? data.user.id.split(':')[0] : (data.phone || data.connected_phone || '');
+                const phone = data.phone || (data.user?.id ? data.user.id.split(':')[0] : (data.connected_phone || ''));
                 if (typeof updateWhatsAppConnectionUI === 'function') {
                     updateWhatsAppConnectionUI(true, phone);
                 }
@@ -5802,6 +5818,12 @@ async function fetchBridgeQrCode(forceRefresh = false) {
                 }
                 if (typeof closeQrModal === 'function') {
                     closeQrModal();
+                } else {
+                    const m = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
+                    if (m) {
+                        m.style.display = 'none';
+                        m.classList.add('hidden');
+                    }
                 }
                 if (typeof showHudToast === 'function') {
                     showHudToast(`WhatsApp Connected!${phone ? ' (+' + String(phone).replace(/\D/g, '') + ')' : ''}`, 'success');
@@ -5811,6 +5833,9 @@ async function fetchBridgeQrCode(forceRefresh = false) {
                 }
                 if (typeof loadWhatsAppDashboard === 'function') {
                     loadWhatsAppDashboard();
+                }
+                if (typeof window.loadWhatsAppChats === 'function' && window.loadWhatsAppChats !== loadWhatsAppDashboard) {
+                    window.loadWhatsAppChats();
                 }
                 return;
             } else {
@@ -5889,6 +5914,11 @@ async function fetchBridgeQrCode(forceRefresh = false) {
     }
 }
 window.fetchBridgeQrCode = fetchBridgeQrCode;
+window.loadWhatsAppChats = function() {
+    if (typeof loadWhatsAppDashboard === 'function') {
+        loadWhatsAppDashboard();
+    }
+};
 
 function switchLinkMode(mode, doFetch = true) {
     const qrInst = document.getElementById('waInstructionsQrView');
@@ -6111,7 +6141,7 @@ async function openQrModal(forceRefresh = false) {
     // 1. Initial modal open: call /api/v1/whatsapp/qr?force_refresh=true ONCE
     await fetchBridgeQrCode(true);
 
-    // 2. Safe 3-second polling loop: ALWAYS call with force_refresh=false so Baileys socket is NOT restarted
+    // 2. Fast 2-second non-blocking polling loop: ALWAYS call with force_refresh=false
     if (waBridgeQrPollTimer) {
         clearInterval(waBridgeQrPollTimer);
         waBridgeQrPollTimer = null;
@@ -6125,7 +6155,7 @@ async function openQrModal(forceRefresh = false) {
             return;
         }
         await fetchBridgeQrCode(false);
-    }, 3000);
+    }, 2000);
 }
 window.openQrModal = openQrModal;
 window.openLinkWhatsAppQrModal = openQrModal;
