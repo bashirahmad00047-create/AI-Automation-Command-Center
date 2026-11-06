@@ -5825,53 +5825,110 @@ async function fetchBridgeQrCode(forceRefresh = false) {
 
             if (qrSrc || qrRaw || qrSvgData) {
                 if (spinner) spinner.style.display = 'none';
-                if (qrWrapper) qrWrapper.style.display = 'block';
+                if (qrWrapper) {
+                    qrWrapper.style.display = 'flex';
+                    qrWrapper.style.flexDirection = 'column';
+                    qrWrapper.style.alignItems = 'center';
+                    qrWrapper.style.justifyContent = 'center';
+                }
 
-                if (qrSrc && (qrSrc.startsWith('data:image') || qrSrc.startsWith('http') || qrSrc.startsWith('/'))) {
+                const hideImages = () => {
                     qrImgs.forEach(img => {
-                        img.src = qrSrc;
-                        img.style.display = 'block';
+                        img.style.display = 'none';
+                        img.removeAttribute('src');
                     });
-                    if (qrCanvas) qrCanvas.style.display = 'none';
-                    if (qrSvg) qrSvg.style.display = 'none';
-                } else if (qrSvgData) {
-                    if (qrSvg) {
-                        qrSvg.innerHTML = qrSvgData;
-                        qrSvg.style.display = 'flex';
+                };
+                const hideCanvas = () => {
+                    if (qrCanvas) {
+                        qrCanvas.style.display = 'none';
                     }
-                    qrImgs.forEach(img => img.style.display = 'none');
-                    if (qrCanvas) qrCanvas.style.display = 'none';
-                } else if (qrRaw) {
-                    let rendered = false;
-                    if (window.QRCode) {
-                        try {
-                            if (qrCanvas && typeof window.QRCode.toCanvas === 'function') {
-                                await window.QRCode.toCanvas(qrCanvas, qrRaw, { width: 220, margin: 2 });
-                                qrCanvas.style.display = 'block';
-                                qrImgs.forEach(img => img.style.display = 'none');
-                                rendered = true;
-                            } else if (typeof window.QRCode.toDataURL === 'function') {
-                                const dataUrl = await window.QRCode.toDataURL(qrRaw, { width: 220, margin: 2 });
-                                qrImgs.forEach(img => {
-                                    img.src = dataUrl;
-                                    img.style.display = 'block';
-                                });
-                                if (qrCanvas) qrCanvas.style.display = 'none';
-                                rendered = true;
-                            }
-                        } catch (qrErr) {
-                            console.warn('[QR Canvas render notice]:', qrErr.message);
+                };
+                const hideSvg = () => {
+                    if (qrSvg) {
+                        qrSvg.style.display = 'none';
+                    }
+                };
+
+                let renderedOnCanvas = false;
+
+                // 1. If raw QR string and QRCode library is available to draw on canvas
+                if (qrRaw && window.QRCode && qrCanvas && typeof window.QRCode.toCanvas === 'function') {
+                    try {
+                        await window.QRCode.toCanvas(qrCanvas, qrRaw, {
+                            width: 220,
+                            margin: 2,
+                            color: { dark: '#000000', light: '#ffffff' }
+                        });
+                        hideImages();
+                        hideSvg();
+                        qrCanvas.style.display = 'block';
+                        qrCanvas.style.width = '220px';
+                        qrCanvas.style.height = '220px';
+                        qrCanvas.style.margin = '0 auto';
+                        renderedOnCanvas = true;
+                    } catch (canvasErr) {
+                        console.warn('[QR Canvas render notice]:', canvasErr.message);
+                    }
+                }
+
+                if (!renderedOnCanvas) {
+                    if (qrSrc && (qrSrc.startsWith('data:image/') || qrSrc.startsWith('http://') || qrSrc.startsWith('https://') || qrSrc.startsWith('/'))) {
+                        // Render onto <img> only
+                        hideCanvas();
+                        hideSvg();
+                        const primaryImg = document.getElementById('qr-code-img') || document.getElementById('bridgeQrImage');
+                        if (primaryImg) {
+                            primaryImg.src = qrSrc;
+                            primaryImg.style.display = 'block';
+                            primaryImg.style.width = '220px';
+                            primaryImg.style.height = '220px';
+                            primaryImg.style.objectFit = 'contain';
+                            primaryImg.style.margin = '0 auto';
+                        }
+                        const secondaryImg = document.getElementById('bridgeQrImage');
+                        if (secondaryImg && secondaryImg !== primaryImg) {
+                            secondaryImg.style.display = 'none';
+                            secondaryImg.removeAttribute('src');
+                        }
+                    } else if (qrSvgData) {
+                        // Render onto SVG only
+                        hideImages();
+                        hideCanvas();
+                        if (qrSvg) {
+                            qrSvg.innerHTML = qrSvgData;
+                            qrSvg.style.display = 'flex';
+                            qrSvg.style.width = '220px';
+                            qrSvg.style.height = '220px';
+                            qrSvg.style.margin = '0 auto';
+                        }
+                    } else if (qrRaw) {
+                        // Fallback: convert raw QR text to dataURL via QRCode or quickchart URL (never set raw string as img.src)
+                        let rawUrl = '';
+                        if (window.QRCode && typeof window.QRCode.toDataURL === 'function') {
+                            try {
+                                rawUrl = await window.QRCode.toDataURL(qrRaw, { width: 220, margin: 2 });
+                            } catch (_) {}
+                        }
+                        if (!rawUrl) {
+                            rawUrl = `https://quickchart.io/qr?size=220&text=${encodeURIComponent(qrRaw)}`;
+                        }
+                        hideCanvas();
+                        hideSvg();
+                        const primaryImg = document.getElementById('qr-code-img') || document.getElementById('bridgeQrImage');
+                        if (primaryImg) {
+                            primaryImg.src = rawUrl;
+                            primaryImg.style.display = 'block';
+                            primaryImg.style.width = '220px';
+                            primaryImg.style.height = '220px';
+                            primaryImg.style.objectFit = 'contain';
+                            primaryImg.style.margin = '0 auto';
+                        }
+                        const secondaryImg = document.getElementById('bridgeQrImage');
+                        if (secondaryImg && secondaryImg !== primaryImg) {
+                            secondaryImg.style.display = 'none';
+                            secondaryImg.removeAttribute('src');
                         }
                     }
-                    if (!rendered) {
-                        const fallbackUrl = `https://quickchart.io/qr?size=220&text=${encodeURIComponent(qrRaw)}`;
-                        qrImgs.forEach(img => {
-                            img.src = fallbackUrl;
-                            img.style.display = 'block';
-                        });
-                        if (qrCanvas) qrCanvas.style.display = 'none';
-                    }
-                    if (qrSvg) qrSvg.style.display = 'none';
                 }
             } else {
                 if (spinner) spinner.style.display = 'flex';
@@ -5886,7 +5943,7 @@ async function fetchBridgeQrCode(forceRefresh = false) {
 }
 window.fetchBridgeQrCode = fetchBridgeQrCode;
 
-function switchLinkMode(mode) {
+function switchLinkMode(mode, doFetch = true) {
     const qrInst = document.getElementById('waInstructionsQrView');
     const phoneInst = document.getElementById('waInstructionsPhoneView');
     const qrCol = document.getElementById('waRightColQrView');
@@ -5903,7 +5960,7 @@ function switchLinkMode(mode) {
         if (phoneCol) phoneCol.style.display = 'none';
         if (qrInst) qrInst.style.display = 'block';
         if (qrCol) qrCol.style.display = 'flex';
-        fetchBridgeQrCode();
+        if (doFetch) fetchBridgeQrCode();
     }
 }
 window.switchLinkMode = switchLinkMode;
@@ -6085,16 +6142,24 @@ async function openQrModal(forceRefresh = false) {
     modal.style.zIndex = '10060';
 
     if (typeof switchLinkMode === 'function') {
-        switchLinkMode('qr');
+        switchLinkMode('qr', false);
     }
 
     // b) Show clean loading spinner ("Generating secure QR code...")
     const spinner = document.getElementById('qrLoadingSpinner');
     const qrWrapper = document.getElementById('qrImageWrapper');
     const statusText = document.getElementById('qrStatusText');
+    const qrCanvas = document.getElementById('qr-code-canvas');
+    const qrImgs = [document.getElementById('qr-code-img'), document.getElementById('bridgeQrImage')].filter(Boolean);
+
     if (spinner) spinner.style.display = 'flex';
     if (qrWrapper) qrWrapper.style.display = 'none';
     if (statusText) statusText.textContent = 'Generating secure QR code...';
+    if (qrCanvas) qrCanvas.style.display = 'none';
+    qrImgs.forEach(img => {
+        img.style.display = 'none';
+        img.removeAttribute('src');
+    });
 
     // c) & d) Make fetch request and render QR image
     await fetchBridgeQrCode(forceRefresh);

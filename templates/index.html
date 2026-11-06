@@ -20,14 +20,21 @@
                 modal.style.zIndex = '10060';
             }
             if (typeof window.switchLinkMode === 'function') {
-                window.switchLinkMode('qr');
+                window.switchLinkMode('qr', false);
             }
             var spinner = document.getElementById('qrLoadingSpinner');
             var qrWrapper = document.getElementById('qrImageWrapper');
             var statusText = document.getElementById('qrStatusText');
+            var qrCanvas = document.getElementById('qr-code-canvas');
+            var qrImg = document.getElementById('qr-code-img');
             if (spinner) spinner.style.display = 'flex';
             if (qrWrapper) qrWrapper.style.display = 'none';
             if (statusText) statusText.textContent = 'Generating secure QR code...';
+            if (qrCanvas) qrCanvas.style.display = 'none';
+            if (qrImg) {
+                qrImg.style.display = 'none';
+                qrImg.removeAttribute('src');
+            }
 
             if (typeof window.fetchBridgeQrCode === 'function') {
                 window.fetchBridgeQrCode(Boolean(forceRefresh));
@@ -5578,18 +5585,18 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                             <p style="margin-top: 16px; font-size: 13px; color: #8696a0;" id="qrStatusText">Connecting to WhatsApp Baileys bridge...</p>
                         </div>
 
-                        <div id="qrImageWrapper" style="display: none; width: 100%; text-align: center;">
-                            <div style="background: #ffffff; padding: 12px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.5); margin-bottom: 14px; width: 220px; height: 220px;">
-                                <img id="qr-code-img" class="qr-code-img" src="" alt="WhatsApp Link QR Code" style="width: 100%; height: 100%; display: block; object-fit: contain; margin: 0 auto;" />
-                                <img id="bridgeQrImage" style="display: none;" />
-                                <canvas id="qr-code-canvas" style="display: none; width: 100%; height: 100%; margin: 0 auto;"></canvas>
-                                <div id="bridgeQrSvgContainer" style="display: none; width: 100%; height: 100%; margin: 0 auto;"></div>
+                        <div id="qrImageWrapper" style="display: none; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; position: static;">
+                            <div id="waQrCodeBox" style="width: 248px; height: 248px; padding: 12px; background: #ffffff; border-radius: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; margin: 0 auto 16px auto; box-shadow: 0 4px 20px rgba(0,0,0,0.5); box-sizing: border-box; position: static;">
+                                <canvas id="qr-code-canvas" style="display: none; width: 220px; height: 220px; margin: 0 auto;"></canvas>
+                                <img id="qr-code-img" class="qr-code-img" alt="WhatsApp Link QR Code" style="display: none; width: 220px; height: 220px; object-fit: contain; margin: 0 auto;" />
+                                <img id="bridgeQrImage" style="display: none !important;" />
+                                <div id="bridgeQrSvgContainer" style="display: none; width: 220px; height: 220px; margin: 0 auto;"></div>
                             </div>
-                            <div style="display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 240px; margin: 0 auto;">
-                                <button type="button" id="btnSwitchToPhonePairing" onclick="switchLinkMode('phone')" class="hud-btn outline small" style="border-color: #00a884; color: #00a884; font-weight: 600; font-size: 12.5px; padding: 8px 12px; border-radius: 8px;">
+                            <div style="display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 248px; margin: 0 auto; position: static;">
+                                <button type="button" id="btnSwitchToPhonePairing" onclick="switchLinkMode('phone')" class="hud-btn outline small" style="border-color: #00a884; color: #00a884; font-weight: 600; font-size: 12.5px; padding: 8px 12px; border-radius: 8px; position: static;">
                                     📱 Log in with phone number &gt;
                                 </button>
-                                <button type="button" id="btn-qr-relink" onclick="openQrModal(true)" class="hud-btn small btn-qr-sync" style="background: #202c33; color: #8696a0; border: 1px solid #2a3942; font-size: 12px; padding: 7px 12px; border-radius: 8px;">
+                                <button type="button" id="btn-qr-relink" onclick="openQrModal(true)" class="hud-btn small btn-qr-sync" style="background: #202c33; color: #8696a0; border: 1px solid #2a3942; font-size: 12px; padding: 7px 12px; border-radius: 8px; position: static;">
                                     🔄 Refresh QR
                                 </button>
                             </div>

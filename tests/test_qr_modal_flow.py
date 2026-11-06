@@ -13,6 +13,8 @@ class TestQrModalFlow(unittest.TestCase):
 
         # Check modal structure and elements
         self.assertIn('id="linkWhatsAppQrModal"', html)
+        self.assertIn('id="waQrCodeBox"', html)
+        self.assertIn('width: 248px; height: 248px;', html)
         self.assertIn('id="qr-code-img"', html)
         self.assertIn('id="bridgeQrImage"', html)
         self.assertIn('id="qr-code-canvas"', html)
@@ -28,6 +30,24 @@ class TestQrModalFlow(unittest.TestCase):
         self.assertIn("window.openQrModal = openQrModal", html)
         self.assertIn("function closeQrModal", html)
         self.assertIn("window.closeQrModal = closeQrModal", html)
+
+    def test_single_clean_qr_element_and_no_overlap(self):
+        index_path = os.path.join(self.repo_dir, "templates", "index.html")
+        with open(index_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        # Check that qr-code-img starts with display: none and no broken src="" attribute
+        self.assertIn('<img id="qr-code-img" class="qr-code-img" alt="WhatsApp Link QR Code" style="display: none;', html)
+        self.assertNotIn('<img id="qr-code-img" class="qr-code-img" src=""', html)
+
+        app_js_path = os.path.join(self.repo_dir, "static", "js", "app.js")
+        with open(app_js_path, "r", encoding="utf-8") as f:
+            code = f.read()
+
+        # Check that canvas mode removes img src and hides img
+        self.assertIn("img.removeAttribute('src')", code)
+        self.assertIn("qrCanvas.style.display = 'block'", code)
+        self.assertIn("qrCanvas.style.display = 'none'", code)
 
     def test_app_js_qr_functions_and_polling(self):
         app_js_path = os.path.join(self.repo_dir, "static", "js", "app.js")
