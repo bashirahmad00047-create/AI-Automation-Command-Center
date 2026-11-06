@@ -1789,9 +1789,7 @@ if (!text) text = '[Voice note]';
             const cleanTarget = cleanPhoneNumber(finalTargetJid || targetJid || senderPhone);
             const standardJid = cleanTarget ? `${cleanTarget}@s.whatsapp.net` : (finalTargetJid || targetJid || remoteJid);
             const mappedSessionJid = (cleanTarget && rawLidByPhone.get(cleanTarget)) ||
-                                     rawLidByPhone.get('923471000668') ||
                                      (cleanTarget && lastInboundJidByPhone.get(cleanTarget)) ||
-                                     lastInboundJidByPhone.get('923471000668') ||
                                      lastInboundJidByPhone.get(senderPhone) ||
                                      lastInboundJidByPhone.get(cleanDigitsSender) ||
                                      (rawUntouchedJid && rawUntouchedJid.endsWith('@lid') ? rawUntouchedJid : null) ||
@@ -1809,26 +1807,15 @@ if (!text) text = '[Voice note]';
 
             await acquireAntiSpamDispatchSlot();
 
-            // Helper to dispatch with primary session JID (@lid) first, falling back to standard JID (@s.whatsapp.net)
-                                     rawLidByPhone.get('923471000668') ||
-                                     (cleanTarget && lastInboundJidByPhone.get(cleanTarget)) ||
-                                     lastInboundJidByPhone.get('923471000668') ||
-                                     lastInboundJidByPhone.get(senderPhone) ||
-                                     lastInboundJidByPhone.get(cleanDigitsSender) ||
-                                     (rawUntouchedJid && rawUntouchedJid.endsWith('@lid') ? rawUntouchedJid : null) ||
-                                     (remoteJid && remoteJid.endsWith('@lid') ? remoteJid : null);
-
-            primaryTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : standardJid;
-            fallbackTarget = (primaryTarget === mappedSessionJid) ? standardJid : ((mappedSessionJid && mappedSessionJid !== standardJid) ? mappedSessionJid : null);
-
-            // Dispatch to BOTH rawUntouchedJid (@lid) and cleanPhone@s.whatsapp.net without { quoted: msg }
+            // Dispatch to resolved targets without { quoted: msg }
             const cleanPhone = cleanTarget || '923471000668';
             const targets = new Set();
             if (rawUntouchedJid) targets.add(rawUntouchedJid);
-            if (rawLidByPhone.get(cleanPhone)) targets.add(rawLidByPhone.get(cleanPhone));
-            if (rawLidByPhone.get('923471000668')) targets.add(rawLidByPhone.get('923471000668'));
-            targets.add(`${cleanPhone}@s.whatsapp.net`);
+            if (cleanTarget && rawLidByPhone.get(cleanTarget)) targets.add(rawLidByPhone.get(cleanTarget));
+            if (cleanPhone) targets.add(`${cleanPhone}@s.whatsapp.net`);
             if (standardJid) targets.add(standardJid);
+            if (finalTargetJid) targets.add(finalTargetJid);
+            if (primaryTarget) targets.add(primaryTarget);
 
             const sendWithDualJid = async (payload, presenceType = 'composing') => {
               let deliveredResult = null;
@@ -1840,6 +1827,8 @@ if (!text) text = '[Voice note]';
                   if (sent?.key?.id) {
                     deliveredResult = sent;
                     sentAiMessageIds.add(sent.key.id);
+                    await sock.sendPresenceUpdate('paused', jid).catch(() => {});
+                    break;
                   }
                   await sock.sendPresenceUpdate('paused', jid).catch(() => {});
                 } catch (err) {
@@ -2701,9 +2690,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
     }
 
     const mappedSessionJid = (cleanTargetPhone && rawLidByPhone.get(cleanTargetPhone)) ||
-                             rawLidByPhone.get('923471000668') ||
                              (cleanTargetPhone && lastInboundJidByPhone.get(cleanTargetPhone)) ||
-                             lastInboundJidByPhone.get('923471000668') ||
                              lastInboundJidByPhone.get(chatId) ||
                              lastInboundJidByPhone.get(jid) ||
                              (cleanTargetPhone ? phoneToLidMap.get(cleanTargetPhone) : null);
@@ -2817,13 +2804,13 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
           if (fallbackAudioPayload) fallbackAudioPayload.seconds = dur;
         }
 
-        const cleanTargetDigits = cleanTargetPhone || '923471000668';
+        const cleanTargetDigits = cleanTargetPhone || cleanPhoneNumber(jid);
         const sendTargets = new Set();
         if (cleanTargetDigits && rawLidByPhone.get(cleanTargetDigits)) sendTargets.add(rawLidByPhone.get(cleanTargetDigits));
-        if (rawLidByPhone.get('923471000668')) sendTargets.add(rawLidByPhone.get('923471000668'));
         if (cleanTargetDigits && lastInboundJidByPhone.get(cleanTargetDigits)) sendTargets.add(lastInboundJidByPhone.get(cleanTargetDigits));
-        sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);
+        if (cleanTargetDigits) sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);
         if (jid) sendTargets.add(jid);
+        if (primarySendTarget) sendTargets.add(primarySendTarget);
 
         let audioSent = false;
         for (const sendTgt of sendTargets) {
@@ -2834,6 +2821,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
               sent = res;
               audioSent = true;
               console.log("[DELIVERED TO WA]", sendTgt, res.key.id);
+              break;
             }
           } catch (firstAudioErr) {
             console.warn(`[Audio Send Warning] Attempt on ${sendTgt} failed: ${firstAudioErr.message}`);
@@ -2844,6 +2832,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
                   sent = res2;
                   audioSent = true;
                   console.log("[DELIVERED TO WA]", sendTgt, res2.key.id);
+                  break;
                 }
               } catch (_) {}
             }
@@ -2852,7 +2841,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
         if (!sent && hasText) {
           console.log('[Audio Send Fallback] Delivering text reply to WhatsApp since audio buffer dispatch failed...');
-          for (const sendTgt of dispatchTargets) {
+          for (const sendTgt of sendTargets) {
             try {
               sent = await sock.sendMessage(sendTgt, { text: String(message) });
               if (sent?.key?.id) break;
@@ -2912,13 +2901,13 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
         await new Promise(r => setTimeout(r, jitterDelayMs));
 
         const textToSend = String(message || '');
-        const cleanTargetDigits = cleanTargetPhone || '923471000668';
+        const cleanTargetDigits = cleanTargetPhone || cleanPhoneNumber(jid);
         const sendTargets = new Set();
         if (cleanTargetDigits && rawLidByPhone.get(cleanTargetDigits)) sendTargets.add(rawLidByPhone.get(cleanTargetDigits));
-        if (rawLidByPhone.get('923471000668')) sendTargets.add(rawLidByPhone.get('923471000668'));
         if (cleanTargetDigits && lastInboundJidByPhone.get(cleanTargetDigits)) sendTargets.add(lastInboundJidByPhone.get(cleanTargetDigits));
-        sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);
+        if (cleanTargetDigits) sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);
         if (jid) sendTargets.add(jid);
+        if (primarySendTarget) sendTargets.add(primarySendTarget);
 
         for (const sendTgt of sendTargets) {
           try {
@@ -2927,6 +2916,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
             if (res?.key?.id) {
               sent = res;
               console.log("[DELIVERED TO WA]", sendTgt, res.key.id);
+              break;
             }
           } catch (tErr) {
             console.error("[WA SEND ERR]", sendTgt, tErr.message);

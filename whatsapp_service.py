@@ -1417,6 +1417,9 @@ class WhatsAppService:
         local_cand = os.path.join(os.getcwd(), "node_modules", "ffmpeg-static", "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
         if os.path.exists(local_cand):
             return local_cand
+        file_cand = os.path.join(os.path.dirname(os.path.abspath(__file__)), "node_modules", "ffmpeg-static", "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        if os.path.exists(file_cand):
+            return file_cand
         for p in ("/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/bin/ffmpeg"):
             if os.path.exists(p):
                 return p
@@ -2640,13 +2643,8 @@ class WhatsAppService:
             return mp3_bytes
         import shutil
         import subprocess
-        ffmpeg_bin = shutil.which("ffmpeg")
-        if not ffmpeg_bin:
-            for p in ("/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "ffmpeg"):
-                if os.path.exists(p):
-                    ffmpeg_bin = p
-                    break
-        if not ffmpeg_bin:
+        ffmpeg_bin = cls.get_ffmpeg_binary_path()
+        if not ffmpeg_bin or (ffmpeg_bin == "ffmpeg" and not shutil.which("ffmpeg")):
             return None
         try:
             cmd = [
@@ -7372,7 +7370,7 @@ class WhatsAppService:
         name_clean = str(sender_name or "").strip().lower()
 
         # Direct known mapping for Bashir khani and WhatsApp LID 7142
-        if "7142" in raw or "bashir" in name_clean or "bashir" in raw.lower():
+        if raw in ("7142", "7142@lid") or raw.endswith("7142@lid") or raw.startswith("7142@") or "bashir" in name_clean or "bashir" in raw.lower():
             return "923471000668"
 
         clean = cls.format_phone_number(raw)
@@ -7416,11 +7414,11 @@ class WhatsAppService:
         raw = str(phone or "").strip()
         if raw.endswith("@g.us"):
             return raw
-        if "7142" in raw:
+        if raw in ("7142", "7142@lid") or raw.endswith("7142@lid") or raw.startswith("7142@"):
             return "923471000668"
         if raw.lower().endswith("@lid"):
             lid_user = raw.split("@")[0].split(":")[0]
-            if "7142" in lid_user:
+            if lid_user == "7142" or lid_user.endswith("7142"):
                 return "923471000668"
             return lid_user
         for suf in ("@s.whatsapp.net", "@c.us"):
@@ -7453,7 +7451,7 @@ class WhatsAppService:
         raw = str(phone or "").strip()
         if not raw or raw.upper() in ("N/A", "NONE", "NULL"):
             return ""
-        if "7142" in raw:
+        if raw in ("7142", "7142@lid") or raw.endswith("7142@lid") or raw.startswith("7142@"):
             return "+92 347 1000668"
         if raw.lower().endswith("@c.us"):
             raw = raw[:-5]
@@ -9803,7 +9801,8 @@ class WhatsAppService:
                 real_chat_id = f"{clean_to}@s.whatsapp.net"
         else:
             clean_to = cls.format_phone_number(raw_target)
-            if "7142" in clean_to:
+            raw_s = str(raw_target).strip()
+            if raw_s in ("7142", "7142@lid") or raw_s.endswith("7142@lid") or clean_to == "7142":
                 clean_to = "923471000668"
             if len(clean_to) > 13:
                 real_chat_id = f"{clean_to}@lid"
