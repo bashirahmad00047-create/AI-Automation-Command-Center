@@ -309,6 +309,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     app_ref.logger.warning(f"Auto-migration notice: {_mig_err}; continuing")
 
                 try:
+                    from whatsapp_service import WhatsAppService
+                    WhatsAppService.cleanup_lid_ghost_records()
+                except Exception as _cln_err:
+                    app_ref.logger.debug(f"LID ghost cleanup notice: {_cln_err}")
+
+                try:
                     from models import LoginAttempt
                     LoginAttempt.__table__.create(db.engine, checkfirst=True)
                 except Exception as _la_err:

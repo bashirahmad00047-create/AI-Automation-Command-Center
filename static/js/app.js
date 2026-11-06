@@ -11805,6 +11805,8 @@ let lastSpokenQueryTime = 0;
 let liveCallActivePhone = '';
 let liveCallActiveName = 'Bashir khani';
 let isLiveAiSpeaking = false;
+window.currentAiAudio = null;
+window.isAiSpeaking = false;
 let liveCallLanguage = 'ur-PK';
 let liveAudioCtx = null;
 let liveCurrentSource = null;
@@ -11894,6 +11896,20 @@ function getPersonaFriendlyName(personaKey) {
 function speakAIResponse(replyText, audioBase64 = null) {
     if (!liveVoiceCallActive) return;
 
+    // Global audio singleton: stop any previous audio before playing new TTS
+    if (window.currentAiAudio) {
+        try {
+            window.currentAiAudio.pause();
+            window.currentAiAudio.currentTime = 0;
+            window.currentAiAudio.src = "";
+            window.currentAiAudio.load();
+        } catch (_) {}
+        window.currentAiAudio = null;
+    }
+    if (window.speechSynthesis) {
+        try { window.speechSynthesis.cancel(); } catch (_) {}
+    }
+    window.isAiSpeaking = true;
     isLiveAiSpeaking = true;
     setEqualizerActive(true);
 
@@ -11961,11 +11977,17 @@ function speakAIResponse(replyText, audioBase64 = null) {
                 try { currentVoiceAudioPlayer.pause(); } catch (_) {}
             }
             currentVoiceAudioPlayer = player;
+            window.currentAiAudio = player;
             player.src = audioUri;
             player.muted = isSpeakerMuted;
 
             player.onended = function() {
-                finishSpeech();
+                window.currentAiAudio = null;
+                // Hard Mic Lock: resume listening only 350ms after currentAiAudio.onended
+                setTimeout(() => {
+                    finishSpeech();
+                    window.isAiSpeaking = false;
+                }, 350);
             };
 
             const playPromise = player.play();
@@ -12250,7 +12272,7 @@ function stopModalPttRecord(e) {
 window.stopModalPttRecord = stopModalPttRecord;
 
 async function sendVoiceChatQuery(payload) {
-    if (!liveVoiceCallActive || isLiveAiSpeaking) return;
+    if (!liveVoiceCallActive || isLiveAiSpeaking || window.isAiSpeaking) return;
     let cleanInput = '';
     let audioPayload = null;
 

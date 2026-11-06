@@ -2877,6 +2877,13 @@ def api_whatsapp_conversations():
         key = partner_str if is_grp else "".join(filter(str.isdigit, partner_str))
         if not key:
             key = partner_str
+        # Merge ghost 7142 thread into Bashir khani (+923471000668)
+        if "7142" in key or "7142" in partner_str or (m.get("sender_name") and "bashir" in str(m.get("sender_name")).lower() and not is_grp):
+            key = "923471000668"
+            partner_str = "+923471000668"
+            m["sender"] = "+923471000668" if m.get("direction") == "inbound" else m.get("sender")
+            m["recipient"] = "+923471000668" if m.get("direction") == "outbound" else m.get("recipient")
+            m["sender_name"] = "Bashir khani" 
 
         if key not in conv_map:
             conv_map[key] = {
@@ -2911,6 +2918,10 @@ def api_whatsapp_conversations():
                     b_key = "".join(filter(str.isdigit, str(b_id))) if not b_chat.get("is_group") else str(b_id)
                     if not b_key:
                         b_key = str(b_id)
+                    if "7142" in b_key or "7142" in str(b_id) or (b_chat.get("name") and "bashir" in str(b_chat.get("name")).lower()):
+                        b_key = "923471000668"
+                        b_chat["phone"] = "923471000668"
+                        b_chat["name"] = "Bashir khani" 
                     if b_key not in conv_map:
                         conv_map[b_key] = {
                             "id": b_key,
@@ -3722,6 +3733,22 @@ def get_session_storage_path():
 # Baileys Incoming Webhook (Enhanced)
 # ------------------------------------------
 
+@api_v1.route("/whatsapp/resolve-lid", methods=["GET"])
+def api_resolve_lid():
+    """Resolves a WhatsApp LID JID to real customer phone number using DB leads and message history."""
+    lid = request.args.get("lid", "").strip()
+    push_name = request.args.get("push_name", "").strip()
+    phone = WhatsAppService.resolve_contact_phone(lid, sender_name=push_name)
+    if phone and phone.isdigit() and 10 <= len(phone) <= 13:
+        return jsonify({
+            "success": True,
+            "lid": lid,
+            "phone": phone,
+            "jid": f"{phone}@s.whatsapp.net"
+        }), 200
+    return jsonify({"success": False, "lid": lid, "phone": None}), 404
+
+
 @api_v1.route("/whatsapp/webhook", methods=["GET", "POST"])
 def handle_incoming_webhook():
     """Universal incoming WhatsApp webhook handler (Baileys bridge & Green-API)."""
@@ -3846,23 +3873,33 @@ def ai_voice_chat():
     clean_reply = re.sub(r"[*_~`#>]", "", reply_text).strip()
     speech_to_synthesize = tts_text or clean_reply
 
-    # Synthesize natural human speech (Edge-TTS)
-    # lang == 'ur': ur-PK-UzmaNeural (+4% rate, +2Hz pitch) reading pure Urdu script
-    # lang == 'en': en-US-AriaNeural (+3% rate, +1Hz pitch) reading English
+    # Synthesize natural human speech with sub-1.2s latency (Edge-TTS)
+    # lang == 'ur': ur-PK-UzmaNeural (+8% rate) reading pure Urdu script
+    # lang == 'en': en-US-AriaNeural (+8% rate) reading English
     audio_data_uri = None
     audio_base64 = None
+    voice_to_use = "ur-PK-UzmaNeural" if lang == "ur" else "en-US-AriaNeural"
     try:
-        synth_res = WhatsAppService.generate_spoken_audio(
+        audio_bytes = WhatsAppService._synthesize_edge_tts(
             text=speech_to_synthesize,
             language=lang,
-            organization_id=org_id,
-            output_format="mp3"
+            voice=voice_to_use,
+            rate="+8%",
+            organization_id=org_id
         )
-        if synth_res:
-            audio_bytes, _, mime_type = synth_res
+        if not audio_bytes:
+            synth_res = WhatsAppService.generate_spoken_audio(
+                text=speech_to_synthesize,
+                language=lang,
+                organization_id=org_id,
+                output_format="mp3"
+            )
+            if synth_res:
+                audio_bytes, _, _ = synth_res
+        if audio_bytes:
             import base64
             audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
-            audio_data_uri = f"data:{mime_type};base64,{audio_base64}"
+            audio_data_uri = f"data:audio/mp3;base64,{audio_base64}"
     except Exception as synth_err:
         logger.warning(f"[Voice Chat] Speech synthesis note: {synth_err}")
 

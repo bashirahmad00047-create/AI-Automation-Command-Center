@@ -310,6 +310,8 @@
         window.turnId = 0;
         let currentTurnId = 0;
         let turnId = 0;
+        window.currentAiAudio = null;
+        window.isAiSpeaking = false;
         window.onerror = function() { return true; };
         window.onunhandledrejection = function(e) { if (e && e.preventDefault) e.preventDefault(); return true; };
 
@@ -365,13 +367,26 @@
         }
 
         function stopIncomingAiAudio() {
-            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
-            if (player) {
+            if (window.currentAiAudio) {
                 try {
-                    player.pause();
-                    player.currentTime = 0;
+                    window.currentAiAudio.pause();
+                    window.currentAiAudio.currentTime = 0;
+                    window.currentAiAudio.src = "";
+                    window.currentAiAudio.load();
                 } catch (_) {}
+                window.currentAiAudio = null;
             }
+            const p1 = document.getElementById('remoteVoicePlayer');
+            const p2 = document.getElementById('audioPlayer');
+            [p1, p2].forEach(p => {
+                if (p) {
+                    try {
+                        p.pause();
+                        p.currentTime = 0;
+                        p.src = "";
+                    } catch (_) {}
+                }
+            });
             if (window.speechSynthesis) {
                 try { window.speechSynthesis.cancel(); } catch (_) {}
             }
@@ -379,6 +394,7 @@
                 try { currentAudioSource.stop(); } catch (_) {}
                 currentAudioSource = null;
             }
+            window.isAiSpeaking = false;
             isAiSpeaking = false;
             isWaitingForServer = false;
             setWaveAnimation(false);
@@ -478,16 +494,25 @@
                 }
                 const uri = cleanB64.startsWith('data:') ? cleanB64 : (`data:${mime};base64,` + cleanB64);
                 if (player) {
-                    try { player.pause(); player.currentTime = 0; } catch(_) {}
+                    stopIncomingAiAudio();
+                    window.currentAiAudio = player;
+                    window.isAiSpeaking = true;
+                    isAiSpeaking = true;
                     player.src = uri;
                     player.currentTime = 0;
                     player.onended = () => {
                         setWaveAnimation(false);
                         setStatus('Listening...');
+                        window.currentAiAudio = null;
+                        // Hard Mic Lock: resume listening only 350ms after currentAiAudio.onended
                         setTimeout(() => {
+                            window.isAiSpeaking = false;
                             isAiSpeaking = false;
                             isWaitingForServer = false;
-                        }, 450);
+                            if (mediaRecorder && mediaRecorder.state === 'paused') {
+                                try { mediaRecorder.resume(); } catch (_) {}
+                            }
+                        }, 350);
                         advanceQueue();
                     };
                     player.onerror = () => {
@@ -821,9 +846,13 @@
 
             vadInterval = setInterval(() => {
                 if (!isCallActive || isMuted) return;
-                if (isAiSpeaking || isWaitingForServer) {
+                // Echo feedback loop fix (Hard Mic Lock): strictly ignore VAD triggers while AI is speaking
+                if (window.isAiSpeaking || isAiSpeaking || isWaitingForServer) {
                     silenceDurationMs = 0;
                     userHasSpoken = false;
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
+                        try { mediaRecorder.pause(); } catch (_) {}
+                    }
                     return;
                 }
 
@@ -900,7 +929,7 @@
                 };
 
                 recognition.onresult = (event) => {
-                    if (isMuted || !isCallActive || isAiSpeaking || isWaitingForServer) return;
+                    if (isMuted || !isCallActive || window.isAiSpeaking || isAiSpeaking || isWaitingForServer) return;
 
                     let interimTranscript = '';
                     let finalTranscript = '';
@@ -1020,6 +1049,9 @@
         // ===================================================================
         function speakAIResponse(replyText, audioBase64) {
             if (!isCallActive) return;
+            // Global audio singleton: stop any previous audio before playing new TTS
+            stopIncomingAiAudio();
+            window.isAiSpeaking = true;
             isAiSpeaking = true;
             setStatus('Assistant Speaking...');
             setWaveAnimation(true);
@@ -1034,16 +1066,22 @@
 
                 const uri = b64.startsWith('data:') ? b64 : (`data:${mime};base64,` + b64);
                 if (player) {
-                    try { player.pause(); player.currentTime = 0; } catch(_) {}
+                    window.currentAiAudio = player;
                     player.src = uri;
                     player.currentTime = 0;
                     player.onended = () => {
                         setWaveAnimation(false);
                         setStatus('Listening...');
+                        window.currentAiAudio = null;
+                        // Hard Mic Lock: resume listening only 350ms after currentAiAudio.onended
                         setTimeout(() => {
+                            window.isAiSpeaking = false;
                             isAiSpeaking = false;
                             isWaitingForServer = false;
-                        }, 450);
+                            if (mediaRecorder && mediaRecorder.state === 'paused') {
+                                try { mediaRecorder.resume(); } catch (_) {}
+                            }
+                        }, 350);
                     };
                     player.onerror = () => {
                         playWithWebAudioBuffer(b64, replyText);
