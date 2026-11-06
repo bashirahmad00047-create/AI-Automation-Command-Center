@@ -5517,7 +5517,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                         <span style="font-size: 11.5px; color: #00a884;" id="qrModalSubtitle">● Live Baileys Cloud Bridge</span>
                     </div>
                 </div>
-                <button type="button" onclick="closeQrModal()" style="background: none; border: none; font-size: 22px; color: #8696a0; cursor: pointer; padding: 4px; line-height: 1;">✕</button>
+                <button type="button" id="btnCloseQrModalHeader" class="btn-close-qr-modal" onclick="closeQrModal()" style="background: none; border: none; font-size: 22px; color: #8696a0; cursor: pointer; padding: 4px; line-height: 1;" title="Close modal">✕</button>
             </div>
 
             <!-- Connected View (Shown when WhatsApp is already linked) -->
@@ -5531,7 +5531,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                     <button type="button" class="hud-btn danger small" onclick="disconnectWhatsAppDevice()" style="background: #ef4444; color: #fff; font-size: 12.5px; font-weight: 600; padding: 8px 18px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
                         <span>⏻</span> Disconnect / Unlink WhatsApp
                     </button>
-                    <button type="button" onclick="closeQrModal()" class="hud-btn small" style="background: #202c33; color: #cbd5e1; font-size: 12.5px; padding: 8px 18px; border-radius: 8px; border: 1px solid #334155;">
+                    <button type="button" id="btnCloseQrModalFooter" class="hud-btn small btn-close-qr-modal" onclick="closeQrModal()" style="background: #202c33; color: #cbd5e1; font-size: 12.5px; padding: 8px 18px; border-radius: 8px; border: 1px solid #334155; cursor: pointer;">
                         Close
                     </button>
                 </div>

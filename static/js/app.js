@@ -5809,45 +5809,38 @@ async function fetchBridgeQrCode(forceRefresh = false) {
             if (isReallyConnected) {
                 window._waIsConnected = true;
                 const phone = data.phone || (data.user?.id ? data.user.id.split(':')[0] : (data.connected_phone || ''));
-                if (typeof updateWhatsAppConnectionUI === 'function') {
-                    updateWhatsAppConnectionUI(true, phone);
-                }
+
+                // b) Clear the polling interval timer
                 if (waBridgeQrPollTimer) {
                     clearInterval(waBridgeQrPollTimer);
                     waBridgeQrPollTimer = null;
                 }
+                if (window.waBridgeQrPollTimer) {
+                    clearInterval(window.waBridgeQrPollTimer);
+                    window.waBridgeQrPollTimer = null;
+                }
 
+                // a) Immediately invoke closeQrModal() and hide the modal container
+                closeQrModal();
                 const modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
-                const mainBody = document.getElementById('waPairingMainBody');
-                const connectedState = document.getElementById('qrConnectedState');
-                const connectedNumber = document.getElementById('qrConnectedNumber');
+                if (modal) {
+                    modal.style.display = 'none';
+                    modal.classList.add('hidden');
+                }
 
-                // If modal is currently open and visible, show rewarding success state briefly and auto-close!
-                const isModalOpen = modal && modal.style.display !== 'none' && !modal.classList.contains('hidden');
-                if (isModalOpen) {
-                    if (mainBody) mainBody.style.display = 'none';
-                    if (connectedState) {
-                        connectedState.style.display = 'block';
-                        if (connectedNumber) {
-                            connectedNumber.innerHTML = `<span style="color:#00a884; font-weight:700;">✓ Connected${phone ? ' (+' + String(phone).replace(/\D/g, '') + ')' : ''}</span><br><span style="font-size:12.5px; color:#8696a0;">Auto-closing & loading WhatsApp chats...</span>`;
-                        }
-                    }
-                    setTimeout(() => {
-                        closeQrModal();
-                        if (typeof switchTab === 'function') switchTab('whatsapp');
-                        if (typeof loadWhatsAppDashboard === 'function') loadWhatsAppDashboard();
-                        if (typeof window.loadWhatsAppChats === 'function' && window.loadWhatsAppChats !== loadWhatsAppDashboard) {
-                            window.loadWhatsAppChats();
-                        }
-                    }, 800);
-                } else {
-                    // Modal already hidden: close immediately, switch tab & refresh
-                    closeQrModal();
-                    if (typeof switchTab === 'function') switchTab('whatsapp');
-                    if (typeof loadWhatsAppDashboard === 'function') loadWhatsAppDashboard();
-                    if (typeof window.loadWhatsAppChats === 'function' && window.loadWhatsAppChats !== loadWhatsAppDashboard) {
-                        window.loadWhatsAppChats();
-                    }
+                // c) Update top connection status badges across the UI to green "WhatsApp Connected (+...)"
+                if (typeof updateWhatsAppConnectionUI === 'function') {
+                    updateWhatsAppConnectionUI(true, phone);
+                }
+
+                // d) Automatically call loadWhatsAppChats() so the chat interface loads instantly behind the closed modal
+                if (typeof switchTab === 'function') {
+                    switchTab('whatsapp');
+                }
+                if (typeof window.loadWhatsAppChats === 'function') {
+                    window.loadWhatsAppChats();
+                } else if (typeof loadWhatsAppDashboard === 'function') {
+                    loadWhatsAppDashboard();
                 }
 
                 if (typeof showHudToast === 'function') {
@@ -6231,8 +6224,30 @@ async function disconnectWhatsAppDevice() {
 }
 window.disconnectWhatsAppDevice = disconnectWhatsAppDevice;
 
+// Explicitly bind Close buttons, (X) button, and backdrop clicks
+function bindQrModalCloseHandlers() {
+    const qrModal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
+    if (qrModal) {
+        qrModal.onclick = function(e) {
+            if (e.target === qrModal) {
+                closeQrModal();
+            }
+        };
+        const closeSelectors = '#btnCloseQrModalHeader, #btnCloseQrModalFooter, #btnCloseQrModalSuccess, .btn-close-qr-modal, button[onclick*="closeQrModal"], button[onclick*="closeLinkWhatsAppQrModal"], [data-action="close-qr-modal"]';
+        const closeBtns = qrModal.querySelectorAll(closeSelectors);
+        closeBtns.forEach(btn => {
+            btn.onclick = function(e) {
+                if (e) { e.preventDefault(); e.stopPropagation(); }
+                closeQrModal();
+            };
+        });
+    }
+}
+window.bindQrModalCloseHandlers = bindQrModalCloseHandlers;
+
 // Attach click listeners on DOM ready for all QR buttons, modal backdrop, and Escape key
 document.addEventListener('DOMContentLoaded', () => {
+    bindQrModalCloseHandlers();
     const qrModal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
     if (qrModal) {
         qrModal.addEventListener('click', (e) => {
@@ -14409,7 +14424,7 @@ function updateWhatsAppConnectionUI(isConnected, phone) {
     const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
     const phoneDisplay = cleanPhone ? ` (+${cleanPhone})` : '';
 
-    const qrButtons = document.querySelectorAll('.topbar-qr-btn, #dashLinkWhatsAppQrBtn, #btnLinkWhatsAppQr, #waHeaderLinkQrBtn, [data-action="link-whatsapp-qr"]');
+    const qrButtons = document.querySelectorAll('.topbar-qr-btn, #btn-link-qr, #btn-qr-relink, .btn-qr-sync, #dashLinkWhatsAppQrBtn, #btnLinkWhatsAppQr, #waHeaderLinkQrBtn, #waHeaderQrRelinkBtn, [data-action="link-whatsapp-qr"]');
     qrButtons.forEach(btn => {
         if (isConnected) {
             btn.innerHTML = `● WhatsApp Connected${phoneDisplay}`;
