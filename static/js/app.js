@@ -13236,7 +13236,7 @@ function startContinuousVoiceVAD() {
                                     handleModalVadCompletion();
                                 }
                                 modalVadSilenceTimer = null;
-                            }, 1500);
+                            }, 1800);
                         }
                     }
                 }
@@ -13279,6 +13279,7 @@ function startContinuousVoiceVAD() {
     }
 
     // 2. Primary SpeechRecognition (with graceful, zero-crash error handling)
+    let modalAccumulatedSpeech = '';
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
         try {
@@ -13302,29 +13303,28 @@ function startContinuousVoiceVAD() {
                         interimTranscript += event.results[i][0].transcript;
                     }
                 }
-                const textToDisplay = (finalTranscript || interimTranscript).trim();
-                if (transcriptBox && textToDisplay) {
-                    transcriptBox.innerHTML = '<div style="color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ' + escapeHtml(textToDisplay) + '</div>';
+                if (finalTranscript && finalTranscript.trim()) {
+                    modalAccumulatedSpeech = (modalAccumulatedSpeech + ' ' + finalTranscript.trim()).trim();
+                }
+                const liveDisplay = (modalAccumulatedSpeech + (interimTranscript ? ' ' + interimTranscript.trim() : '')).trim();
+                if (transcriptBox && liveDisplay) {
+                    transcriptBox.innerHTML = '<div style="color: #cbd5e1;"><strong style="color: #38bdf8;">You:</strong> ' + escapeHtml(liveDisplay) + '</div>';
                     transcriptBox.scrollTop = transcriptBox.scrollHeight;
                 }
 
-                if (textToDisplay && statusLabel) {
+                if (liveDisplay && statusLabel) {
                     statusLabel.textContent = '🟢 Listening... (Hearing voice)';
                 }
 
+                // Strict 1.8s (1800ms) silence debounce: accumulate full customer thought, never fire on half-sentences!
                 clearTimeout(voiceSpeechDebounceTimer);
-                const finalClean = finalTranscript.trim();
-                const interimClean = interimTranscript.trim();
-
-                if (finalClean.length > 1) {
-                    sendVoiceChatQuery({ text: finalClean });
-                } else if (interimClean.length > 2) {
-                    voiceSpeechDebounceTimer = setTimeout(() => {
-                        if (!isLiveAiSpeaking && interimClean.length > 2) {
-                            sendVoiceChatQuery({ text: interimClean });
-                        }
-                    }, 750);
-                }
+                voiceSpeechDebounceTimer = setTimeout(() => {
+                    const fullText = (modalAccumulatedSpeech || liveDisplay || '').trim();
+                    if (!isLiveAiSpeaking && fullText.length > 1) {
+                        modalAccumulatedSpeech = '';
+                        sendVoiceChatQuery({ text: fullText });
+                    }
+                }, 1800);
             };
 
             liveVoiceRecognition.onerror = function(err) {

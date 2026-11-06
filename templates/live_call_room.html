@@ -392,6 +392,7 @@
         let isAiSpeaking = false;
         let isWaitingForServer = false;
         let latestInterimTranscript = '';
+        let accumulatedCustomerSpeech = '';
         const playedChunkIds = new Set();
         let currentLanguage = 'ur-PK';
         let callSeconds = 0;
@@ -856,9 +857,11 @@
                                     const b64 = reader.result;
                                     currentTurnId++;
                                     turnId = currentTurnId;
-                                    broadcastLiveCallChunk('customer', b64, latestInterimTranscript || null, 'audio/webm', currentTurnId);
-                                    sendLiveVoicePayload({ audioBase64: b64, customer_audio_base64: b64, text: latestInterimTranscript || null, turnId: currentTurnId, seq: currentTurnId });
+                                    const fullText = (accumulatedCustomerSpeech || latestInterimTranscript || '').trim();
+                                    accumulatedCustomerSpeech = '';
                                     latestInterimTranscript = '';
+                                    broadcastLiveCallChunk('customer', b64, fullText || null, 'audio/webm', currentTurnId);
+                                    sendLiveVoicePayload({ audioBase64: b64, customer_audio_base64: b64, text: fullText || null, turnId: currentTurnId, seq: currentTurnId });
                                 };
                                 reader.readAsDataURL(audioBlob);
                             }
@@ -908,34 +911,29 @@
                     }
                 } else {
                     if (userHasSpoken) {
-                        // BUG 4: 3.5s Hard Max Turn Cap for instant mobile turn-taking without hanging
-                        const speechElapsed = Date.now() - (window.speechStartEpoch || Date.now());
-                        if (speechElapsed >= 3500) {
-                            userHasSpoken = false;
-                            silenceDurationMs = 0;
-                            if (STATE === "LISTENING" && !inFlightRequest) {
-                                setCallState("PROCESSING");
-                                if (mediaRecorder && mediaRecorder.state === 'recording') {
-                                    try { mediaRecorder.stop(); } catch (_) {}
-                                }
-                            }
-                            return;
-                        }
-
                         silenceDurationMs += 100;
-                        // BUG 4: 400ms silence detection for sub-second mobile response
-                        if (silenceDurationMs >= 400) {
+                        // Strict 1.8s (1800ms) continuous silence threshold: customer has completed their thought
+                        if (silenceDurationMs >= 1800) {
                             userHasSpoken = false;
                             silenceDurationMs = 0;
                             if (STATE !== "LISTENING" || inFlightRequest) return;
 
-                            // 400ms VAD silence reached: advance to PROCESSING and lock hardware mic
+                            // 1.8s continuous silence reached: advance to PROCESSING and lock hardware mic
                             setCallState("PROCESSING");
 
                             if (mediaRecorder && mediaRecorder.state === 'recording') {
                                 try {
                                     mediaRecorder.stop();
                                 } catch (_) {}
+                            } else {
+                                const fullText = (accumulatedCustomerSpeech || latestInterimTranscript || '').trim();
+                                if (fullText) {
+                                    sendLiveVoicePayload({ text: fullText, turnId: ++currentTurnId });
+                                    accumulatedCustomerSpeech = '';
+                                    latestInterimTranscript = '';
+                                } else {
+                                    setCallState("LISTENING");
+                                }
                             }
                         }
                     } else if (STATE === "LISTENING") {
@@ -980,29 +978,20 @@
                         }
                     }
 
-                    const liveSpeech = (finalTranscript || interimTranscript).trim();
+                    if (finalTranscript && finalTranscript.trim()) {
+                        accumulatedCustomerSpeech = (accumulatedCustomerSpeech + ' ' + finalTranscript.trim()).trim();
+                    }
+
+                    const liveSpeech = (accumulatedCustomerSpeech + (interimTranscript ? ' ' + interimTranscript.trim() : '')).trim();
                     if (liveSpeech) {
                         latestInterimTranscript = liveSpeech;
+                        userHasSpoken = true;
+                        silenceDurationMs = 0; // Customer is speaking: reset silence timer!
                         setWaveAnimation(true);
                         setStatus('Listening to you...');
                         const tb = document.getElementById('transcriptBox');
                         if (tb) {
                             tb.innerHTML = `<span style="color:#cbd5e1;"><b>You:</b> ${escapeHtml(liveSpeech)}</span>`;
-                        }
-
-                        // BUG 4: Immediate trigger when speech recognizer produces final sentence
-                        if (finalTranscript && finalTranscript.trim() && userHasSpoken) {
-                            userHasSpoken = false;
-                            silenceDurationMs = 0;
-                            if (STATE === "LISTENING" && !inFlightRequest) {
-                                setCallState("PROCESSING");
-                                if (mediaRecorder && mediaRecorder.state === 'recording') {
-                                    try { mediaRecorder.stop(); } catch (_) {}
-                                } else {
-                                    sendLiveVoicePayload({ text: liveSpeech, turnId: ++currentTurnId });
-                                    latestInterimTranscript = '';
-                                }
-                            }
                         }
                     }
                 };
@@ -1129,9 +1118,15 @@
             setCallState("PROCESSING");
             if (mediaRecorder && mediaRecorder.state === 'recording') {
                 try { mediaRecorder.stop(); } catch (_) {}
-            } else if (latestInterimTranscript) {
-                sendLiveVoicePayload({ text: latestInterimTranscript, turnId: ++currentTurnId });
-                latestInterimTranscript = '';
+            } else {
+                const fullText = (accumulatedCustomerSpeech || latestInterimTranscript || '').trim();
+                if (fullText) {
+                    sendLiveVoicePayload({ text: fullText, turnId: ++currentTurnId });
+                    accumulatedCustomerSpeech = '';
+                    latestInterimTranscript = '';
+                } else {
+                    setCallState("LISTENING");
+                }
             }
         }
         window.forceDispatchTurn = forceDispatchTurn;

@@ -35,6 +35,9 @@ class TestAudioRelayAndOgg(unittest.TestCase):
         self.assertIn("audio/mpeg", code)
         self.assertIn("audio/mp4", code)
 
+        # Check sock.sendMessage delivers with audio payload and no quoted stanza across mapped targets
+        self.assertIn("sock.sendMessage(sendTgt, primaryAudioPayload)", code)
+
     def test_api_v1_audio_relay(self):
         api_path = os.path.join(self.repo_dir, "api_v1.py")
         with open(api_path, "r", encoding="utf-8") as f:
@@ -45,7 +48,7 @@ class TestAudioRelayAndOgg(unittest.TestCase):
         self.assertIn("live-call-chunk", code)
         self.assertIn("clean_call_phone", code)
 
-    def test_static_app_js_queue_relay(self):
+    def test_static_app_js_queue_relay_and_silence(self):
         app_js_path = os.path.join(self.repo_dir, "static", "js", "app.js")
         with open(app_js_path, "r", encoding="utf-8") as f:
             code = f.read()
@@ -55,14 +58,20 @@ class TestAudioRelayAndOgg(unittest.TestCase):
         self.assertIn("🤖 Live Call: AI Responding...", code)
         # Ensure queue is not wiped on window.isAiSpeaking
         self.assertNotIn("if (window.isAiSpeaking || window.isLiveAiSpeaking || window.location.pathname.includes('/call/'))", code)
+        # Ensure 1.8s silence debounce and sentence accumulation
+        self.assertIn("modalAccumulatedSpeech", code)
+        self.assertIn("1800", code)
 
-    def test_live_call_room_customer_audio(self):
+    def test_live_call_room_customer_audio_and_silence(self):
         room_path = os.path.join(self.repo_dir, "templates", "live_call_room.html")
         with open(room_path, "r", encoding="utf-8") as f:
             code = f.read()
 
         self.assertIn("customer_audio_base64", code)
         self.assertIn("mediaRecorder.start(200)", code)
+        # Ensure 1.8s (1800ms) silence threshold
+        self.assertIn("silenceDurationMs >= 1800", code)
+        self.assertIn("accumulatedCustomerSpeech", code)
 
 if __name__ == "__main__":
     unittest.main()
