@@ -12475,6 +12475,7 @@ window.switchLiveCallLanguage = switchLiveCallLanguage;
 
 function startModalPttRecord(e) {
     if (e && e.cancelable) e.preventDefault();
+    unlockPersistentAudioElement();
     if (!liveVoiceCallActive || isLiveAiSpeaking) return;
     isModalPttRecording = true;
     const btn = document.getElementById('btnModalPushToTalk');
@@ -12977,10 +12978,29 @@ function startAdminAudioPolling(phoneNum) {
     }, 800);
 }
 
+function unlockPersistentAudioElement() {
+    try {
+        let player = document.getElementById('liveCallAudioPlayer');
+        if (!player) {
+            player = new Audio();
+            player.id = 'liveCallAudioPlayer';
+            document.body.appendChild(player);
+        }
+        player.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+        const p = player.play();
+        if (p !== undefined) {
+            p.then(() => { player.pause(); player.currentTime = 0; }).catch(() => {});
+        }
+    } catch (_) {}
+}
+window.unlockPersistentAudioElement = unlockPersistentAudioElement;
+
 function openLiveVoiceCallModal(autoConnect = true, customPhone = null, customName = null) {
     const modal = document.getElementById('liveVoiceCallModal');
     if (!modal) return;
     modal.style.display = 'flex';
+
+    unlockPersistentAudioElement();
 
     // 1. Unlock browser AudioContext inside the user click handler itself!
     try {
@@ -14524,6 +14544,14 @@ function updateWhatsAppConnectionUI(isConnected, phone) {
         relinkBtn.style.display = 'inline-flex';
         relinkBtn.style.cursor = 'pointer';
         relinkBtn.onclick = function() { openQrModal(true); };
+    }
+
+    const sidebarRelinkBtn = document.getElementById('waHeaderQrRelinkBtnSidebar') || document.getElementById('waHeaderLinkQrBtn');
+    if (sidebarRelinkBtn) {
+        sidebarRelinkBtn.innerHTML = '<span>🔄</span> <span>QR Re-Link</span>';
+        sidebarRelinkBtn.style.display = 'inline-flex';
+        sidebarRelinkBtn.style.cursor = 'pointer';
+        sidebarRelinkBtn.onclick = function() { openQrModal(true); };
     }
 
     // Update sidebar status cleanly without overflowing

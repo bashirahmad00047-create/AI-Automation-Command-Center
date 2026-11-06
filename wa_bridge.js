@@ -43,6 +43,14 @@ let ffmpegBinaryPath = null;
 try {
   ffmpegBinaryPath = require('ffmpeg-static');
 } catch (_) {}
+
+if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
+  const localFfmpeg = path.join(__dirname, 'node_modules', 'ffmpeg-static', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+  if (fs.existsSync(localFfmpeg)) {
+    ffmpegBinaryPath = localFfmpeg;
+  }
+}
+
 if (!ffmpegBinaryPath || !fs.existsSync(ffmpegBinaryPath)) {
   try {
     const cmd = process.platform === 'win32' ? 'where.exe ffmpeg' : 'which ffmpeg';

@@ -1437,8 +1437,7 @@ class WhatsAppService:
         in_p = None
         out_p = None
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as in_f, \
-                 tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as out_f:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as in_f, tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as out_f:
                 in_p = in_f.name
                 out_p = out_f.name
                 in_f.write(audio_bytes)
@@ -2703,19 +2702,43 @@ class WhatsAppService:
         audio_fn = "voice_reply.oga" if is_oga else "voice_reply.mp3"
         audio_mt = "audio/ogg; codecs=opus" if is_oga else "audio/mpeg"
 
-        # 1. Primary: Microsoft Edge Neural HD Voice (ur-PK-UzmaNeural / en-US-AvaNeural)
-        # Always tried first: instant, completely free, ultra-natural human tone without robotic sound.
+        # 1. Primary: Microsoft Edge Neural HD Voice with 4.0s timeout
         try:
-            edge_bytes = cls._synthesize_edge_tts(clean_text[:1200], language=language, organization_id=organization_id)
-            if edge_bytes and len(edge_bytes) > 1024:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                edge_bytes = pool.submit(
+                    cls._synthesize_edge_tts,
+                    clean_text[:500],
+                    language=language,
+                    organization_id=organization_id
+                ).result(timeout=4.0)
+            if edge_bytes and len(edge_bytes) > 64:
                 ogg_converted = cls.convert_mp3_to_ogg_opus(edge_bytes)
                 if ogg_converted and ogg_converted[:4] == b"OggS":
                     logger.info(f"[TTS Pipeline] Converted Edge-TTS to strict WhatsApp OGG Opus ({len(ogg_converted)} bytes).")
                     return (ogg_converted, "voice_reply.oga", "audio/ogg; codecs=opus")
                 logger.info(f"[TTS Pipeline] Edge-TTS synthesized native MP3 ({len(edge_bytes)} bytes).")
-                return (edge_bytes, "voice_reply.mp3", "audio/mpeg")
+                return (edge_bytes, "voice_reply.mp3", "audio/mp4")
         except Exception as e_err:
             logger.debug(f"[TTS Pipeline] Edge-TTS notice: {e_err}")
+
+        # 1b. Guaranteed Instant gTTS Fallback with OGG Opus conversion
+        try:
+            from gtts import gTTS
+            import io
+            g_lang = "ur" if (language and ("ur" in language.lower() or "urdu" in language.lower())) else "en"
+            tts = gTTS(text=clean_text[:500], lang=g_lang)
+            buf = io.BytesIO()
+            tts.write_to_fp(buf)
+            g_bytes = buf.getvalue()
+            if g_bytes and len(g_bytes) > 64:
+                ogg_converted = cls.convert_mp3_to_ogg_opus(g_bytes)
+                if ogg_converted and ogg_converted[:4] == b"OggS":
+                    logger.info(f"[TTS Pipeline] gTTS fallback converted to strict WhatsApp OGG Opus ({len(ogg_converted)} bytes).")
+                    return (ogg_converted, "voice_reply.oga", "audio/ogg; codecs=opus")
+                return (g_bytes, "voice_reply.mp3", "audio/mp4")
+        except Exception as g_err:
+            logger.debug(f"[TTS Pipeline] gTTS fallback notice: {g_err}")
 
         # 2. Secondary fallback: ElevenLabs Multilingual Neural TTS
         eleven_bytes = cls._synthesize_elevenlabs_tts(clean_text[:1000], organization_id=organization_id)
@@ -7001,13 +7024,18 @@ class WhatsAppService:
             send_as_voice = False
             tts_failed = False
 
+            inbound_type = str(kwargs.get("message_type") or kwargs.get("type") or "").lower()
+            if is_voice_inbound or inbound_type in ("audio", "voice", "ptt", "audiomessage", "voicemessage") or kwargs.get("is_voice") or kwargs.get("is_audio"):
+                is_voice_inbound = True
+                send_as_voice = True
+
             should_synth_voice = (
                 is_voice_inbound
+                or send_as_voice
                 or kwargs.get("reply_as_voice")
                 or (intent == "order_intent" and ("order" in str(message_body or "").lower() or "confirm" in str(message_body or "").lower()))
                 or auto_conf.get("voice_replies_enabled")
                 or auto_conf.get("always_send_voice")
-                or not is_voice_inbound
             )
 
             if should_synth_voice:

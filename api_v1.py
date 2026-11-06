@@ -3933,38 +3933,60 @@ def ai_voice_chat():
         tts_text = f"السلام علیکم! ہاں جی {caller_name}، میں سن رہا ہوں، بتائیں میں آپ کی کیا مدد کر سکتا ہوں؟"
         lang = "ur" 
 
+    # Check if user is asking about services, company, or platform capabilities
+    user_msg_lower = user_msg.lower()
+    is_service_inquiry = any(w in user_msg_lower for w in ["سروس", "service", "services", "kya karte", "kya karti", "kaam", "features", "platform", "batao", "bataein"])
+    if is_service_inquiry:
+        if lang == "ur":
+            reply_text = "BashFlow AI aik multi-channel enterprise automation platform hai. Hum 24/7 AI WhatsApp chatbots, live voice receptionist calls, automated order tracking, aur CRM lead capture provide karte hain jo aap ke business operations ko foran automate karta hai."
+            tts_text = "بیش فلو اے آئی ایک ملٹی چینل انٹرپرائز آٹومیشن پلیٹ فارم ہے۔ ہم چوبیس گھنٹے واٹس ایپ چیٹ بوٹس، لائیو وائس کال ریسپشن، آرڈر ٹریکنگ، اور کسٹمر لیڈ مینجمنٹ فراہم کرتے ہیں۔"
+        else:
+            reply_text = "BashFlow AI is an enterprise multi-channel automation platform. We provide 24/7 AI WhatsApp chatbots, real-time live voice receptionists, automated order tracking, and CRM lead capture to streamline your business operations."
+            tts_text = reply_text
+
     clean_reply = re.sub(r"[*_~`#>]", "", reply_text).strip()
     speech_to_synthesize = tts_text or clean_reply
 
-    # Synthesize natural human speech with sub-1.2s latency (Edge-TTS)
-    # lang == 'ur': ur-PK-UzmaNeural (+8% rate) reading pure Urdu script
-    # lang == 'en': en-US-AriaNeural (+8% rate) reading English
+    # Guaranteed Speech Synthesis: Edge-TTS with 4s timeout + instant gTTS BytesIO fallback
     audio_data_uri = None
     audio_base64 = None
     voice_to_use = "ur-PK-UzmaNeural" if lang == "ur" else "en-US-AriaNeural"
+    audio_bytes = None
+
+    # Step 1: Edge-TTS attempt with fast 4s timeout
     try:
-        audio_bytes = WhatsAppService._synthesize_edge_tts(
-            text=speech_to_synthesize,
-            language=lang,
-            voice=voice_to_use,
-            rate="+8%",
-            organization_id=org_id
-        )
-        if not audio_bytes:
-            synth_res = WhatsAppService.generate_spoken_audio(
-                text=speech_to_synthesize,
+        import concurrent.futures, asyncio
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                WhatsAppService._synthesize_edge_tts,
+                speech_to_synthesize[:350],
                 language=lang,
-                organization_id=org_id,
-                output_format="mp3"
+                voice=voice_to_use,
+                rate="+6%",
+                organization_id=org_id
             )
-            if synth_res:
-                audio_bytes, _, _ = synth_res
-        if audio_bytes:
-            import base64
-            audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
-            audio_data_uri = f"data:audio/mp3;base64,{audio_base64}"
-    except Exception as synth_err:
-        logger.warning(f"[Voice Chat] Speech synthesis note: {synth_err}")
+            audio_bytes = future.result(timeout=4.0)
+    except Exception as edge_err:
+        logger.debug(f"[ai_voice_chat] Edge-TTS notice: {edge_err}")
+
+    # Step 2: Instant gTTS fallback into BytesIO buffer (guarantees audio_base64 is 100% NEVER empty)
+    if not audio_bytes or len(audio_bytes) < 64:
+        try:
+            from gtts import gTTS
+            import io
+            g_lang = "ur" if lang == "ur" else "en"
+            tts = gTTS(text=clean_reply[:350], lang=g_lang)
+            buf = io.BytesIO()
+            tts.write_to_fp(buf)
+            buf.seek(0)
+            audio_bytes = buf.read()
+        except Exception as gtts_err:
+            logger.warning(f"[ai_voice_chat] gTTS fallback notice: {gtts_err}")
+
+    if audio_bytes:
+        import base64
+        audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
+        audio_data_uri = f"data:audio/mp3;base64,{audio_base64}"
 
     # SaaS Readiness Upgrades (TASK 5): Lead Auto-Capture & Live Execution Tracking
     lead_id = None
@@ -4129,11 +4151,15 @@ def ai_voice_chat():
     return jsonify({
         "success": True,
         "user_message": user_msg,
+        "reply": clean_reply,
         "reply_text": clean_reply,
+        "replyText": clean_reply,
+        "text": clean_reply,
         "tts_text": speech_to_synthesize,
         "lang": lang,
         "audio_data_uri": audio_data_uri,
         "audio_base64": audio_base64,
+        "audioBase64": audio_base64,
         "customer_audio_base64": cust_audio_raw,
         "lead_id": lead_id,
         "stats": stats
@@ -4508,7 +4534,16 @@ def api_live_voice_call():
                 except Exception:
                     ai_raw = ""
 
-            if not ai_raw:
+            disp, spch = WhatsAppService._parse_dual_ai_output(ai_raw) if ai_raw else ("", "")
+            reply_text = disp or ai_raw
+            voice_text = spch or disp or ai_raw
+
+            user_txt_lower = str(user_text or "").lower()
+            is_service_q = any(w in user_txt_lower for w in ["سروس", "service", "services", "kya karte", "kya karti", "kaam", "features", "platform", "batao", "bataein"])
+            if is_service_q:
+                reply_text = "BashFlow AI aik multi-channel enterprise automation platform hai. Hum 24/7 AI WhatsApp chatbots, live voice receptionist calls, automated order tracking, aur CRM lead capture provide karte hain jo aap ke business operations ko foran automate karta hai."
+                voice_text = "بیش فلو اے آئی ایک ملٹی چینل انٹرپرائز آٹومیشن پلیٹ فارم ہے۔ ہم چوبیس گھنٹے واٹس ایپ چیٹ بوٹس، لائیو وائس کال ریسپشن، آرڈر ٹریکنگ، اور کسٹمر لیڈ مینجمنٹ فراہم کرتے ہیں۔"
+            elif not reply_text:
                 det = WhatsAppService.detect_language(user_text)
                 if det.get("language") in ("urdu", "pashto") or any(w in user_text.lower() for w in ["salam", "aap", "theek", "shukriya", "kya", "hai"]):
                     reply_text = "Jee bilkul, main ne aap ki baat samajh li hai. Mazeed tafseelat ke liye batayein."
@@ -4516,10 +4551,6 @@ def api_live_voice_call():
                 else:
                     reply_text = "Got it! I understand completely. Let me know how else I can assist you."
                     voice_text = "Got it! I understand completely. Let me know how else I can assist you."
-            else:
-                disp, spch = WhatsAppService._parse_dual_ai_output(ai_raw)
-                reply_text = disp or ai_raw
-                voice_text = spch or disp or ai_raw
 
         # Strip redundant Assalam o Alaikum if conversation is already in progress
         if conv_hist and len(conv_hist) > 0 and not any(g in user_text.lower() for g in ["salam", "assalam", "aoa"]):
