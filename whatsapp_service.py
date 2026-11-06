@@ -6224,17 +6224,31 @@ class WhatsAppService:
 
         # Check if incoming message is already wrapped with transcribed customer speech
         pre_extracted = cls.extract_voice_transcript(clean_body)
+        inbound_type_early = str(kwargs.get("message_type") or kwargs.get("type") or "").lower()
         if pre_extracted:
             message_body = pre_extracted
             clean_body = message_body
             body_clean_str = clean_body.lower()
-            is_voice_inbound = bool(is_voice or download_url)
+            is_voice_inbound = bool(
+                is_voice
+                or download_url
+                or kwargs.get("is_voice")
+                or kwargs.get("is_audio")
+                or kwargs.get("reply_as_voice")
+                or inbound_type_early in ("audio", "voice", "ptt", "audiomessage", "voicemessage")
+            )
         else:
             is_voice_inbound = bool(
                 is_voice
-                or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]")
-                or body_clean_str.startswith(("[voice", "[audio", "[ptt"))
+                or kwargs.get("is_voice")
+                or kwargs.get("is_audio")
+                or kwargs.get("reply_as_voice")
+                or inbound_type_early in ("audio", "voice", "ptt", "audiomessage", "voicemessage")
+                or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]", "🎤 voice message", "🎤 voice note", "🎤 audio message")
+                or body_clean_str.startswith(("[voice", "[audio", "[ptt", "🎤 voice", "🎤 audio", "🎤"))
                 or (not clean_body and bool(download_url))
+                or bool(download_url and any(ext in str(download_url).lower() for ext in (".oga", ".ogg", ".opus", ".mp3", ".wav", "data:audio")))
+                or bool(kwargs.get("audio_base64") or kwargs.get("audioBase64"))
             )
 
         if not clean_body:
@@ -7025,18 +7039,20 @@ class WhatsAppService:
             tts_failed = False
 
             inbound_type = str(kwargs.get("message_type") or kwargs.get("type") or "").lower()
-            if is_voice_inbound or inbound_type in ("audio", "voice", "ptt", "audiomessage", "voicemessage") or kwargs.get("is_voice") or kwargs.get("is_audio"):
+            if (
+                is_voice_inbound
+                or is_voice
+                or inbound_type in ("audio", "voice", "ptt", "audiomessage", "voicemessage")
+                or kwargs.get("is_voice")
+                or kwargs.get("is_audio")
+                or kwargs.get("reply_as_voice")
+                or auto_conf.get("voice_replies_enabled")
+                or auto_conf.get("always_send_voice")
+            ):
                 is_voice_inbound = True
                 send_as_voice = True
 
-            should_synth_voice = (
-                is_voice_inbound
-                or send_as_voice
-                or kwargs.get("reply_as_voice")
-                or (intent == "order_intent" and ("order" in str(message_body or "").lower() or "confirm" in str(message_body or "").lower()))
-                or auto_conf.get("voice_replies_enabled")
-                or auto_conf.get("always_send_voice")
-            )
+            should_synth_voice = is_voice_inbound or send_as_voice
 
             if should_synth_voice:
                 try:
@@ -7123,8 +7139,8 @@ class WhatsAppService:
 
             # Send text reply:
             # - If inbound was NOT voice, send text reply!
-            # - If inbound WAS voice, but audio dispatch failed, send text fallback!
-            if not is_voice_inbound or (not dispatch_res or (isinstance(dispatch_res, dict) and not dispatch_res.get("success"))):
+            # - If inbound was voice, ONLY send text fallback if audio synthesis completely failed and no audio was produced
+            if not is_voice_inbound:
                 try:
                     green_dispatch_res = cls.send_green_api_message(
                         organization_id=org_id,
@@ -8004,7 +8020,7 @@ class WhatsAppService:
         if type_message == "reactionMessage":
             return reply_text or "[Reaction]"
 
-        if type_message in ("imageMessage", "documentMessage", "audioMessage", "voiceMessage", "ptt", "videoMessage"):
+        if type_message in ("imageMessage", "documentMessage", "audioMessage", "voiceMessage", "ptt", "videoMessage", "audio", "voice"):
             file_data = message_data_or_item.get("fileMessageData") or {}
             cap = message_data_or_item.get("caption") or (file_data.get("caption") if isinstance(file_data, dict) else "")
             fname = message_data_or_item.get("fileName") or (file_data.get("fileName") if isinstance(file_data, dict) else "")
@@ -8012,7 +8028,7 @@ class WhatsAppService:
                 return f"[Image] {cap}".strip() if cap else "[Image message]"
             if type_message == "documentMessage":
                 return f"[Document: {fname}]" if fname else (f"[Document] {cap}".strip() if cap else "[Document message]")
-            if type_message in ("audioMessage", "voiceMessage", "ptt"):
+            if type_message in ("audioMessage", "voiceMessage", "ptt", "audio", "voice"):
                 return "[Voice note]"
             if type_message == "videoMessage":
                 return f"[Video] {cap}".strip() if cap else "[Video message]"
@@ -8293,7 +8309,7 @@ class WhatsAppService:
 
         if not body and is_audio_detected:
             body = "[Voice note]"
-        final_msg_type = type_message if type_message in ("audioMessage", "voiceMessage", "ptt", "audio") else ("audio" if is_audio_detected else type_message)
+        final_msg_type = "voiceMessage" if (is_audio_detected or data.get("is_voice")) else (type_message if type_message in ("audioMessage", "voiceMessage", "ptt", "audio") else type_message)
 
         messages.append({
             "message_id": msg_id,
@@ -8316,6 +8332,7 @@ class WhatsAppService:
             "mediaUrl": clean_media_url,
             "audio_base64": audio_base64,
             "is_audio": is_audio_detected,
+            "is_voice": is_audio_detected or bool(data.get("is_voice")),
             "location": location_info,
             "provider": "green_api",
             "raw": data
@@ -9740,6 +9757,9 @@ class WhatsAppService:
             except Exception:
                 pass
 
+        send_kwargs = dict(kwargs)
+        send_kwargs["ptt"] = kwargs.get("ptt", True)
+        send_kwargs["is_voice"] = True
         return cls.send_message(
             organization_id=organization_id,
             to_phone=to_phone,
@@ -9750,9 +9770,7 @@ class WhatsAppService:
             file_bytes=f_bytes,
             filename=fn,
             mime_type=mime_type or "audio/ogg; codecs=opus",
-            is_voice=True,
-            ptt=kwargs.get("ptt", True),
-            **kwargs
+            **send_kwargs
         )
 
 
@@ -9859,7 +9877,7 @@ class WhatsAppService:
             bridge_payload["quoted_message_id"] = str(quoted_message_id).strip()
 
         if f_bytes:
-            if len(f_bytes) > 1024:
+            if len(f_bytes) > 64:
                 import base64
                 bridge_payload["audioBase64"] = base64.b64encode(f_bytes).decode("ascii")
                 bridge_payload["ptt"] = bool(kwargs.get("ptt", True) or kwargs.get("is_voice", False))

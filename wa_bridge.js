@@ -1543,7 +1543,7 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
           const audioMsg = unwrappedMsg?.audioMessage;
           if (audioMsg) {
             isAudio = true;
-            isVoice = Boolean(audioMsg.ptt);
+            isVoice = true; // Force voice-to-voice: treat all incoming audio notes as voice notes
             typeMessage = isVoice ? 'voiceMessage' : 'audioMessage';
             audioDuration = audioMsg.seconds || audioMsg.duration || null;
 
@@ -1814,7 +1814,7 @@ if (!text) text = '[Voice note]';
             audioBase64: audioBase64,
             parent_msg_id: quotedStanzaId,
             parent_message_id: quotedStanzaId,
-            is_voice: isVoice,
+            is_voice: isVoice || isAudio,
             is_audio: isAudio,
             mimetype: isAudio ? 'audio/ogg' : undefined,
             mime_type: isAudio ? 'audio/ogg' : undefined,
@@ -1860,7 +1860,7 @@ if (!text) text = '[Voice note]';
             if (primaryTarget && primaryTarget.endsWith('@c.us')) primaryTarget = primaryTarget.replace('@c.us', '@s.whatsapp.net');
             if (fallbackTarget && fallbackTarget.endsWith('@c.us')) fallbackTarget = fallbackTarget.replace('@c.us', '@s.whatsapp.net');
 
-            const shouldSendVoice = Boolean(resData.audio_base64 && (resData.send_as_voice || resData.is_voice));
+            const shouldSendVoice = Boolean((resData.audio_base64 || resData.audio_url || resData.media_url) && (resData.send_as_voice || resData.is_voice || isVoice || isAudio));
             const shouldSendImage = Boolean(resData.image_url || resData.image_base64);
             const jitterMs = Math.floor(Math.random() * 2000) + 3000; // 3.0s - 5.0s human delay
 
@@ -1925,7 +1925,7 @@ if (!text) text = '[Voice note]';
             } else if (shouldSendVoice && resData.audio_base64) {
               await new Promise(r => setTimeout(r, jitterMs));
               let audioBuf = Buffer.from(resData.audio_base64, 'base64');
-              if (!audioBuf || audioBuf.length <= 1024) {
+              if (!audioBuf || audioBuf.length <= 64) {
                 console.warn(`[Direct Bridge Audio Buffer Invalid] Size=${audioBuf ? audioBuf.length : 0} bytes. Delivering text reply.`);
                 if (resData.reply) {
                   try {
@@ -1963,9 +1963,9 @@ if (!text) text = '[Voice note]';
               } else {
                 primaryPayload = {
                   audio: audioBuf,
-                  mimetype: 'audio/mpeg',
-                  ptt: false,
-                  fileName: 'voice_reply.mp3'
+                  mimetype: 'audio/mp4',
+                  ptt: true,
+                  fileName: 'voice_reply.mp4'
                 };
                 fallbackPayload = {
                   audio: audioBuf,
@@ -2706,9 +2706,9 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
         } else {
           primaryAudioPayload = {
             audio: audioBuffer || { url: audioUrl },
-            mimetype: 'audio/mpeg',
-            ptt: false,
-            fileName: 'audio.mp3'
+            mimetype: 'audio/mp4',
+            ptt: true,
+            fileName: 'voice_message.mp4'
           };
           fallbackAudioPayload = {
             audio: audioBuffer || { url: audioUrl },

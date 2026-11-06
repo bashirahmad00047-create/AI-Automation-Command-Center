@@ -5857,11 +5857,16 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
                 logger.error(f"Error triggering engine: {e}")
 
         if not rule_replied:
-            is_v = WhatsAppService.is_audio_message(
-                message_type=msg.get("message_type"),
-                body=msg_body,
-                download_url=msg.get("download_url"),
-                audio_base64=msg.get("audio_base64")
+            is_v = (
+                WhatsAppService.is_audio_message(
+                    message_type=msg.get("message_type"),
+                    body=msg_body,
+                    download_url=msg.get("download_url"),
+                    audio_base64=msg.get("audio_base64")
+                )
+                or bool(msg.get("is_voice"))
+                or bool(msg.get("is_audio"))
+                or str(msg.get("message_type") or "").lower() in ("audio", "voice", "ptt", "audiomessage", "voicemessage")
             )
             try:
                 ai_reply = WhatsAppService.handle_inbound_auto_response(
@@ -5873,6 +5878,9 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
                     message_id=msg_id,
                     message_timestamp=msg.get("timestamp"),
                     is_voice=is_v,
+                    is_audio=is_v,
+                    reply_as_voice=is_v,
+                    message_type=msg.get("message_type") or ("voiceMessage" if is_v else "text"),
                     download_url=msg.get("download_url"),
                     audio_base64=msg.get("audio_base64"),
                     media_url=msg.get("media_url") or msg.get("download_url"),
@@ -5897,8 +5905,21 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
         audio_b64 = ai_reply.get("audio_base64")
         image_url_val = ai_reply.get("image_url") or ai_reply.get("imageUrl")
         image_b64_val = ai_reply.get("image_base64") or ai_reply.get("imageBase64")
-        is_voice_flag = bool(ai_reply.get("is_voice"))
-        send_as_voice_flag = bool(ai_reply.get("send_as_voice") or (is_voice_flag and audio_b64))
+        # Ensure TTS audio buffer is guaranteed when incoming was a voice note
+        first_is_voice = bool(messages and (messages[0].get("is_voice") or messages[0].get("is_audio") or str(messages[0].get("message_type") or "").lower() in ("audio", "voice", "ptt", "audiomessage", "voicemessage")))
+        if (first_is_voice or ai_reply.get("is_voice")) and reply_text and not audio_b64:
+            try:
+                clean_txt = str(reply_text).replace("🎤", "").strip()
+                det_lang = "ur" if (any('\u0600' <= ch <= '\u06FF' for ch in clean_txt) or any(w in clean_txt.lower() for w in ["salam", "aap", "jee", "shukriya", "hai", "hain"])) else "en"
+                synth_fb = WhatsAppService.generate_spoken_audio(text=clean_txt, language=det_lang, organization_id=org_id, output_format="oga")
+                if synth_fb and synth_fb[0]:
+                    import base64
+                    audio_b64 = base64.b64encode(synth_fb[0]).decode("ascii")
+            except Exception as _fb_err:
+                logger.warning(f"[Voice Guarantee] Speech synthesis fallback in webhook processor: {_fb_err}")
+
+        is_voice_flag = bool(ai_reply.get("is_voice") or first_is_voice or audio_b64)
+        send_as_voice_flag = bool(ai_reply.get("send_as_voice") or (is_voice_flag and audio_b64) or first_is_voice)
 
         first_sender = (messages[0].get("from_phone") or "") if messages else ""
         first_body = (messages[0].get("body") or "") if messages else ""
