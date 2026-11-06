@@ -13,6 +13,7 @@
 
         // Global QR Modal Early Fallbacks
         function openQrModal(forceRefresh) {
+            window._qrModalClosedByUser = false;
             var modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
             if (modal) {
                 modal.classList.remove('hidden');
@@ -48,9 +49,10 @@
         window.openLinkWhatsAppQrModal = openQrModal;
 
         function closeQrModal() {
-            var modals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, .link-whatsapp-modal');
+            window._qrModalClosedByUser = true;
+            var modals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, #waQrModal, .link-whatsapp-modal');
             modals.forEach(function(m) {
-                m.style.display = 'none';
+                m.style.setProperty('display', 'none', 'important');
                 m.classList.add('hidden');
             });
             var connectedState = document.getElementById('qrConnectedState');

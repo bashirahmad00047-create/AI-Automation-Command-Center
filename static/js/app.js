@@ -5390,24 +5390,10 @@ function initWhatsAppSocket() {
             });
             waSocket.on('live-call-chunk', (data) => {
                 if (!data) return;
+                // Only process chunk if user has explicitly activated the live call widget
+                if (!liveVoiceCallActive) return;
                 const chunk = data.chunk || data;
-                const currentClean = String(liveCallActivePhone || '').replace(/\D/g, '');
-                const chunkRoom = String(data.roomId || data.phone || chunk.roomId || chunk.phone || '').replace(/\D/g, '');
-
-                if (chunk.sender !== 'admin') {
-                    const callerPhone = chunkRoom || currentClean;
-                    if (callerPhone) {
-                        liveCallActivePhone = callerPhone;
-                        window.roomId = callerPhone;
-                    }
-                    liveVoiceCallActive = true;
-                    // Automatically open Live Call bar/modal on laptop screen
-                    const modal = document.getElementById('liveVoiceCallModal');
-                    if (modal && modal.style.display !== 'flex') {
-                        modal.style.display = 'flex';
-                    }
-                    const statusLabel = document.getElementById('voiceCallStatusLabel');
-                    if (statusLabel) statusLabel.textContent = '📞 Live Call Connected (Customer Speaking)';
+                if (chunk && chunk.sender !== 'admin') {
                     enqueueAdminAudioChunk(chunk);
                 }
             });
@@ -5758,6 +5744,9 @@ let waPairingCodeCountdownTimer = null;
 let currentPairingCode = '';
 
 async function fetchBridgeQrCode(forceRefresh = false) {
+    if (window._qrModalClosedByUser && !forceRefresh) {
+        return;
+    }
     const spinner = document.getElementById('qrLoadingSpinner');
     const qrWrapper = document.getElementById('qrImageWrapper');
     const qrImgs = [document.getElementById('qr-code-img'), document.getElementById('bridgeQrImage')].filter(Boolean);
@@ -6012,13 +6001,13 @@ async function requestWaPairingCode() {
     }
 
     try {
-        let res = await fetch('/api/whatsapp/pairing-code', {
+        let res = await fetch('/api/v1/whatsapp/pairing-code', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ phone: fullPhone })
         });
         if (!res.ok) {
-            res = await fetch('/api/v1/whatsapp/pairing-code', {
+            res = await fetch('/api/whatsapp/pairing-code', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phone: fullPhone })
@@ -6117,6 +6106,7 @@ async function forceResetWhatsAppSession() {
 window.forceResetWhatsAppSession = forceResetWhatsAppSession;
 
 async function openQrModal(forceRefresh = false) {
+    window._qrModalClosedByUser = false;
     const modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
     if (!modal) {
         console.warn('QR modal element not found');
@@ -6191,9 +6181,10 @@ window.openQrModal = openQrModal;
 window.openLinkWhatsAppQrModal = openQrModal;
 
 function closeQrModal() {
-    const modals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, .link-whatsapp-modal');
+    window._qrModalClosedByUser = true;
+    const modals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, #waQrModal, .link-whatsapp-modal');
     modals.forEach(modal => {
-        modal.style.display = 'none';
+        modal.style.setProperty('display', 'none', 'important');
         modal.classList.add('hidden');
     });
     const connectedState = document.getElementById('qrConnectedState');
@@ -6204,9 +6195,17 @@ function closeQrModal() {
         clearInterval(waBridgeQrPollTimer);
         waBridgeQrPollTimer = null;
     }
+    if (window.waBridgeQrPollTimer) {
+        clearInterval(window.waBridgeQrPollTimer);
+        window.waBridgeQrPollTimer = null;
+    }
     if (waPairingCodeCountdownTimer) {
         clearInterval(waPairingCodeCountdownTimer);
         waPairingCodeCountdownTimer = null;
+    }
+    if (window.waPairingCodeCountdownTimer) {
+        clearInterval(window.waPairingCodeCountdownTimer);
+        window.waPairingCodeCountdownTimer = null;
     }
 }
 window.closeQrModal = closeQrModal;
@@ -6226,7 +6225,23 @@ window.disconnectWhatsAppDevice = disconnectWhatsAppDevice;
 
 // Explicitly bind Close buttons, (X) button, and backdrop clicks
 function bindQrModalCloseHandlers() {
-    const qrModal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
+    const qrModals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, #waQrModal, .link-whatsapp-modal');
+    qrModals.forEach(qrModal => {
+        qrModal.onclick = function(e) {
+            if (e.target === qrModal) {
+                closeQrModal();
+            }
+        };
+        const closeSelectors = '#btnCloseQrModalHeader, #btnCloseQrModalFooter, #btnCloseQrModalSuccess, .btn-close-qr-modal, button[onclick*="closeQrModal"], button[onclick*="closeLinkWhatsAppQrModal"], [data-action="close-qr-modal"]';
+        const closeBtns = qrModal.querySelectorAll(closeSelectors);
+        closeBtns.forEach(btn => {
+            btn.onclick = function(e) {
+                if (e) { e.preventDefault(); e.stopPropagation(); }
+                closeQrModal();
+            };
+        });
+    });
+    const qrModal = qrModals[0];
     if (qrModal) {
         qrModal.onclick = function(e) {
             if (e.target === qrModal) {

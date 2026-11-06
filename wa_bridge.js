@@ -370,6 +370,7 @@ let currentQr = null;
 let currentQrUrl = null;
 let currentQrSvg = null;
 let latestQr = null;
+let lastQrGeneratedTime = 0;
 let latestQrDataUrl = null;
 let isStarting = false;
 let reconnectTimer = null;
@@ -1054,6 +1055,7 @@ async function startWhatsAppBridge() {
       if (qr) {
         currentQr = qr;
         latestQr = qr;
+        lastQrGeneratedTime = Date.now();
         console.log('\n===============================================================');
         console.log('  SCAN THIS QR CODE IN WHATSAPP TO LINK FOR FREE');
         console.log('  Steps: WhatsApp -> Settings/Menu -> Linked Devices -> Link a Device');
@@ -1654,6 +1656,10 @@ if (!text) text = '[Voice note]';
           }
           const jidToSave = (rawUntouchedJid && rawUntouchedJid.endsWith('@lid')) ? rawUntouchedJid : remoteJid;
           if (cleanDigitsSender) {
+            phoneToReplyJidMap.set(cleanDigitsSender, jidToSave);
+            phoneToReplyJidMap.set(`+${cleanDigitsSender}`, jidToSave);
+            phoneToReplyJidMap.set(`${cleanDigitsSender}@s.whatsapp.net`, jidToSave);
+            phoneToReplyJidMap.set(jidToSave, jidToSave);
             lastInboundJidByPhone.set(cleanDigitsSender, jidToSave);
             lastInboundJidByPhone.set(`+${cleanDigitsSender}`, jidToSave);
             lastInboundJidByPhone.set(`${cleanDigitsSender}@s.whatsapp.net`, jidToSave);
@@ -1820,6 +1826,9 @@ if (!text) text = '[Voice note]';
             const cleanPhone = cleanTarget || '923471000668';
             const targets = new Set();
             if (rawUntouchedJid) targets.add(rawUntouchedJid);
+            if (cleanTarget && phoneToReplyJidMap.get(cleanTarget)) targets.add(phoneToReplyJidMap.get(cleanTarget));
+            if (phoneToReplyJidMap.get(senderPhone)) targets.add(phoneToReplyJidMap.get(senderPhone));
+            if (phoneToReplyJidMap.get(remoteJid)) targets.add(phoneToReplyJidMap.get(remoteJid));
             if (cleanTarget && rawLidByPhone.get(cleanTarget)) targets.add(rawLidByPhone.get(cleanTarget));
             if (cleanPhone) targets.add(`${cleanPhone}@s.whatsapp.net`);
             if (standardJid) targets.add(standardJid);
@@ -1928,18 +1937,6 @@ if (!text) text = '[Voice note]';
                   sentMsg = await sendWithDualJid(fallbackPayload, 'recording');
                 }
                 if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
-
-                if (resData.reply && resData.send_followup_call_link) {
-                  try {
-                    const callMsg = await sendWithDualJid({ text: String(resData.reply) }, 'composing');
-                    if (callMsg?.key?.id) {
-                      sentAiMessageIds.add(callMsg.key.id);
-                      storeMessageForRetry(callMsg.key, callMsg.message);
-                    }
-                  } catch (clErr) {
-                    console.warn('[Direct Bridge Call Link Followup Error]:', clErr.message);
-                  }
-                }
               } catch (aErr) {
                 console.warn('[Direct Bridge Audio Error, attempting fallback]:', aErr.message);
                 if (fallbackPayload) {
@@ -1989,136 +1986,13 @@ if (!text) text = '[Voice note]';
     sock.ev.on('call', async (callEvents) => {
       try {
         if (!callEvents || !Array.isArray(callEvents)) return;
-
         for (const call of callEvents) {
           if (call.status === 'offer') {
             const callerJid = call.from || call.chatId;
-            console.log(`[Incoming Call] Incoming call from ${callerJid} (Call ID: ${call.id})`);
-            
-            // 2-second natural delay before polite auto-rejection
-            await new Promise(r => setTimeout(r, 2000));
-            try {
-              if (typeof sock?.rejectCall === 'function') {
-                await sock.rejectCall(call.id, call.from);
-                console.log(`[Incoming Call] Call ${call.id} rejected after 2s polite delay.`);
-              }
-            } catch (rejErr) {
-              console.error(`[Incoming Call] Could not reject call ${call.id}:`, rejErr.message);
-            }
-
-            // LID resolution: If caller is @lid, check phone mapping or preserve @lid intact
-            let targetJid;
-            if (callerJid.endsWith('@lid')) {
-              const resPhone = lidToPhoneMap.get(callerJid);
-              targetJid = (resPhone && resPhone.length >= 10 && resPhone.length <= 13)
-                ? `${resPhone}@s.whatsapp.net`
-                : callerJid;
-            } else {
-              targetJid = normalizeJid(callerJid);
-            }
-            const callerPhone = cleanPhoneNumber(callerJid);
-
-            // 1. Log call to dashboard backend
-            try {
-              const callPayload = {
-                typeWebhook: 'incomingCallReceived',
-                idMessage: `call_${call.id || Date.now()}`,
-                timestamp: Math.floor(Date.now() / 1000),
-                chatId: callerJid,
-                from_phone: callerPhone,
-                sender: callerPhone,
-                caller: callerJid,
-                callId: call.id,
-                isVideo: Boolean(call.isVideo),
-                status: 'missed_call',
-                message_type: 'call',
-                type: 'call',
-                body: '📞 Incoming WhatsApp Voice Call (Auto-responded with AI voice note)'
-              };
-              await fetch(PYTHON_WEBHOOK_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'User-Agent': 'WhatsApp-Baileys-Bridge/1.0' },
-                body: JSON.stringify(callPayload)
-              }).then(r => r.text()).catch(e => console.warn('[Incoming Call] Webhook log warning:', e.message));
-            } catch (whErr) {
-              console.warn('[Incoming Call] Webhook notice:', whErr.message);
-            }
-
-            // Dynamically generate AI response for incoming voice call with 1-Click Live Call link
-            const liveCallUrl = 'https://ai-automation-command-center-4.onrender.com/?livecall=1';
-            let autoReplyText = `Assalam-o-Alaikum! Main BashFlow AI Voice Assistant hoon. Main ne aap ki call note kar li hai.\n\nAap foran niche diye gaye 1-Click link par tap karke mere sath direct live phone call par baat kar sakte hain:\n\n📞 ${liveCallUrl}\n\nClick karte hi humari live phone call foran connect ho jaye gi!`;
-            let voiceAudioBase64 = null;
-
-            try {
-              const backendUrl = getBackendBaseUrl();
-              const voiceResp = await fetch(`${backendUrl}/api/v1/voice/chat`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  message: `[Incoming WhatsApp Voice Call from ${callerPhone}]: The user placed a WhatsApp voice call. Generate a polite, natural 1-2 sentence Roman Urdu response explaining this is an automated AI assistance system and asking them to send a voice note or text message so we can assist immediately.`,
-                  language: 'ur'
-                })
-              });
-              if (voiceResp.ok) {
-                const voiceData = await voiceResp.json();
-                if (voiceData.reply_text && voiceData.reply_text.trim()) {
-                  autoReplyText = voiceData.reply_text.trim();
-                }
-                voiceAudioBase64 = voiceData.audio_base64 || (voiceData.audio_data_uri ? voiceData.audio_data_uri.split('base64,')[1] : null);
-              }
-            } catch (callAiErr) {
-              console.warn('[Incoming Call] AI dynamic response query notice:', callAiErr.message);
-            }
-
-            // 2. Dispatch dynamically generated AI text response
-            try {
-              if (sock && isConnected && autoReplyText) {
-                await sock.sendMessage(targetJid, { text: autoReplyText });
-                console.log(`[Incoming Call] Sent dynamic AI text response to caller ${targetJid}`);
-              }
-            } catch (sendErr) {
-              console.error(`[Incoming Call] Failed to send rejection text:`, sendErr.message);
-            }
-
-            // 3. Dispatch dynamically generated AI voice note (PTT voice note)
-            try {
-              if (sock && isConnected) {
-                let rawBuf = null;
-                if (voiceAudioBase64) {
-                  rawBuf = Buffer.from(voiceAudioBase64, 'base64');
-                } else {
-                  const backendUrl = getBackendBaseUrl();
-                  const ttsResp = await fetch(`${backendUrl}/api/v1/voice/chat`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: autoReplyText, language: 'ur' })
-                  });
-                  if (ttsResp.ok) {
-                    const ttsData = await ttsResp.json();
-                    const b64 = ttsData.audio_base64 || (ttsData.audio_data_uri ? ttsData.audio_data_uri.split('base64,')[1] : null);
-                    if (b64) rawBuf = Buffer.from(b64, 'base64');
-                  }
-                }
-
-                if (rawBuf) {
-                  const oggBuf = await convertAudioToOggOpus(rawBuf).catch(() => rawBuf);
-                  await sock.sendMessage(targetJid, {
-                    audio: oggBuf,
-                    mimetype: 'audio/ogg; codecs=opus',
-                    ptt: true,
-                    fileName: 'voice_reply.oga'
-                  });
-                  console.log(`[Incoming Call] Dispatched dynamic AI PTT voice note to ${targetJid}`);
-                }
-              }
-            } catch (pttErr) {
-              console.warn('[Incoming Call] AI PTT voice note dispatch notice:', pttErr.message);
-            }
+            console.log(`[Incoming Call] Detected passive call offer from ${callerJid} (Call ID: ${call.id})`);
           }
         }
-      } catch (callErr) {
-        console.error('[WhatsApp Bridge] call event error:', callErr.message);
-      }
+      } catch (_) {}
     });
   } catch (fatalInitErr) {
     console.error('[WhatsApp Bridge] startWhatsAppBridge fatal error:', fatalInitErr);
@@ -2251,9 +2125,13 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
     }
 
     // Trigger background restart if requested or socket is offline, with 15-second debounce
-    if (isForceRefresh || (!genuinelyConnected && !sock && !isStarting)) {
-      const now = Date.now();
-      if (now - lastRestartTriggerTime > 15000) {
+    const now = Date.now();
+    const qrAgeMs = now - lastQrGeneratedTime;
+    const hasValidQr = Boolean((latestQr || currentQr) && qrAgeMs < 60000);
+
+    // Keep Baileys socket alive for at least 60 seconds once QR is emitted; do not reset socket on polling
+    if ((isForceRefresh && !hasValidQr) || (!genuinelyConnected && !sock && !isStarting)) {
+      if (now - lastRestartTriggerTime > 60000) {
         lastRestartTriggerTime = now;
         console.log('[WhatsApp Bridge] Non-blocking background socket restart triggered.');
         setImmediate(() => {
@@ -2815,6 +2693,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
         const cleanTargetDigits = cleanTargetPhone || cleanPhoneNumber(jid);
         const sendTargets = new Set();
+        if (cleanTargetDigits && phoneToReplyJidMap.get(cleanTargetDigits)) sendTargets.add(phoneToReplyJidMap.get(cleanTargetDigits));
         if (cleanTargetDigits && rawLidByPhone.get(cleanTargetDigits)) sendTargets.add(rawLidByPhone.get(cleanTargetDigits));
         if (cleanTargetDigits && lastInboundJidByPhone.get(cleanTargetDigits)) sendTargets.add(lastInboundJidByPhone.get(cleanTargetDigits));
         if (cleanTargetDigits) sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);
@@ -2912,6 +2791,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
         const textToSend = String(message || '');
         const cleanTargetDigits = cleanTargetPhone || cleanPhoneNumber(jid);
         const sendTargets = new Set();
+        if (cleanTargetDigits && phoneToReplyJidMap.get(cleanTargetDigits)) sendTargets.add(phoneToReplyJidMap.get(cleanTargetDigits));
         if (cleanTargetDigits && rawLidByPhone.get(cleanTargetDigits)) sendTargets.add(rawLidByPhone.get(cleanTargetDigits));
         if (cleanTargetDigits && lastInboundJidByPhone.get(cleanTargetDigits)) sendTargets.add(lastInboundJidByPhone.get(cleanTargetDigits));
         if (cleanTargetDigits) sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);

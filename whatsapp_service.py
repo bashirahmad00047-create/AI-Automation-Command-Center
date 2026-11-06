@@ -6982,15 +6982,6 @@ class WhatsAppService:
             if not clean_reply_text:
                 clean_reply_text = reply_body.strip()
 
-            base_app_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
-            if "localhost" in base_app_url or "127.0.0.1" in base_app_url:
-                base_app_url = "https://ai-automation-command-center-4.onrender.com"
-            call_phone_slug = clean_phone or (str(raw_chat).split("@")[0] if raw_chat else "")
-            if not is_grp and call_phone_slug and cls.should_attach_call_link(message_body, call_phone_slug, is_group=is_grp):
-                live_call_url = f"{base_app_url.rstrip('/')}/call/{call_phone_slug}"
-                if "/call/" not in clean_reply_text:
-                    clean_reply_text = f"{clean_reply_text}\n\n📞 *Live AI Voice Call:* {live_call_url}"
-
             # FORCE DISPATCH LOGIC:
             # Every generated AI reply is actively sent to the real WhatsApp chat ID using Green API's send methods,
             # ensuring messages reach actual WhatsApp chats and are not just saved locally.
@@ -7008,6 +6999,7 @@ class WhatsAppService:
             audio_dispatch_res = None
             outbound_audio_b64 = None
             send_as_voice = False
+            tts_failed = False
 
             should_synth_voice = (
                 is_voice_inbound
@@ -7029,7 +7021,7 @@ class WhatsAppService:
                         or has_arabic_script
                         or any(word in (clean_reply_text or "").lower() for word in ["salam", "aap", "madad", "shukriya", "jee", "hain", "kya", "kar"])
                     )
-                    synth_lang = "urdu" if is_urdu_context else (kwargs.get("detected_lang") or "en") 
+                    synth_lang = "ur" if is_urdu_context else (kwargs.get("detected_lang") or "en") 
                     audio_res = cls.generate_spoken_audio(
                         text=speech_text,
                         language=synth_lang,
@@ -7066,10 +7058,11 @@ class WhatsAppService:
                             dispatch_res = audio_dispatch_res
                             logger.info(f"[Voice Dispatch Guarantee] Dispatched OGG Opus PTT voice note to {real_chat_id}: result={audio_dispatch_res}")
                 except Exception as tts_err:
+                    tts_failed = True
                     logger.warning(f"[Voice Fallback Notice] Voice synthesis/dispatch failed for {real_chat_id}: {tts_err}. Falling back to text.")
 
             # Emergency voice synthesis: If voice dispatch failed on inbound voice and no audio was produced
-            if is_voice_inbound and not audio_res and (not dispatch_res or (isinstance(dispatch_res, dict) and not dispatch_res.get("success"))):
+            if is_voice_inbound and not tts_failed and not audio_res and (not dispatch_res or (isinstance(dispatch_res, dict) and not dispatch_res.get("success"))):
                 try:
                     logger.info(f"[Emergency Voice Dispatch] Generating emergency audio for {real_chat_id}...")
                     from gtts import gTTS

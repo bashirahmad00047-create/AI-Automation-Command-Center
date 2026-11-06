@@ -2794,8 +2794,7 @@ def api_whatsapp_bridge_qr():
                         q_img.save(img_buf, format="PNG")
                         qr_img = "data:image/png;base64," + base64.b64encode(img_buf.getvalue()).decode("utf-8")
                     except Exception:
-                        import urllib.parse
-                        qr_img = f"https://api.qrserver.com/v1/create-qr-code/?size=240x240&data={urllib.parse.quote(qr_val)}"
+                        qr_img = None
             return jsonify({
                 "success": True,
                 "status": data.get("status", "connected" if is_connected else ("qr_ready" if qr_val else "initializing")),
@@ -5850,13 +5849,6 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
         clean_first = WhatsAppService.resolve_contact_phone(first_sender, sender_name=sender_contact_name)
         if not clean_first or len(clean_first) < 10:
             clean_first = "923471000668" if ("7142" in str(first_sender) or "bashir" in str(sender_contact_name).lower()) else re.sub(r"\D", "", str(first_sender))
-        if clean_first and reply_text and "/call/" not in reply_text:
-            if WhatsAppService.should_attach_call_link(first_body, clean_first, is_group=False):
-                base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
-                if "localhost" in base_url or "127.0.0.1" in base_url:
-                    base_url = "https://ai-automation-command-center-4.onrender.com"
-                reply_text = f"{reply_text}\n\n📞 *Live AI Voice Call:* {base_url.rstrip('/')}/call/{clean_first}"
-
     return {
         "status": "ok",
         "provider": "green_api",
