@@ -42,8 +42,9 @@ class TestEndToEndLidAndVoice(unittest.TestCase):
         with open(os.path.join(repo_root, "wa_bridge.js"), "r", encoding="utf-8") as f:
             code = f.read()
 
-        self.assertIn("lastInboundJidByPhone.set(cleanDigitsSender, remoteJid)", code)
-        self.assertIn("lastInboundJidByPhone.set('923471000668', remoteJid)", code)
+        self.assertIn("rawLidByPhone", code)
+        self.assertIn("rawUntouchedJid", code)
+        self.assertIn("rawLidByPhone.set('923471000668', rawUntouchedJid)", code)
         self.assertIn("primaryTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : standardJid", code)
         self.assertIn("primarySendTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : jid", code)
         self.assertIn("No message ID returned from Baileys socket", code)

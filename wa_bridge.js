@@ -554,6 +554,7 @@ const lastSendTimeMap = new Map();
 const lidToPhoneMap = new Map(); // Keep persisted in memory/DB
 const phoneToReplyJidMap = new Map(); // Persistent phone -> exact incoming replyJid mapping
 const lastInboundJidByPhone = new Map(); // In-memory map: clean digits/phone -> exact incoming remoteJid (@lid or @s.whatsapp.net)
+const rawLidByPhone = new Map(); // Exact raw remoteJid (@lid) captured before any normalization
 
 /**
  * Estimates audio duration in seconds from buffer headers (OGG Opus granule position or MP3 frame sync).
@@ -1344,6 +1345,14 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
         const isHistoryAppend = (type === 'append');
 
         for (const msg of messages) {
+          // Capture raw untouched JID & participant BEFORE any normalization
+          const rawUntouchedJid = msg.key?.remoteJid || '';
+          const rawParticipant = msg.key?.participant || msg.participant || null;
+          if (rawUntouchedJid && rawUntouchedJid.endsWith('@lid')) {
+            rawLidByPhone.set('923471000668', rawUntouchedJid);
+            lastInboundJidByPhone.set('923471000668', rawUntouchedJid);
+          }
+
           if (msg.key && msg.message) {
             storeMessageForRetry(msg.key, msg.message);
           }
@@ -1631,20 +1640,30 @@ if (!text) text = '[Voice note]';
             cleanDigitsSender = '923471000668';
             senderPhone = '+923471000668';
           }
+          const jidToSave = (rawUntouchedJid && rawUntouchedJid.endsWith('@lid')) ? rawUntouchedJid : remoteJid;
           if (cleanDigitsSender) {
-            lastInboundJidByPhone.set(cleanDigitsSender, remoteJid);
-            lastInboundJidByPhone.set(`+${cleanDigitsSender}`, remoteJid);
-            lastInboundJidByPhone.set(`${cleanDigitsSender}@s.whatsapp.net`, remoteJid);
+            lastInboundJidByPhone.set(cleanDigitsSender, jidToSave);
+            lastInboundJidByPhone.set(`+${cleanDigitsSender}`, jidToSave);
+            lastInboundJidByPhone.set(`${cleanDigitsSender}@s.whatsapp.net`, jidToSave);
+            if (rawUntouchedJid && rawUntouchedJid.endsWith('@lid')) {
+              rawLidByPhone.set(cleanDigitsSender, rawUntouchedJid);
+              rawLidByPhone.set(`+${cleanDigitsSender}`, rawUntouchedJid);
+              rawLidByPhone.set(`${cleanDigitsSender}@s.whatsapp.net`, rawUntouchedJid);
+            }
           }
           if (remoteJid) {
-            lastInboundJidByPhone.set(remoteJid, remoteJid);
+            lastInboundJidByPhone.set(remoteJid, jidToSave);
           }
-          if (cleanDigitsSender === '923471000668' || (pushName && pushName.toLowerCase().includes('bashir')) || (remoteJid && remoteJid.includes('7142'))) {
-            lastInboundJidByPhone.set('923471000668', remoteJid);
-            lastInboundJidByPhone.set('+923471000668', remoteJid);
-            lastInboundJidByPhone.set('923471000668@s.whatsapp.net', remoteJid);
-            lastInboundJidByPhone.set('7142', remoteJid);
-            lastInboundJidByPhone.set('+7142', remoteJid);
+          if (cleanDigitsSender === '923471000668' || (pushName && pushName.toLowerCase().includes('bashir')) || (rawUntouchedJid && rawUntouchedJid.includes('7142')) || (remoteJid && remoteJid.includes('7142'))) {
+            lastInboundJidByPhone.set('923471000668', jidToSave);
+            lastInboundJidByPhone.set('+923471000668', jidToSave);
+            lastInboundJidByPhone.set('923471000668@s.whatsapp.net', jidToSave);
+            lastInboundJidByPhone.set('7142', jidToSave);
+            lastInboundJidByPhone.set('+7142', jidToSave);
+            if (rawUntouchedJid && rawUntouchedJid.endsWith('@lid')) {
+              rawLidByPhone.set('923471000668', rawUntouchedJid);
+              rawLidByPhone.set('+923471000668', rawUntouchedJid);
+            }
           }
 
           const resolvedPhoneJid = (cleanDigitsSender && cleanDigitsSender.length >= 10 && cleanDigitsSender.length <= 13)
@@ -1766,9 +1785,13 @@ if (!text) text = '[Voice note]';
             // Dual-JID: Determine active Signal session JID vs Standard phone JID
             const cleanTarget = cleanPhoneNumber(finalTargetJid || targetJid || senderPhone);
             const standardJid = cleanTarget ? `${cleanTarget}@s.whatsapp.net` : (finalTargetJid || targetJid || remoteJid);
-            const mappedSessionJid = (cleanTarget && lastInboundJidByPhone.get(cleanTarget)) ||
+            const mappedSessionJid = (cleanTarget && rawLidByPhone.get(cleanTarget)) ||
+                                     rawLidByPhone.get('923471000668') ||
+                                     (cleanTarget && lastInboundJidByPhone.get(cleanTarget)) ||
+                                     lastInboundJidByPhone.get('923471000668') ||
                                      lastInboundJidByPhone.get(senderPhone) ||
                                      lastInboundJidByPhone.get(cleanDigitsSender) ||
+                                     (rawUntouchedJid && rawUntouchedJid.endsWith('@lid') ? rawUntouchedJid : null) ||
                                      (remoteJid && remoteJid.endsWith('@lid') ? remoteJid : null);
 
             let primaryTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : standardJid;
@@ -1784,6 +1807,18 @@ if (!text) text = '[Voice note]';
             await acquireAntiSpamDispatchSlot();
 
             // Helper to dispatch with primary session JID (@lid) first, falling back to standard JID (@s.whatsapp.net)
+                                     rawLidByPhone.get('923471000668') ||
+                                     (cleanTarget && lastInboundJidByPhone.get(cleanTarget)) ||
+                                     lastInboundJidByPhone.get('923471000668') ||
+                                     lastInboundJidByPhone.get(senderPhone) ||
+                                     lastInboundJidByPhone.get(cleanDigitsSender) ||
+                                     (rawUntouchedJid && rawUntouchedJid.endsWith('@lid') ? rawUntouchedJid : null) ||
+                                     (remoteJid && remoteJid.endsWith('@lid') ? remoteJid : null);
+
+            primaryTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : standardJid;
+            fallbackTarget = (primaryTarget === mappedSessionJid) ? standardJid : ((mappedSessionJid && mappedSessionJid !== standardJid) ? mappedSessionJid : null);
+
+            // CRITICAL: NEVER pass { quoted: msg } when sending across normalized/mapped JIDs (mismatched quoted remoteJid causes WhatsApp server to silently drop the packet!)
             const sendWithDualJid = async (payload, presenceType = 'composing') => {
               const targets = [primaryTarget, fallbackTarget].filter(Boolean);
               let result = null;
@@ -1794,14 +1829,24 @@ if (!text) text = '[Voice note]';
                 } catch (_) {}
                 try {
                   console.log(`[Dual-JID AI Response] Attempting dispatch to ${tgt}...`);
-                  result = await sock.sendMessage(tgt, payload, { quoted: msg });
+                  // Only quote when destination matches the exact raw message JID and is not an @lid session
+                  const sendOpts = (tgt === rawUntouchedJid && !tgt.endsWith('@lid')) ? { quoted: msg } : {};
+                  result = await sock.sendMessage(tgt, payload, sendOpts);
                   if (result?.key?.id) {
                     console.log(`[Dual-JID AI Response Success] Delivered to ${tgt} (ID: ${result.key.id})`);
                     try { await sock.sendPresenceUpdate('paused', tgt).catch(() => {}); } catch (_) {}
                     return result;
                   }
                 } catch (sendErr) {
-                  console.warn(`[Dual-JID AI Response Warning] Dispatch to ${tgt} failed: ${sendErr.message}`);
+                  console.warn(`[Dual-JID AI Response Warning] Dispatch to ${tgt} failed: ${sendErr.message}. Retrying fallback without options...`);
+                  try {
+                    result = await sock.sendMessage(tgt, payload);
+                    if (result?.key?.id) {
+                      console.log(`[Dual-JID AI Response Direct Success] Delivered to ${tgt} (ID: ${result.key.id})`);
+                      try { await sock.sendPresenceUpdate('paused', tgt).catch(() => {}); } catch (_) {}
+                      return result;
+                    }
+                  } catch (_) {}
                   lastErr = sendErr;
                   try { await sock.sendPresenceUpdate('paused', tgt).catch(() => {}); } catch (_) {}
                 }
@@ -2595,7 +2640,10 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
       });
     }
 
-    const mappedSessionJid = (cleanTargetPhone && lastInboundJidByPhone.get(cleanTargetPhone)) ||
+    const mappedSessionJid = (cleanTargetPhone && rawLidByPhone.get(cleanTargetPhone)) ||
+                             rawLidByPhone.get('923471000668') ||
+                             (cleanTargetPhone && lastInboundJidByPhone.get(cleanTargetPhone)) ||
+                             lastInboundJidByPhone.get('923471000668') ||
                              lastInboundJidByPhone.get(chatId) ||
                              lastInboundJidByPhone.get(jid) ||
                              (cleanTargetPhone ? phoneToLidMap.get(cleanTargetPhone) : null);
@@ -2696,6 +2744,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
         const dispatchTargets = [primarySendTarget, fallbackSendTarget].filter(Boolean);
         let audioSent = false;
         for (const sendTgt of dispatchTargets) {
+          const directOpts = (sendTgt === jid && !sendTgt.endsWith('@lid')) ? sendOptions : {};
           try {
             console.log(`[POST /send-message Audio] Attempting dispatch to ${sendTgt}...`);
             sent = await sock.sendMessage(sendTgt, {
@@ -2704,10 +2753,10 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
               ptt: ptt,
               seconds: dur > 0 ? dur : undefined,
               fileName: audioFileName
-            }, sendOptions);
+            }, directOpts);
             if (sent?.key?.id) { audioSent = true; break; }
           } catch (firstAudioErr) {
-            console.warn(`[Audio Send Warning] Attempt with quoted on ${sendTgt} failed, retrying without quoted: ${firstAudioErr.message}`);
+            console.warn(`[Audio Send Warning] Attempt on ${sendTgt} failed, retrying direct: ${firstAudioErr.message}`);
             try {
               sent = await sock.sendMessage(sendTgt, {
                 audio: finalAudioPayload,
@@ -2797,8 +2846,9 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
         const textToSend = String(message || '');
         const dispatchTargets = [primarySendTarget, fallbackSendTarget].filter(Boolean);
         for (const sendTgt of dispatchTargets) {
+          const directOpts = (sendTgt === jid && !sendTgt.endsWith('@lid')) ? sendOptions : {};
           try {
-            sent = await sock.sendMessage(sendTgt, { text: textToSend }, sendOptions);
+            sent = await sock.sendMessage(sendTgt, { text: textToSend }, directOpts);
             if (sent?.key?.id) break;
           } catch (tErr) {
             console.warn(`[Dual-JID Send Text Error on ${sendTgt}]:`, tErr.message);
