@@ -12603,7 +12603,6 @@ function processAdminAudioQueue() {
     const player = document.getElementById('remoteVoicePlayer') || document.getElementById('liveCallAudioPlayer');
     const audioData = chunk.audio || '';
     const textData = chunk.text || '';
-    const sender = chunk.sender || 'customer';
 
     if (textData) {
         const transcriptBox = document.getElementById('voiceTranscriptBox');
