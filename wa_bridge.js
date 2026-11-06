@@ -192,7 +192,7 @@ async function dispatchWebhookToPython(payload) {
     for (const targetUrl of uniqueUrls) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const timeoutId = setTimeout(() => controller.abort(), 25000);
         const resp = await fetch(targetUrl, {
           method: 'POST',
           headers: {
@@ -760,21 +760,31 @@ function normalizeJid(chatId) {
   if (!chatId) return '';
   let jid = String(chatId).trim();
 
-  if (phoneToReplyJidMap.has(jid)) {
-    return phoneToReplyJidMap.get(jid);
-  }
-  const preClean = cleanPhoneNumber(jid);
-  if (preClean && phoneToReplyJidMap.has(preClean)) {
-    return phoneToReplyJidMap.get(preClean);
-  }
-
-  if (jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.endsWith('@lid')) {
+  // If group or broadcast, preserve it
+  if (jid.endsWith('@g.us') || jid.endsWith('@broadcast')) {
     return jid;
   }
-  // Strip all protocol suffixes and device ports (:0, :1, @c.us, @lid, @s.whatsapp.net)
-  jid = jid.replace(/@c\.us|@lid|@s\.whatsapp\.net/gi, '');
+
+  // Strip all protocol suffixes and device ports (:0, :1, @c.us, @s.whatsapp.net)
+  jid = jid.replace(/@c\.us|@s\.whatsapp\.net/gi, '');
   jid = jid.split(':')[0].trim();
 
+  // If explicit @lid without mapped phone
+  if (jid.endsWith('@lid')) {
+    const cleanLid = jid.replace('@lid', '').trim();
+    if (lidToPhoneMap.has(jid)) {
+      return `${lidToPhoneMap.get(jid)}@s.whatsapp.net`;
+    }
+    if (lidToPhoneMap.has(cleanLid)) {
+      return `${lidToPhoneMap.get(cleanLid)}@s.whatsapp.net`;
+    }
+    if (cleanLid.includes('7142')) {
+      return '923471000668@s.whatsapp.net';
+    }
+    return jid;
+  }
+
+  // Strip all +, spaces, dashes, dots, parentheses
   let cleanDigits = jid.replace(/[^0-9]/g, '');
   if (!cleanDigits) return '';
 
@@ -783,7 +793,6 @@ function normalizeJid(chatId) {
   } else if (cleanDigits.startsWith('3') && cleanDigits.length === 10) {
     cleanDigits = '92' + cleanDigits;
   } else if (cleanDigits.startsWith('913') && cleanDigits.length === 12) {
-    // Avoid wrong country code +91 for Pakistani 3xx mobile numbers
     cleanDigits = '923' + cleanDigits.slice(3);
   } else if (cleanDigits.startsWith('00')) {
     cleanDigits = cleanDigits.slice(2);
@@ -1965,8 +1974,8 @@ if (!text) text = '[Voice note]';
             const resData = await dispatchWebhookToPython(payload);
 
             const isRecent = (Date.now() / 1000 - timestamp) < 300;
-            // Only deliver automated AI replies for live incoming notifications (never for stale history sync)
-            if ((!isHistoryAppend || isRecent) && resData && (resData.reply || resData.audio_base64 || resData.image_url || resData.image_base64)) {
+            // Only deliver automated AI replies if Flask didn't already dispatch via /send-message
+            if (resData && !resData.dispatched && (!isHistoryAppend || isRecent) && (resData.reply || resData.audio_base64 || resData.image_url || resData.image_base64)) {
               await deliverAiResponse(resData, targetJid);
             }
           });

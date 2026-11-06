@@ -5861,6 +5861,7 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
         "status": "ok",
         "provider": "green_api",
         "processed": processed_count,
+        "dispatched": bool(ai_reply and ai_reply.get("dispatched")),
         "reply": reply_text,
         "audio_base64": audio_b64,
         "image_url": image_url_val,

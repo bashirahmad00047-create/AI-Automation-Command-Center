@@ -6770,14 +6770,13 @@ class WhatsAppService:
                 getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
                 if hasattr(cls, "_in_flight_phones_ts"):
                     cls._in_flight_phones_ts.pop(clean_phone, None)
-            if not kwargs.get("direct_bridge"):
-                cls.send_green_api_message(
-                    organization_id=org_id,
-                    to_phone=clean_phone,
-                    chat_id=real_chat_id,
-                    message_text=order_reply_msg,
-                    allow_fallback=False
-                )
+            cls.send_green_api_message(
+                organization_id=org_id,
+                to_phone=clean_phone,
+                chat_id=real_chat_id,
+                message_text=order_reply_msg,
+                allow_fallback=False
+            )
             return {
                 "success": True,
                 "action": "order_created",
@@ -6797,14 +6796,13 @@ class WhatsAppService:
                 getattr(cls, "_in_flight_phones", set()).discard(clean_phone)
                 if hasattr(cls, "_in_flight_phones_ts"):
                     cls._in_flight_phones_ts.pop(clean_phone, None)
-            if not kwargs.get("direct_bridge"):
-                cls.send_green_api_message(
-                    organization_id=org_id,
-                    to_phone=clean_phone,
-                    chat_id=real_chat_id,
-                    message_text=tracking_reply_msg,
-                    allow_fallback=False
-                )
+            cls.send_green_api_message(
+                organization_id=org_id,
+                to_phone=clean_phone,
+                chat_id=real_chat_id,
+                message_text=tracking_reply_msg,
+                allow_fallback=False
+            )
             return {
                 "success": True,
                 "action": "order_tracked",
@@ -6853,14 +6851,13 @@ class WhatsAppService:
                         logger.info(f"Auto-captured CRM Lead for payment query/deal closure: {clean_phone}")
                 except Exception as lead_err:
                     logger.error(f"Failed to auto-capture CRM Lead on payment query: {lead_err}")
-            if not kwargs.get("direct_bridge"):
-                cls.send_green_api_message(
-                    organization_id=org_id,
-                    to_phone=clean_phone,
-                    chat_id=real_chat_id,
-                    message_text=payment_reply_msg,
-                    allow_fallback=False
-                )
+            cls.send_green_api_message(
+                organization_id=org_id,
+                to_phone=clean_phone,
+                chat_id=real_chat_id,
+                message_text=payment_reply_msg,
+                allow_fallback=False
+            )
             return {
                 "success": True,
                 "action": "payment_instructions_dispatched",
@@ -7008,13 +7005,20 @@ class WhatsAppService:
             source = "gemini_ai" if is_gemini else ("groq_ai" if is_groq else "system_fallback")
 
             # Outbound Voice Note Reply vs Text Reply:
-            # When customer sends a voice note (or when voice reply is enabled), convert AI text response into speech audio
             audio_dispatch_res = None
             outbound_audio_b64 = None
             send_as_voice = False
-            direct_bridge = bool(kwargs.get("direct_bridge") or kwargs.get("from_bridge"))
 
-            if is_voice_inbound or kwargs.get("reply_as_voice") or (intent == "order_intent" and ("order" in str(message_body or "").lower() or "confirm" in str(message_body or "").lower())):
+            should_synth_voice = (
+                is_voice_inbound
+                or kwargs.get("reply_as_voice")
+                or (intent == "order_intent" and ("order" in str(message_body or "").lower() or "confirm" in str(message_body or "").lower()))
+                or auto_conf.get("voice_replies_enabled")
+                or auto_conf.get("always_send_voice")
+                or not is_voice_inbound
+            )
+
+            if should_synth_voice:
                 try:
                     speech_text = generated.get("voice_script") or generated.get("speech_text") or kwargs.get("tts_script") or clean_reply_text
                     detected_lang_str = str(kwargs.get("detected_lang") or "").lower()
@@ -7034,26 +7038,20 @@ class WhatsAppService:
                     )
                     if audio_res:
                         audio_b, audio_fn, audio_mt = audio_res
-                        if audio_b and len(audio_b) > 1024:
+                        if audio_b and len(audio_b) > 0:
                             import base64
                             clean_synth_b64 = base64.b64encode(audio_b).decode("ascii")
                             synth_data_url = f"data:audio/ogg;base64,{clean_synth_b64}"
                             outbound_audio_b64 = clean_synth_b64
                             send_as_voice = True
-                        else:
-                            logger.warning(f"[Voice Pipeline Notice] Audio buffer <= 1024 bytes ({len(audio_b) if audio_b else 0}b). Bypassing audio dispatch and ensuring text delivery.")
-                            outbound_audio_b64 = None
-                            send_as_voice = False
-                        logger.info(f"[Voice Pipeline] Synthesized {len(audio_b)} bytes of voice reply for {real_chat_id} (direct_bridge={direct_bridge}, lang={synth_lang}).")
 
-                        if not direct_bridge:
                             audio_dispatch_res = cls.send_green_api_file(
                                 organization_id=org_id,
                                 to_phone=clean_phone,
                                 chat_id=real_chat_id,
                                 file_bytes=audio_b,
-                                filename="voice_reply.oga",
-                                mime_type="audio/ogg; codecs=opus",
+                                filename=audio_fn or "voice_reply.oga",
+                                mime_type=audio_mt or "audio/ogg; codecs=opus",
                                 caption="",
                                 quoted_message_id=message_id,
                                 transcript=clean_reply_text,
@@ -7070,8 +7068,8 @@ class WhatsAppService:
                 except Exception as tts_err:
                     logger.warning(f"[Voice Fallback Notice] Voice synthesis/dispatch failed for {real_chat_id}: {tts_err}. Falling back to text.")
 
-            # Emergency voice synthesis: If voice dispatch failed on inbound voice and not direct_bridge
-            if is_voice_inbound and not direct_bridge and not dispatch_res:
+            # Emergency voice synthesis: If voice dispatch failed on inbound voice and no audio was produced
+            if is_voice_inbound and not audio_res and (not dispatch_res or (isinstance(dispatch_res, dict) and not dispatch_res.get("success"))):
                 try:
                     logger.info(f"[Emergency Voice Dispatch] Generating emergency audio for {real_chat_id}...")
                     from gtts import gTTS
@@ -7102,46 +7100,37 @@ class WhatsAppService:
                 except Exception as emerg_err:
                     logger.error(f"[Emergency Voice Dispatch Error] {emerg_err}")
 
-            # Send text reply unless this was an incoming voice note (inbound voice gets voice-only reply)
-            if not is_voice_inbound and not direct_bridge:
+            # Send text reply:
+            # - If inbound was NOT voice, send text reply!
+            # - If inbound WAS voice, but audio dispatch failed, send text fallback!
+            if not is_voice_inbound or (not dispatch_res or (isinstance(dispatch_res, dict) and not dispatch_res.get("success"))):
                 try:
-                    dispatch_res = cls.send_message(
-                        organization_id=org_id,
-                        to_phone=clean_phone,
-                        chat_id=real_chat_id,
-                        message_text=clean_reply_text,
-                        quoted_message_id=message_id,
-                        image_url=matched_image_url,
-                        is_ai_response=True
-                    )
-                    logger.info(f"[Direct Bridge Outbound] send_message dispatched to {real_chat_id}: {dispatch_res}")
-                except Exception as b_send_err:
-                    logger.warning(f"[Direct Bridge Outbound] send_message notice: {b_send_err}")
                     green_dispatch_res = cls.send_green_api_message(
                         organization_id=org_id,
                         to_phone=clean_phone,
                         chat_id=real_chat_id,
                         message_text=clean_reply_text,
                         quoted_message_id=message_id,
+                        image_url=matched_image_url,
                         allow_fallback=False,
                         is_ai_response=True
                     )
                     dispatch_res = green_dispatch_res
-
-            # Outbound text dispatch fallback if not dispatched and not direct bridge
-            if not direct_bridge and not dispatch_res:
-                try:
-                    dispatch_res = cls.send_message(
-                        organization_id=org_id,
-                        to_phone=clean_phone,
-                        chat_id=real_chat_id,
-                        message_text=clean_reply_text,
-                        quoted_message_id=message_id,
-                        image_url=matched_image_url,
-                        is_ai_response=True
-                    )
-                except Exception as send_err:
-                    logger.error(f"[Delivery Fallback Exception] {send_err}")
+                    logger.info(f"[Text Dispatch Success] send_green_api_message dispatched to {real_chat_id}: {green_dispatch_res}")
+                except Exception as b_send_err:
+                    logger.warning(f"[Text Dispatch Warning] send_green_api_message notice: {b_send_err}")
+                    try:
+                        dispatch_res = cls.send_message(
+                            organization_id=org_id,
+                            to_phone=clean_phone,
+                            chat_id=real_chat_id,
+                            message_text=clean_reply_text,
+                            quoted_message_id=message_id,
+                            image_url=matched_image_url,
+                            is_ai_response=True
+                        )
+                    except Exception as s_err:
+                        logger.error(f"[Delivery Fallback Exception] {s_err}")
 
             if not dispatch_res:
                 dispatch_res = text_dispatch_res or audio_dispatch_res or {}
@@ -7260,8 +7249,10 @@ class WhatsAppService:
                     f"[WhatsApp AI Auto-Responder] System fallback response dispatched to {clean_phone} "
                     f"because Gemini AI was unavailable or failed. [Intent: {intent}, Score: {lead_score}]"
                 )
+            is_dispatched = bool(dispatch_res and (dispatch_res.get("success") or dispatch_res.get("whatsapp_message_id") or dispatch_res.get("messageId")))
             return {
                 "success": True,
+                "dispatched": is_dispatched,
                 "reply_body": clean_reply_text,
                 "reply": clean_reply_text,
                 "image_url": matched_image_url,
