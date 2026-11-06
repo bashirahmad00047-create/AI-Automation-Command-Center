@@ -2548,9 +2548,9 @@ class WhatsAppService:
                     if chunk.get("type") == "audio":
                         chunks.append(chunk.get("data", b""))
                 out_b = b"".join(chunks)
-                if out_b and len(out_b) > 1024:
+                if out_b and len(out_b) > 64:
                     return out_b
-                logger.warning(f"[Edge-TTS Validation] Audio output buffer too small ({len(out_b) if out_b else 0} bytes <= 1024), rejecting.")
+                logger.warning(f"[Edge-TTS Validation] Audio output buffer too small ({len(out_b) if out_b else 0} bytes <= 64), rejecting.")
                 return None
 
             try:
@@ -9838,7 +9838,7 @@ class WhatsAppService:
                 bridge_payload["mimetype"] = kwargs.get("mime_type") or kwargs.get("mimetype") or "audio/ogg; codecs=opus"
                 out_msg_type = "voiceMessage" if bridge_payload["ptt"] else "audioMessage"
             else:
-                logger.warning(f"[WhatsApp Audio Delivery Guarantee] Audio buffer rejected ({len(f_bytes)} bytes <= 1024). Delivering as text message.")
+                logger.warning(f"[WhatsApp Audio Delivery Guarantee] Audio buffer rejected ({len(f_bytes)} bytes <= 64). Delivering as text message.")
                 f_bytes = None
                 out_msg_type = "text"
 

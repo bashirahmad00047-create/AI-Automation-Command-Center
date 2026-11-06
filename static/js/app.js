@@ -12154,7 +12154,16 @@ function speakAIResponse(replyText, audioBase64 = null) {
     const promptEl = document.getElementById('liveCallUnmutePrompt');
     if (promptEl) promptEl.style.display = 'none';
 
+    const safetyWatchdog = setTimeout(() => {
+        if (isLiveAiSpeaking) {
+            console.warn('[speakAIResponse] Watchdog timeout hit - resetting AI speaking state.');
+            finishSpeech();
+            window.isAiSpeaking = false;
+        }
+    }, Math.max(7000, ((replyText ? replyText.length : 10) * 150) + 4000));
+
     function finishSpeech() {
+        clearTimeout(safetyWatchdog);
         isLiveAiSpeaking = false;
         setEqualizerActive(false);
         const intrEl = document.getElementById('liveCallInterruptIndicator');
@@ -12187,7 +12196,7 @@ function speakAIResponse(replyText, audioBase64 = null) {
                 console.warn('[speechSynthesis error]', e);
                 finishSpeech();
             };
-            // browser speech speak removed for zero voice mixing
+            window.speechSynthesis.speak(utter);
         } catch (synthErr) {
             console.warn('[speechSynthesis exception]', synthErr);
             finishSpeech();
@@ -12212,6 +12221,12 @@ function speakAIResponse(replyText, audioBase64 = null) {
             window.currentAiAudio = player;
             player.src = audioUri;
             player.muted = isSpeakerMuted;
+
+            player.onerror = function(pErr) {
+                console.warn('[liveCallAudioPlayer error, falling back to speech synthesis]', pErr);
+                window.currentAiAudio = null;
+                runBrowserSynthesisFallback();
+            };
 
             player.onended = function() {
                 window.currentAiAudio = null;
@@ -12604,7 +12619,13 @@ async function sendVoiceChatQuery(payload) {
 
         const data = await res.json();
         if (res.ok && data && data.success) {
-            const replyText = data.replyText || data.reply_text || 'Ji bilkul, batayein.';
+            if (data.empty_turn) {
+                return;
+            }
+            const replyText = data.replyText || data.reply_text || data.reply || (data.audioBase64 ? 'Ji bilkul, batayein.' : '');
+            if (!replyText) {
+                return;
+            }
             liveVoiceCallHistory.push({ role: 'assistant', text: replyText });
 
             if (transcriptBox) {

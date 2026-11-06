@@ -1248,13 +1248,39 @@
         }
 
         function fallbackBrowserSpeech(text) {
-            // Speech synthesis speak disabled for 100% single-engine audio playback
-            setTimeout(() => {
+            if (!text || typeof window === 'undefined' || !window.speechSynthesis) {
+                setTimeout(() => {
+                    isAiSpeaking = false;
+                    isWaitingForServer = false;
+                    setStatus('Listening...');
+                    setWaveAnimation(false);
+                }, 450);
+                return;
+            }
+            try {
+                window.speechSynthesis.cancel();
+                const u = new SpeechSynthesisUtterance(text);
+                u.lang = (typeof currentLanguage !== 'undefined' && currentLanguage) ? currentLanguage : 'ur-PK';
+                u.rate = 1.0;
+                u.onend = () => {
+                    isAiSpeaking = false;
+                    isWaitingForServer = false;
+                    setStatus('Listening...');
+                    setWaveAnimation(false);
+                };
+                u.onerror = () => {
+                    isAiSpeaking = false;
+                    isWaitingForServer = false;
+                    setStatus('Listening...');
+                    setWaveAnimation(false);
+                };
+                window.speechSynthesis.speak(u);
+            } catch (_) {
                 isAiSpeaking = false;
                 isWaitingForServer = false;
                 setStatus('Listening...');
                 setWaveAnimation(false);
-            }, 450);
+            }
         }
     </script>
 </body>
