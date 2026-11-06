@@ -443,6 +443,13 @@
                 window.isAiSpeaking = false;
                 isAiSpeaking = false;
                 isWaitingForServer = false;
+                if (mediaRecorder && mediaRecorder.state === 'inactive') {
+                    recordedAudioChunks = [];
+                    try {
+                        mediaRecorder.start(200);
+                        isVADRecording = true;
+                    } catch (_) {}
+                }
             } else if (STATE === "PROCESSING") {
                 setStatus('Thinking...');
                 setWaveAnimation(false);
@@ -850,7 +857,7 @@
                                     currentTurnId++;
                                     turnId = currentTurnId;
                                     broadcastLiveCallChunk('customer', b64, latestInterimTranscript || null, 'audio/webm', currentTurnId);
-                                    sendLiveVoicePayload({ audioBase64: b64, text: latestInterimTranscript || null, turnId: currentTurnId, seq: currentTurnId });
+                                    sendLiveVoicePayload({ audioBase64: b64, customer_audio_base64: b64, text: latestInterimTranscript || null, turnId: currentTurnId, seq: currentTurnId });
                                     latestInterimTranscript = '';
                                 };
                                 reader.readAsDataURL(audioBlob);
@@ -1044,6 +1051,7 @@
             }
 
             try {
+                const custAudio = payload?.customer_audio_base64 || payload?.audioBase64 || payload?.audio_base64 || undefined;
                 const bodyData = {
                     persona: 'ur-PK-UzmaNeural',
                     rate: '+8%',
@@ -1051,10 +1059,11 @@
                     phone: phone || roomId,
                     roomId: roomId || phone,
                     message: textQuery || payload?.text || undefined,
-                    audio_base64: payload?.audioBase64 || undefined
+                    audio_base64: custAudio,
+                    audioBase64: custAudio,
+                    customer_audio_base64: custAudio
                 };
                 if (payload.text) bodyData.text = payload.text;
-                if (payload.audioBase64) bodyData.audioBase64 = payload.audioBase64;
 
                 let data = null;
                 try {

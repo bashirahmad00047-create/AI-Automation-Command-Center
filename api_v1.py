@@ -3961,6 +3961,105 @@ def ai_voice_chat():
         except Exception as we_err:
             logger.debug(f"[Voice Chat WorkflowExecution Notice] {we_err}")
 
+    # Investor Demo Two-Way Audio Relay (Customer + AI Audio saved to active call session & emitted via Socket.IO)
+    caller_phone = str(data.get("phone") or data.get("roomId") or data.get("phone_number") or "").strip()
+    clean_call_phone = re.sub(r"\D", "", caller_phone)
+    if not clean_call_phone:
+        with _ACTIVE_CALL_SESSIONS_LOCK:
+            active_keys = list(_ACTIVE_CALL_SESSIONS.keys())
+            if len(active_keys) == 1:
+                clean_call_phone = active_keys[0]
+            elif "923471000668" in _ACTIVE_CALL_SESSIONS:
+                clean_call_phone = "923471000668"
+            else:
+                clean_call_phone = "923471000668"
+
+    cust_audio_raw = data.get("customer_audio_base64") or data.get("audio_base64") or data.get("audioBase64") or data.get("audio")
+    now_iso = datetime.datetime.utcnow().isoformat() + "Z"
+
+    if clean_call_phone:
+        with _ACTIVE_CALL_SESSIONS_LOCK:
+            sess = _ACTIVE_CALL_SESSIONS.get(clean_call_phone)
+            if not sess:
+                sess = {
+                    "phone": clean_call_phone,
+                    "name": caller_name or "Customer",
+                    "status": "connected",
+                    "initiated_at": now_iso,
+                    "joined_at": now_iso,
+                    "ended_at": None,
+                    "human_admin_active": False,
+                    "human_admin_last_active": 0,
+                    "to_customer_queue": [],
+                    "to_customer_seq": 0,
+                    "to_admin_queue": [],
+                    "to_admin_seq": 0
+                }
+                _ACTIVE_CALL_SESSIONS[clean_call_phone] = sess
+
+            if "to_admin_queue" not in sess:
+                sess["to_admin_queue"] = []
+                sess["to_admin_seq"] = 0
+
+            # 1. Customer speech chunk enqueued first so laptop plays customer speech first
+            if cust_audio_raw:
+                sess["to_admin_seq"] += 1
+                seq1 = sess["to_admin_seq"]
+                cust_uid = f"{clean_call_phone}_cust_{seq1}_{int(time.time()*1000)}"
+                clean_cust_b64 = str(cust_audio_raw).split("base64,")[-1].strip()
+                cust_chunk = {
+                    "seq_id": seq1,
+                    "seq": seq1,
+                    "chunk_id": cust_uid,
+                    "id": cust_uid,
+                    "phone": clean_call_phone,
+                    "roomId": clean_call_phone,
+                    "sender": "customer",
+                    "audio": clean_cust_b64,
+                    "text": user_msg or "[Customer Voice]",
+                    "mimeType": "audio/webm",
+                    "timestamp": now_iso
+                }
+                sess["to_admin_queue"].append(cust_chunk)
+                try:
+                    from flask import current_app
+                    sock = current_app.config.get("SOCKETIO")
+                    if sock:
+                        sock.emit("live-call-chunk", cust_chunk, room=clean_call_phone)
+                        sock.emit("live-call-chunk", cust_chunk)
+                except Exception as _se:
+                    logger.debug(f"[ai_voice_chat] SocketIO cust emit notice: {_se}")
+
+            # 2. AI speech chunk enqueued second so laptop plays AI reply as soon as customer speech ends
+            if audio_base64:
+                sess["to_admin_seq"] += 1
+                seq2 = sess["to_admin_seq"]
+                ai_uid = f"{clean_call_phone}_ai_{seq2}_{int(time.time()*1000)}"
+                ai_chunk = {
+                    "seq_id": seq2,
+                    "seq": seq2,
+                    "chunk_id": ai_uid,
+                    "id": ai_uid,
+                    "phone": clean_call_phone,
+                    "roomId": clean_call_phone,
+                    "sender": "ai",
+                    "audio": audio_base64,
+                    "text": clean_reply,
+                    "mimeType": "audio/mp3",
+                    "timestamp": now_iso
+                }
+                sess["to_admin_queue"].append(ai_chunk)
+                if len(sess["to_admin_queue"]) > 60:
+                    sess["to_admin_queue"] = sess["to_admin_queue"][-60:]
+                try:
+                    from flask import current_app
+                    sock = current_app.config.get("SOCKETIO")
+                    if sock:
+                        sock.emit("live-call-chunk", ai_chunk, room=clean_call_phone)
+                        sock.emit("live-call-chunk", ai_chunk)
+                except Exception as _se:
+                    logger.debug(f"[ai_voice_chat] SocketIO AI emit notice: {_se}")
+
     storage = get_storage()
     stats = storage.get_stats(org_id) if storage else {}
 
@@ -3972,6 +4071,7 @@ def ai_voice_chat():
         "lang": lang,
         "audio_data_uri": audio_data_uri,
         "audio_base64": audio_base64,
+        "customer_audio_base64": cust_audio_raw,
         "lead_id": lead_id,
         "stats": stats
     }), 200

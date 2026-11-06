@@ -2629,6 +2629,50 @@ class WhatsAppService:
             return None
 
     @classmethod
+    def convert_mp3_to_ogg_opus(cls, mp3_bytes: bytes) -> Optional[bytes]:
+        """Converts MP3 audio bytes to strict WhatsApp-compatible OGG Opus using ffmpeg.
+        Enforces: ffmpeg -y -i pipe:0 -c:a libopus -b:a 24k -vbr on -compression_level 10 -frame_duration 60 -application voip -ar 48000 -ac 1 -f ogg pipe:1
+        Verifies that the returned buffer begins with the b'OggS' magic header.
+        """
+        if not mp3_bytes or len(mp3_bytes) < 100:
+            return None
+        if mp3_bytes[:4] == b"OggS":
+            return mp3_bytes
+        import shutil
+        import subprocess
+        ffmpeg_bin = shutil.which("ffmpeg")
+        if not ffmpeg_bin:
+            for p in ("/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "ffmpeg"):
+                if os.path.exists(p):
+                    ffmpeg_bin = p
+                    break
+        if not ffmpeg_bin:
+            return None
+        try:
+            cmd = [
+                ffmpeg_bin,
+                "-y",
+                "-i", "pipe:0",
+                "-c:a", "libopus",
+                "-b:a", "24k",
+                "-vbr", "on",
+                "-compression_level", "10",
+                "-frame_duration", "60",
+                "-application", "voip",
+                "-ar", "48000",
+                "-ac", "1",
+                "-f", "ogg",
+                "pipe:1"
+            ]
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out, err = proc.communicate(input=mp3_bytes, timeout=8)
+            if proc.returncode == 0 and out and out[:4] == b"OggS":
+                return out
+        except Exception as e:
+            logger.debug(f"[FFmpeg Opus Conversion notice] {e}")
+        return None
+
+    @classmethod
     def generate_spoken_audio(
         cls,
         text: str,
@@ -2666,15 +2710,22 @@ class WhatsAppService:
         try:
             edge_bytes = cls._synthesize_edge_tts(clean_text[:1200], language=language, organization_id=organization_id)
             if edge_bytes and len(edge_bytes) > 1024:
-                logger.info(f"[TTS Pipeline] Edge-TTS successfully synthesized {len(edge_bytes)} bytes (lang={language}).")
-                return (edge_bytes, audio_fn, audio_mt)
+                ogg_converted = cls.convert_mp3_to_ogg_opus(edge_bytes)
+                if ogg_converted and ogg_converted[:4] == b"OggS":
+                    logger.info(f"[TTS Pipeline] Converted Edge-TTS to strict WhatsApp OGG Opus ({len(ogg_converted)} bytes).")
+                    return (ogg_converted, "voice_reply.oga", "audio/ogg; codecs=opus")
+                logger.info(f"[TTS Pipeline] Edge-TTS synthesized native MP3 ({len(edge_bytes)} bytes).")
+                return (edge_bytes, "voice_reply.mp3", "audio/mpeg")
         except Exception as e_err:
             logger.debug(f"[TTS Pipeline] Edge-TTS notice: {e_err}")
 
         # 2. Secondary fallback: ElevenLabs Multilingual Neural TTS
         eleven_bytes = cls._synthesize_elevenlabs_tts(clean_text[:1000], organization_id=organization_id)
         if eleven_bytes and len(eleven_bytes) > 1024:
-            return (eleven_bytes, audio_fn, audio_mt)
+            ogg_converted = cls.convert_mp3_to_ogg_opus(eleven_bytes)
+            if ogg_converted and ogg_converted[:4] == b"OggS":
+                return (ogg_converted, "voice_reply.oga", "audio/ogg; codecs=opus")
+            return (eleven_bytes, "voice_reply.mp3", "audio/mpeg")
 
         # 3. Tertiary fallback: OpenAI HD Audio Speech API (model 'tts-1-hd')
         openai_key = cls.get_openai_api_key(organization_id=organization_id)

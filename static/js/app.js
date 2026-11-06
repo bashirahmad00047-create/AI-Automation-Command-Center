@@ -12574,7 +12574,7 @@ function enqueueAdminAudioChunk(chunk) {
 
 function processAdminAudioQueue() {
     if (isAdminPlayingAudio || adminAudioQueue.length === 0) return;
-    if (window.isAiSpeaking || window.isLiveAiSpeaking || window.location.pathname.includes('/call/')) {
+    if (window.location.pathname.includes('/call/')) {
         adminAudioQueue = [];
         return;
     }
@@ -12583,8 +12583,22 @@ function processAdminAudioQueue() {
 
     const advance = () => {
         isAdminPlayingAudio = false;
-        setTimeout(processAdminAudioQueue, 40);
+        const statusLabel = document.getElementById('voiceCallStatusLabel');
+        if (statusLabel && adminAudioQueue.length === 0) {
+            statusLabel.textContent = '📞 Live Call Connected (Listening)';
+        }
+        setTimeout(processAdminAudioQueue, 50);
     };
+
+    const sender = chunk.sender || 'customer';
+    const statusLabel = document.getElementById('voiceCallStatusLabel');
+    if (statusLabel) {
+        if (sender === 'customer') {
+            statusLabel.textContent = '📞 Live Call: Customer Speaking...';
+        } else if (sender === 'ai' || sender === 'assistant') {
+            statusLabel.textContent = '🤖 Live Call: AI Responding...';
+        }
+    }
 
     const player = document.getElementById('remoteVoicePlayer') || document.getElementById('liveCallAudioPlayer');
     const audioData = chunk.audio || '';

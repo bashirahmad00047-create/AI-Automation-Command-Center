@@ -70,11 +70,13 @@ function convertAudioToOggOpus(buffer) {
       '-y',
       '-i', 'pipe:0',
       '-c:a', 'libopus',
-      '-b:a', '32k',
+      '-b:a', '24k',
       '-vbr', 'on',
       '-compression_level', '10',
       '-frame_duration', '60',
       '-application', 'voip',
+      '-ar', '48000',
+      '-ac', '1',
       '-f', 'ogg',
       'pipe:1'
     ];
@@ -85,7 +87,12 @@ function convertAudioToOggOpus(buffer) {
     proc.stderr.on('data', d => { err += d.toString(); });
     proc.on('close', code => {
       if (code === 0 && chunks.length > 0) {
-        resolve(Buffer.concat(chunks));
+        const out = Buffer.concat(chunks);
+        if (out.slice(0, 4).toString() === 'OggS') {
+          resolve(out);
+        } else {
+          reject(new Error('ffmpeg conversion produced non-OggS buffer'));
+        }
       } else {
         reject(new Error('ffmpeg conversion failed (code ' + code + '): ' + err));
       }
@@ -1884,26 +1891,48 @@ if (!text) text = '[Voice note]';
                 return;
               }
 
-              let outMime = 'audio/ogg; codecs=opus';
-              let outPtt = true;
-              const isAlreadyOgg = audioBuf.slice(0, 4).toString() === 'OggS';
-              if (!isAlreadyOgg) {
+              let isOgg = audioBuf.slice(0, 4).toString() === 'OggS';
+              if (!isOgg) {
                 try {
                   const oggBuf = await convertAudioToOggOpus(audioBuf);
-                  if (oggBuf && oggBuf.length > 0) audioBuf = oggBuf;
+                  if (oggBuf && oggBuf.length > 0 && oggBuf.slice(0, 4).toString() === 'OggS') {
+                    audioBuf = oggBuf;
+                    isOgg = true;
+                  }
                 } catch (convErr) {
-                  console.warn('[Direct Bridge Voice] ffmpeg conversion failed, falling back to audio/mp4:', convErr.message);
-                  outMime = 'audio/mp4';
+                  console.warn('[Direct Bridge Voice] ffmpeg conversion notice:', convErr.message);
                 }
               }
 
-              try {
-                sentMsg = await sendWithDualJid({
+              let primaryPayload = null;
+              let fallbackPayload = null;
+              if (isOgg) {
+                primaryPayload = {
                   audio: audioBuf,
-                  mimetype: outMime,
-                  ptt: outPtt,
-                  fileName: outMime.includes('ogg') ? 'voice_reply.oga' : 'voice_reply.mp4'
-                }, 'recording');
+                  mimetype: 'audio/ogg; codecs=opus',
+                  ptt: true,
+                  fileName: 'voice_reply.oga'
+                };
+              } else {
+                primaryPayload = {
+                  audio: audioBuf,
+                  mimetype: 'audio/mpeg',
+                  ptt: false,
+                  fileName: 'voice_reply.mp3'
+                };
+                fallbackPayload = {
+                  audio: audioBuf,
+                  mimetype: 'audio/mp4',
+                  ptt: true,
+                  fileName: 'voice_reply.mp4'
+                };
+              }
+
+              try {
+                sentMsg = await sendWithDualJid(primaryPayload, 'recording');
+                if (!sentMsg?.key?.id && fallbackPayload) {
+                  sentMsg = await sendWithDualJid(fallbackPayload, 'recording');
+                }
                 if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
 
                 if (resData.reply && resData.send_followup_call_link) {
@@ -1918,21 +1947,13 @@ if (!text) text = '[Voice note]';
                   }
                 }
               } catch (aErr) {
-                console.warn('[Direct Bridge Audio Error, falling back to MP4 / text delivery]:', aErr.message);
-                // Fallback attempt: audio/mp4
-                let sentMp4 = false;
-                try {
-                  sentMsg = await sendWithDualJid({
-                    audio: audioBuf,
-                    mimetype: 'audio/mp4',
-                    ptt: true,
-                    fileName: 'voice_reply.mp4'
-                  }, 'recording');
-                  if (sentMsg?.key?.id) {
-                    sentAiMessageIds.add(sentMsg.key.id);
-                    sentMp4 = true;
-                  }
-                } catch (_) {}
+                console.warn('[Direct Bridge Audio Error, attempting fallback]:', aErr.message);
+                if (fallbackPayload) {
+                  try {
+                    sentMsg = await sendWithDualJid(fallbackPayload, 'recording');
+                    if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
+                  } catch (_) {}
+                }
 
                 if (!sentMp4 && resData.reply) {
                   try {
@@ -2702,35 +2723,51 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
         const isVoiceReq = req.body?.ptt !== undefined ? Boolean(req.body.ptt) : (req.body?.is_voice !== undefined ? Boolean(req.body.is_voice) : true);
         let ptt = isVoiceReq;
-        let mimetype = 'audio/ogg; codecs=opus';
-        let finalAudioPayload = audioBuffer || { url: audioUrl };
+        let isOgg = audioBuffer && Buffer.isBuffer(audioBuffer) && audioBuffer.slice(0, 4).toString() === 'OggS';
 
-        if (ptt && audioBuffer && Buffer.isBuffer(audioBuffer)) {
-          const isAlreadyOgg = audioBuffer.slice(0, 4).toString() === 'OggS';
-          if (!isAlreadyOgg) {
-            try {
-              console.log('[WhatsApp Bridge] Converting MP3/WAV buffer to OGG Opus via ffmpeg for WhatsApp PTT voice delivery...');
-              const oggBuffer = await convertAudioToOggOpus(audioBuffer);
-              finalAudioPayload = oggBuffer;
-              mimetype = 'audio/ogg; codecs=opus';
-              ptt = true;
-              console.log('[WhatsApp Bridge] Successfully converted audio (' + audioBuffer.length + 'b -> ' + oggBuffer.length + 'b OGG Opus).');
-            } catch (convErr) {
-              console.warn('[WhatsApp Bridge] ffmpeg conversion failed or unavailable, delivering native MP3 with ptt: true (audio/mp4):', convErr.message);
-              finalAudioPayload = audioBuffer;
-              mimetype = 'audio/mp4';
-              ptt = true;
+        if (ptt && audioBuffer && Buffer.isBuffer(audioBuffer) && !isOgg) {
+          try {
+            console.log('[WhatsApp Bridge] Converting MP3/WAV buffer to strict OGG Opus via ffmpeg...');
+            const oggBuffer = await convertAudioToOggOpus(audioBuffer);
+            if (oggBuffer && oggBuffer.length > 0 && oggBuffer.slice(0, 4).toString() === 'OggS') {
+              audioBuffer = oggBuffer;
+              isOgg = true;
+              console.log('[WhatsApp Bridge] Successfully converted audio to strict OGG Opus (' + oggBuffer.length + 'b).');
             }
-          } else {
-            mimetype = 'audio/ogg; codecs=opus';
-            ptt = true;
+          } catch (convErr) {
+            console.warn('[WhatsApp Bridge] ffmpeg conversion notice:', convErr.message);
           }
-        } else if (!ptt) {
-          mimetype = req.body?.mimetype || (cleanBase64.startsWith('T2dn') ? 'audio/ogg; codecs=opus' : 'audio/mp4');
         }
 
-        const dur = Number(req.body?.seconds || req.body?.duration || 0) || (Buffer.isBuffer(finalAudioPayload) ? estimateAudioDuration(finalAudioPayload) : 0);
-        const audioFileName = ptt ? 'voice_message.oga' : 'audio.mp4';
+        let primaryAudioPayload = null;
+        let fallbackAudioPayload = null;
+        if (isOgg) {
+          primaryAudioPayload = {
+            audio: audioBuffer,
+            mimetype: 'audio/ogg; codecs=opus',
+            ptt: true,
+            fileName: 'voice_message.oga'
+          };
+        } else {
+          primaryAudioPayload = {
+            audio: audioBuffer || { url: audioUrl },
+            mimetype: 'audio/mpeg',
+            ptt: false,
+            fileName: 'audio.mp3'
+          };
+          fallbackAudioPayload = {
+            audio: audioBuffer || { url: audioUrl },
+            mimetype: 'audio/mp4',
+            ptt: true,
+            fileName: 'audio.mp4'
+          };
+        }
+
+        const dur = Number(req.body?.seconds || req.body?.duration || 0) || (Buffer.isBuffer(audioBuffer) ? estimateAudioDuration(audioBuffer) : 0);
+        if (dur > 0) {
+          primaryAudioPayload.seconds = dur;
+          if (fallbackAudioPayload) fallbackAudioPayload.seconds = dur;
+        }
 
         const cleanTargetDigits = cleanTargetPhone || '923471000668';
         const sendTargets = new Set();
@@ -2743,14 +2780,8 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
         let audioSent = false;
         for (const sendTgt of sendTargets) {
           try {
-            console.log(`[POST /send-message Audio] Dispatching to ${sendTgt}...`);
-            const res = await sock.sendMessage(sendTgt, {
-              audio: finalAudioPayload,
-              mimetype: mimetype,
-              ptt: ptt,
-              seconds: dur > 0 ? dur : undefined,
-              fileName: audioFileName
-            }); // NO { quoted: msg }!
+            console.log(`[POST /send-message Audio] Dispatching to ${sendTgt} (${primaryAudioPayload.mimetype})...`);
+            const res = await sock.sendMessage(sendTgt, primaryAudioPayload); // NO { quoted: msg }!
             if (res?.key?.id) {
               sent = res;
               audioSent = true;
@@ -2758,20 +2789,16 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
             }
           } catch (firstAudioErr) {
             console.warn(`[Audio Send Warning] Attempt on ${sendTgt} failed: ${firstAudioErr.message}`);
-            try {
-              const res2 = await sock.sendMessage(sendTgt, {
-                audio: finalAudioPayload,
-                mimetype: 'audio/mp4',
-                ptt: true,
-                seconds: dur > 0 ? dur : undefined,
-                fileName: 'audio.mp4'
-              });
-              if (res2?.key?.id) {
-                sent = res2;
-                audioSent = true;
-                console.log("[DELIVERED TO WA]", sendTgt, res2.key.id);
-              }
-            } catch (_) {}
+            if (fallbackAudioPayload) {
+              try {
+                const res2 = await sock.sendMessage(sendTgt, fallbackAudioPayload);
+                if (res2?.key?.id) {
+                  sent = res2;
+                  audioSent = true;
+                  console.log("[DELIVERED TO WA]", sendTgt, res2.key.id);
+                }
+              } catch (_) {}
+            }
           }
         }
 
