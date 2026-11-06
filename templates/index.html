@@ -19,6 +19,10 @@
                 modal.style.display = 'flex';
                 modal.style.zIndex = '10060';
             }
+            var connectedState = document.getElementById('qrConnectedState');
+            if (connectedState) connectedState.style.display = 'none';
+            var mainBody = document.getElementById('waPairingMainBody');
+            if (mainBody) mainBody.style.display = 'flex';
             if (typeof window.switchLinkMode === 'function') {
                 window.switchLinkMode('qr', false);
             }
@@ -44,14 +48,22 @@
         window.openLinkWhatsAppQrModal = openQrModal;
 
         function closeQrModal() {
-            var modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
-            if (modal) {
-                modal.style.display = 'none';
-                modal.classList.add('hidden');
-            }
+            var modals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, .link-whatsapp-modal');
+            modals.forEach(function(m) {
+                m.style.display = 'none';
+                m.classList.add('hidden');
+            });
+            var connectedState = document.getElementById('qrConnectedState');
+            if (connectedState) connectedState.style.display = 'none';
+            var mainBody = document.getElementById('waPairingMainBody');
+            if (mainBody) mainBody.style.display = 'flex';
             if (window.waBridgeQrPollTimer) {
                 clearInterval(window.waBridgeQrPollTimer);
                 window.waBridgeQrPollTimer = null;
+            }
+            if (window.waPairingCodeCountdownTimer) {
+                clearInterval(window.waPairingCodeCountdownTimer);
+                window.waPairingCodeCountdownTimer = null;
             }
         }
         window.closeQrModal = closeQrModal;
@@ -5514,7 +5526,7 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                     ✓
                 </div>
                 <h4 style="margin: 0 0 8px 0; color: #00a884; font-size: 20px; font-weight: 700;">WhatsApp Connected!</h4>
-                <p id="qrConnectedNumber" style="font-size: 14px; color: #8696a0; margin: 0 0 24px 0; max-width: 440px; margin-left: auto; margin-right: auto;">Your device is active and permanently synced for unlimited free messaging & AI automation.</p>
+                <p id="qrConnectedNumber" style="font-size: 14px; color: #8696a0; margin: 0 0 24px 0; max-width: 440px; margin-left: auto; margin-right: auto;">Your device is active & permanently synced. Auto-closing & opening WhatsApp...</p>
                 <div style="display: flex; gap: 12px; justify-content: center;">
                     <button type="button" class="hud-btn danger small" onclick="disconnectWhatsAppDevice()" style="background: #ef4444; color: #fff; font-size: 12.5px; font-weight: 600; padding: 8px 18px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
                         <span>⏻</span> Disconnect / Unlink WhatsApp

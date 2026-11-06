@@ -5816,26 +5816,42 @@ async function fetchBridgeQrCode(forceRefresh = false) {
                     clearInterval(waBridgeQrPollTimer);
                     waBridgeQrPollTimer = null;
                 }
-                if (typeof closeQrModal === 'function') {
-                    closeQrModal();
+
+                const modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
+                const mainBody = document.getElementById('waPairingMainBody');
+                const connectedState = document.getElementById('qrConnectedState');
+                const connectedNumber = document.getElementById('qrConnectedNumber');
+
+                // If modal is currently open and visible, show rewarding success state briefly and auto-close!
+                const isModalOpen = modal && modal.style.display !== 'none' && !modal.classList.contains('hidden');
+                if (isModalOpen) {
+                    if (mainBody) mainBody.style.display = 'none';
+                    if (connectedState) {
+                        connectedState.style.display = 'block';
+                        if (connectedNumber) {
+                            connectedNumber.innerHTML = `<span style="color:#00a884; font-weight:700;">✓ Connected${phone ? ' (+' + String(phone).replace(/\D/g, '') + ')' : ''}</span><br><span style="font-size:12.5px; color:#8696a0;">Auto-closing & loading WhatsApp chats...</span>`;
+                        }
+                    }
+                    setTimeout(() => {
+                        closeQrModal();
+                        if (typeof switchTab === 'function') switchTab('whatsapp');
+                        if (typeof loadWhatsAppDashboard === 'function') loadWhatsAppDashboard();
+                        if (typeof window.loadWhatsAppChats === 'function' && window.loadWhatsAppChats !== loadWhatsAppDashboard) {
+                            window.loadWhatsAppChats();
+                        }
+                    }, 800);
                 } else {
-                    const m = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
-                    if (m) {
-                        m.style.display = 'none';
-                        m.classList.add('hidden');
+                    // Modal already hidden: close immediately, switch tab & refresh
+                    closeQrModal();
+                    if (typeof switchTab === 'function') switchTab('whatsapp');
+                    if (typeof loadWhatsAppDashboard === 'function') loadWhatsAppDashboard();
+                    if (typeof window.loadWhatsAppChats === 'function' && window.loadWhatsAppChats !== loadWhatsAppDashboard) {
+                        window.loadWhatsAppChats();
                     }
                 }
+
                 if (typeof showHudToast === 'function') {
                     showHudToast(`WhatsApp Connected!${phone ? ' (+' + String(phone).replace(/\D/g, '') + ')' : ''}`, 'success');
-                }
-                if (typeof switchTab === 'function') {
-                    switchTab('whatsapp');
-                }
-                if (typeof loadWhatsAppDashboard === 'function') {
-                    loadWhatsAppDashboard();
-                }
-                if (typeof window.loadWhatsAppChats === 'function' && window.loadWhatsAppChats !== loadWhatsAppDashboard) {
-                    window.loadWhatsAppChats();
                 }
                 return;
             } else {
@@ -6113,6 +6129,27 @@ async function openQrModal(forceRefresh = false) {
         console.warn('QR modal element not found');
         return;
     }
+
+    // If already genuinely connected and NOT requesting force reset, redirect directly without reopening modal
+    if (window._waIsConnected && !forceRefresh) {
+        if (typeof showHudToast === 'function') {
+            showHudToast('WhatsApp is already connected & permanent!', 'success');
+        }
+        if (typeof switchTab === 'function') {
+            switchTab('whatsapp');
+        }
+        if (typeof loadWhatsAppDashboard === 'function') {
+            loadWhatsAppDashboard();
+        }
+        return;
+    }
+
+    // Reset inner states before opening
+    const connectedState = document.getElementById('qrConnectedState');
+    const mainBody = document.getElementById('waPairingMainBody');
+    if (connectedState) connectedState.style.display = 'none';
+    if (mainBody) mainBody.style.display = 'flex';
+
     // a) Immediately unhide/display the QR modal element (remove hidden, set display: flex, ensure z-index: 10060/9999)
     modal.classList.remove('hidden');
     modal.style.display = 'flex';
@@ -6161,11 +6198,15 @@ window.openQrModal = openQrModal;
 window.openLinkWhatsAppQrModal = openQrModal;
 
 function closeQrModal() {
-    const modal = document.getElementById('linkWhatsAppQrModal') || document.getElementById('qrModal');
-    if (modal) {
+    const modals = document.querySelectorAll('#linkWhatsAppQrModal, #qrModal, .link-whatsapp-modal');
+    modals.forEach(modal => {
         modal.style.display = 'none';
         modal.classList.add('hidden');
-    }
+    });
+    const connectedState = document.getElementById('qrConnectedState');
+    if (connectedState) connectedState.style.display = 'none';
+    const mainBody = document.getElementById('waPairingMainBody');
+    if (mainBody) mainBody.style.display = 'flex';
     if (waBridgeQrPollTimer) {
         clearInterval(waBridgeQrPollTimer);
         waBridgeQrPollTimer = null;
