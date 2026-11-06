@@ -286,19 +286,24 @@
             <div id="callTimer" style="font-size: 11px; color: #64748b; margin-top: 8px; font-family: monospace;">00:00</div>
         </div>
 
-        <!-- Bottom Area: Exactly 2 Buttons (Green Mic + Red End Call Pill) -->
-        <div class="call-bottom">
+        <!-- Bottom Area: Exactly 3 Buttons (Green Mic + Tap to Send + Red End Call Pill) -->
+        <div class="call-bottom" style="display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%;">
             <button type="button" id="btnMicMute" class="btn-mute-mic" onclick="toggleMute()" title="Mute/Unmute Mic">
                 <span id="micIcon">🎤</span>
             </button>
+            <button type="button" id="btnTapToSend" class="btn-tap-send" onclick="forceDispatchTurn()" title="Tap to Send / Speak Now" style="background: linear-gradient(135deg, #10b981, #059669); color: #fff; border: none; border-radius: 9999px; padding: 12px 20px; font-weight: 700; font-size: 13.5px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 4px 16px rgba(16, 185, 129, 0.45); transition: transform 0.15s ease;">
+                <span>⚡</span>
+                <span id="btnTapToSendText">Tap to Send</span>
+            </button>
             <button type="button" id="btnEndCall" class="btn-end-call-pill" onclick="endCall()" title="End Call">
                 <span>🔴</span>
-                <span>End Call</span>
+                <span>End</span>
             </button>
         </div>
     </div>
 
-    <!-- Hidden audio playback elements -->
+    <!-- Hidden audio playback elements (Persistent element for mobile browser autoplay unlock) -->
+    <audio id="ai-voice-player" playsinline preload="auto" style="display: none;"></audio>
     <audio id="remoteVoicePlayer" playsinline autoplay preload="auto" style="display: none;"></audio>
     <audio id="audioPlayer" preload="auto" style="display: none;"></audio>
 
@@ -320,12 +325,53 @@
         let inFlightRequest = false;
         let currentAbortController = null;
 
-        // Hard disable robotic browser window.speechSynthesis across call page
-        if (typeof window !== 'undefined' && window.speechSynthesis) {
+        // Mobile Browser AudioContext & Persistent <audio> Element Unlocker
+        const SILENT_WAV = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+        let isMobileAudioUnlocked = false;
+        function unlockMobileAudio() {
+            if (isMobileAudioUnlocked) return;
             try {
-                window.speechSynthesis.speak = function() {};
-                window.speechSynthesis.cancel = function() {};
+                const player = document.getElementById('ai-voice-player') || document.getElementById('remoteVoicePlayer');
+                if (player) {
+                    player.src = SILENT_WAV;
+                    const p = player.play();
+                    if (p !== undefined) {
+                        p.then(() => { player.pause(); player.currentTime = 0; }).catch(() => {});
+                    }
+                }
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!audioCtx && AudioCtx) audioCtx = new AudioCtx();
+                if (audioCtx && audioCtx.state === 'suspended') {
+                    audioCtx.resume().catch(() => {});
+                }
+                isMobileAudioUnlocked = true;
+                console.log('[Mobile Audio] Persistent audio player successfully unlocked synchronously.');
             } catch (_) {}
+        }
+        document.addEventListener('touchstart', unlockMobileAudio, { once: true, passive: true });
+        document.addEventListener('click', unlockMobileAudio, { once: true, passive: true });
+
+        // Immediate mobile browser speech fallback (activated only if HTML5 audio fails to play on device)
+        function speakWithBrowserFallback(text) {
+            if (!text || typeof window === 'undefined' || !window.speechSynthesis) {
+                setTimeout(() => { if (isCallActive) setCallState("LISTENING"); }, 300);
+                return;
+            }
+            try {
+                window.speechSynthesis.cancel();
+                const u = new SpeechSynthesisUtterance(text);
+                u.lang = currentLanguage || 'ur-PK';
+                u.rate = 1.05;
+                u.onend = () => {
+                    setTimeout(() => { if (isCallActive) setCallState("LISTENING"); }, 300);
+                };
+                u.onerror = () => {
+                    if (isCallActive) setCallState("LISTENING");
+                };
+                window.speechSynthesis.speak(u);
+            } catch (_) {
+                if (isCallActive) setCallState("LISTENING");
+            }
         }
 
         // Room ID is kept strictly clean (digits only) on both mobile and dashboard
@@ -473,7 +519,8 @@
         let customerAudioPollInterval = null;
 
         function unlockPersistentRemotePlayer() {
-            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
+            unlockMobileAudio();
+            const player = document.getElementById('ai-voice-player') || document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer');
             if (!player) return;
             try {
                 player.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
@@ -571,6 +618,7 @@
         // ===================================================================
         function executeJoinFlow(e) {
             if (e && e.stopPropagation) e.stopPropagation();
+            unlockMobileAudio();
             if (isCallActive) return;
 
             const overlay = document.getElementById('connectOverlay');
@@ -838,7 +886,10 @@
                 if (rms > 0.02) {
                     setStatus('Listening to you...');
                     setWaveAnimation(true);
-                    userHasSpoken = true;
+                    if (!userHasSpoken) {
+                        userHasSpoken = true;
+                        window.speechStartEpoch = Date.now();
+                    }
                     silenceDurationMs = 0;
 
                     if (mediaRecorder && mediaRecorder.state !== 'recording') {
@@ -850,13 +901,28 @@
                     }
                 } else {
                     if (userHasSpoken) {
+                        // BUG 4: 3.5s Hard Max Turn Cap for instant mobile turn-taking without hanging
+                        const speechElapsed = Date.now() - (window.speechStartEpoch || Date.now());
+                        if (speechElapsed >= 3500) {
+                            userHasSpoken = false;
+                            silenceDurationMs = 0;
+                            if (STATE === "LISTENING" && !inFlightRequest) {
+                                setCallState("PROCESSING");
+                                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                                    try { mediaRecorder.stop(); } catch (_) {}
+                                }
+                            }
+                            return;
+                        }
+
                         silenceDurationMs += 100;
-                        if (silenceDurationMs >= 650) {
+                        // BUG 4: 400ms silence detection for sub-second mobile response
+                        if (silenceDurationMs >= 400) {
                             userHasSpoken = false;
                             silenceDurationMs = 0;
                             if (STATE !== "LISTENING" || inFlightRequest) return;
 
-                            // 650ms VAD silence reached: advance to PROCESSING and lock hardware mic
+                            // 400ms VAD silence reached: advance to PROCESSING and lock hardware mic
                             setCallState("PROCESSING");
 
                             if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -915,6 +981,21 @@
                         const tb = document.getElementById('transcriptBox');
                         if (tb) {
                             tb.innerHTML = `<span style="color:#cbd5e1;"><b>You:</b> ${escapeHtml(liveSpeech)}</span>`;
+                        }
+
+                        // BUG 4: Immediate trigger when speech recognizer produces final sentence
+                        if (finalTranscript && finalTranscript.trim() && userHasSpoken) {
+                            userHasSpoken = false;
+                            silenceDurationMs = 0;
+                            if (STATE === "LISTENING" && !inFlightRequest) {
+                                setCallState("PROCESSING");
+                                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                                    try { mediaRecorder.stop(); } catch (_) {}
+                                } else {
+                                    sendLiveVoicePayload({ text: liveSpeech, turnId: ++currentTurnId });
+                                    latestInterimTranscript = '';
+                                }
+                            }
                         }
                     }
                 };
@@ -1010,6 +1091,7 @@
                         return;
                     }
                     const reply = data.reply_text || data.replyText || data.reply || 'Jee bilkul.';
+                    lastAiSpokenReply = reply;
                     callHistory.push({ role: 'assistant', text: reply });
 
                     const tb = document.getElementById('transcriptBox');
@@ -1029,9 +1111,27 @@
             }
         }
 
+        // BUG 4: Tap to Send / Speak Now push-to-talk override function
+        function forceDispatchTurn() {
+            if (STATE === "SPEAKING") return;
+            unlockMobileAudio();
+            userHasSpoken = false;
+            silenceDurationMs = 0;
+            setCallState("PROCESSING");
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                try { mediaRecorder.stop(); } catch (_) {}
+            } else if (latestInterimTranscript) {
+                sendLiveVoicePayload({ text: latestInterimTranscript, turnId: ++currentTurnId });
+                latestInterimTranscript = '';
+            }
+        }
+        window.forceDispatchTurn = forceDispatchTurn;
+
         // ===================================================================
-        // 8. STRICT SINGLETON NEURAL VOICE PLAYBACK
+        // 8. STRICT SINGLETON NEURAL VOICE PLAYBACK (BUG 3: MOBILE AUDIO PLAYER)
         // ===================================================================
+        let lastAiSpokenReply = "Jee bilkul.";
+
         function playNeuralVoiceResponse(audioBase64) {
             if (!isCallActive) return;
             setCallState("SPEAKING");
@@ -1047,9 +1147,7 @@
             }
 
             if (!audioBase64 || !String(audioBase64).trim()) {
-                setTimeout(() => {
-                    if (isCallActive) setCallState("LISTENING");
-                }, 500);
+                speakWithBrowserFallback(lastAiSpokenReply);
                 return;
             }
 
@@ -1059,13 +1157,16 @@
             else if (b64.startsWith('UklG')) mime = 'audio/wav';
 
             const uri = b64.startsWith('data:') ? b64 : (`data:${mime};base64,` + b64);
-            const player = document.getElementById('remoteVoicePlayer') || document.getElementById('audioPlayer') || new Audio();
+            // BUG 3: Always reuse persistent ai-voice-player DOM element
+            const player = document.getElementById('ai-voice-player') || document.getElementById('remoteVoicePlayer');
             window.currentAiAudio = player;
             window.isAiSpeaking = true;
 
             const onDone = () => {
-                player.onended = null;
-                player.onerror = null;
+                if (player) {
+                    player.onended = null;
+                    player.onerror = null;
+                }
                 window.currentAiAudio = null;
                 window.isAiSpeaking = false;
                 setWaveAnimation(false);
@@ -1079,14 +1180,24 @@
                 }, 300);
             };
 
-            player.onended = onDone;
-            player.onerror = onDone;
-            player.src = uri;
-            player.currentTime = 0;
+            if (player) {
+                player.onended = onDone;
+                player.onerror = () => {
+                    console.warn('[Mobile HTML5 Audio Error, falling back to speech synthesis]');
+                    speakWithBrowserFallback(lastAiSpokenReply);
+                };
+                player.src = uri;
+                player.currentTime = 0;
 
-            const playPromise = player.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(onDone);
+                const playPromise = player.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch((err) => {
+                        console.warn('[Mobile Audio Autoplay blocked, falling back to browser speech]', err);
+                        speakWithBrowserFallback(lastAiSpokenReply);
+                    });
+                }
+            } else {
+                speakWithBrowserFallback(lastAiSpokenReply);
             }
         }
 

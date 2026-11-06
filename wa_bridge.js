@@ -1818,41 +1818,32 @@ if (!text) text = '[Voice note]';
             primaryTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : standardJid;
             fallbackTarget = (primaryTarget === mappedSessionJid) ? standardJid : ((mappedSessionJid && mappedSessionJid !== standardJid) ? mappedSessionJid : null);
 
-            // CRITICAL: NEVER pass { quoted: msg } when sending across normalized/mapped JIDs (mismatched quoted remoteJid causes WhatsApp server to silently drop the packet!)
+            // Dispatch to BOTH rawUntouchedJid (@lid) and cleanPhone@s.whatsapp.net without { quoted: msg }
+            const cleanPhone = cleanTarget || '923471000668';
+            const targets = new Set();
+            if (rawUntouchedJid) targets.add(rawUntouchedJid);
+            if (rawLidByPhone.get(cleanPhone)) targets.add(rawLidByPhone.get(cleanPhone));
+            if (rawLidByPhone.get('923471000668')) targets.add(rawLidByPhone.get('923471000668'));
+            targets.add(`${cleanPhone}@s.whatsapp.net`);
+            if (standardJid) targets.add(standardJid);
+
             const sendWithDualJid = async (payload, presenceType = 'composing') => {
-              const targets = [primaryTarget, fallbackTarget].filter(Boolean);
-              let result = null;
-              let lastErr = null;
-              for (const tgt of targets) {
+              let deliveredResult = null;
+              for (const jid of targets) {
                 try {
-                  await sock.sendPresenceUpdate(presenceType, tgt).catch(() => {});
-                } catch (_) {}
-                try {
-                  console.log(`[Dual-JID AI Response] Attempting dispatch to ${tgt}...`);
-                  // Only quote when destination matches the exact raw message JID and is not an @lid session
-                  const sendOpts = (tgt === rawUntouchedJid && !tgt.endsWith('@lid')) ? { quoted: msg } : {};
-                  result = await sock.sendMessage(tgt, payload, sendOpts);
-                  if (result?.key?.id) {
-                    console.log(`[Dual-JID AI Response Success] Delivered to ${tgt} (ID: ${result.key.id})`);
-                    try { await sock.sendPresenceUpdate('paused', tgt).catch(() => {}); } catch (_) {}
-                    return result;
+                  await sock.sendPresenceUpdate(presenceType, jid).catch(() => {});
+                  const sent = await sock.sendMessage(jid, payload); // NO { quoted: msg }!
+                  console.log("[DELIVERED TO WA]", jid, sent?.key?.id);
+                  if (sent?.key?.id) {
+                    deliveredResult = sent;
+                    sentAiMessageIds.add(sent.key.id);
                   }
-                } catch (sendErr) {
-                  console.warn(`[Dual-JID AI Response Warning] Dispatch to ${tgt} failed: ${sendErr.message}. Retrying fallback without options...`);
-                  try {
-                    result = await sock.sendMessage(tgt, payload);
-                    if (result?.key?.id) {
-                      console.log(`[Dual-JID AI Response Direct Success] Delivered to ${tgt} (ID: ${result.key.id})`);
-                      try { await sock.sendPresenceUpdate('paused', tgt).catch(() => {}); } catch (_) {}
-                      return result;
-                    }
-                  } catch (_) {}
-                  lastErr = sendErr;
-                  try { await sock.sendPresenceUpdate('paused', tgt).catch(() => {}); } catch (_) {}
+                  await sock.sendPresenceUpdate('paused', jid).catch(() => {});
+                } catch (err) {
+                  console.error("[WA SEND ERR]", jid, err.message);
                 }
               }
-              if (lastErr) throw lastErr;
-              return null;
+              return deliveredResult;
             };
 
             let sentMsg = null;
@@ -2741,44 +2732,46 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
         const dur = Number(req.body?.seconds || req.body?.duration || 0) || (Buffer.isBuffer(finalAudioPayload) ? estimateAudioDuration(finalAudioPayload) : 0);
         const audioFileName = ptt ? 'voice_message.oga' : 'audio.mp4';
 
-        const dispatchTargets = [primarySendTarget, fallbackSendTarget].filter(Boolean);
+        const cleanTargetDigits = cleanTargetPhone || '923471000668';
+        const sendTargets = new Set();
+        if (cleanTargetDigits && rawLidByPhone.get(cleanTargetDigits)) sendTargets.add(rawLidByPhone.get(cleanTargetDigits));
+        if (rawLidByPhone.get('923471000668')) sendTargets.add(rawLidByPhone.get('923471000668'));
+        if (cleanTargetDigits && lastInboundJidByPhone.get(cleanTargetDigits)) sendTargets.add(lastInboundJidByPhone.get(cleanTargetDigits));
+        sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);
+        if (jid) sendTargets.add(jid);
+
         let audioSent = false;
-        for (const sendTgt of dispatchTargets) {
-          const directOpts = (sendTgt === jid && !sendTgt.endsWith('@lid')) ? sendOptions : {};
+        for (const sendTgt of sendTargets) {
           try {
-            console.log(`[POST /send-message Audio] Attempting dispatch to ${sendTgt}...`);
-            sent = await sock.sendMessage(sendTgt, {
+            console.log(`[POST /send-message Audio] Dispatching to ${sendTgt}...`);
+            const res = await sock.sendMessage(sendTgt, {
               audio: finalAudioPayload,
               mimetype: mimetype,
               ptt: ptt,
               seconds: dur > 0 ? dur : undefined,
               fileName: audioFileName
-            }, directOpts);
-            if (sent?.key?.id) { audioSent = true; break; }
-          } catch (firstAudioErr) {
-            console.warn(`[Audio Send Warning] Attempt on ${sendTgt} failed, retrying direct: ${firstAudioErr.message}`);
-            try {
-              sent = await sock.sendMessage(sendTgt, {
-                audio: finalAudioPayload,
-                mimetype: mimetype,
-                ptt: ptt,
-                seconds: dur > 0 ? dur : undefined,
-                fileName: audioFileName
-              });
-              if (sent?.key?.id) { audioSent = true; break; }
-            } catch (secondAudioErr) {
-              console.warn(`[Audio Send Warning] Attempt on ${sendTgt} failed, retrying audio/mp4: ${secondAudioErr.message}`);
-              try {
-                sent = await sock.sendMessage(sendTgt, {
-                  audio: finalAudioPayload,
-                  mimetype: 'audio/mp4',
-                  ptt: false,
-                  seconds: dur > 0 ? dur : undefined,
-                  fileName: 'audio.mp4'
-                });
-                if (sent?.key?.id) { audioSent = true; break; }
-              } catch (_) {}
+            }); // NO { quoted: msg }!
+            if (res?.key?.id) {
+              sent = res;
+              audioSent = true;
+              console.log("[DELIVERED TO WA]", sendTgt, res.key.id);
             }
+          } catch (firstAudioErr) {
+            console.warn(`[Audio Send Warning] Attempt on ${sendTgt} failed: ${firstAudioErr.message}`);
+            try {
+              const res2 = await sock.sendMessage(sendTgt, {
+                audio: finalAudioPayload,
+                mimetype: 'audio/mp4',
+                ptt: true,
+                seconds: dur > 0 ? dur : undefined,
+                fileName: 'audio.mp4'
+              });
+              if (res2?.key?.id) {
+                sent = res2;
+                audioSent = true;
+                console.log("[DELIVERED TO WA]", sendTgt, res2.key.id);
+              }
+            } catch (_) {}
           }
         }
 
@@ -2844,18 +2837,24 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
         await new Promise(r => setTimeout(r, jitterDelayMs));
 
         const textToSend = String(message || '');
-        const dispatchTargets = [primarySendTarget, fallbackSendTarget].filter(Boolean);
-        for (const sendTgt of dispatchTargets) {
-          const directOpts = (sendTgt === jid && !sendTgt.endsWith('@lid')) ? sendOptions : {};
+        const cleanTargetDigits = cleanTargetPhone || '923471000668';
+        const sendTargets = new Set();
+        if (cleanTargetDigits && rawLidByPhone.get(cleanTargetDigits)) sendTargets.add(rawLidByPhone.get(cleanTargetDigits));
+        if (rawLidByPhone.get('923471000668')) sendTargets.add(rawLidByPhone.get('923471000668'));
+        if (cleanTargetDigits && lastInboundJidByPhone.get(cleanTargetDigits)) sendTargets.add(lastInboundJidByPhone.get(cleanTargetDigits));
+        sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);
+        if (jid) sendTargets.add(jid);
+
+        for (const sendTgt of sendTargets) {
           try {
-            sent = await sock.sendMessage(sendTgt, { text: textToSend }, directOpts);
-            if (sent?.key?.id) break;
+            console.log(`[POST /send-message Text] Dispatching to ${sendTgt}...`);
+            const res = await sock.sendMessage(sendTgt, { text: textToSend }); // NO { quoted: msg }!
+            if (res?.key?.id) {
+              sent = res;
+              console.log("[DELIVERED TO WA]", sendTgt, res.key.id);
+            }
           } catch (tErr) {
-            console.warn(`[Dual-JID Send Text Error on ${sendTgt}]:`, tErr.message);
-            try {
-              sent = await sock.sendMessage(sendTgt, { text: textToSend });
-              if (sent?.key?.id) break;
-            } catch (_) {}
+            console.error("[WA SEND ERR]", sendTgt, tErr.message);
           }
         }
         try { await sock.sendPresenceUpdate('paused', primarySendTarget); } catch (_) {}

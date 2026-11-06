@@ -7240,11 +7240,8 @@ class WhatsAppService:
     @classmethod
     def should_attach_call_link(cls, message_body: str, clean_phone: str, is_group: bool = False) -> bool:
         """Determines whether a Live Voice Call link should be attached to the AI response.
-        Attaches ONLY for:
-        1. Explicit customer requests for call/voice (e.g. 'call', 'voice', 'baat', 'phone').
-        2. Customer greetings/initial inquiries (e.g. 'hi', 'hello', 'salam', 'assalam').
-        Strictly never attaches to follow-up transactional turns (orders, tracking, payments)
-        to prevent hijacking the conversation flow.
+        Attaches ONLY for explicit customer requests to make a live voice call (e.g. 'call karo', 'call link bhejo').
+        Strictly NEVER attaches to greetings ('hi', 'hello', 'salam') or normal conversational inquiries!
         """
         if is_group:
             return False
@@ -7253,15 +7250,13 @@ class WhatsAppService:
             return False
         text = str(message_body or "").strip().lower()
         if not text:
-            return True
-        call_keywords = (
-            "call", "calling", "phone", "voice", "audio", "baat", "bol", "bolna",
-            "rabta", "talk", "speak", "live call", "livecall", "voice call"
+            return False
+        explicit_call_phrases = (
+            "call karo", "call karen", "call kijiye", "call karna", "call link", "call pe",
+            "phone karo", "phone pe", "voice call", "live call", "voice call link",
+            "call me", "audio call", "call link bhejo", "baat karni hai", "rabta karna"
         )
-        if any(re.search(rf"\b{re.escape(kw)}\b", text) for kw in call_keywords):
-            return True
-        greeting_keywords = ("hi", "hello", "salam", "assalam", "assalam-o-alaikum", "hey", "aao")
-        if any(text.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", text) for kw in greeting_keywords):
+        if any(p in text for p in explicit_call_phrases):
             return True
         return False
 

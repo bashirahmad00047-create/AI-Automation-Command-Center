@@ -45,8 +45,7 @@ class TestEndToEndLidAndVoice(unittest.TestCase):
         self.assertIn("rawLidByPhone", code)
         self.assertIn("rawUntouchedJid", code)
         self.assertIn("rawLidByPhone.set('923471000668', rawUntouchedJid)", code)
-        self.assertIn("primaryTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : standardJid", code)
-        self.assertIn("primarySendTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : jid", code)
+        self.assertIn("cleanPhone = cleanTarget || '923471000668'", code)
         self.assertIn("No message ID returned from Baileys socket", code)
 
     def test_live_call_3_state_machine(self):
@@ -57,9 +56,20 @@ class TestEndToEndLidAndVoice(unittest.TestCase):
         self.assertIn('setCallState("PROCESSING")', code)
         self.assertIn('setCallState("SPEAKING")', code)
         self.assertIn('setCallState("LISTENING")', code)
-        self.assertIn('window.speechSynthesis.speak = function()', code)
+        self.assertIn('ai-voice-player', code)
+        self.assertIn('speakWithBrowserFallback', code)
+        self.assertIn('btnTapToSend', code)
         self.assertIn('setHardwareMicEnabled(false)', code)
         self.assertIn('setHardwareMicEnabled(true)', code)
+
+    def test_should_not_attach_call_link_on_hi(self):
+        # BUG 2 verification: 'Hi' or 'Salam' should NOT attach call link
+        self.assertFalse(WhatsAppService.should_attach_call_link("Hi", "923471000668"))
+        self.assertFalse(WhatsAppService.should_attach_call_link("Salam", "923471000668"))
+        self.assertFalse(WhatsAppService.should_attach_call_link("Shilajit ke baare mein batayein", "923471000668"))
+        # Explicit call requests MUST attach call link
+        self.assertTrue(WhatsAppService.should_attach_call_link("call karo bhai", "923471000668"))
+        self.assertTrue(WhatsAppService.should_attach_call_link("call link bhejo", "923471000668"))
 
 
 if __name__ == "__main__":
