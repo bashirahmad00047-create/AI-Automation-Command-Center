@@ -5866,7 +5866,11 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
                 )
                 or bool(msg.get("is_voice"))
                 or bool(msg.get("is_audio"))
+                or bool(msg.get("send_as_voice"))
+                or bool(msg.get("is_voice_inbound"))
+                or bool(msg.get("ptt"))
                 or str(msg.get("message_type") or "").lower() in ("audio", "voice", "ptt", "audiomessage", "voicemessage")
+                or str(msg.get("type") or "").lower() in ("audio", "voice", "ptt", "audiomessage", "voicemessage")
             )
             try:
                 ai_reply = WhatsAppService.handle_inbound_auto_response(
@@ -5879,7 +5883,10 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
                     message_timestamp=msg.get("timestamp"),
                     is_voice=is_v,
                     is_audio=is_v,
+                    send_as_voice=is_v,
+                    is_voice_inbound=is_v,
                     reply_as_voice=is_v,
+                    ptt=is_v,
                     message_type=msg.get("message_type") or ("voiceMessage" if is_v else "text"),
                     download_url=msg.get("download_url"),
                     audio_base64=msg.get("audio_base64"),

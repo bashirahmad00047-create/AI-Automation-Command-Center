@@ -1815,6 +1815,9 @@ if (!text) text = '[Voice note]';
             parent_msg_id: quotedStanzaId,
             parent_message_id: quotedStanzaId,
             is_voice: isVoice || isAudio,
+            send_as_voice: isVoice || isAudio,
+            is_voice_inbound: isVoice || isAudio,
+            ptt: isVoice || isAudio,
             is_audio: isAudio,
             mimetype: isAudio ? 'audio/ogg' : undefined,
             mime_type: isAudio ? 'audio/ogg' : undefined,
@@ -1957,21 +1960,18 @@ if (!text) text = '[Voice note]';
                 primaryPayload = {
                   audio: audioBuf,
                   mimetype: 'audio/ogg; codecs=opus',
-                  ptt: true,
-                  fileName: 'voice_reply.oga'
+                  ptt: true
                 };
               } else {
                 primaryPayload = {
                   audio: audioBuf,
                   mimetype: 'audio/mp4',
-                  ptt: true,
-                  fileName: 'voice_reply.mp4'
+                  ptt: true
                 };
                 fallbackPayload = {
                   audio: audioBuf,
                   mimetype: 'audio/mp4',
-                  ptt: true,
-                  fileName: 'voice_reply.mp4'
+                  ptt: true
                 };
               }
 
@@ -1990,16 +1990,10 @@ if (!text) text = '[Voice note]';
                   } catch (_) {}
                 }
 
-                if (!sentMp4 && resData.reply) {
-                  try {
-                    sentMsg = await sendWithDualJid({ text: String(resData.reply) }, 'composing');
-                    if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
-                  } catch (fErr) {
-                    console.error('[Direct Bridge Fallback Text Failed]:', fErr.message);
-                  }
-                }
+                // Strictly avoid text fallback when incoming was a voice note
+                console.warn('[Direct Bridge Voice] Voice note dispatch failed, suppressing plain text reply.');
               }
-            } else if (resData.reply) {
+            } else if (resData.reply && !isVoice && !isAudio && !resData.send_as_voice && !resData.is_voice) {
               await new Promise(r => setTimeout(r, jitterMs));
               try {
                 sentMsg = await sendWithDualJid({ text: String(resData.reply) }, 'composing');
@@ -2700,21 +2694,18 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
           primaryAudioPayload = {
             audio: audioBuffer,
             mimetype: 'audio/ogg; codecs=opus',
-            ptt: true,
-            fileName: 'voice_message.oga'
+            ptt: true
           };
         } else {
           primaryAudioPayload = {
             audio: audioBuffer || { url: audioUrl },
             mimetype: 'audio/mp4',
-            ptt: true,
-            fileName: 'voice_message.mp4'
+            ptt: true
           };
           fallbackAudioPayload = {
             audio: audioBuffer || { url: audioUrl },
             mimetype: 'audio/mp4',
-            ptt: true,
-            fileName: 'audio.mp4'
+            ptt: true
           };
         }
 
@@ -2760,7 +2751,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
           }
         }
 
-        if (!sent && hasText) {
+        if (!sent && hasText && !ptt && !req.body?.send_as_voice && !req.body?.is_voice) {
           console.log('[Audio Send Fallback] Delivering text reply to WhatsApp since audio buffer dispatch failed...');
           for (const sendTgt of sendTargets) {
             try {

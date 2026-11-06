@@ -7139,8 +7139,8 @@ class WhatsAppService:
 
             # Send text reply:
             # - If inbound was NOT voice, send text reply!
-            # - If inbound was voice, ONLY send text fallback if audio synthesis completely failed and no audio was produced
-            if not is_voice_inbound:
+            # - When send_as_voice is True, strictly bypass text dispatch
+            if not is_voice_inbound and not send_as_voice:
                 try:
                     green_dispatch_res = cls.send_green_api_message(
                         organization_id=org_id,
@@ -8293,9 +8293,15 @@ class WhatsAppService:
         is_audio_detected = bool(
             data.get("is_audio")
             or data.get("is_voice")
-            or type_message in ("audio", "audioMessage", "voiceMessage", "ptt")
+            or data.get("send_as_voice")
+            or data.get("is_voice_inbound")
+            or data.get("ptt") is True
+            or str(data.get("type") or "").lower() in ("audio", "voice", "ptt", "audiomessage", "voicemessage")
+            or str(data.get("message_type") or "").lower() in ("audio", "voice", "ptt", "audiomessage", "voicemessage")
+            or str(type_message or "").lower() in ("audio", "audiomessage", "voicemessage", "ptt", "voice")
             or audio_base64
             or (clean_media_url and ("audio" in str(clean_media_url) or str(clean_media_url).endswith((".oga", ".ogg", ".opus", ".mp3", ".wav"))))
+            or bool(message_data.get("audioMessageData") or message_data.get("audioMessage") or message_data.get("voiceMessage") or message_data.get("pttMessage"))
         )
         duration = (
             data.get("duration")
@@ -8324,7 +8330,7 @@ class WhatsAppService:
             "display_phone_number": instance_data.get("wid", instance_id),
             "timestamp": timestamp,
             "message_type": final_msg_type,
-            "type": final_msg_type,
+            "type": "ptt" if is_audio_detected else final_msg_type,
             "body": body,
             "parent_msg_id": parent_msg_id,
             "download_url": clean_media_url,
@@ -8333,6 +8339,9 @@ class WhatsAppService:
             "audio_base64": audio_base64,
             "is_audio": is_audio_detected,
             "is_voice": is_audio_detected or bool(data.get("is_voice")),
+            "send_as_voice": is_audio_detected or bool(data.get("is_voice")),
+            "is_voice_inbound": is_audio_detected or bool(data.get("is_voice")),
+            "ptt": bool(is_audio_detected or data.get("ptt")),
             "location": location_info,
             "provider": "green_api",
             "raw": data
@@ -9880,8 +9889,10 @@ class WhatsAppService:
             if len(f_bytes) > 64:
                 import base64
                 bridge_payload["audioBase64"] = base64.b64encode(f_bytes).decode("ascii")
-                bridge_payload["ptt"] = bool(kwargs.get("ptt", True) or kwargs.get("is_voice", False))
-                bridge_payload["mimetype"] = kwargs.get("mime_type") or kwargs.get("mimetype") or "audio/ogg; codecs=opus"
+                bridge_payload["ptt"] = bool(kwargs.get("ptt", True) or kwargs.get("is_voice", False) or kwargs.get("send_as_voice", False))
+                bridge_payload["send_as_voice"] = bridge_payload["ptt"]
+                bridge_payload["is_voice"] = bridge_payload["ptt"]
+                bridge_payload["mimetype"] = "audio/ogg; codecs=opus"
                 out_msg_type = "voiceMessage" if bridge_payload["ptt"] else "audioMessage"
             else:
                 logger.warning(f"[WhatsApp Audio Delivery Guarantee] Audio buffer rejected ({len(f_bytes)} bytes <= 64). Delivering as text message.")
@@ -9933,7 +9944,7 @@ class WhatsAppService:
                         headers={"Content-Type": "application/json"},
                         timeout=bridge_timeout
                     )
-                if bridge_resp.status_code != 200 and f_bytes and bridge_message:
+                if bridge_resp.status_code != 200 and f_bytes and bridge_message and not kwargs.get("ptt") and not kwargs.get("is_voice") and not kwargs.get("send_as_voice"):
                     logger.warning(f"[Baileys Bridge Audio Fallback] Audio payload rejected ({bridge_resp.status_code}). Retrying with text...")
                     text_bridge_payload = {
                         "chatId": real_chat_id,
