@@ -46,7 +46,7 @@ class TestQrModalFlow(unittest.TestCase):
 
         # Check that canvas mode removes img src and hides img
         self.assertIn("img.removeAttribute('src')", code)
-        self.assertIn("qrCanvas.style.display = 'block'", code)
+        self.assertIn("primaryImg.style.display = 'block'", code)
         self.assertIn("qrCanvas.style.display = 'none'", code)
 
     def test_app_js_qr_functions_and_polling(self):

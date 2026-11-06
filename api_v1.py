@@ -2784,6 +2784,17 @@ def api_whatsapp_bridge_qr():
             is_connected = bool(data.get("connected") or data.get("status") == "connected")
             qr_val = data.get("qr")
             qr_img = data.get("qr_image") or data.get("qrUrl") or data.get("qrImageUrl")
+            if qr_val:
+                if not qr_img or not (str(qr_img).startswith("data:image/") or str(qr_img).startswith("http")):
+                    try:
+                        import qrcode, io, base64
+                        img_buf = io.BytesIO()
+                        q_img = qrcode.make(qr_val)
+                        q_img.save(img_buf, format="PNG")
+                        qr_img = "data:image/png;base64," + base64.b64encode(img_buf.getvalue()).decode("utf-8")
+                    except Exception:
+                        import urllib.parse
+                        qr_img = f"https://api.qrserver.com/v1/create-qr-code/?size=240x240&data={urllib.parse.quote(qr_val)}"
             return jsonify({
                 "success": True,
                 "status": data.get("status", "connected" if is_connected else ("qr_ready" if qr_val else "initializing")),
