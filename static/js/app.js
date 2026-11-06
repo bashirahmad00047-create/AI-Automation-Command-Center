@@ -41,20 +41,31 @@ const state = {
 // ==========================================
 
 document.addEventListener('DOMContentLoaded', () => {
-    initTheme();
-    initClock();
-    initEnterpriseSidebar();
-    initCommandPalette();
-    initAuthAndTenancy();
-    checkBillingUrlParams();
-    checkAuthUrlParams();
-    checkSystemReadiness();
-    refreshAllData();
+    // 1. Immediately bind window.switchTab and attach navigation listeners
+    window.switchTab = switchTab;
+    try { initNavigationListeners(); } catch (e) { console.warn('[Navigation listeners error]:', e); }
 
-    // Initialize real-time WebSocket connection and auto-sync
-    initWhatsAppSocket();
-    startWhatsAppAutoPoll(3000);
-    initWhatsAppChatBarListeners();
+    // 2. Activate default tab ('whatsapp' or URL hash) immediately
+    const initialHash = (window.location.hash || '').replace('#', '').trim();
+    const defaultTab = initialHash || 'whatsapp';
+    try { switchTab(defaultTab); } catch (e) { console.warn('[Default switchTab error]:', e); }
+
+    // 3. Safe subsystem inits with individual try-catches (no single subsystem error halts the UI)
+    try { initTheme(); } catch (e) { console.warn('[initTheme notice]:', e); }
+    try { initClock(); } catch (e) { console.warn('[initClock notice]:', e); }
+    try { initEnterpriseSidebar(); } catch (e) { console.warn('[initEnterpriseSidebar notice]:', e); }
+    try { initCommandPalette(); } catch (e) { console.warn('[initCommandPalette notice]:', e); }
+    try { initAuthAndTenancy(); } catch (e) { console.warn('[initAuthAndTenancy notice]:', e); }
+    try { checkBillingUrlParams(); } catch (e) { console.warn('[checkBillingUrlParams notice]:', e); }
+    try { checkAuthUrlParams(); } catch (e) { console.warn('[checkAuthUrlParams notice]:', e); }
+    try { checkSystemReadiness(); } catch (e) { console.warn('[checkSystemReadiness notice]:', e); }
+    try { refreshAllData(); } catch (e) { console.warn('[refreshAllData notice]:', e); }
+
+    // 4. Initialize real-time WebSocket connection and auto-sync
+    try { initWhatsAppSocket(); } catch (e) { console.warn('[initWhatsAppSocket notice]:', e); }
+    try { startWhatsAppAutoPoll(3000); } catch (e) { console.warn('[startWhatsAppAutoPoll notice]:', e); }
+    try { initWhatsAppChatBarListeners(); } catch (e) { console.warn('[initWhatsAppChatBarListeners notice]:', e); }
+
     // Auto-parse any GPS location in conversation messages and plot on Delivery Radar Map
     if (typeof partnerMsgs !== 'undefined' && Array.isArray(partnerMsgs)) {
         partnerMsgs.forEach(m => {
@@ -69,14 +80,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    initNavigationListeners();
-    syncWhatsAppHeaderAiBadge();
+
+    try { syncWhatsAppHeaderAiBadge(); } catch (e) { console.warn('[syncWhatsAppHeaderAiBadge notice]:', e); }
 
     // Telemetry and status poll with exponential backoff
-    scheduleNextTelemetry(500);
+    try { scheduleNextTelemetry(500); } catch (_) {}
 
     // Event stream & notifications poll with exponential backoff
-    scheduleNextNotifications(2000);
+    try { scheduleNextNotifications(2000); } catch (_) {}
 
     // Section 22 Performance: Immediate poll when user switches back to active tab
     document.addEventListener('visibilitychange', () => {
@@ -276,23 +287,34 @@ function refreshAllData() {
 // ==========================================
 
 function switchTab(tabId) {
+    if (!tabId) tabId = 'whatsapp';
     if (tabId === 'studio') tabId = 'rules';
     if (tabId === 'map') tabId = 'delivery-map';
-    state.currentTab = tabId;
-    updateBreadcrumb(tabId);
+    if (tabId === 'overview') tabId = 'dashboard';
+    if (typeof state !== 'undefined' && state) {
+        state.currentTab = tabId;
+    }
+    if (typeof updateBreadcrumb === 'function') {
+        try { updateBreadcrumb(tabId); } catch (_) {}
+    }
 
-    document.querySelectorAll('.hud-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    // 1. Remove active class from all tabs & buttons
+    document.querySelectorAll('.hud-tab, [data-tab], .sidebar-item').forEach(t => t.classList.remove('active'));
+    // 2. Remove active class from all panels
+    document.querySelectorAll('.tab-panel, [id^="tab-"]').forEach(p => p.classList.remove('active'));
 
-    const tabButtons = document.querySelectorAll('.hud-tab');
+    // 3. Activate all matching navigation buttons
+    const tabButtons = document.querySelectorAll('.hud-tab, [data-tab], [onclick*="switchTab"]');
     tabButtons.forEach(btn => {
         const oc = btn.getAttribute('onclick') || '';
-        if (oc.includes(tabId) || (tabId === 'delivery-map' && (oc.includes('map') || oc.includes('delivery-map')))) {
+        const dTab = btn.getAttribute('data-tab') || '';
+        if (dTab === tabId || oc.includes(`'${tabId}'`) || oc.includes(`"${tabId}"`) || (tabId === 'delivery-map' && (dTab === 'map' || oc.includes('map')))) {
             btn.classList.add('active');
         }
     });
 
-    let activePanel = document.getElementById(`tab-${tabId}`);
+    // 4. Activate the corresponding panel
+    let activePanel = document.getElementById(`tab-${tabId}`) || document.getElementById(`panel-${tabId}`);
     if (!activePanel && (tabId === 'delivery-map' || tabId === 'map')) {
         activePanel = document.getElementById('tab-delivery-map') || document.getElementById('tab-map');
     }
@@ -373,6 +395,7 @@ function switchTab(tabId) {
         if (typeof refreshInterconnectedStream === 'function') refreshInterconnectedStream();
     }
 }
+window.switchTab = switchTab;
 
 // ==========================================
 // TELEMETRY & SYSTEM HEALTH
@@ -6756,20 +6779,25 @@ function insertTemplateReply(text) {
 
 function initNavigationListeners() {
     if (typeof document === 'undefined') return;
-    document.querySelectorAll('.hud-tab').forEach(tab => {
-        const onclickAttr = tab.getAttribute('onclick');
-        if (onclickAttr && onclickAttr.includes('switchTab')) {
+    document.querySelectorAll('.hud-tab, [data-tab], [onclick*="switchTab"]').forEach(tab => {
+        const dTab = tab.getAttribute('data-tab');
+        const onclickAttr = tab.getAttribute('onclick') || '';
+        let tabId = dTab;
+        if (!tabId && onclickAttr.includes('switchTab')) {
             const match = onclickAttr.match(/switchTab\(['"]([^'"]+)['"]\)/);
-            if (match && match[1]) {
-                const tabId = match[1];
-                tab.addEventListener('click', (e) => {
+            if (match && match[1]) tabId = match[1];
+        }
+        if (tabId) {
+            tab.addEventListener('click', (e) => {
+                if (tab.tagName !== 'A' || !tab.getAttribute('href') || tab.getAttribute('href') === '#') {
                     e.preventDefault();
-                    switchTab(tabId);
-                });
-            }
+                }
+                switchTab(tabId);
+            });
         }
     });
 }
+window.initNavigationListeners = initNavigationListeners;
 
 function initWhatsAppChatBarListeners() {
     if (typeof document === 'undefined') return;

@@ -10,6 +10,52 @@
                 };
             } catch (_) {}
         }
+
+        // Global Early Tab Navigation & Fallback Controller
+        function earlySwitchTab(tabId) {
+            if (!tabId) tabId = 'whatsapp';
+            if (tabId === 'studio') tabId = 'rules';
+            if (tabId === 'map') tabId = 'delivery-map';
+            if (tabId === 'overview') tabId = 'dashboard';
+
+            // 1. Remove active class from all tabs
+            var allTabs = document.querySelectorAll('.hud-tab, [data-tab], .sidebar-item');
+            for (var i = 0; i < allTabs.length; i++) {
+                allTabs[i].classList.remove('active');
+            }
+
+            // 2. Remove active class from all panels
+            var allPanels = document.querySelectorAll('.tab-panel, [id^="tab-"]');
+            for (var j = 0; j < allPanels.length; j++) {
+                allPanels[j].classList.remove('active');
+            }
+
+            // 3. Activate matching buttons
+            for (var k = 0; k < allTabs.length; k++) {
+                var btn = allTabs[k];
+                var oc = btn.getAttribute('onclick') || '';
+                var dTab = btn.getAttribute('data-tab') || '';
+                if (dTab === tabId || oc.indexOf("'" + tabId + "'") !== -1 || oc.indexOf('"' + tabId + '"') !== -1 || (tabId === 'delivery-map' && (dTab === 'map' || oc.indexOf('map') !== -1))) {
+                    btn.classList.add('active');
+                }
+            }
+
+            // 4. Activate matching panel
+            var activePanel = document.getElementById('tab-' + tabId) || document.getElementById('panel-' + tabId);
+            if (!activePanel && (tabId === 'delivery-map' || tabId === 'map')) {
+                activePanel = document.getElementById('tab-delivery-map') || document.getElementById('tab-map');
+            }
+            if (activePanel) {
+                activePanel.classList.add('active');
+            }
+        }
+        window.switchTab = earlySwitchTab;
+
+        // Auto-activate default tab ('whatsapp') on initial DOM ready
+        document.addEventListener('DOMContentLoaded', function() {
+            var hashTab = (window.location.hash || '').replace('#', '').trim();
+            window.switchTab(hashTab || 'whatsapp');
+        });
     </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
