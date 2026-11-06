@@ -14,7 +14,7 @@ class TestQrModalFlow(unittest.TestCase):
         # Check modal structure and elements
         self.assertIn('id="linkWhatsAppQrModal"', html)
         self.assertIn('id="waQrCodeBox"', html)
-        self.assertIn('width: 248px; height: 248px;', html)
+        self.assertIn('width: 240px; height: 240px;', html)
         self.assertIn('id="qr-code-img"', html)
         self.assertIn('id="bridgeQrImage"', html)
         self.assertIn('id="qr-code-canvas"', html)
@@ -37,7 +37,7 @@ class TestQrModalFlow(unittest.TestCase):
             html = f.read()
 
         # Check that qr-code-img starts with display: none and no broken src="" attribute
-        self.assertIn('<img id="qr-code-img" class="qr-code-img" alt="WhatsApp Link QR Code" style="display: none;', html)
+        self.assertIn('<img id="qr-code-img" class="qr-code-img" alt="" style="display: none;', html)
         self.assertNotIn('<img id="qr-code-img" class="qr-code-img" src=""', html)
 
         app_js_path = os.path.join(self.repo_dir, "static", "js", "app.js")
