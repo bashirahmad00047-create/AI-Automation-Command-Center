@@ -5800,12 +5800,17 @@ async function fetchBridgeQrCode(forceRefresh = false) {
                     clearInterval(waBridgeQrPollTimer);
                     waBridgeQrPollTimer = null;
                 }
-                if (mainBody) mainBody.style.display = 'none';
-                if (connectedState) {
-                    connectedState.style.display = 'block';
-                    if (connectedNumber) {
-                        connectedNumber.textContent = phone ? `Your linked phone: +${String(phone).replace(/\D/g, '')} is active & permanent.` : 'Your device is active and permanently synced for unlimited free messaging & AI automation.';
-                    }
+                if (typeof closeQrModal === 'function') {
+                    closeQrModal();
+                }
+                if (typeof showHudToast === 'function') {
+                    showHudToast(`WhatsApp Connected!${phone ? ' (+' + String(phone).replace(/\D/g, '') + ')' : ''}`, 'success');
+                }
+                if (typeof switchTab === 'function') {
+                    switchTab('whatsapp');
+                }
+                if (typeof loadWhatsAppDashboard === 'function') {
+                    loadWhatsAppDashboard();
                 }
                 return;
             } else {

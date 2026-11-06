@@ -2778,7 +2778,7 @@ def api_whatsapp_bridge_qr():
     bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://127.0.0.1:3001/qr")
     try:
         params = {"force_refresh": "true"} if force_refresh else None
-        resp = requests.get(bridge_url, params=params, timeout=5.0)
+        resp = requests.get(bridge_url, params=params, timeout=8.0)
         if resp.status_code == 200 and resp.text:
             data = resp.json()
             is_connected = bool(data.get("connected") or data.get("status") == "connected")
@@ -2816,7 +2816,8 @@ def api_whatsapp_bridge_qr():
                 "qrUrl": None,
                 "message": "WhatsApp Baileys bridge is initializing... Please wait 3-5 seconds."
             }), 200
-    except Exception as e:
+    except requests.exceptions.Timeout:
+        logger.warning("[WA Bridge] /qr request timed out waiting for bridge response")
         return jsonify({
             "success": True,
             "status": "initializing",
@@ -2824,7 +2825,18 @@ def api_whatsapp_bridge_qr():
             "qr": None,
             "qr_image": None,
             "qrUrl": None,
-            "message": f"WhatsApp Baileys bridge is initializing... ({str(e)})"
+            "message": "Connecting to WhatsApp bridge (generating QR code)..."
+        }), 200
+    except Exception as e:
+        logger.warning(f"[WA Bridge] /qr fetch error: {e}")
+        return jsonify({
+            "success": True,
+            "status": "initializing",
+            "connected": False,
+            "qr": None,
+            "qr_image": None,
+            "qrUrl": None,
+            "message": "Connecting to WhatsApp bridge (generating QR code)..."
         }), 200
 
 

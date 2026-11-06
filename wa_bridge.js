@@ -343,30 +343,14 @@ function triggerSessionClear() {
 }
 
 async function tryRestoreFromPythonBackend() {
-  // 1. Immediate direct Python database restore (zero HTTP latency)
-  try {
-    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
-    const pyScript = "import os; os.environ['SKIP_WA_BRIDGE_INIT']='1'; from wa_bridge_manager import restore_wa_session_from_db; res = restore_wa_session_from_db(); print('CLI_RESTORE=' + str(res))";
-    const cliOutput = execSync(`${pythonCmd} -c "${pyScript}"`, {
-      cwd: path.resolve(__dirname),
-      timeout: 3000,
-      encoding: 'utf8',
-      env: process.env
-    });
-    if (cliOutput && cliOutput.includes('CLI_RESTORE=True')) {
-      console.log('[WhatsApp Bridge] Restored permanent session directly from database via Python CLI!');
-      return true;
-    }
-  } catch (_) {}
-
-  // 2. Fast single-shot HTTP session-restore check (max 2 seconds)
+  // Fast non-blocking async HTTP session-restore check (max 1.5s, no blocking execSync)
   const tenantId = encodeURIComponent(process.env.TENANT_ID || 'default');
   try {
     const restoreUrl = `${getBackendBaseUrl()}/api/v1/whatsapp/session-restore?tenant_id=${tenantId}`;
     const res = await fetch(restoreUrl, {
       method: 'GET',
       headers: { 'X-Internal-Bridge': '1' },
-      signal: AbortSignal.timeout(2000)
+      signal: AbortSignal.timeout(1500)
     });
     if (res.ok) {
       const data = await res.json().catch(() => null);
@@ -2264,8 +2248,8 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
         startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Auto-start on /qr error:', e.message));
       }
 
-      // Poll up to 2.8 seconds to capture fresh QR or connection state before sending response
-      for (let i = 0; i < 28; i++) {
+      // Poll up to 1.5 seconds to capture fresh QR or connection state before sending response
+      for (let i = 0; i < 15; i++) {
         if (currentQr || isSocketGenuinelyConnected()) break;
         await new Promise(r => setTimeout(r, 100));
       }
