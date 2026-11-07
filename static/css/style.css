@@ -5002,6 +5002,113 @@ pre, code, .hud-code-snippet, .raw-json-viewer {
 }
 
 /* ==========================================================================
+   20b. ULTRA COMPACT MOBILE RESPONSIVENESS (< 380px) - iPhone SE & Foldables
+   ========================================================================== */
+@media (max-width: 380px) {
+    html, body {
+        overflow-x: hidden !important;
+        font-size: 13px !important;
+    }
+
+    .main-content,
+    .enterprise-content-area {
+        padding: 8px 4px !important;
+    }
+
+    /* Topbar adjustments */
+    .topbar-container {
+        padding: 4px 6px !important;
+        height: 48px !important;
+    }
+    .topbar-brand-title {
+        font-size: 12px !important;
+        max-width: 130px !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+    .topbar-right {
+        gap: 4px !important;
+    }
+    .topbar-btn,
+    .hud-btn {
+        padding: 4px 6px !important;
+        font-size: 11px !important;
+        min-height: 30px !important;
+    }
+
+    /* WhatsApp Web Chat Interface on Compact Screens */
+    .whatsapp-web-container,
+    .wa-main-layout {
+        flex-direction: column !important;
+        height: calc(100vh - 100px) !important;
+        overflow: hidden !important;
+    }
+
+    .whatsapp-conversations-sidebar.mobile-hidden,
+    .wa-chat-list-panel.mobile-hidden {
+        display: none !important;
+    }
+
+    .whatsapp-chat-main-area.mobile-fullscreen,
+    .wa-chat-detail-panel.mobile-fullscreen {
+        display: flex !important;
+        width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+
+    .wa-mobile-back-btn {
+        display: inline-flex !important;
+        align-items: center !important;
+        background: transparent !important;
+        border: none !important;
+        color: var(--cyan-glow, #06b6d4) !important;
+        font-weight: 600 !important;
+        font-size: 13px !important;
+        padding: 4px 8px !important;
+        margin-right: 6px !important;
+        cursor: pointer !important;
+    }
+
+    .wa-chat-footer,
+    .wa-input-bar {
+        padding: 6px 4px !important;
+        gap: 4px !important;
+    }
+
+    .wa-chat-input-wrapper input {
+        font-size: 13px !important;
+        padding: 8px 10px !important;
+    }
+
+    .wa-send-btn,
+    .wa-ptt-record-btn {
+        width: 34px !important;
+        height: 34px !important;
+        min-width: 34px !important;
+        padding: 4px !important;
+    }
+
+    /* Modal dialogs on <=380px */
+    .modal-box,
+    .modal-content,
+    .hud-modal {
+        width: 95vw !important;
+        max-width: 95vw !important;
+        padding: 12px 10px !important;
+        margin: 10px auto !important;
+    }
+
+    /* QR Code Canvas on Small Phones */
+    #qrImageWrapper,
+    #qr-code-canvas,
+    #qr-code-img {
+        max-width: 220px !important;
+        max-height: 220px !important;
+    }
+}
+
+/* ==========================================================================
    21. ACCESSIBILITY & VISIBLE FOCUS STATES
    ========================================================================== */
 :focus-visible {
