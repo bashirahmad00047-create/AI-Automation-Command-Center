@@ -2675,18 +2675,8 @@ class WhatsAppService:
         text: str,
         language: Optional[str] = None,
         organization_id: Optional[str] = None,
-        output_format: str = "mp3"
+        output_format: str = 'mp3'
     ) -> Optional[Tuple[bytes, str, str]]:
-        """Synthesizes text into ultra-realistic HD human spoken audio bytes.
-
-        Supported providers in order of precedence:
-        1. Microsoft Edge Neural HD Voice (ur-PK-UzmaNeural / en-US-AvaNeural) - Primary for all Urdu/English voice notes
-        2. ElevenLabs Multilingual Neural TTS fallback
-        3. OpenAI Audio Speech API (tts-1-hd) fallback
-        4. Local gTTS (Google Text-to-Speech) fallback
-
-        Returns (audio_bytes, filename, mime_type) or None if no TTS capability is available.
-        """
         if not text or not str(text).strip():
             return None
 
@@ -2695,150 +2685,36 @@ class WhatsAppService:
         if not clean_text:
             clean_text = str(text).strip()
 
-        is_oga = (
-            output_format.lower() in ("oga", "ogg", "opus")
-            or (language and ("ur" in language.lower() or "urdu" in language.lower()))
-        )
-        audio_fn = "voice_reply.oga" if is_oga else "voice_reply.mp3"
-        audio_mt = "audio/ogg; codecs=opus" if is_oga else "audio/mpeg"
-
-        # 1. Primary: Microsoft Edge Neural HD Voice with 4.0s timeout
         try:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                edge_bytes = pool.submit(
-                    cls._synthesize_edge_tts,
-                    clean_text[:500],
-                    language=language,
-                    organization_id=organization_id
-                ).result(timeout=4.0)
+            from services.voice_engine import generate_spoken_audio as engine_generate_audio
+            res = engine_generate_audio(
+                text=clean_text,
+                language=language,
+                organization_id=organization_id,
+                output_format=output_format
+            )
+            if res and res[0] and len(res[0]) > 64:
+                return res
+        except Exception as e:
+            logger.debug(f'[TTS Pipeline] voice_engine dispatch notice: {e}')
+
+        try:
+            is_oga = (
+                output_format.lower() in ('oga', 'ogg', 'opus')
+                or (language and ('ur' in language.lower() or 'urdu' in language.lower()))
+            )
+            edge_bytes = cls._synthesize_edge_tts(clean_text[:500], language=language, organization_id=organization_id)
             if edge_bytes and len(edge_bytes) > 64:
                 ogg_converted = cls.convert_mp3_to_ogg_opus(edge_bytes)
-                if ogg_converted and ogg_converted[:4] == b"OggS":
-                    logger.info(f"[TTS Pipeline] Converted Edge-TTS to strict WhatsApp OGG Opus ({len(ogg_converted)} bytes).")
-                    return (ogg_converted, "voice_reply.oga", "audio/ogg; codecs=opus")
-                logger.info(f"[TTS Pipeline] Edge-TTS synthesized native MP3 ({len(edge_bytes)} bytes).")
-                return (edge_bytes, "voice_reply.mp3", "audio/mp4")
-        except Exception as e_err:
-            logger.debug(f"[TTS Pipeline] Edge-TTS notice: {e_err}")
+                if ogg_converted and ogg_converted[:4] == b'OggS':
+                    return (ogg_converted, 'voice_reply.oga', 'audio/ogg; codecs=opus')
+                return (edge_bytes, 'voice_reply.mp3', 'audio/mp4')
+        except Exception as e_fb:
+            logger.debug(f'[TTS Pipeline] Edge-TTS direct fallback notice: {e_fb}')
 
-        # 1b. Guaranteed Instant gTTS Fallback with OGG Opus conversion
-        try:
-            from gtts import gTTS
-            import io
-            g_lang = "ur" if (language and ("ur" in language.lower() or "urdu" in language.lower())) else "en"
-            tts = gTTS(text=clean_text[:500], lang=g_lang)
-            buf = io.BytesIO()
-            tts.write_to_fp(buf)
-            g_bytes = buf.getvalue()
-            if g_bytes and len(g_bytes) > 64:
-                ogg_converted = cls.convert_mp3_to_ogg_opus(g_bytes)
-                if ogg_converted and ogg_converted[:4] == b"OggS":
-                    logger.info(f"[TTS Pipeline] gTTS fallback converted to strict WhatsApp OGG Opus ({len(ogg_converted)} bytes).")
-                    return (ogg_converted, "voice_reply.oga", "audio/ogg; codecs=opus")
-                return (g_bytes, "voice_reply.mp3", "audio/mp4")
-        except Exception as g_err:
-            logger.debug(f"[TTS Pipeline] gTTS fallback notice: {g_err}")
-
-        # 2. Secondary fallback: ElevenLabs Multilingual Neural TTS
-        eleven_bytes = cls._synthesize_elevenlabs_tts(clean_text[:1000], organization_id=organization_id)
-        if eleven_bytes and len(eleven_bytes) > 1024:
-            ogg_converted = cls.convert_mp3_to_ogg_opus(eleven_bytes)
-            if ogg_converted and ogg_converted[:4] == b"OggS":
-                return (ogg_converted, "voice_reply.oga", "audio/ogg; codecs=opus")
-            return (eleven_bytes, "voice_reply.mp3", "audio/mpeg")
-
-        # 3. Tertiary fallback: OpenAI HD Audio Speech API (model 'tts-1-hd')
-        openai_key = cls.get_openai_api_key(organization_id=organization_id)
-        if openai_key and str(openai_key).strip():
-            try:
-                import requests
-                voice_choice = (
-                    cls._get_tenant_or_global_setting("OPENAI_TTS_VOICE", organization_id=organization_id)
-                    or os.environ.get("OPENAI_TTS_VOICE")
-                    or "onyx"
-                ).strip().lower()
-                if voice_choice not in ("onyx", "nova", "alloy", "echo", "fable", "shimmer"):
-                    voice_choice = "onyx"
-
-                speed_val = 1.0
-                speed_str = (
-                    cls._get_tenant_or_global_setting("OPENAI_TTS_SPEED", organization_id=organization_id)
-                    or os.environ.get("OPENAI_TTS_SPEED")
-                )
-                if speed_str:
-                    try:
-                        speed_val = float(speed_str)
-                    except (ValueError, TypeError):
-                        speed_val = 1.0
-
-                openai_payload = {
-                    "model": "tts-1-hd",
-                    "input": clean_text[:1000],
-                    "voice": voice_choice,
-                    "speed": speed_val,
-                    "response_format": "opus" if is_oga else "mp3"
-                }
-                headers = {
-                    "Authorization": f"Bearer {str(openai_key).strip()}",
-                    "Content-Type": "application/json"
-                }
-                resp = requests.post(
-                    "https://api.openai.com/v1/audio/speech",
-                    headers=headers,
-                    json=openai_payload,
-                    stream=True,
-                    timeout=5.0
-                )
-                if resp.status_code == 200:
-                    chunks = []
-                    if hasattr(resp, "iter_content"):
-                        try:
-                            for chunk in resp.iter_content(chunk_size=4096):
-                                if chunk:
-                                    chunks.append(chunk)
-                        except Exception:
-                            pass
-                    audio_bytes = b"".join(chunks) if chunks else getattr(resp, "content", b"")
-                    if audio_bytes and len(audio_bytes) > 1024:
-                        logger.info(f"OpenAI tts-1-hd voice '{voice_choice}' successfully synthesized {len(audio_bytes)} streaming bytes of natural Urdu audio.")
-                        return (audio_bytes, audio_fn, audio_mt)
-            except Exception as e:
-                logger.debug(f"OpenAI TTS-1-HD synthesis failed: {e}")
-
-        # 4. Local gTTS synthesis (last-resort emergency fallback)
-        try:
-            from gtts import gTTS
-            import io
-            lang_code = "en"
-            if language:
-                l_lower = language.lower()
-                if "urdu" in l_lower or l_lower == "ur":
-                    lang_code = "ur"
-                elif "arabic" in l_lower or l_lower == "ar":
-                    lang_code = "ar"
-                elif "spanish" in l_lower or l_lower == "es":
-                    lang_code = "es"
-                elif "french" in l_lower or l_lower == "fr":
-                    lang_code = "fr"
-                elif "hindi" in l_lower or l_lower == "hi":
-                    lang_code = "hi"
-            tts = gTTS(text=clean_text[:1000], lang=lang_code)
-            buf = io.BytesIO()
-            tts.write_to_fp(buf)
-            audio_bytes = buf.getvalue()
-            if audio_bytes and len(audio_bytes) > 100:
-                return (audio_bytes, audio_fn, audio_mt)
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug(f"gTTS audio synthesis failed: {e}")
-
-        logger.warning(
-            "[WhatsApp Voice] Audio reply synthesis unavailable: "
-            "no TTS engine installed or configured. Delivering reply as text."
-        )
+        logger.warning('[WhatsApp Voice] Audio reply synthesis unavailable across all configured engines.')
         return None
+
 
     @classmethod
     def clear_recent_replied_trigger_ids(cls) -> None:

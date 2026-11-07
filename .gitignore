@@ -22,8 +22,8 @@ venv.bak/
 
 # SQLite databases & lock files (auto-seeded on startup)
 *.db
+*.sqlite
 *.sqlite3
-!opsflow_saas_online_backup.db
 *.db-journal
 *.db-wal
 *.db-shm
