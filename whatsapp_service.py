@@ -3858,6 +3858,11 @@ class WhatsAppService:
         text: str,
         conversation_history: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
+        try:
+            from services.ai_responder import detect_language as responder_detect_language
+            return responder_detect_language(text=text, conversation_history=conversation_history)
+        except Exception:
+            pass
         """Detects customer language as Pashto, Urdu, or English (including Arabic & Roman scripts).
 
         Returns:
@@ -9079,6 +9084,11 @@ class WhatsAppService:
         """Marks a message ID as processed in memory only AFTER successful DB commit."""
         if not message_id:
             return
+        try:
+            from services.whatsapp_ingress import mark_message_processed as ingress_mark_processed
+            ingress_mark_processed(message_id)
+        except Exception:
+            pass
         clean_id = str(message_id).strip()
         with cls._processed_ids_lock:
             cls._processed_message_ids[clean_id] = time.time()
