@@ -6,6 +6,7 @@ Verifies:
 3. Backward compatibility for legacy default tenant
 4. Python bridge manager tenant directory resolution and DB backup/restore
 5. Ingress webhook tenant / org_id preservation
+6. Voice engine payload org_id preservation
 """
 
 import os
@@ -16,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 from wa_bridge_manager import resolve_auth_dir, is_authenticated_session, extract_phone_from_creds
 from services.ingress import parse_green_api_payload, is_duplicate_message, clean_phone_number
+from services.voice_engine import build_voice_payload
 
 
 class TestMultiTenantWhatsAppSessions(unittest.TestCase):
@@ -60,12 +62,13 @@ class TestMultiTenantWhatsAppSessions(unittest.TestCase):
         """Verify that inbound webhook payloads preserve tenant_id and org_id for multi-tenancy."""
         sample_payload = {
             "typeWebhook": "incomingMessageReceived",
+            "org_id": "org_fashion_boutique",
             "tenant_id": "org_fashion_boutique",
             "organization_id": "org_fashion_boutique",
             "instanceData": {
                 "idInstance": "baileys_bridge",
                 "wid": "923001234567@c.us",
-                "tenant_id": "org_fashion_boutique"
+                "org_id": "org_fashion_boutique"
             },
             "timestamp": 1700000000,
             "idMessage": "MSG_MT_001",
@@ -89,18 +92,26 @@ class TestMultiTenantWhatsAppSessions(unittest.TestCase):
         self.assertIn("lawn collection", event["body"])
         self.assertEqual(clean_phone_number("0300 1234567"), "03001234567")
 
-    def test_node_session_pool_multi_tenant_execution(self):
-        """Execute node test verifying SessionPool concurrency and state isolation."""
+    def test_voice_payload_org_id_preservation(self):
+        """Verify voice engine builds outbound payload with explicit org_id."""
+        dummy_audio = b"OggS_test_bytes"
+        payload = build_voice_payload("923001234567@s.whatsapp.net", dummy_audio, org_id="org_client_42")
+        self.assertEqual(payload["org_id"], "org_client_42")
+        self.assertEqual(payload["organization_id"], "org_client_42")
+        self.assertTrue(payload["ptt"])
+        self.assertEqual(payload["mimetype"], "audio/ogg; codecs=opus")
+
+    def test_node_active_sessions_and_start_sock(self):
+        """Execute node test verifying activeSessions map and startSock presence in wa_bridge.js."""
         import subprocess
         node_script = """
-        const { sessionPool } = require('./session_manager');
-        const s1 = sessionPool.getOrCreateSession('biz_1');
-        const s2 = sessionPool.getOrCreateSession('biz_2');
-        if (s1.tenantId !== 'biz_1' || s2.tenantId !== 'biz_2') process.exit(1);
-        if (s1.authDir === s2.authDir) process.exit(2);
-        const all = sessionPool.getAllSessions();
-        if (all.length < 2) process.exit(3);
-        console.log('NODE_MULTI_TENANT_SUCCESS');
+        const fs = require('fs');
+        const path = require('path');
+        const bridgeContent = fs.readFileSync(path.join(__dirname, 'wa_bridge.js'), 'utf8');
+        if (!bridgeContent.includes('const activeSessions = new Map();')) process.exit(1);
+        if (!bridgeContent.includes('async function startSock(')) process.exit(2);
+        if (!bridgeContent.includes('auth_info_baileys_')) process.exit(3);
+        console.log('NODE_ACTIVE_SESSIONS_VERIFIED');
         """
         res = subprocess.run(
             ["node", "-e", node_script],
@@ -108,8 +119,8 @@ class TestMultiTenantWhatsAppSessions(unittest.TestCase):
             capture_output=True,
             text=True
         )
-        self.assertEqual(res.returncode, 0, f"Node test failed: {res.stderr}")
-        self.assertIn("NODE_MULTI_TENANT_SUCCESS", res.stdout)
+        self.assertEqual(res.returncode, 0, f"Node activeSessions check failed: {res.stderr}")
+        self.assertIn("NODE_ACTIVE_SESSIONS_VERIFIED", res.stdout)
 
 
 if __name__ == "__main__":

@@ -48,6 +48,42 @@ const {
   isAuthenticatedCreds: checkAuthCreds
 } = require('./session_manager');
 
+// Dynamic Multi-Tenant Session Map (Audit Area 15 / Step 4)
+const activeSessions = new Map(); // orgId -> session object
+
+function getAuthDirForOrg(orgId) {
+  const cleanOrg = (orgId || 'default').toString().trim().replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+  const dirName = `auth_info_baileys_${cleanOrg}`;
+  // For backward compatibility on default org: if legacy baileys_auth/creds.json exists, use it
+  if (cleanOrg === 'default') {
+    const legacyPath = path.join(__dirname, 'baileys_auth');
+    if (fs.existsSync(path.join(legacyPath, 'creds.json'))) {
+      return legacyPath;
+    }
+  }
+  const orgAuthDir = path.join(__dirname, dirName);
+  if (!fs.existsSync(orgAuthDir)) {
+    fs.mkdirSync(orgAuthDir, { recursive: true });
+  }
+  return orgAuthDir;
+}
+
+function extractOrgId(req) {
+  return (
+    req?.query?.org_id ||
+    req?.body?.org_id ||
+    req?.query?.organization_id ||
+    req?.body?.organization_id ||
+    req?.headers?.['x-org-id'] ||
+    req?.headers?.['x-organization-id'] ||
+    req?.query?.tenant_id ||
+    req?.body?.tenant_id ||
+    process.env.ORG_ID ||
+    process.env.TENANT_ID ||
+    'default'
+  ).toString().trim();
+}
+
 const express = require('express');
 
 const {
@@ -356,7 +392,8 @@ let detectedWorkingBackendUrl = null;
 
 
 
-async function dispatchWebhookToPython(payload) {
+async function dispatchWebhookToPython(payload, explicitOrgId = null) {
+  const orgId = explicitOrgId || payload?.org_id || payload?.organization_id || payload?.tenant_id || 'default';
 
   const flaskBase = getFlaskBackendUrl();
 
@@ -408,9 +445,11 @@ async function dispatchWebhookToPython(payload) {
 
         const controller = new AbortController();
 
+        const sep = targetUrl.includes('?') ? '&' : '?';
+        const targetUrlWithOrg = `${targetUrl}${sep}org_id=${encodeURIComponent(orgId)}`;
         const timeoutId = setTimeout(() => controller.abort(), 25000);
 
-        const resp = await fetch(targetUrl, {
+        const resp = await fetch(targetUrlWithOrg, {
 
           method: 'POST',
 
@@ -1633,6 +1672,44 @@ function storeMessageForRetry(key, message) {
  * Initializes and manages the Baileys WhatsApp Web socket.
 
  */
+
+
+/**
+ * Starts and manages Baileys WhatsApp Web socket for an isolated organization (Audit Area 15).
+ * @param {string} orgId - Organization identifier
+ * @param {boolean} skipRestore - Whether to purge and regenerate QR credentials
+ */
+async function startSock(orgId = 'default', skipRestore = false) {
+  const cleanOrg = (orgId || 'default').toString().trim();
+  const AUTH_DIR = path.join(__dirname, `auth_info_baileys_${cleanOrg}`);
+  if (!fs.existsSync(AUTH_DIR)) {
+    fs.mkdirSync(AUTH_DIR, { recursive: true });
+  }
+
+  // Register in activeSessions
+  let session = activeSessions.get(cleanOrg);
+  if (!session) {
+    session = {
+      orgId: cleanOrg,
+      authDir: AUTH_DIR,
+      sock: null,
+      isConnected: false,
+      isStarting: false,
+      currentQr: null,
+      currentQrUrl: null,
+      currentQrSvg: null,
+      latestQr: null,
+      latestQrDataUrl: null,
+      lastQrGeneratedTime: 0,
+      reconnectAttempts: 0,
+      reconnectTimer: null
+    };
+    activeSessions.set(cleanOrg, session);
+  }
+
+  // Delegate to startWhatsAppBridge with cleanOrg
+  return await startWhatsAppBridge(cleanOrg, skipRestore);
+}
 
 async function startWhatsAppBridge(param1 = 'default', param2 = false) {
   let tenantId = 'default';
@@ -4897,6 +4974,8 @@ app.post(['/disconnect', '/logout'], async (req, res) => {
 
 
 app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
+  const targetOrgId = extractOrgId(req);
+  const orgSession = activeSessions.get(targetOrgId) || activeSessions.get('default') || sessionPool.getSession(targetOrgId);
   const targetTenantId = sessionPool.extractTenantId(req);
   const activeSession = sessionPool.getSession(targetTenantId) || sessionPool.getSession('default') || sessionPool.getOrCreateSession(targetTenantId);
 
@@ -5661,6 +5740,18 @@ app.post(['/sessions/stop', '/api/sessions/stop'], async (req, res) => {
   return res.status(404).json({ success: false, error: `Session not found for tenant '${tenantId}'` });
 });
 
+
+app.all(['/reconnect', '/api/reconnect', '/wa/reconnect'], async (req, res) => {
+  const orgId = extractOrgId(req);
+  console.log(`[WhatsApp Bridge] Manual reconnect requested for org '${orgId}'`);
+  startSock(orgId, true).catch(err => console.error(`Error reconnecting org ${orgId}:`, err));
+  return res.json({
+    success: true,
+    org_id: orgId,
+    status: 'reconnecting',
+    message: `Reconnect triggered for organization '${orgId}'`
+  });
+});
 app.use((err, req, res, next) => {
 
   console.error('[Bridge Server Global Error Handler]', err);

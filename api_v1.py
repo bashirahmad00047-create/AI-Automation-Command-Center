@@ -2738,6 +2738,7 @@ def stripe_webhook():
 @api_v1.route("/wa/qr", methods=["GET"])
 def api_whatsapp_bridge_qr():
     """Returns the Baileys bridge QR code and pairing status for web dashboard scanning.
+    Dynamically routes to organization-specific Baileys session via ?org_id=<current_org_id>.
     Guaranteed: Always returns HTTP 200 with JSON status ('connected', 'qr_ready', or 'initializing').
     Never throws 500 Internal Server Error under any bridge state.
     Supports ?force_refresh=true to immediately generate and return a fresh QR code.
@@ -2759,9 +2760,11 @@ def api_whatsapp_bridge_qr():
         except Exception as _clr_err:
             logger.warning(f"[WA Bridge] Session clear on force_refresh error: {_clr_err}")
 
+    current_org_id = request.args.get("org_id") or getattr(g, "org_id", None) or "org-enterprise-default"
+
     # 1. Guard check: if bridge is already live & connected, and not forcing refresh, return immediately
     if not force_refresh:
-        bridge_status_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://127.0.0.1:3001/status")
+        bridge_status_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", f"http://127.0.0.1:3001/status?org_id={current_org_id}")
         try:
             sresp = requests.get(bridge_status_url, timeout=1.5)
             if sresp.status_code == 200:
@@ -2790,7 +2793,8 @@ def api_whatsapp_bridge_qr():
     # 3. Fetch live QR from Node bridge with optional force_refresh (guaranteed HTTP 200 response)
     bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_URL", "http://127.0.0.1:3001/qr")
     try:
-        params = {"force_refresh": "true"} if force_refresh else None
+        params = {"org_id": current_org_id}
+        if force_refresh: params["force_refresh"] = "true"
         resp = requests.get(bridge_url, params=params, timeout=12.0)
         if resp.status_code == 200 and resp.text:
             data = resp.json()
@@ -2867,9 +2871,10 @@ def api_whatsapp_bridge_qr_refresh():
     except Exception:
         pass
 
-    refresh_url = os.environ.get("BAILEYS_BRIDGE_REFRESH_URL", "http://127.0.0.1:3001/refresh-qr")
+    current_org_id = request.args.get("org_id") or getattr(g, "org_id", None) or "org-enterprise-default"
+    refresh_url = os.environ.get("BAILEYS_BRIDGE_REFRESH_URL", f"http://127.0.0.1:3001/refresh-qr?org_id={current_org_id}")
     try:
-        resp = requests.post(refresh_url, timeout=4.0)
+        resp = requests.post(refresh_url, params={"org_id": current_org_id}, json={"org_id": current_org_id}, timeout=4.0)
         data = resp.json() if resp.text else {"success": True, "status": "refreshing"}
         return jsonify(data), 200
     except Exception as e:
@@ -3307,13 +3312,14 @@ def api_whatsapp_bridge_disconnect():
         logger.warning(f"[WA Bridge] Error clearing DB/local auth on disconnect: {e}")
 
     # Notify Node bridge to destroy socket and delete auth
-    bridge_url = os.environ.get("BAILEYS_BRIDGE_LOGOUT_URL", "http://127.0.0.1:3001/disconnect")
+    current_org_id = request.args.get("org_id") or getattr(g, "org_id", None) or "org-enterprise-default"
+    bridge_url = os.environ.get("BAILEYS_BRIDGE_LOGOUT_URL", f"http://127.0.0.1:3001/disconnect?org_id={current_org_id}")
     try:
-        requests.post(bridge_url, timeout=4.0)
+        requests.post(bridge_url, params={"org_id": current_org_id}, json={"org_id": current_org_id}, timeout=4.0)
     except Exception:
         pass
     try:
-        requests.get("http://127.0.0.1:3001/qr?force_refresh=true", timeout=4.0)
+        requests.get(f"http://127.0.0.1:3001/qr?force_refresh=true&org_id={current_org_id}", timeout=4.0)
     except Exception:
         pass
     return jsonify({"success": True, "message": "WhatsApp device unlinked. Session reset for fresh QR scan."}), 200
@@ -5984,13 +5990,8 @@ def whatsapp_webhook_ingress():
         is_green_api = bool(payload.get("typeWebhook") or payload.get("instanceData"))
 
         if is_green_api:
-            target_tenant = (
-                request.args.get("org_id")
-                or payload.get("tenant_id")
-                or payload.get("organization_id")
-                or (payload.get("instanceData") or {}).get("tenant_id")
-            )
-            res_dict = process_inbound_whatsapp_payload(payload, target_org_id=target_tenant)
+            org_id = request.args.get("org_id") or payload.get("org_id") or payload.get("organization_id") or payload.get("tenant_id") or (payload.get("instanceData") or {}).get("org_id") or "org-enterprise-default"
+            res_dict = process_inbound_whatsapp_payload(payload, target_org_id=org_id)
             return jsonify(res_dict), 200
         else:
             # Meta Cloud API signature verification

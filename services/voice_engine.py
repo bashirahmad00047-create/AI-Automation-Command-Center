@@ -298,3 +298,26 @@ def generate_spoken_audio(
 
     logger.warning("[Voice Engine] Audio synthesis unavailable across all configured engines.")
     return None
+
+
+def build_voice_payload(
+    chat_id: str,
+    audio_bytes: bytes,
+    org_id: str = "org-enterprise-default",
+    ptt: bool = True
+) -> dict:
+    """Standardized outbound voice payload for multi-tenant Baileys bridge."""
+    import base64
+    clean_org = str(org_id or "org-enterprise-default")
+    return {
+        "chatId": chat_id,
+        "to": chat_id,
+        "recipient": chat_id,
+        "audioBase64": base64.b64encode(audio_bytes).decode("ascii") if audio_bytes else "",
+        "ptt": ptt,
+        "send_as_voice": ptt,
+        "is_voice": ptt,
+        "mimetype": "audio/ogg; codecs=opus",
+        "org_id": clean_org,
+        "organization_id": clean_org
+    }

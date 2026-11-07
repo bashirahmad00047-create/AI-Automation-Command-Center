@@ -9779,11 +9779,14 @@ class WhatsAppService:
                 pass
 
         out_msg_type = "text"
+        resolved_org_id = str(organization_id or kwargs.get("org_id") or kwargs.get("organization_id") or "org-enterprise-default")
         bridge_payload = {
             "chatId": real_chat_id,
             "to": clean_to,
             "recipient": real_chat_id,
-            "message": bridge_message
+            "message": bridge_message,
+            "org_id": resolved_org_id,
+            "organization_id": resolved_org_id
         }
         if quoted_message_id:
             bridge_payload["quotedMessageId"] = str(quoted_message_id).strip()
