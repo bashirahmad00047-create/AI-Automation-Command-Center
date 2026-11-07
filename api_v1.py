@@ -5727,7 +5727,17 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
     2. Synchronously updates CRM Leads.
     3. Executes AI Auto-Responder in an isolated try-except block so errors never block saving.
     """
-    messages = WhatsAppService.parse_green_api_payload(payload)
+    try:
+        from services.ingress import parse_green_api_payload as ingress_parse_payload, record_phone_reply_jid
+        messages = ingress_parse_payload(payload)
+        for msg in messages:
+            s_p = msg.get("from_phone")
+            r_j = msg.get("reply_jid") or msg.get("chat_id")
+            if s_p and r_j:
+                record_phone_reply_jid(s_p, r_j)
+    except Exception:
+        messages = WhatsAppService.parse_green_api_payload(payload)
+
     if not messages:
         return {"status": "acknowledged", "provider": "green_api", "processed": 0}
 
@@ -5918,7 +5928,11 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
             try:
                 clean_txt = str(reply_text).replace("🎤", "").strip()
                 det_lang = "ur" if (any('\u0600' <= ch <= '\u06FF' for ch in clean_txt) or any(w in clean_txt.lower() for w in ["salam", "aap", "jee", "shukriya", "hai", "hain"])) else "en"
-                synth_fb = WhatsAppService.generate_spoken_audio(text=clean_txt, language=det_lang, organization_id=org_id, output_format="oga")
+                try:
+                    from services.voice_engine import generate_spoken_audio as voice_engine_synth
+                    synth_fb = voice_engine_synth(text=clean_txt, language=det_lang, organization_id=org_id, output_format="oga")
+                except Exception:
+                    synth_fb = WhatsAppService.generate_spoken_audio(text=clean_txt, language=det_lang, organization_id=org_id, output_format="oga")
                 if synth_fb and synth_fb[0]:
                     import base64
                     audio_b64 = base64.b64encode(synth_fb[0]).decode("ascii")

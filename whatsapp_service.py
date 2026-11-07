@@ -7622,6 +7622,13 @@ class WhatsAppService:
     @classmethod
     def parse_webhook_payload(cls, data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Parses Meta Cloud API webhook JSON payload into normalized message events."""
+        try:
+            from services.ingress import parse_webhook_payload as ingress_parse_meta
+            res = ingress_parse_meta(data)
+            if res:
+                return res
+        except Exception:
+            pass
         messages: List[Dict[str, Any]] = []
 
         if not data or not isinstance(data, dict):
@@ -7934,6 +7941,13 @@ class WhatsAppService:
     @classmethod
     def parse_green_api_payload(cls, data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Parses Green-API webhook notification JSON payload into normalized message events."""
+        try:
+            from services.ingress import parse_green_api_payload as ingress_parse_green
+            res = ingress_parse_green(data)
+            if res:
+                return res
+        except Exception:
+            pass
         messages: List[Dict[str, Any]] = []
         if not data or not isinstance(data, dict):
             return messages

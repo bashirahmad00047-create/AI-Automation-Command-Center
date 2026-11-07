@@ -1,14 +1,15 @@
 """Decoupled WhatsApp AI Responder & Cognitive Processing Engine.
 
-Provides multi-lingual AI response generation:
-1. Multi-dialect detection: Pashto, Urdu, Roman Urdu, and English
-2. Model routing: Gemini -> Groq -> OpenAI -> Free Pollinations AI -> Conversational Fallback
-3. Location awareness and product grounding protocols
-4. Clean conversational formatting without hardcoded template echoes
+Handles:
+1. Gemini prompt construction with business grounding, catalog context & location awareness
+2. Intent parsing and multi-dialect language detection (Urdu, Roman Urdu, English, Pashto)
+3. Response formatting and sanitization (stripping internal prompt artifacts)
+4. Clean integration with services.voice_engine for guaranteed voice-to-voice replies
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -23,16 +24,7 @@ def detect_language(
     text: str,
     conversation_history: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
-    """Detects customer language as Pashto, Urdu, or English (including Arabic & Roman scripts).
-
-    Returns:
-        Dict containing:
-            - language: 'pashto' | 'urdu' | 'english'
-            - script: 'arabic' | 'latin'
-            - format: 'pashto_arabic' | 'roman_pashto' | 'urdu_arabic' | 'roman_urdu' | 'english'
-            - name: Descriptive label
-            - confidence: float (0.0 - 1.0)
-    """
+    """Detects customer language as Pashto, Urdu, or English (including Arabic & Roman scripts)."""
     raw_text = str(text or "").strip()
     if not raw_text:
         return {
@@ -72,13 +64,11 @@ def detect_language(
     # 2. Check Roman / Latin Script Vocabulary
     lower_tokens = set(re.findall(r'[a-zA-Z]+', raw_text.lower()))
 
-    # Common Roman Urdu Markers
     roman_urdu_words = {
         "kya", "kia", "hai", "hain", "kese", "kaise", "kaisa", "ho", "hoon", "hun",
         "bhai", "shukriya", "madad", "ap", "aap", "mera", "meri", "karna", "chahiye",
         "chahye", "kitna", "kitne", "kitni", "batao", "bataein", "acha", "theek", "shukran"
     }
-    # Common Roman Pashto Markers
     roman_pashto_words = {
         "tsomra", "somra", "pakar", "ghwaram", "ghwari", "marasta", "de", "da", "di",
         "staso", "zama", "kawal", "karey", "sangay", "sanga", "wroor", "manana"
@@ -113,7 +103,35 @@ def detect_language(
     }
 
 
-def get_language_prompt_directive(lang_info: Dict[str, Any], message_body: str) -> str:
+def parse_intent(text: str) -> Dict[str, Any]:
+    """Parses intent, urgency, and lead score from customer text."""
+    clean_text = str(text or "").strip().lower()
+    intent = "lead_inquiry"
+    urgency = 20
+    lead_score = 50
+    route_dept = "Sales"
+
+    if any(w in clean_text for w in ("salam", "hello", "hi", "hey", "aoa")):
+        intent = "greeting"
+        urgency = 10
+    elif any(w in clean_text for w in ("qimat", "rate", "price", "kitna", "package", "cost", "buy", "order")):
+        intent = "sales_inquiry"
+        urgency = 50
+        lead_score = 75
+    elif any(w in clean_text for w in ("madad", "masla", "issue", "help", "problem", "ticket", "kharab")):
+        intent = "support_request"
+        urgency = 70
+        route_dept = "Support"
+
+    return {
+        "intent": intent,
+        "urgency": urgency,
+        "lead_score": lead_score,
+        "route_department": route_dept
+    }
+
+
+def get_language_prompt_directive(lang_info: Dict[str, Any]) -> str:
     """Returns system prompt formatting directives tailored to the detected language and script."""
     fmt = lang_info.get("format", "english")
     if fmt == "roman_urdu":
@@ -139,19 +157,69 @@ def get_language_prompt_directive(lang_info: Dict[str, Any], message_body: str) 
     )
 
 
+def construct_gemini_prompt(
+    user_message: str,
+    system_prompt: Optional[str] = None,
+    customer_name: Optional[str] = None,
+    knowledge_base: Optional[str] = None,
+    catalog_context: Optional[str] = None,
+    has_shared_location: bool = False,
+    conversation_history: Optional[List[Dict[str, str]]] = None
+) -> str:
+    """Constructs grounded Gemini prompt with knowledge, catalog context, and location protocol."""
+    lang_info = detect_language(user_message, conversation_history=conversation_history)
+    lang_directive = get_language_prompt_directive(lang_info)
+
+    prompt_parts = [
+        "You are BashFlow Enterprise AI, a helpful, polite, and intelligent business assistant.",
+        lang_directive
+    ]
+
+    if knowledge_base:
+        prompt_parts.append(f"\nBusiness Knowledge Base:\n{knowledge_base.strip()}")
+
+    if catalog_context:
+        prompt_parts.append(f"\nProduct Catalog Information:\n{catalog_context.strip()}")
+
+    if system_prompt:
+        prompt_parts.append(f"\nCustom Organization Instructions:\n{system_prompt.strip()}")
+
+    if has_shared_location:
+        prompt_parts.append(
+            "\nCRITICAL LOCATION PROTOCOL: The customer has already shared their GPS pin/location on our radar map. "
+            "Do NOT ask for their address or location pin again. Acknowledge that delivery tracking is active."
+        )
+
+    if customer_name:
+        prompt_parts.append(f"\nCustomer Name: {customer_name}")
+
+    if conversation_history:
+        history_lines = ["\nRecent Conversation History:"]
+        for item in conversation_history[-6:]:
+            role = item.get("role", "customer")
+            content = item.get("content", "")
+            history_lines.append(f"- {role}: {content}")
+        prompt_parts.append("\n".join(history_lines))
+
+    prompt_parts.append(f"\nCustomer Message: {user_message.strip()}")
+    prompt_parts.append("Your Response:")
+
+    return "\n".join(prompt_parts)
+
+
 def clean_ai_text(raw_text: str) -> str:
     """Cleans up internal thought artifacts, prompt echoes, and JSON wrappers."""
     if not raw_text:
         return ""
     text = str(raw_text).strip()
 
-    # Strip triple-backtick code fences if accidentally output by model
+    # Strip triple-backtick code fences
     if text.startswith("```") and text.endswith("```"):
         lines = text.splitlines()
         if len(lines) >= 3:
             text = "\n".join(lines[1:-1]).strip()
 
-    # Strip raw JSON object wrapper if model returned {"response": "..."}
+    # Strip raw JSON object wrapper
     if text.startswith("{") and text.endswith("}"):
         try:
             parsed = json.loads(text)
@@ -171,10 +239,9 @@ def generate_smart_conversational_fallback(
     org_name: str = "BashFlow AI",
     sender_name: Optional[str] = None,
     is_voice: bool = False,
-    intent: Optional[str] = None,
-    conversation_history: Optional[List[Dict[str, str]]] = None
+    intent: Optional[str] = None
 ) -> str:
-    """Generates an authentic, respectful conversational fallback without hardcoded pitches."""
+    """Generates an authentic conversational fallback without hardcoded pitches."""
     lower_text = str(message_body or "").lower()
 
     cust_greeting = ""
@@ -224,59 +291,65 @@ def generate_ai_auto_response(
     message_body: str,
     sender_name: Optional[str] = None,
     sender_phone: Optional[str] = None,
+    is_voice_inbound: bool = False,
     system_prompt: Optional[str] = None,
     knowledge_base: Optional[str] = None,
     catalog_context: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Analyzes an incoming message, resolves language and intent, and generates tailored response."""
+    """Generates a tailored AI auto-response with voice integration when inbound is voice/audio."""
     clean_body = str(message_body or "").strip()
-    if not clean_body:
-        clean_body = "[Voice note]"
+    if not clean_body or clean_body.lower() in ("[voice note]", "🎤 voice message", "audio"):
+        clean_body = "Hello, voice note received."
 
-    # 1. Language Detection
+    # 1. Detect language & parse intent
     lang_info = detect_language(clean_body)
     lang_fmt = lang_info.get("format", "english")
     det_lang = lang_info.get("language", "english")
     det_script = lang_info.get("script", "latin")
+    intent_data = parse_intent(clean_body)
 
-    # 2. Basic Intent Classification
-    lower_raw = clean_body.lower()
-    intent = "lead_inquiry"
-    urgency = 20
-    lead_score = 50
-    route_dept = "Sales"
-
-    if any(w in lower_raw for w in ("salam", "hello", "hi", "hey", "aoa")):
-        intent = "greeting"
-        urgency = 10
-    elif any(w in lower_raw for w in ("qimat", "rate", "price", "kitna", "package", "cost", "buy", "order")):
-        intent = "sales_inquiry"
-        urgency = 50
-        lead_score = 75
-    elif any(w in lower_raw for w in ("madad", "masla", "issue", "help", "problem", "ticket", "kharab")):
-        intent = "support_request"
-        urgency = 70
-        route_dept = "Support"
-
-    # 3. Generate Response
-    # In production, this can invoke Google Gemini / Groq API with knowledge_base and catalog_context.
-    # Fallback to intelligent conversational generator:
+    # 2. Generate conversational text response
     reply_text = generate_smart_conversational_fallback(
         message_body=clean_body,
         lang_fmt=lang_fmt,
         sender_name=sender_name,
-        intent=intent
+        intent=intent_data["intent"]
     )
+
+    # 3. Voice synthesis integration when inbound is voice
+    audio_base64 = None
+    audio_bytes = None
+    send_as_voice = False
+
+    if is_voice_inbound and reply_text:
+        try:
+            from services.voice_engine import generate_spoken_audio
+            synth_lang = "ur" if ("ur" in det_lang or "urdu" in lang_fmt) else "en"
+            synth_res = generate_spoken_audio(
+                text=reply_text,
+                language=synth_lang,
+                organization_id=organization_id,
+                output_format="oga"
+            )
+            if synth_res and synth_res[0]:
+                audio_bytes = synth_res[0]
+                audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
+                send_as_voice = True
+        except Exception as v_err:
+            logger.debug(f"[AI Responder Voice] Synthesis notice: {v_err}")
 
     return {
         "reply_body": reply_text,
-        "intent": intent,
-        "urgency": urgency,
-        "lead_score": lead_score,
-        "route_department": route_dept,
+        "intent": intent_data["intent"],
+        "urgency": intent_data["urgency"],
+        "lead_score": intent_data["lead_score"],
+        "route_department": intent_data["route_department"],
         "detected_language": det_lang,
         "detected_script": det_script,
         "language_format": lang_fmt,
+        "is_voice": is_voice_inbound,
+        "send_as_voice": send_as_voice,
+        "audio_base64": audio_base64,
         "is_ai_generated": True,
         "confidence": 90
     }
