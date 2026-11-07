@@ -8,6 +8,7 @@ Handles:
 """
 
 from __future__ import annotations
+import datetime
 
 import base64
 import json
@@ -146,6 +147,20 @@ def parse_intent(text: str) -> Dict[str, Any]:
     lead_score = 50
     route_dept = "Sales"
 
+    # Multi-lingual Booking & Appointment Intent Detection (Audit Item 1 / Phase 5)
+    booking_markers = (
+        "appointment", "book", "booking", "schedule", "reservation",
+        "reserve", "slot", "consultation", "doctor", "meeting", "checkup",
+        "mulaqat", "tareekh", "tarikh", "waqt", "kal milna", "shaam ko milna"
+    )
+    if any(w in clean_text for w in booking_markers) and any(w in clean_text for w in ("appointment", "book", "booking", "schedule", "slot", "reserve", "reservation", "mulaqat", "doctor", "consultation", "checkup", "tarikh", "tareekh")):
+        return {
+            "intent": "booking_appointment",
+            "urgency": 60,
+            "lead_score": 85,
+            "route_department": "Appointments"
+        }
+
     if any(w in clean_text for w in ("salam", "hello", "hi", "hey", "aoa")):
         intent = "greeting"
         urgency = 10
@@ -268,6 +283,218 @@ def clean_ai_text(raw_text: str) -> str:
     return text.strip()
 
 
+
+
+# ============================================================================
+# PHASE 5: BOOKING & APPOINTMENT STATE MACHINE & CONFLICT ENGINE
+# ============================================================================
+
+def extract_appointment_datetime(text: str) -> Optional[datetime.datetime]:
+    """Parses appointment date and time from customer messages in English and Roman Urdu."""
+    now = datetime.datetime.now()
+    clean = str(text or "").lower()
+
+    # 1. Target Day Resolution
+    target_date = None
+    if "kal" in clean or "tomorrow" in clean:
+        target_date = now.date() + datetime.timedelta(days=1)
+    elif "parso" in clean or "day after tomorrow" in clean:
+        target_date = now.date() + datetime.timedelta(days=2)
+    elif "aaj" in clean or "today" in clean:
+        target_date = now.date()
+    else:
+        m_iso = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", clean)
+        if m_iso:
+            try:
+                target_date = datetime.date(int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3)))
+            except Exception:
+                pass
+        else:
+            m_dm = re.search(r"\b(\d{1,2})[/.-](\d{1,2})\b", clean)
+            if m_dm:
+                try:
+                    target_date = datetime.date(now.year, int(m_dm.group(2)), int(m_dm.group(1)))
+                except Exception:
+                    pass
+
+    # 2. Target Time Resolution
+    time_str = re.sub(r"\d{4}-\d{1,2}-\d{1,2}", "", clean)
+    time_str = re.sub(r"\b\d{1,2}[/.-]\d{1,2}\b", "", time_str)
+
+    target_hour = None
+    target_min = 0
+
+    m_time = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|baje)\b", time_str)
+    if not m_time:
+        m_time = re.search(r"\bat\s*(\d{1,2})(?::(\d{2}))?\b", time_str)
+    if not m_time:
+        m_time = re.search(r"\b(\d{1,2}):(\d{2})\b", time_str)
+
+    if m_time:
+        raw_hour = int(m_time.group(1))
+        raw_min = int(m_time.group(2)) if m_time.group(2) else 0
+        meridiem = (m_time.group(3) if len(m_time.groups()) >= 3 and m_time.group(3) else "").lower()
+
+        is_evening = any(w in clean for w in ["shaam", "dopahar", "raat", "pm", "afternoon", "evening", "night"])
+        is_morning = any(w in clean for w in ["subah", "am", "morning"])
+
+        if (meridiem == "pm" or (is_evening and raw_hour < 12)) and raw_hour < 12:
+            raw_hour += 12
+        elif (meridiem == "am" or is_morning) and raw_hour == 12:
+            raw_hour = 0
+
+        target_hour = raw_hour
+        target_min = raw_min
+
+    if target_date and target_hour is not None:
+        return datetime.datetime(target_date.year, target_date.month, target_date.day, target_hour, target_min)
+    elif target_date and target_hour is None:
+        return datetime.datetime(target_date.year, target_date.month, target_date.day, 11, 0)
+    elif not target_date and target_hour is not None:
+        tomorrow = now.date() + datetime.timedelta(days=1)
+        return datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, target_hour, target_min)
+
+    return None
+
+
+def extract_service_name(text: str) -> str:
+    """Extracts common service domain from customer request."""
+    clean = str(text or "").lower()
+    services = [
+        ("Doctor Consultation", ["doctor", "physician", "checkup", "clinic", "ilaaj", "tabiyat", "consultation", "consult"]),
+        ("Dental Scaling & Checkup", ["dental", "teeth", "daant", "scaling", "dentist"]),
+        ("Vehicle Inspection & Repair", ["car", "bike", "inspection", "tuning", "oil change", "repair", "service"]),
+        ("Salon & Grooming Session", ["haircut", "facial", "salon", "makeup", "grooming", "barber"]),
+        ("Legal Advisory & Tax Consultation", ["legal", "lawyer", "advocate", "tax", "accounting", "audit"]),
+        ("Property Viewing & Tour", ["property", "plot", "house", "makaan", "viewing", "tour", "visit"])
+    ]
+    for s_name, keywords in services:
+        if any(k in clean for k in keywords):
+            return s_name
+    return "General Consultation"
+
+
+def handle_booking_flow(
+    organization_id: Optional[str],
+    customer_phone: Optional[str],
+    customer_name: Optional[str],
+    message_text: str,
+    lang_fmt: str = "roman_urdu"
+) -> Dict[str, Any]:
+    """State machine for processing appointment and booking requests:
+    1. Prompts for required service, date, and time if missing.
+    2. Performs slot conflict detection against database for that organization.
+    3. Saves valid confirmed booking to database with status 'Confirmed'.
+    4. Generates formatted WhatsApp confirmation.
+    """
+    clean_org = str(organization_id or "org-enterprise-default")
+    clean_phone = re.sub(r"[^\d]", "", str(customer_phone or "")) or "923001234567"
+    client_name = customer_name or f"Client {clean_phone[-4:]}"
+
+    service_name = extract_service_name(message_text)
+    target_dt = extract_appointment_datetime(message_text)
+
+    # If date and time are missing from customer inquiry, prompt for details
+    if not target_dt:
+        if "urdu" in lang_fmt:
+            prompt_msg = (
+                f"Ji zaroor {client_name}! Appointment book karne ke liye baraye meherbani service ka naam aur "
+                f"appointment ki tareekh aur waqt (Date & Time) batayein (maslan: '{service_name} kal subah 11 baje')."
+            )
+        else:
+            prompt_msg = (
+                f"Certainly {client_name}! To schedule your appointment, please let us know the required service "
+                f"along with your preferred date and time (e.g., '{service_name} tomorrow at 11:00 AM')."
+            )
+        return {
+            "status": "needs_info",
+            "reply_body": prompt_msg,
+            "intent": "booking_appointment",
+            "booking_saved": False,
+            "target_datetime": None
+        }
+
+    # Slot conflict detection & DB save with safe app context
+    from wa_bridge_manager import safe_app_context
+    with safe_app_context():
+        try:
+            from models import Appointment
+            from database import db
+
+            # Basic slot conflict detection
+            conflict = Appointment.query.filter_by(
+                org_id=clean_org,
+                appointment_datetime=target_dt,
+                status="Confirmed"
+            ).first()
+
+            if conflict:
+                if "urdu" in lang_fmt:
+                    conflict_msg = (
+                        f"Maazrat {client_name}! {target_dt.strftime('%d-%b %I:%M %p')} ka slot pehle se booked hai. "
+                        f"Baraye meherbani koi doosra waqt ya din muntakhab farmayein."
+                    )
+                else:
+                    conflict_msg = (
+                        f"We apologize {client_name}, but the slot on {target_dt.strftime('%d-%b at %I:%M %p')} is already booked. "
+                        f"Please choose an alternative time slot."
+                    )
+                return {
+                    "status": "conflict",
+                    "reply_body": conflict_msg,
+                    "intent": "booking_appointment",
+                    "booking_saved": False,
+                    "target_datetime": target_dt.strftime("%Y-%m-%d %H:%M:%S")
+                }
+
+            # Save valid booking with status 'Confirmed'
+            new_appt = Appointment(
+                org_id=clean_org,
+                customer_phone=clean_phone,
+                customer_name=client_name,
+                service_name=service_name,
+                appointment_datetime=target_dt,
+                status="Confirmed",
+                notes="Booked via WhatsApp AI Concierge"
+            )
+            db.session.add(new_appt)
+            db.session.commit()
+
+            if "urdu" in lang_fmt:
+                confirm_msg = (
+                    f"Aap ki booking '{service_name}' ke liye {target_dt.strftime('%A, %d %B')} ko {target_dt.strftime('%I:%M %p')} confirm ho gayi hai! 📅\n"
+                    f"Reference ID: {new_appt.id}\n\n"
+                    f"Mulaqat ka intezar rahega. Shukriya!"
+                )
+            else:
+                confirm_msg = (
+                    f"Your booking for '{service_name}' on {target_dt.strftime('%A, %d %B at %I:%M %p')} has been confirmed! 📅\n"
+                    f"Booking Reference: {new_appt.id}\n\n"
+                    f"We look forward to seeing you. Thank you!"
+                )
+
+            return {
+                "status": "confirmed",
+                "reply_body": confirm_msg,
+                "intent": "booking_appointment",
+                "booking_saved": True,
+                "appointment": new_appt.to_dict(),
+                "target_datetime": target_dt.strftime("%Y-%m-%d %H:%M:%S")
+            }
+
+        except Exception as e:
+            logger.error(f"[Booking Engine DB Error] {e}")
+            if "urdu" in lang_fmt:
+                err_msg = f"Aap ki booking request register ho gayi hai ({service_name} at {target_dt.strftime('%d-%b %I:%M %p')}). Hamari team confirmation bhejegi!"
+            else:
+                err_msg = f"Your booking request for {service_name} at {target_dt.strftime('%d-%b %I:%M %p')} has been registered. Confirmation will follow!"
+            return {
+                "status": "pending",
+                "reply_body": err_msg,
+                "intent": "booking_appointment",
+                "booking_saved": False,
+                "target_datetime": target_dt.strftime("%Y-%m-%d %H:%M:%S")
+            }
 def generate_smart_conversational_fallback(
     message_body: str,
     lang_fmt: str,
@@ -343,13 +570,24 @@ def generate_ai_auto_response(
     det_script = lang_info.get("script", "latin")
     intent_data = parse_intent(clean_body)
 
-    # 2. Generate conversational text response
-    reply_text = generate_smart_conversational_fallback(
-        message_body=clean_body,
-        lang_fmt=lang_fmt,
-        sender_name=sender_name,
-        intent=intent_data["intent"]
-    )
+    # 2. Generate conversational or appointment booking response
+    booking_res = None
+    if intent_data["intent"] == "booking_appointment":
+        booking_res = handle_booking_flow(
+            organization_id=organization_id,
+            customer_phone=sender_phone,
+            customer_name=sender_name,
+            message_text=clean_body,
+            lang_fmt=lang_fmt
+        )
+        reply_text = booking_res["reply_body"]
+    else:
+        reply_text = generate_smart_conversational_fallback(
+            message_body=clean_body,
+            lang_fmt=lang_fmt,
+            sender_name=sender_name,
+            intent=intent_data["intent"]
+        )
 
     # 3. Voice synthesis integration when inbound is voice
     audio_base64 = None

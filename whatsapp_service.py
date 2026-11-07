@@ -5404,6 +5404,49 @@ class WhatsAppService:
         if order_grounding:
             custom_prompt = f"{custom_prompt}\n\n{order_grounding}" if custom_prompt else order_grounding
 
+        # Booking & Appointment State Machine Interception (Phase 5: Audit Item 1)
+        booking_keywords = (
+            "appointment", "book", "booking", "schedule", "reservation",
+            "reserve", "slot", "consultation", "doctor", "meeting", "checkup",
+            "mulaqat", "tareekh", "tarikh", "waqt", "kal milna", "shaam ko milna"
+        )
+        if any(w in lower_body for w in booking_keywords) and any(w in lower_body for w in ("appointment", "book", "booking", "schedule", "slot", "reserve", "reservation", "mulaqat", "doctor", "consultation", "checkup", "tarikh", "tareekh")):
+            try:
+                from services.ai_responder import handle_booking_flow
+                booking_res = handle_booking_flow(
+                    organization_id=organization_id,
+                    customer_phone=sender_phone,
+                    customer_name=sender_name,
+                    message_text=message_body,
+                    lang_fmt=lang_fmt
+                )
+                if booking_res and booking_res.get("reply_body"):
+                    disp = booking_res["reply_body"]
+                    spch = re.sub(r"[*_~`#>]", "", disp).strip()
+                    return {
+                        "reply_body": disp,
+                        "display_text": disp,
+                        "speech_text": spch,
+                        "voice_script": spch,
+                        "intent": "booking_appointment",
+                        "urgency": 60,
+                        "lead_score": 85,
+                        "route_department": "Appointments",
+                        "entities": entities,
+                        "booking": booking_res.get("appointment"),
+                        "booking_confirmed": booking_res.get("booking_saved", False),
+                        "mode": "booking_engine",
+                        "detected_language": detected_lang["language"],
+                        "detected_script": detected_lang["script"],
+                        "language_format": lang_fmt,
+                        "is_gemini": False,
+                        "is_groq": False,
+                        "is_ai_generated": True,
+                        "confidence": 99
+                    }
+            except Exception as b_err:
+                logger.warning(f"[Booking Engine Notice] {b_err}")
+
         # 1. Try Groq First (Ultra-fast Llama 3 - Zero Noticeable Latency ~250ms)
         groq_reply = cls.call_groq_ai(
             message_body,
