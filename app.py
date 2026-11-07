@@ -548,6 +548,26 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         response.headers["Content-Security-Policy"] = csp
         if application.config.get("SESSION_COOKIE_SECURE"):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        # Static Asset Caching & Dynamic Compression (Phase 7: Mobile 4G Optimization)
+        if request.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            response.headers["Vary"] = "Accept-Encoding"
+            accept_enc = request.headers.get("Accept-Encoding", "")
+            if "gzip" in accept_enc and not response.headers.get("Content-Encoding"):
+                c_type = response.headers.get("Content-Type", "")
+                if any(t in c_type for t in ("javascript", "css", "html", "json", "text", "xml")):
+                    try:
+                        import gzip
+                        data = response.get_data()
+                        if len(data) > 400:
+                            compressed = gzip.compress(data)
+                            response.set_data(compressed)
+                            response.headers["Content-Encoding"] = "gzip"
+                            response.headers["Content-Length"] = len(compressed)
+                    except Exception:
+                        pass
+
         return response
 
     # Ultra-fast, zero-overhead Health Check for Render & Cloud Monitors (<2ms)

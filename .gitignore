@@ -82,3 +82,6 @@ baileys_auth/
 wa_bridge.log
 
 
+
+# Pre-compressed static asset archives
+*.gz
