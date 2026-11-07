@@ -75,31 +75,52 @@ def safe_app_context(app=None):
             yield
 
 
-def resolve_auth_dir(root_dir: str = None) -> str:
+def resolve_auth_dir(root_dir: str = None, tenant_id: str = None) -> str:
     """Resolves the permanent directory path for Baileys auth credentials.
-    Respects AUTH_DIR environment variable or persistent disk mounts.
+    Respects AUTH_DIR environment variable or persistent disk mounts, and isolates
+    directories per tenant_id to support concurrent multi-tenant B2B SaaS accounts.
     """
     if root_dir is None:
         root_dir = os.path.dirname(os.path.abspath(__file__))
     auth_env = os.environ.get("AUTH_DIR", "").strip()
+    base_auth = ""
     if auth_env:
-        return os.path.abspath(auth_env)
-    for mount in [
-        os.environ.get("RENDER_DISK_PATH"),
-        os.environ.get("PERSISTENT_DATA_DIR"),
-        "/var/data",
-        "/data",
-        "/mnt/data",
-        "/opt/render/project/src/baileys_auth",
-    ]:
-        if mount and os.path.exists(mount):
-            if mount.endswith("baileys_auth"):
-                os.makedirs(mount, exist_ok=True)
-                return mount
-            d = os.path.join(mount, "baileys_auth")
-            os.makedirs(d, exist_ok=True)
-            return d
-    return os.path.join(root_dir, "baileys_auth")
+        base_auth = os.path.abspath(auth_env)
+    else:
+        for mount in [
+            os.environ.get("RENDER_DISK_PATH"),
+            os.environ.get("PERSISTENT_DATA_DIR"),
+            "/var/data",
+            "/data",
+            "/mnt/data",
+            "/opt/render/project/src/baileys_auth",
+        ]:
+            if mount and os.path.exists(mount):
+                if mount.endswith("baileys_auth"):
+                    os.makedirs(mount, exist_ok=True)
+                    base_auth = mount
+                    break
+                d = os.path.join(mount, "baileys_auth")
+                os.makedirs(d, exist_ok=True)
+                base_auth = d
+                break
+        if not base_auth:
+            base_auth = os.path.join(root_dir, "baileys_auth")
+
+    clean_tenant = str(tenant_id or "default").strip()
+    if clean_tenant == "default":
+        legacy_creds = os.path.join(base_auth, "creds.json")
+        if os.path.exists(legacy_creds):
+            return base_auth
+        default_dir = os.path.join(base_auth, "tenant_default")
+        if os.path.exists(default_dir):
+            return default_dir
+        return base_auth
+
+    safe_tenant = "".join(c if c.isalnum() or c in ("_", "-", ".") else "_" for c in clean_tenant)
+    tenant_dir = os.path.join(base_auth, f"tenant_{safe_tenant}")
+    os.makedirs(tenant_dir, exist_ok=True)
+    return tenant_dir
 
 
 def is_authenticated_session(auth_dir: str) -> bool:
@@ -156,7 +177,7 @@ def restore_wa_session_from_db(root_dir: str = None, app=None, tenant_id: str = 
     if local credentials are missing or corrupted. Supports multi-tenant isolation
     and resilient multi-tier fallback to ensure Render redeploys never reset QR codes.
     """
-    auth_dir = resolve_auth_dir(root_dir)
+    auth_dir = resolve_auth_dir(root_dir, tenant_id=tenant_id)
 
     # If local creds already exist AND are authenticated, no need to overwrite
     if is_authenticated_session(auth_dir):
@@ -247,7 +268,7 @@ def backup_wa_session_to_db(root_dir: str = None, app=None, tenant_id: str = "de
     CRITICAL: Never backs up an unlinked / unauthenticated session to prevent wiping
     the active session in the database during container boot or QR display.
     """
-    auth_dir = resolve_auth_dir(root_dir)
+    auth_dir = resolve_auth_dir(root_dir, tenant_id=tenant_id)
 
     # CRITICAL GUARD: Only back up if the session is verified to be authenticated!
     if not is_authenticated_session(auth_dir):

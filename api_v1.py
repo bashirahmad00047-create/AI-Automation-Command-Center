@@ -5741,7 +5741,13 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
     if not messages:
         return {"status": "acknowledged", "provider": "green_api", "processed": 0}
 
-    org_id = target_org_id or "org-enterprise-default"
+    org_id = (
+        target_org_id
+        or payload.get("tenant_id")
+        or payload.get("organization_id")
+        or (payload.get("instanceData") or {}).get("tenant_id")
+        or "org-enterprise-default"
+    )
     processed_count = 0
     ai_reply = None
     engine = get_engine()
@@ -5978,7 +5984,13 @@ def whatsapp_webhook_ingress():
         is_green_api = bool(payload.get("typeWebhook") or payload.get("instanceData"))
 
         if is_green_api:
-            res_dict = process_inbound_whatsapp_payload(payload, target_org_id=request.args.get("org_id"))
+            target_tenant = (
+                request.args.get("org_id")
+                or payload.get("tenant_id")
+                or payload.get("organization_id")
+                or (payload.get("instanceData") or {}).get("tenant_id")
+            )
+            res_dict = process_inbound_whatsapp_payload(payload, target_org_id=target_tenant)
             return jsonify(res_dict), 200
         else:
             # Meta Cloud API signature verification
