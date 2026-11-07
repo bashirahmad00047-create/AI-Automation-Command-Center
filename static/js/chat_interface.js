@@ -166,6 +166,108 @@
             `;
             container.appendChild(bubble);
             container.scrollTop = container.scrollHeight;
+        },
+
+        async fetchQrCode(forceRefresh = false) {
+            const currentOrgId = (
+                (typeof getEffectiveOrgId === 'function' ? getEffectiveOrgId() : null) ||
+                (window.BashFlowAuth && typeof window.BashFlowAuth.getEffectiveOrgId === 'function' ? window.BashFlowAuth.getEffectiveOrgId() : null) ||
+                window.state?.currentOrg?.id ||
+                window._currentOrgId ||
+                (function() { try { return localStorage.getItem('selectedOrgId'); } catch (_) { return null; } })() ||
+                'org-enterprise-default'
+            );
+
+            const spinner = document.getElementById('qrLoadingSpinner');
+            const qrWrapper = document.getElementById('qrImageWrapper');
+            const statusText = document.getElementById('qrStatusText');
+            const qrImgs = [document.getElementById('qr-code-img'), document.getElementById('bridgeQrImage')].filter(Boolean);
+            const refreshBtn = document.getElementById('btn-qr-relink') || document.getElementById('qrRefreshBtn');
+
+            if (forceRefresh && refreshBtn) {
+                refreshBtn.textContent = '⏳ Refreshing...';
+            }
+
+            try {
+                const refreshParam = forceRefresh ? '&force_refresh=true' : '';
+                const url = '/api/v1/whatsapp/qr?org_id=' + currentOrgId + refreshParam;
+                let res = await fetch(url);
+                if (!res.ok) {
+                    res = await fetch('/api/whatsapp/qr?org_id=' + currentOrgId + refreshParam);
+                }
+
+                if (refreshBtn) refreshBtn.textContent = '🔄 Refresh QR';
+
+                if (!res.ok) {
+                    if (statusText) statusText.textContent = 'Connecting to WhatsApp bridge (generating QR code)...';
+                    return null;
+                }
+
+                const data = await res.json().catch(() => null);
+                if (!data) return null;
+
+                const isConnected = Boolean(data.connected === true || data.status === 'connected' || data.phone || (data.user && data.user.id));
+                if (isConnected && !forceRefresh) {
+                    window._waIsConnected = true;
+                    const phone = data.phone || (data.user?.id ? data.user.id.split(':')[0] : (data.connected_phone || ''));
+                    if (typeof closeQrModal === 'function') closeQrModal();
+                    if (typeof updateWhatsAppConnectionUI === 'function') {
+                        updateWhatsAppConnectionUI(true, phone);
+                    }
+                    return data;
+                }
+
+                const qrSrc = data.qr_image || data.qrImageUrl || data.qrUrl || data.qr_image_url;
+                const qrRaw = data.qr || data.qr_code;
+
+                if (qrSrc || qrRaw) {
+                    let resolvedImgUrl = '';
+                    if (qrSrc && (qrSrc.startsWith('data:image/') || qrSrc.startsWith('http://') || qrSrc.startsWith('https://') || qrSrc.startsWith('/'))) {
+                        resolvedImgUrl = qrSrc;
+                    } else if (qrRaw) {
+                        resolvedImgUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' + encodeURIComponent(qrRaw);
+                    }
+
+                    if (resolvedImgUrl) {
+                        qrImgs.forEach((img, idx) => {
+                            if (idx === 0 || img.id === 'qr-code-img') {
+                                img.src = resolvedImgUrl;
+                                img.style.display = 'block';
+                                img.style.width = '220px';
+                                img.style.height = '220px';
+                                img.style.objectFit = 'contain';
+                                img.style.margin = '0 auto';
+                            } else {
+                                img.style.display = 'none';
+                            }
+                        });
+
+                        // Hide the "Generating secure QR code..." spinner and display the QR wrapper
+                        if (spinner) spinner.style.display = 'none';
+                        if (qrWrapper) {
+                            qrWrapper.style.display = 'flex';
+                            qrWrapper.style.flexDirection = 'column';
+                            qrWrapper.style.alignItems = 'center';
+                            qrWrapper.style.justifyContent = 'center';
+                        }
+                        if (statusText) {
+                            statusText.textContent = 'Scan this QR code with WhatsApp on your phone:';
+                        }
+                    }
+                } else {
+                    if (spinner) spinner.style.display = 'flex';
+                    if (qrWrapper) qrWrapper.style.display = 'none';
+                    if (statusText) {
+                        statusText.textContent = data.message || 'Connecting to WhatsApp bridge (generating QR code)...';
+                    }
+                }
+
+                return data;
+            } catch (err) {
+                console.warn('[BashFlowChat] QR Fetch error:', err);
+                if (refreshBtn) refreshBtn.textContent = '🔄 Refresh QR';
+                return null;
+            }
         }
     };
 
@@ -181,6 +283,7 @@
 
     // Expose module globally and bind legacy handlers
     window.BashFlowChat = BashFlowChat;
+    window.fetchQrCode = (forceRefresh) => BashFlowChat.fetchQrCode(forceRefresh);
     window.initWhatsAppSocket = () => BashFlowChat.initSocket();
     window.initWhatsAppChatBarListeners = () => BashFlowChat.initChatBarListeners();
 

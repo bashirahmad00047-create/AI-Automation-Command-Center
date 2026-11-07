@@ -280,6 +280,9 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             engine_opts.setdefault("pool_size", int(os.environ.get("DB_POOL_SIZE", "10")))
             engine_opts.setdefault("max_overflow", int(os.environ.get("DB_MAX_OVERFLOW", "20")))
             engine_opts.setdefault("connect_args", {"sslmode": "require"})
+    else:
+        # SQLite concurrency hardening for multi-threaded Gunicorn workers
+        engine_opts.setdefault("connect_args", {"timeout": 30, "check_same_thread": False})
     application.config["SQLALCHEMY_ENGINE_OPTIONS"] = engine_opts
 
     # Initialize SQLAlchemy & Database Migrations immediately

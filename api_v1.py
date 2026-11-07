@@ -2817,6 +2817,8 @@ def api_whatsapp_bridge_qr():
                         qr_img = None
             return jsonify({
                 "success": True,
+                "org_id": current_org_id,
+                "tenant_id": current_org_id,
                 "status": "connected" if (is_connected and not force_refresh) else ("qr_ready" if qr_val else "initializing"),
                 "connected": is_connected and not force_refresh,
                 "phone": None if force_refresh else phone_num,
@@ -3344,9 +3346,10 @@ def api_whatsapp_bridge_qr_png():
     except Exception:
         pass
 
+    current_org_id = request.args.get("org_id") or getattr(g, "org_id", None) or "org-enterprise-default"
     bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_PNG_URL", "http://127.0.0.1:3001/qr.png")
     try:
-        resp = requests.get(bridge_url, timeout=4.0)
+        resp = requests.get(bridge_url, params={"org_id": current_org_id}, timeout=4.0)
         if resp.status_code == 200 and resp.content:
             return Response(resp.content, mimetype="image/png", headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
     except Exception as e:
@@ -3368,9 +3371,10 @@ def api_whatsapp_bridge_qr_svg():
     except Exception:
         pass
 
+    current_org_id = request.args.get("org_id") or getattr(g, "org_id", None) or "org-enterprise-default"
     bridge_url = os.environ.get("BAILEYS_BRIDGE_QR_SVG_URL", "http://127.0.0.1:3001/qr.svg")
     try:
-        resp = requests.get(bridge_url, timeout=4.0)
+        resp = requests.get(bridge_url, params={"org_id": current_org_id}, timeout=4.0)
         if resp.status_code == 200 and resp.content:
             return Response(resp.content, mimetype="image/svg+xml", headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
     except Exception as e:

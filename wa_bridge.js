@@ -1681,31 +1681,10 @@ function storeMessageForRetry(key, message) {
  */
 async function startSock(orgId = 'default', skipRestore = false) {
   const cleanOrg = (orgId || 'default').toString().trim();
-  const AUTH_DIR = path.join(__dirname, `auth_info_baileys_${cleanOrg}`);
-  if (!fs.existsSync(AUTH_DIR)) {
-    fs.mkdirSync(AUTH_DIR, { recursive: true });
-  }
-
-  // Register in activeSessions
-  let session = activeSessions.get(cleanOrg);
-  if (!session) {
-    session = {
-      orgId: cleanOrg,
-      authDir: AUTH_DIR,
-      sock: null,
-      isConnected: false,
-      isStarting: false,
-      currentQr: null,
-      currentQrUrl: null,
-      currentQrSvg: null,
-      latestQr: null,
-      latestQrDataUrl: null,
-      lastQrGeneratedTime: 0,
-      reconnectAttempts: 0,
-      reconnectTimer: null
-    };
-    activeSessions.set(cleanOrg, session);
-  }
+  const session = (typeof sessionPool !== 'undefined' && sessionPool.getOrCreateSession)
+    ? sessionPool.getOrCreateSession(cleanOrg)
+    : { orgId: cleanOrg, authDir: path.join(__dirname, 'auth_info_baileys_' + cleanOrg), sock: null, isConnected: false, isStarting: false, latestQr: null, latestQrDataUrl: null, currentQr: null, currentQrUrl: null };
+  activeSessions.set(cleanOrg, session);
 
   // Delegate to startWhatsAppBridge with cleanOrg
   return await startWhatsAppBridge(cleanOrg, skipRestore);
@@ -2022,7 +2001,9 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
 
     });
 
-
+    session.sock = sock;
+    session.isConnected = false;
+    activeSessions.set(tenantId, session);
 
     // Safely persist session credentials (only sync to DB once authenticated)
 
@@ -2107,36 +2088,42 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
       // INSTANT CONNECTED STATE SETTING ON FIRST LINE BEFORE ANY DB BACKUP OR CHAT SYNC
 
       if (connection === 'open') {
-
-        isConnected = true;
-
-        latestQr = null;
-
-        latestQrDataUrl = null;
-
-        currentQr = null;
-
-        currentQrUrl = null;
-
-        currentQrSvg = null;
-
+        session.isConnected = true;
+        session.isStarting = false;
+        session.latestQr = null;
+        session.latestQrDataUrl = null;
+        session.currentQr = null;
+        session.currentQrUrl = null;
+        session.currentQrSvg = null;
+        if (sock?.user?.id) {
+          session.authenticatedUserPhone = sock.user.id.split(':')[0].replace(/\D/g, '');
+        }
+        if (tenantId === 'default') {
+          isConnected = true;
+          latestQr = null;
+          latestQrDataUrl = null;
+          currentQr = null;
+          currentQrUrl = null;
+          currentQrSvg = null;
+        }
       } else if (connection === 'close') {
-
-        isConnected = false;
-
+        session.isConnected = false;
+        session.isStarting = false;
+        if (tenantId === 'default') {
+          isConnected = false;
+        }
       }
 
-
-
       // Display QR code in terminal when generated & pre-generate data URL and SVG
-
       if (qr) {
-
-        currentQr = qr;
-
-        latestQr = qr;
-
-        lastQrGeneratedTime = Date.now();
+        session.currentQr = qr;
+        session.latestQr = qr;
+        session.lastQrGeneratedTime = Date.now();
+        if (tenantId === 'default') {
+          currentQr = qr;
+          latestQr = qr;
+          lastQrGeneratedTime = Date.now();
+        }
 
         console.log('\n===============================================================');
 
@@ -2179,11 +2166,12 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
           color: { dark: '#000000', light: '#ffffff' }
 
         }).then((url) => {
-
-          latestQrDataUrl = url;
-
-          currentQrUrl = url;
-
+          session.latestQrDataUrl = url;
+          session.currentQrUrl = url;
+          if (tenantId === 'default') {
+            latestQrDataUrl = url;
+            currentQrUrl = url;
+          }
         }).catch((err) => {
 
           console.error('[Bridge QR] Error generating QR Data URL:', err.message);
@@ -2203,9 +2191,10 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
           width: 240
 
         }).then((svg) => {
-
-          currentQrSvg = svg;
-
+          session.currentQrSvg = svg;
+          if (tenantId === 'default') {
+            currentQrSvg = svg;
+          }
         }).catch((err) => {
 
           console.error('[Bridge QR] Error generating QR SVG:', err.message);
@@ -4278,13 +4267,25 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
       while (!session?.latestQr && !session?.currentQr && !latestQr && (Date.now() - startWait < 3500)) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-    } else if ((!session || (!session.isStarting && !session.latestQr && !session.currentQr)) && !latestQr && !currentQr && !genuinelyConnected) {
-      const now = Date.now();
-      const lastRestart = session?.lastRestartTriggerTime || lastRestartTriggerTime || 0;
-      if (now - lastRestart > 10000) {
-        if (session) session.lastRestartTriggerTime = now;
-        lastRestartTriggerTime = now;
-        startWhatsAppBridge(tenantId, false).catch(e => console.error(`[WhatsApp Bridge] Auto-start on /qr error for ${tenantId}:`, e.message));
+    } else if (!session?.sock && !session?.isStarting && !session?.latestQr && !session?.currentQr && !genuinelyConnected) {
+      console.log(`[WhatsApp Bridge] Dynamic socket initialization for tenant '${tenantId}' on /qr request...`);
+      console.log(`[WhatsApp Bridge] Dynamic socket initialization for tenant '${tenantId}' on /qr request...`);
+      if (session) {
+        session.isStarting = true;
+        session.lastRestartTriggerTime = Date.now();
+      }
+      startSock(tenantId, false).catch(e => console.error(`[WhatsApp Bridge] Dynamic start on /qr error for ${tenantId}:`, e.message));
+
+      // Wait up to 4s for fresh QR code to generate
+      const startWait = Date.now();
+      while (!session?.latestQr && !session?.currentQr && !latestQr && !session?.isConnected && (Date.now() - startWait < 4000)) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    } else if ((session?.isStarting || isStarting) && !session?.latestQr && !session?.currentQr && !latestQr && !genuinelyConnected) {
+      // Socket is starting, wait up to 3s for QR code so client gets Base64 QR code on first request
+      const startWait = Date.now();
+      while (!session?.latestQr && !session?.currentQr && !latestQr && !session?.isConnected && (Date.now() - startWait < 3000)) {
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
 
@@ -4314,6 +4315,7 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
     return res.status(200).json({
       success: true,
       tenant_id: tenantId,
+      org_id: tenantId,
       status: qrText ? 'qr_ready' : ((session?.isStarting || isStarting) ? 'initializing' : 'waiting'),
       connected: isForceRefresh ? false : genuinelyConnected,
       phone: isForceRefresh ? null : phone,

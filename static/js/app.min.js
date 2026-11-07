@@ -5766,9 +5766,9 @@ async function fetchBridgeQrCode(forceRefresh = false) {
 
     try {
         const effectiveOrg = (typeof getEffectiveOrgId === 'function' ? getEffectiveOrgId() : (window.BashFlowAuth?.getEffectiveOrgId?.() || window.state?.currentOrg?.id || window._currentOrgId || (function() { try { return localStorage.getItem('selectedOrgId'); } catch (_) { return null; } })() || 'org-enterprise-default'));
-        const sep = forceRefresh ? '&' : '?';
-        const refreshParam = forceRefresh ? '?force_refresh=true&org_id=' + encodeURIComponent(effectiveOrg) : '?org_id=' + encodeURIComponent(effectiveOrg);
-        let res = await fetch(`/api/v1/whatsapp/qr${refreshParam}`);
+        const currentOrgId = effectiveOrg;
+        const refreshParam = forceRefresh ? '&force_refresh=true' : '';
+        let res = await fetch('/api/v1/whatsapp/qr?org_id=' + currentOrgId + refreshParam);
         if (!res.ok) {
             res = await fetch(`/api/whatsapp/qr${refreshParam}`);
         }
