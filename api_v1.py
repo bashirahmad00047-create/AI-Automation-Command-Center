@@ -94,6 +94,8 @@ from models import (
     Product,
     EcommerceOrder,
     AbandonedCart,
+    Appointment,
+    Booking,
     generate_uuid,
 )
 from business_templates import (

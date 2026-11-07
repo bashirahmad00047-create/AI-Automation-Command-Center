@@ -2001,3 +2001,60 @@ class RideRequest(db.Model):
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }
+
+
+class Appointment(db.Model):
+    """Multi-tenant Appointment & Booking entity for service businesses (clinics, salons, consultancies).
+    Supports calendar slot reservation, conflict detection, and status workflows.
+    """
+    __tablename__ = "appointments"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("apt"))
+    org_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    customer_phone = db.Column(db.String(50), nullable=False, index=True)
+    customer_name = db.Column(db.String(255), nullable=True)
+    service_name = db.Column(db.String(255), nullable=False)
+    appointment_datetime = db.Column(db.DateTime, nullable=False, index=True)
+    duration_minutes = db.Column(db.Integer, nullable=False, default=30)
+    status = db.Column(db.String(32), nullable=False, default="Pending", index=True)  # Pending, Confirmed, Cancelled
+    notes = db.Column(db.Text, nullable=True)
+    reminder_sent = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow
+    )
+
+    # Relationships
+    organization = db.relationship("Organization", backref=db.backref("appointments", lazy="dynamic", cascade="all, delete-orphan"))
+
+    @property
+    def organization_id(self):
+        return self.org_id
+
+    @organization_id.setter
+    def organization_id(self, val):
+        self.org_id = val
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "org_id": self.org_id,
+            "organization_id": self.org_id,
+            "customer_phone": self.customer_phone,
+            "customer_name": self.customer_name,
+            "service_name": self.service_name,
+            "appointment_datetime": self.appointment_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.appointment_datetime else None,
+            "duration_minutes": self.duration_minutes,
+            "status": self.status,
+            "notes": self.notes,
+            "reminder_sent": self.reminder_sent,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
+
+
+# Enterprise Alias for Booking Engine
+Booking = Appointment
