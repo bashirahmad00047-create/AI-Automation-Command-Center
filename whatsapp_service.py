@@ -6990,12 +6990,16 @@ class WhatsAppService:
             if is_voice_inbound and not tts_failed and not audio_res and (not dispatch_res or (isinstance(dispatch_res, dict) and not dispatch_res.get("success"))):
                 try:
                     logger.info(f"[Emergency Voice Dispatch] Generating emergency audio for {real_chat_id}...")
-                    from gtts import gTTS
-                    import io
-                    tts = gTTS(text=clean_reply_text[:500], lang="ur")
-                    buf = io.BytesIO()
-                    tts.write_to_fp(buf)
-                    emerg_bytes = buf.getvalue()
+                    from services.voice_engine import generate_spoken_audio as voice_engine_synth
+                    emerg_res = voice_engine_synth(text=clean_reply_text[:500], language="ur", organization_id=org_id, output_format="oga")
+                    emerg_bytes = emerg_res[0] if (emerg_res and emerg_res[0]) else None
+                    if not emerg_bytes:
+                        from gtts import gTTS
+                        import io
+                        tts = gTTS(text=clean_reply_text[:500], lang="ur")
+                        buf = io.BytesIO()
+                        tts.write_to_fp(buf)
+                        emerg_bytes = buf.getvalue()
                     if emerg_bytes and len(emerg_bytes) > 100:
                         outbound_audio_b64 = base64.b64encode(emerg_bytes).decode("ascii")
                         send_as_voice = True
