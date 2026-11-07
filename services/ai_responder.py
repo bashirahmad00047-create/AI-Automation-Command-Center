@@ -161,6 +161,46 @@ def parse_intent(text: str) -> Dict[str, Any]:
             "route_department": "Appointments"
         }
 
+    # Sales Negotiation, Bargaining & Cart Management (Audit Item 3 / Phase 6)
+    checkout_markers = (
+        "confirm order", "order confirm", "pack kar", "pack krdo", "bhej do", "bhej dein",
+        "deal done", "theek hai bhej", "finalize order", "address note", "deal pakki",
+        "deliver kar dein"
+    )
+    if any(w in clean_text for w in checkout_markers):
+        return {
+            "intent": "sales_checkout",
+            "urgency": 80,
+            "lead_score": 95,
+            "route_department": "Sales"
+        }
+
+    negotiation_markers = (
+        "discount", "kam karo", "kam karein", "kam ho sakta", "kuch kam", "gujaish",
+        "gunjaish", "mehnga", "bohot zyada", "riayat", "reayat", "munasib", "last price",
+        "final price", "counter offer", "bargain", "cheaper", "best price", "special price",
+        "off do", "percent off", "itne me de do", "itne me do"
+    )
+    if any(w in clean_text for w in negotiation_markers):
+        return {
+            "intent": "sales_negotiation",
+            "urgency": 65,
+            "lead_score": 88,
+            "route_department": "Sales"
+        }
+
+    cart_markers = (
+        "cart", "add to cart", "daal do", "nikal do", "remove item", "mera bill",
+        "total kitna", "bill kitna", "view cart", "show cart", "check cart"
+    )
+    if any(w in clean_text for w in cart_markers):
+        return {
+            "intent": "cart_management",
+            "urgency": 55,
+            "lead_score": 80,
+            "route_department": "Sales"
+        }
+
     if any(w in clean_text for w in ("salam", "hello", "hi", "hey", "aoa")):
         intent = "greeting"
         urgency = 10
@@ -495,6 +535,303 @@ def handle_booking_flow(
                 "booking_saved": False,
                 "target_datetime": target_dt.strftime("%Y-%m-%d %H:%M:%S")
             }
+def extract_negotiation_intent(text: str) -> Dict[str, Any]:
+    """Extracts negotiation specifics: counter-offer price, discount percent, action type.
+    Action types:
+    - 'checkout': User wants to confirm order / provide address / finalize deal.
+    - 'cart_remove': User wants to remove or decrease item.
+    - 'cart_view': User wants to see total / bill / items.
+    - 'bargain_price': User specifies an exact counter-offer price (e.g. 2500 PKR).
+    - 'bargain_pct': User specifies a percentage discount (e.g. 15% off).
+    - 'bargain_generic': User asks for discount / reduction without amount (e.g. 'kuch kam karein').
+    - 'cart_add': User asks to add an item.
+    """
+    clean = str(text or "").strip().lower()
+
+    checkout_markers = (
+        "confirm order", "order confirm", "pack kar", "pack krdo", "bhej do", "bhej dein",
+        "deal done", "theek hai bhej", "finalize order", "address note", "deal pakki",
+        "order bhej do", "deliver kar dein", "delivery address"
+    )
+    if any(m in clean for m in checkout_markers):
+        return {"action": "checkout", "value": None}
+
+    remove_markers = ("nikal do", "hata do", "remove", "cancel item", "kam kar do", "kam krdo", "drop item")
+    if any(m in clean for m in remove_markers):
+        return {"action": "cart_remove", "value": None}
+
+    view_markers = ("total bill", "mera bill", "bill kitna", "cart check", "view cart", "show cart", "total kitna", "kitna bana")
+    if any(m in clean for m in view_markers):
+        return {"action": "cart_view", "value": None}
+
+    pct_match = re.search(r'(\d{1,2})\s*(?:%|percent|feesad)', clean)
+    if pct_match:
+        return {"action": "bargain_pct", "value": float(pct_match.group(1))}
+
+    pm = re.search(r'(?:(?:pkr|rs\.?|inr)\s*)?(\d{3,6})\s*(?:mein|me|ka|pkr|rs|rupaye|\b)', clean)
+    if pm:
+        try:
+            val = float(pm.group(1))
+            if val >= 50:
+                return {"action": "bargain_price", "value": val}
+        except (ValueError, TypeError):
+            pass
+
+    discount_markers = (
+        "discount", "kam karo", "kam karein", "kam ho sakta", "kuch kam", "gujaish",
+        "gunjaish", "mehnga", "bohot zyada", "riayat", "reayat", "munasib", "last price",
+        "final price", "counter offer", "bargain", "cheaper", "best price", "special price"
+    )
+    if any(m in clean for m in discount_markers):
+        return {"action": "bargain_generic", "value": None}
+
+    return {"action": "cart_add", "value": None}
+
+
+def handle_sales_negotiation_flow(
+    organization_id: Optional[str],
+    customer_phone: Optional[str],
+    customer_name: Optional[str],
+    message_text: str,
+    lang_fmt: str = "roman_urdu"
+) -> Dict[str, Any]:
+    """Deterministic Multi-Tenant Sales Negotiation & Cart State Machine (Audit Item 3 / Phase 6).
+    Handles:
+    - Multi-turn price bargaining with cost-floor margin protection.
+    - Cart revisions (add / remove / clear / recalculate).
+    - Conditional discounting (counter-offers & sweet-deals).
+    - Deterministic stage transitions: browsing -> bargaining -> agreed -> checkout.
+    """
+    clean_org = str(organization_id or "org-enterprise-default")
+    clean_phone = re.sub(r"[^\d]", "", str(customer_phone or "")) or "923001234567"
+    client_name = customer_name or f"Customer {clean_phone[-4:]}"
+
+    neg_intent = extract_negotiation_intent(message_text)
+    action = neg_intent["action"]
+    val = neg_intent["value"]
+
+    from wa_bridge_manager import safe_app_context
+    with safe_app_context():
+        try:
+            from models import CartState, Product
+            from database import db
+
+            # Retrieve or create active cart for this tenant and customer
+            cart = CartState.query.filter(
+                CartState.org_id == clean_org,
+                CartState.customer_phone == clean_phone,
+                CartState.negotiation_stage.notin_(["completed", "abandoned"])
+            ).order_by(CartState.created_at.desc()).first()
+
+            if not cart:
+                cart = CartState(
+                    org_id=clean_org,
+                    customer_phone=clean_phone,
+                    customer_name=client_name,
+                    negotiation_stage="browsing"
+                )
+                db.session.add(cart)
+                db.session.flush()
+
+            # Ensure cart has at least catalog item if empty and user is bargaining
+            items = cart.get_items()
+            if not items:
+                catalog_prod = Product.query.filter_by(organization_id=clean_org, is_active=True).first()
+                if catalog_prod:
+                    cart.add_item(
+                        product_name=catalog_prod.name,
+                        quantity=1,
+                        unit_price=float(catalog_prod.price or 2500.0),
+                        product_id=catalog_prod.id,
+                        seller_cost=float(catalog_prod.seller_price or (catalog_prod.price * 0.70))
+                    )
+                else:
+                    cart.add_item(
+                        product_name="Catalog Item",
+                        quantity=1,
+                        unit_price=2500.0,
+                        seller_cost=1800.0
+                    )
+                db.session.commit()
+                items = cart.get_items()
+
+            reply_msg = ""
+            stage = cart.negotiation_stage
+
+            if action == "checkout":
+                cart.negotiation_stage = "checkout"
+                db.session.commit()
+                if "urdu" in lang_fmt:
+                    reply_msg = (
+                        f"Bohat shukriya {client_name}! 🎉 Aap ka order PKR {cart.current_total:,.0f} mein finalize ho gaya hai.\n"
+                        f"Baraye meherbani apna mukammal delivery address aur city share farmayein taake parcel dispatch kiya ja sake."
+                    )
+                else:
+                    reply_msg = (
+                        f"Thank you {client_name}! 🎉 Your order is finalized at PKR {cart.current_total:,.0f}.\n"
+                        f"Please provide your complete delivery address and city for dispatch."
+                    )
+
+            elif action == "cart_view":
+                item_lines = "\n".join([f"• {it.get('name')} x{it.get('quantity', 1)}: PKR {float(it.get('unit_price', 0)) * int(it.get('quantity', 1)):,.0f}" for it in items])
+                disc_info = f"\nDiscount Applied: {cart.offered_discount_pct:.0f}%" if cart.offered_discount_pct > 0 else ""
+                if "urdu" in lang_fmt:
+                    reply_msg = (
+                        f"Aap ke cart ki tafseelat, {client_name}:\n{item_lines}{disc_info}\n"
+                        f"-----------------------------\n"
+                        f"Kul Raqam (Total): PKR {cart.current_total:,.0f} (Stage: {cart.negotiation_stage.title()})\n\n"
+                        f"Kya aap is order ko confirm karna chahte hain ya koi tabdeeli karni hai?"
+                    )
+                else:
+                    reply_msg = (
+                        f"Your cart breakdown, {client_name}:\n{item_lines}{disc_info}\n"
+                        f"-----------------------------\n"
+                        f"Total Amount: PKR {cart.current_total:,.0f} (Stage: {cart.negotiation_stage.title()})\n\n"
+                        f"Would you like to confirm this order or make any revisions?"
+                    )
+
+            elif action == "cart_remove":
+                if items:
+                    removed_name = items[0].get("name", "Item")
+                    cart.remove_item(removed_name, quantity=1)
+                    db.session.commit()
+                    if "urdu" in lang_fmt:
+                        reply_msg = (
+                            f"{removed_name} cart se remove kar diya gaya hai. 🛒\n"
+                            f"Naya Total: PKR {cart.current_total:,.0f}. Aur koi cheez add ya remove karni hai?"
+                        )
+                    else:
+                        reply_msg = (
+                            f"{removed_name} has been removed from your cart. 🛒\n"
+                            f"Updated Total: PKR {cart.current_total:,.0f}. Would you like to adjust anything else?"
+                        )
+                else:
+                    reply_msg = "Cart khali hai." if "urdu" in lang_fmt else "Your cart is currently empty."
+
+            elif action == "bargain_price":
+                proposed = float(val)
+                if proposed >= cart.floor_price:
+                    cart.counter_offer_price = proposed
+                    cart.negotiation_stage = "agreed"
+                    disc_val = max(0.0, cart.original_total - proposed)
+                    cart.offered_discount_pct = (disc_val / cart.original_total * 100.0) if cart.original_total > 0 else 0.0
+                    cart.recalculate()
+                    db.session.commit()
+                    if "urdu" in lang_fmt:
+                        reply_msg = (
+                            f"Zabardast {client_name}! Hum aap ki counter-offer PKR {proposed:,.0f} qabool karte hain! 🤝✨\n"
+                            f"Aap ki bachat: PKR {disc_val:,.0f}! Kul bill ab PKR {cart.current_total:,.0f} hai.\n\n"
+                            f"Kya hum order finalize karein aur delivery address note karein?"
+                        )
+                    else:
+                        reply_msg = (
+                            f"Deal agreed {client_name}! We accept your offer of PKR {proposed:,.0f}! 🤝✨\n"
+                            f"Your savings: PKR {disc_val:,.0f}! Total payable is now PKR {cart.current_total:,.0f}.\n\n"
+                            f"Shall we finalize the order and confirm delivery address?"
+                        )
+                else:
+                    seller_counter = round(max(cart.floor_price * 1.05, cart.original_total * 0.88), 0)
+                    cart.counter_offer_price = seller_counter
+                    cart.negotiation_stage = "bargaining"
+                    cart.offered_discount_pct = ((cart.original_total - seller_counter) / cart.original_total * 100.0) if cart.original_total > 0 else 10.0
+                    cart.recalculate()
+                    db.session.commit()
+                    if "urdu" in lang_fmt:
+                        reply_msg = (
+                            f"{client_name} bhai, PKR {proposed:,.0f} hamari wholesale cost se bhi kam hai. "
+                            f"Lekin aap hamare qeemti customer hain, to hum special final rate PKR {seller_counter:,.0f} kar sakte hain! 🎁\n"
+                            f"Kya is rate par deal done karein?"
+                        )
+                    else:
+                        reply_msg = (
+                            f"Dear {client_name}, PKR {proposed:,.0f} is below our wholesale cost. "
+                            f"However, as a special gesture, our best final offer is PKR {seller_counter:,.0f}! 🎁\n"
+                            f"Would this work for you to lock in the deal?"
+                        )
+
+            elif action == "bargain_pct":
+                proposed_pct = min(40.0, float(val))
+                max_allowed_pct = ((cart.original_total - cart.floor_price) / cart.original_total * 100.0) if cart.original_total > 0 else 15.0
+                max_allowed_pct = max(5.0, min(25.0, max_allowed_pct))
+
+                if proposed_pct <= max_allowed_pct:
+                    cart.offered_discount_pct = proposed_pct
+                    cart.counter_offer_price = None
+                    cart.negotiation_stage = "agreed"
+                    cart.recalculate()
+                    db.session.commit()
+                    if "urdu" in lang_fmt:
+                        reply_msg = (
+                            f"Mubarak ho {client_name}! Hum ne aap ke liye {proposed_pct:.0f}% discount apply kar diya hai! 🏷️\n"
+                            f"Aap ka bill PKR {cart.original_total:,.0f} se kam ho kar sirf PKR {cart.current_total:,.0f} reh gaya hai.\n\n"
+                            f"Kya order pack karwa dein?"
+                        )
+                    else:
+                        reply_msg = (
+                            f"Congratulations {client_name}! We have applied a {proposed_pct:.0f}% discount for you! 🏷️\n"
+                            f"Your total dropped from PKR {cart.original_total:,.0f} to only PKR {cart.current_total:,.0f}.\n\n"
+                            f"Shall we get this packed for you?"
+                        )
+                else:
+                    cart.offered_discount_pct = max_allowed_pct
+                    cart.counter_offer_price = None
+                    cart.negotiation_stage = "bargaining"
+                    cart.recalculate()
+                    db.session.commit()
+                    if "urdu" in lang_fmt:
+                        reply_msg = (
+                            f"{client_name} bhai, {proposed_pct:.0f}% margin se bahir hai. "
+                            f"Lekin hum aap ko highest possible {max_allowed_pct:.0f}% discount de rahe hain! Naya total: PKR {cart.current_total:,.0f}. ✨\n"
+                            f"Kya yeh deal lock karein?"
+                        )
+                    else:
+                        reply_msg = (
+                            f"Dear {client_name}, {proposed_pct:.0f}% exceeds our maximum margin limit. "
+                            f"However, we can offer our highest possible discount of {max_allowed_pct:.0f}%! New total: PKR {cart.current_total:,.0f}. ✨\n"
+                            f"Shall we confirm at this price?"
+                        )
+
+            else:
+                cart.offered_discount_pct = 10.0
+                cart.counter_offer_price = None
+                cart.negotiation_stage = "bargaining"
+                cart.recalculate()
+                db.session.commit()
+                if "urdu" in lang_fmt:
+                    reply_msg = (
+                        f"Ji zaroor {client_name}! Aap ke liye hum khas 10% discount offer kar rahe hain! 🎁\n"
+                        f"Aap ka total PKR {cart.original_total:,.0f} se kam ho kar sirf PKR {cart.current_total:,.0f} ban gaya hai.\n"
+                        f"Kya hum order finalize karein?"
+                    )
+                else:
+                    reply_msg = (
+                        f"Certainly {client_name}! We are happy to offer you a special 10% discount! 🎁\n"
+                        f"Your total is reduced from PKR {cart.original_total:,.0f} to only PKR {cart.current_total:,.0f}.\n"
+                        f"Would you like us to finalize your order?"
+                    )
+
+            return {
+                "status": "success",
+                "reply_body": reply_msg,
+                "intent": "sales_negotiation",
+                "action": action,
+                "stage": cart.negotiation_stage,
+                "cart": cart.to_dict()
+            }
+
+        except Exception as e:
+            logger.error(f"[Sales Negotiation Flow Error] {e}")
+            fallback = f"Salam {client_name}! Aap ke order aur discount ke hawalay se hamari sales team aap ko rabta kar rahi hai." if "urdu" in lang_fmt else f"Hello {client_name}! Our sales team is reviewing your discount request and will update you shortly."
+            return {
+                "status": "fallback",
+                "reply_body": fallback,
+                "intent": "sales_negotiation",
+                "action": action,
+                "stage": "bargaining",
+                "cart": None
+            }
+
+
 def generate_smart_conversational_fallback(
     message_body: str,
     lang_fmt: str,
@@ -572,6 +909,7 @@ def generate_ai_auto_response(
 
     # 2. Generate conversational or appointment booking response
     booking_res = None
+    negotiation_res = None
     if intent_data["intent"] == "booking_appointment":
         booking_res = handle_booking_flow(
             organization_id=organization_id,
@@ -581,6 +919,15 @@ def generate_ai_auto_response(
             lang_fmt=lang_fmt
         )
         reply_text = booking_res["reply_body"]
+    elif intent_data["intent"] in ("sales_negotiation", "sales_checkout", "cart_management"):
+        negotiation_res = handle_sales_negotiation_flow(
+            organization_id=organization_id,
+            customer_phone=sender_phone,
+            customer_name=sender_name,
+            message_text=clean_body,
+            lang_fmt=lang_fmt
+        )
+        reply_text = negotiation_res["reply_body"]
     else:
         reply_text = generate_smart_conversational_fallback(
             message_body=clean_body,

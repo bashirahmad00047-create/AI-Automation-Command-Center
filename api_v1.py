@@ -96,6 +96,7 @@ from models import (
     AbandonedCart,
     Appointment,
     Booking,
+    CartState,
     generate_uuid,
 )
 from business_templates import (

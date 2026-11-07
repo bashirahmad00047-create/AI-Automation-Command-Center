@@ -5404,6 +5404,51 @@ class WhatsAppService:
         if order_grounding:
             custom_prompt = f"{custom_prompt}\n\n{order_grounding}" if custom_prompt else order_grounding
 
+        # Sales Negotiation & Cart State Machine Interception (Phase 6: Audit Item 3)
+        sales_neg_keywords = (
+            "discount", "kam karo", "kam karein", "kam ho sakta", "kuch kam", "gujaish",
+            "gunjaish", "mehnga", "bohot zyada", "riayat", "reayat", "munasib", "last price",
+            "final price", "counter offer", "bargain", "cheaper", "best price", "pack kar",
+            "pack krdo", "bhej do", "bhej dein", "deal done", "confirm order", "order confirm",
+            "cart", "total bill", "mera bill", "nikal do", "remove"
+        )
+        if any(w in lower_body for w in sales_neg_keywords):
+            try:
+                from services.ai_responder import handle_sales_negotiation_flow
+                neg_res = handle_sales_negotiation_flow(
+                    organization_id=organization_id,
+                    customer_phone=sender_phone,
+                    customer_name=sender_name,
+                    message_text=message_body,
+                    lang_fmt=lang_fmt
+                )
+                if neg_res and neg_res.get("reply_body"):
+                    disp = neg_res["reply_body"]
+                    spch = re.sub(r"[*_~`#>]", "", disp).strip()
+                    return {
+                        "reply_body": disp,
+                        "display_text": disp,
+                        "speech_text": spch,
+                        "voice_script": spch,
+                        "intent": neg_res.get("intent", "sales_negotiation"),
+                        "urgency": 70,
+                        "lead_score": 90,
+                        "route_department": "Sales",
+                        "entities": entities,
+                        "cart": neg_res.get("cart"),
+                        "negotiation_stage": neg_res.get("stage"),
+                        "mode": "sales_negotiation_engine",
+                        "detected_language": detected_lang["language"],
+                        "detected_script": detected_lang["script"],
+                        "language_format": lang_fmt,
+                        "is_gemini": False,
+                        "is_groq": False,
+                        "is_ai_generated": True,
+                        "confidence": 98
+                    }
+            except Exception as n_err:
+                logger.warning(f"[Sales Negotiation Notice] {n_err}")
+
         # Booking & Appointment State Machine Interception (Phase 5: Audit Item 1)
         booking_keywords = (
             "appointment", "book", "booking", "schedule", "reservation",

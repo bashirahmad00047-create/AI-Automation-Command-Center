@@ -2058,3 +2058,158 @@ class Appointment(db.Model):
 
 # Enterprise Alias for Booking Engine
 Booking = Appointment
+
+
+class CartState(db.Model):
+    """Deterministic Multi-Tenant Shopping Cart and Sales Negotiation State Machine.
+    Tracks active customer cart items, running totals, counter-offers, conditional discounts,
+    floor prices, and lifecycle stages (browsing -> bargaining -> agreed -> checkout -> abandoned / completed).
+    """
+    __tablename__ = "cart_states"
+
+    id = db.Column(db.String(64), primary_key=True, default=lambda: generate_uuid("cart"))
+    org_id = db.Column(db.String(64), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    customer_phone = db.Column(db.String(50), nullable=False, index=True)
+    customer_name = db.Column(db.String(255), nullable=True)
+    items_json = db.Column(db.Text, nullable=False, default="[]")
+    original_total = db.Column(db.Float, nullable=False, default=0.0)
+    current_total = db.Column(db.Float, nullable=False, default=0.0)
+    currency = db.Column(db.String(10), nullable=False, default="PKR")
+    negotiation_stage = db.Column(db.String(32), nullable=False, default="browsing", index=True)
+    # Lifecycle stages: browsing, bargaining, agreed, checkout, abandoned, completed
+    offered_discount_pct = db.Column(db.Float, nullable=False, default=0.0)
+    counter_offer_price = db.Column(db.Float, nullable=True)
+    floor_price = db.Column(db.Float, nullable=False, default=0.0)
+    negotiation_notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow
+    )
+
+    # Relationships
+    organization = db.relationship("Organization", backref=db.backref("cart_states", lazy="dynamic", cascade="all, delete-orphan"))
+
+    @property
+    def organization_id(self):
+        return self.org_id
+
+    @organization_id.setter
+    def organization_id(self, val):
+        self.org_id = val
+
+    def get_items(self) -> List[Dict[str, Any]]:
+        try:
+            return json.loads(self.items_json or "[]")
+        except Exception:
+            return []
+
+    def set_items(self, items: List[Dict[str, Any]]) -> None:
+        self.items_json = json.dumps(items or [])
+        self.recalculate()
+
+    def add_item(
+        self,
+        product_name: str,
+        quantity: int = 1,
+        unit_price: float = 0.0,
+        product_id: Optional[str] = None,
+        seller_cost: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        items = self.get_items()
+        norm_name = str(product_name or "").strip()
+        existing = next(
+            (it for it in items if it.get("name", "").lower() == norm_name.lower() or (product_id and it.get("product_id") == product_id)),
+            None
+        )
+        if existing:
+            existing["quantity"] = max(1, int(existing.get("quantity", 1)) + int(quantity))
+            if unit_price > 0:
+                existing["unit_price"] = float(unit_price)
+            if seller_cost is not None and seller_cost > 0:
+                existing["seller_cost"] = float(seller_cost)
+        else:
+            items.append({
+                "product_id": product_id or generate_uuid("prd"),
+                "name": norm_name,
+                "quantity": max(1, int(quantity)),
+                "unit_price": float(unit_price),
+                "seller_cost": float(seller_cost if seller_cost is not None and seller_cost > 0 else (unit_price * 0.70))
+            })
+        self.items_json = json.dumps(items)
+        self.recalculate()
+        return items
+
+    def remove_item(self, product_name_or_id: str, quantity: Optional[int] = None) -> bool:
+        items = self.get_items()
+        norm = str(product_name_or_id or "").strip().lower()
+        found = False
+        new_items = []
+        for it in items:
+            match = (it.get("product_id") == norm) or (norm in it.get("name", "").lower())
+            if match:
+                found = True
+                curr_qty = int(it.get("quantity", 1))
+                if quantity is not None and curr_qty > quantity:
+                    it["quantity"] = curr_qty - quantity
+                    new_items.append(it)
+            else:
+                new_items.append(it)
+        if found:
+            self.items_json = json.dumps(new_items)
+            self.recalculate()
+        return found
+
+    def recalculate(self) -> None:
+        items = self.get_items()
+        subtotal = sum(float(it.get("unit_price", 0.0)) * int(it.get("quantity", 1)) for it in items)
+        base_cost = sum(float(it.get("seller_cost", it.get("unit_price", 0.0) * 0.70)) * int(it.get("quantity", 1)) for it in items)
+        self.original_total = round(subtotal, 2)
+        self.floor_price = round(base_cost, 2)
+
+        discount_multiplier = max(0.0, 1.0 - (float(self.offered_discount_pct or 0.0) / 100.0))
+        computed_discounted = round(subtotal * discount_multiplier, 2)
+
+        if self.counter_offer_price is not None and self.counter_offer_price > 0:
+            self.current_total = round(max(self.floor_price, self.counter_offer_price), 2)
+        else:
+            self.current_total = round(max(self.floor_price, computed_discounted), 2)
+
+    def apply_negotiation(
+        self,
+        offered_price: Optional[float] = None,
+        discount_pct: Optional[float] = None,
+        notes: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Applies negotiated pricing with strict floor price enforcement."""
+        if discount_pct is not None:
+            self.offered_discount_pct = float(discount_pct)
+        if offered_price is not None:
+            self.counter_offer_price = float(offered_price)
+        if notes:
+            self.negotiation_notes = str(notes)
+
+        self.recalculate()
+        return self.to_dict()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "org_id": self.org_id,
+            "organization_id": self.org_id,
+            "customer_phone": self.customer_phone,
+            "customer_name": self.customer_name,
+            "items": self.get_items(),
+            "original_total": round(self.original_total, 2),
+            "current_total": round(self.current_total, 2),
+            "currency": self.currency,
+            "negotiation_stage": self.negotiation_stage,
+            "offered_discount_pct": round(self.offered_discount_pct, 2),
+            "counter_offer_price": self.counter_offer_price,
+            "floor_price": round(self.floor_price, 2),
+            "negotiation_notes": self.negotiation_notes,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
