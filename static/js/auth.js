@@ -27,6 +27,9 @@
                     this.state.currentUser = data.user;
                     this.state.currentOrg = data.current_organization || data.organization;
                     this.state.userRole = data.role || 'admin';
+                    const activeOrgId = this.state.currentOrg?.id || 'org-enterprise-default';
+                    window._currentOrgId = activeOrgId;
+                    try { localStorage.setItem('selectedOrgId', activeOrgId); } catch (_) {}
 
                     if (window.state) {
                         window.state.currentUser = this.state.currentUser;
@@ -301,7 +304,16 @@
     };
 
     // Expose module globally and bind legacy function signatures
+    BashFlowAuth.getEffectiveOrgId = function() {
+        return this.state.currentOrg?.id ||
+            window.state?.currentOrg?.id ||
+            window.state?.currentUser?.organization_id ||
+            window._currentOrgId ||
+            (function() { try { return localStorage.getItem('selectedOrgId'); } catch (_) { return null; } })() ||
+            'org-enterprise-default';
+    };
     window.BashFlowAuth = BashFlowAuth;
+    window.getEffectiveOrgId = () => BashFlowAuth.getEffectiveOrgId();
     window.initAuthAndTenancy = () => BashFlowAuth.initAuthAndTenancy();
     window.updateAuthHeaderUI = (isLoggedIn) => BashFlowAuth.updateAuthHeaderUI(isLoggedIn);
     window.updateUserBadgeUI = () => BashFlowAuth.updateUserBadgeUI();

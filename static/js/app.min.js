@@ -5765,13 +5765,15 @@ async function fetchBridgeQrCode(forceRefresh = false) {
     }
 
     try {
-        const refreshParam = forceRefresh ? '?force_refresh=true' : '';
+        const effectiveOrg = (typeof getEffectiveOrgId === 'function' ? getEffectiveOrgId() : (window.BashFlowAuth?.getEffectiveOrgId?.() || window.state?.currentOrg?.id || window._currentOrgId || (function() { try { return localStorage.getItem('selectedOrgId'); } catch (_) { return null; } })() || 'org-enterprise-default'));
+        const sep = forceRefresh ? '&' : '?';
+        const refreshParam = forceRefresh ? '?force_refresh=true&org_id=' + encodeURIComponent(effectiveOrg) : '?org_id=' + encodeURIComponent(effectiveOrg);
         let res = await fetch(`/api/v1/whatsapp/qr${refreshParam}`);
         if (!res.ok) {
             res = await fetch(`/api/whatsapp/qr${refreshParam}`);
         }
         if (!res.ok) {
-            res = await fetch('/api/v1/whatsapp/bridge-qr');
+            res = await fetch(`/api/v1/whatsapp/bridge-qr${refreshParam}`);
         }
 
         if (refreshBtn) refreshBtn.textContent = '🔄 Refresh QR';
@@ -5784,7 +5786,7 @@ async function fetchBridgeQrCode(forceRefresh = false) {
         // Secondary check against /status endpoint ONLY during normal polling (never when forceRefresh is requested)
         if (!forceRefresh && !window._isForceReLinking && (!data || (!data.connected && data.status !== 'connected' && !data.phone))) {
             try {
-                const sRes = await fetch('/api/v1/whatsapp/status');
+                const sRes = await fetch(`/api/v1/whatsapp/status?org_id=${encodeURIComponent(effectiveOrg)}`);
                 if (sRes.ok) {
                     const sData = await sRes.json().catch(() => null);
                     if (sData && (sData.connected || sData.status === 'connected' || sData.phone)) {
