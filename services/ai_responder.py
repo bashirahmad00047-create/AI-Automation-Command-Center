@@ -539,7 +539,9 @@ def extract_negotiation_intent(text: str) -> Dict[str, Any]:
     """Extracts negotiation specifics: counter-offer price, discount percent, action type.
     Action types:
     - 'checkout': User wants to confirm order / provide address / finalize deal.
-    - 'cart_remove': User wants to remove or decrease item.
+    - 'cart_revise_qty': User modifies item quantity (e.g. 'mujhe 2 nahi 3 chahiye').
+    - 'cart_remove_specific': User removes specific item (e.g. 'is mein se blue wala nikal do').
+    - 'cart_remove': General item removal.
     - 'cart_view': User wants to see total / bill / items.
     - 'bargain_price': User specifies an exact counter-offer price (e.g. 2500 PKR).
     - 'bargain_pct': User specifies a percentage discount (e.g. 15% off).
@@ -548,26 +550,50 @@ def extract_negotiation_intent(text: str) -> Dict[str, Any]:
     """
     clean = str(text or "").strip().lower()
 
+    # 1. Checkout confirmation
     checkout_markers = (
         "confirm order", "order confirm", "pack kar", "pack krdo", "bhej do", "bhej dein",
         "deal done", "theek hai bhej", "finalize order", "address note", "deal pakki",
-        "order bhej do", "deliver kar dein", "delivery address"
+        "order bhej do", "deliver kar dein", "delivery address", "pending payment"
     )
     if any(m in clean for m in checkout_markers):
         return {"action": "checkout", "value": None}
 
+    # 2. Natural language quantity revision (e.g. "mujhe 2 nahi 3 chahiye", "1 nahi 2 piece")
+    qty_rev_match = re.search(r'(\d+)\s*(?:nahi|nay|not)\s*(\d+)', clean)
+    if qty_rev_match:
+        old_qty = int(qty_rev_match.group(1))
+        new_qty = int(qty_rev_match.group(2))
+        return {"action": "cart_revise_qty", "old_qty": old_qty, "new_qty": new_qty, "value": new_qty}
+
+    # 3. Specific item / color removal (e.g. "is mein se blue wala nikal do", "shirt nikal do", "hata do shoes")
+    rem_specific_1 = re.search(r'(?:is mein se\s*)?([a-zA-Z0-9\s]+?)\s*(?:wala|wali|item)?\s*(?:nikal do|hata do|remove|drop)', clean)
+    rem_specific_2 = re.search(r'(?:nikal do|hata do|remove|drop)\s+(?:item\s+)?([a-zA-Z0-9\s]+)', clean)
+    target_item = None
+    if rem_specific_1 and rem_specific_1.group(1).strip() not in ("is mein se", "yeh", "woh", ""):
+        target_item = rem_specific_1.group(1).strip()
+    elif rem_specific_2:
+        target_item = rem_specific_2.group(1).strip()
+
+    if target_item:
+        return {"action": "cart_remove_specific", "value": target_item}
+
+    # 4. General cart removal
     remove_markers = ("nikal do", "hata do", "remove", "cancel item", "kam kar do", "kam krdo", "drop item")
     if any(m in clean for m in remove_markers):
         return {"action": "cart_remove", "value": None}
 
+    # 5. Cart view inquiry
     view_markers = ("total bill", "mera bill", "bill kitna", "cart check", "view cart", "show cart", "total kitna", "kitna bana")
     if any(m in clean for m in view_markers):
         return {"action": "cart_view", "value": None}
 
+    # 6. Percentage discount offer
     pct_match = re.search(r'(\d{1,2})\s*(?:%|percent|feesad)', clean)
     if pct_match:
         return {"action": "bargain_pct", "value": float(pct_match.group(1))}
 
+    # 7. Exact counter price offer
     pm = re.search(r'(?:(?:pkr|rs\.?|inr)\s*)?(\d{3,6})\s*(?:mein|me|ka|pkr|rs|rupaye|\b)', clean)
     if pm:
         try:
@@ -577,6 +603,7 @@ def extract_negotiation_intent(text: str) -> Dict[str, Any]:
         except (ValueError, TypeError):
             pass
 
+    # 8. Generic discount inquiry
     discount_markers = (
         "discount", "kam karo", "kam karein", "kam ho sakta", "kuch kam", "gujaish",
         "gunjaish", "mehnga", "bohot zyada", "riayat", "reayat", "munasib", "last price",
@@ -587,6 +614,67 @@ def extract_negotiation_intent(text: str) -> Dict[str, Any]:
 
     return {"action": "cart_add", "value": None}
 
+
+def generate_invoice_summary(
+    cart: Any,
+    client_name: str,
+    lang_fmt: str = "roman_urdu"
+) -> str:
+    """Generates a formal final invoice summary with Quantity, Discount Applied, and Final Total."""
+    items = cart.get_items() if hasattr(cart, "get_items") else []
+    lines = []
+    for it in items:
+        name = it.get("name", "Item")
+        qty = int(it.get("quantity", 1))
+        unit = float(it.get("unit_price", 0.0))
+        tot = unit * qty
+        lines.append(f"• {name} x{qty}: PKR {tot:,.0f}")
+    items_breakdown = "\n".join(lines) if lines else "• Standard Item x1: PKR 0"
+
+    discount_amount = max(0.0, float(getattr(cart, "original_total", 0.0)) - float(getattr(cart, "current_total", 0.0)))
+    discount_pct = float(getattr(cart, "offered_discount_pct", 0.0))
+
+    if "urdu" in lang_fmt:
+        return (
+            f"🧾 *INVOICE & ORDER SUMMARY*\n"
+            f"---------------------------------\n"
+            f"Customer: {client_name}\n"
+            f"{items_breakdown}\n\n"
+            f"Subtotal: PKR {cart.original_total:,.0f}\n"
+            f"Discount Applied: {discount_pct:.0f}% (PKR {discount_amount:,.0f})\n"
+            f"---------------------------------\n"
+            f"*Final Total: PKR {cart.current_total:,.0f}*\n"
+            f"Status: ⏳ Pending Payment\n"
+            f"---------------------------------\n"
+            f"Aap payment EasyPaisa, JazzCash ya Cash on Delivery (COD) se ada kar sakte hain. "
+            f"Baraye meherbani apna mukammal delivery address aur shehar (City) confirm farmayein taake parcel dispatch kiya ja sake!"
+        )
+    else:
+        return (
+            f"🧾 *INVOICE & ORDER SUMMARY*\n"
+            f"---------------------------------\n"
+            f"Customer: {client_name}\n"
+            f"{items_breakdown}\n\n"
+            f"Subtotal: PKR {cart.original_total:,.0f}\n"
+            f"Discount Applied: {discount_pct:.0f}% (PKR {discount_amount:,.0f})\n"
+            f"---------------------------------\n"
+            f"*Final Total: PKR {cart.current_total:,.0f}*\n"
+            f"Status: ⏳ Pending Payment\n"
+            f"---------------------------------\n"
+            f"You can pay via EasyPaisa, JazzCash, or Cash on Delivery (COD). "
+            f"Please confirm your delivery address and city for prompt dispatch!"
+        )
+
+
+def generate_abandonment_prompt(
+    cart: Any,
+    client_name: str,
+    lang_fmt: str = "roman_urdu"
+) -> str:
+    """Generates an authentic gentle follow-up prompt for abandoned carts."""
+    if "urdu" in lang_fmt:
+        return f"Salam {client_name}! Aapka saman cart mein mehfooz hai, kya main order confirm kar doon? Aaj free delivery ka aakhri din hai. 🛒✨"
+    return f"Hello {client_name}! Your items are safely saved in your cart. Shall I confirm your order? Today is the last day for free delivery! 🛒✨"
 
 def handle_sales_negotiation_flow(
     organization_id: Optional[str],
@@ -658,19 +746,86 @@ def handle_sales_negotiation_flow(
             reply_msg = ""
             stage = cart.negotiation_stage
 
-            if action == "checkout":
-                cart.negotiation_stage = "checkout"
-                db.session.commit()
-                if "urdu" in lang_fmt:
-                    reply_msg = (
-                        f"Bohat shukriya {client_name}! 🎉 Aap ka order PKR {cart.current_total:,.0f} mein finalize ho gaya hai.\n"
-                        f"Baraye meherbani apna mukammal delivery address aur city share farmayein taake parcel dispatch kiya ja sake."
-                    )
+            # 1. Natural Language Quantity Revision (e.g. "mujhe 2 nahi 3 chahiye")
+            if action == "cart_revise_qty":
+                new_qty = max(1, int(val or 1))
+                items = cart.get_items()
+                if items:
+                    target_it = None
+                    old_q = neg_intent.get("old_qty")
+                    if old_q:
+                        target_it = next((it for it in items if it.get("quantity") == old_q), None)
+                    if not target_it:
+                        target_it = items[-1]
+                    target_it["quantity"] = new_qty
+                    cart.set_items(items)
+                    cart.negotiation_stage = "browsing"
+                    db.session.commit()
+                    if "urdu" in lang_fmt:
+                        reply_msg = (
+                            f"Ji bilkul {client_name}! '{target_it.get('name', 'Item')}' ki quantity {new_qty} kar di gayi hai. 🛒\n"
+                            f"Naya Total: PKR {cart.current_total:,.0f}. Kya hum isay pack karwa dein?"
+                        )
+                    else:
+                        reply_msg = (
+                            f"Certainly {client_name}! Quantity for '{target_it.get('name', 'Item')}' updated to {new_qty}. 🛒\n"
+                            f"New Total: PKR {cart.current_total:,.0f}. Would you like us to proceed with this order?"
+                        )
                 else:
-                    reply_msg = (
-                        f"Thank you {client_name}! 🎉 Your order is finalized at PKR {cart.current_total:,.0f}.\n"
-                        f"Please provide your complete delivery address and city for dispatch."
+                    reply_msg = "Aap ka cart khali hai." if "urdu" in lang_fmt else "Your cart is currently empty."
+
+            # 2. Natural Language Specific Item / Color Removal (e.g. "is mein se blue wala nikal do")
+            elif action == "cart_remove_specific":
+                target_term = str(val or "").strip().lower()
+                items = cart.get_items()
+                matched_item = None
+                if items:
+                    for it in items:
+                        if target_term in it.get("name", "").lower():
+                            matched_item = it
+                            break
+                    if not matched_item:
+                        matched_item = items[0]
+                    cart.remove_item(matched_item.get("name", ""))
+                    cart.negotiation_stage = "browsing"
+                    db.session.commit()
+                    if "urdu" in lang_fmt:
+                        reply_msg = (
+                            f"'{matched_item.get('name', 'Item')}' cart se nikal diya gaya hai. 🛒\n"
+                            f"Naya Total: PKR {cart.current_total:,.0f}. Mazeed kuch add ya change karna hai?"
+                        )
+                    else:
+                        reply_msg = (
+                            f"'{matched_item.get('name', 'Item')}' has been removed from your cart. 🛒\n"
+                            f"New Total: PKR {cart.current_total:,.0f}. Anything else you'd like to adjust?"
+                        )
+                else:
+                    reply_msg = "Aap ka cart pehle se khali hai." if "urdu" in lang_fmt else "Your cart is already empty."
+
+            # 3. Order Checkout Confirmation & Pending Payment Transition
+            elif action == "checkout":
+                cart.negotiation_stage = "Pending Payment"
+                try:
+                    from models import EcommerceOrder
+                    order_ref = f"ORD-{datetime.datetime.utcnow().strftime('%y%m%d%H%M')}-{clean_phone[-4:]}"
+                    new_order = EcommerceOrder(
+                        organization_id=clean_org,
+                        order_number=order_ref,
+                        customer_phone=clean_phone,
+                        customer_name=client_name,
+                        total_amount=cart.current_total,
+                        currency=cart.currency,
+                        order_status="pending",
+                        payment_status="unpaid",
+                        payment_method="cod",
+                        items_json=cart.items_json,
+                        notes=f"Auto-generated via WhatsApp Sales Negotiation. Discount: {cart.offered_discount_pct}%"
                     )
+                    db.session.add(new_order)
+                except Exception as ord_err:
+                    logger.debug(f"[EcommerceOrder Creation Notice] {ord_err}")
+                db.session.commit()
+                reply_msg = generate_invoice_summary(cart, client_name, lang_fmt)
 
             elif action == "cart_view":
                 item_lines = "\n".join([f"• {it.get('name')} x{it.get('quantity', 1)}: PKR {float(it.get('unit_price', 0)) * int(it.get('quantity', 1)):,.0f}" for it in items])
@@ -712,23 +867,36 @@ def handle_sales_negotiation_flow(
                 proposed = float(val)
                 if proposed >= cart.floor_price:
                     cart.counter_offer_price = proposed
-                    cart.negotiation_stage = "agreed"
+                    cart.negotiation_stage = "Pending Payment"
                     disc_val = max(0.0, cart.original_total - proposed)
                     cart.offered_discount_pct = (disc_val / cart.original_total * 100.0) if cart.original_total > 0 else 0.0
                     cart.recalculate()
+                    try:
+                        from models import EcommerceOrder
+                        order_ref = f"ORD-{datetime.datetime.utcnow().strftime('%y%m%d%H%M')}-{clean_phone[-4:]}"
+                        new_order = EcommerceOrder(
+                            organization_id=clean_org,
+                            order_number=order_ref,
+                            customer_phone=clean_phone,
+                            customer_name=client_name,
+                            total_amount=cart.current_total,
+                            currency=cart.currency,
+                            order_status="pending",
+                            payment_status="unpaid",
+                            payment_method="cod",
+                            items_json=cart.items_json,
+                            notes=f"Auto-generated via WhatsApp Sales Negotiation. Counter-offer: PKR {proposed}"
+                        )
+                        db.session.add(new_order)
+                    except Exception as ord_err:
+                        logger.debug(f"[EcommerceOrder Creation Notice] {ord_err}")
                     db.session.commit()
-                    if "urdu" in lang_fmt:
-                        reply_msg = (
-                            f"Zabardast {client_name}! Hum aap ki counter-offer PKR {proposed:,.0f} qabool karte hain! 🤝✨\n"
-                            f"Aap ki bachat: PKR {disc_val:,.0f}! Kul bill ab PKR {cart.current_total:,.0f} hai.\n\n"
-                            f"Kya hum order finalize karein aur delivery address note karein?"
-                        )
-                    else:
-                        reply_msg = (
-                            f"Deal agreed {client_name}! We accept your offer of PKR {proposed:,.0f}! 🤝✨\n"
-                            f"Your savings: PKR {disc_val:,.0f}! Total payable is now PKR {cart.current_total:,.0f}.\n\n"
-                            f"Shall we finalize the order and confirm delivery address?"
-                        )
+                    lead_in = (
+                        f"Zabardast {client_name}! Hum aap ki counter-offer PKR {proposed:,.0f} qabool karte hain! 🤝✨\n\n"
+                        if "urdu" in lang_fmt else
+                        f"Deal agreed {client_name}! We accept your offer of PKR {proposed:,.0f}! 🤝✨\n\n"
+                    )
+                    reply_msg = lead_in + generate_invoice_summary(cart, client_name, lang_fmt)
                 else:
                     seller_counter = round(max(cart.floor_price * 1.05, cart.original_total * 0.88), 0)
                     cart.counter_offer_price = seller_counter

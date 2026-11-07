@@ -5404,6 +5404,15 @@ class WhatsAppService:
         if order_grounding:
             custom_prompt = f"{custom_prompt}\n\n{order_grounding}" if custom_prompt else order_grounding
 
+        # Pricing & Sales Negotiation Bounds Injection (Phase 6: Audit Item 3)
+        pricing_bounds_prompt = (
+            "PRICING & SALES NEGOTIATION POLICY:\n"
+            "- You are authorized to offer up to a 10% discount on orders over PKR 2,000 to close the sale if the customer negotiates or asks for a discount.\n"
+            "- If the customer asks for more than 10-15% discount or offers below wholesale cost, politely decline and highlight product quality, craftsmanship, and warranty.\n"
+            "- When the customer agrees to the price or confirms checkout, transition them to 'Pending Payment' and provide the final invoice summary breakdown."
+        )
+        custom_prompt = f"{custom_prompt}\n\n{pricing_bounds_prompt}" if custom_prompt else pricing_bounds_prompt
+
         # Sales Negotiation & Cart State Machine Interception (Phase 6: Audit Item 3)
         sales_neg_keywords = (
             "discount", "kam karo", "kam karein", "kam ho sakta", "kuch kam", "gujaish",
@@ -10664,8 +10673,8 @@ class WhatsAppService:
 
         lines = [
             f"Salam {c_name}! 👋\n",
-            "Aapne checkout mein kuch items chhor diye hain:\n",
-            f"🛒 *Cart Items:* {items_str}"
+            "Aapka saman cart mein mehfooz hai, kya main order confirm kar doon? Aaj free delivery ka aakhri din hai. 🛒✨\n",
+            f"📦 *Cart Items:* {items_str}"
         ]
         if cart_value is not None and cart_value > 0:
             lines.append(f"💰 *Cart Total:* {curr} {cart_value:,.2f}")
