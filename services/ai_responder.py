@@ -19,6 +19,41 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger("ai_responder")
 
+# Comprehensive lexicon definitions
+PASHTO_PHRASES = {
+    "sanga ye", "tsanga ye", "sanga yast", "tsanga yast", "sanga chal", "tsanga chal",
+    "sa hal", "tsa hal", "sa chal", "tsa chal", "sa khabar", "tsa khabar",
+    "khe chara", "kha chara", "dera manana", "der manana", "pa kher", "pa khair",
+    "pakar de", "pakar di", "kawale sham", "kawale shi", "staso na", "staso da",
+    "tsomra de", "somra de", "tsomra qimat", "somra qimat", "sa qimat"
+}
+
+PASHTO_WORDS = {
+    "sanga", "tsanga", "manana", "staso", "taso", "zamung", "zama", "sta",
+    "pakar", "ghwaram", "ghwari", "marasta", "wraz", "shpa", "narkh", "shta",
+    "nishta", "tsomra", "somra", "charta", "tsok", "wali", "chara", "rora",
+    "khushala", "stare", "staray", "kawale", "kawali", "kawi", "kawom", "rasegi",
+    "dalta", "halta", "kawal", "tapos"
+}
+
+ROMAN_URDU_PHRASES = {
+    "kya haal", "kia haal", "kaise hain", "kese hain", "kaise ho", "kese ho",
+    "kaisa hai", "kya price", "kia price", "kya rate", "kia rate", "madad chahiye",
+    "rabta karein", "rabta karo", "bata dein", "bata do", "batao bhai", "kitna kharcha",
+    "kitne paise", "kya charges", "chahiye mujhe", "ap kaise", "aap kaise"
+}
+
+ROMAN_URDU_WORDS = {
+    "kya", "kia", "aap", "ap", "tum", "mujhe", "mujy", "humein", "humain",
+    "hai", "hain", "hoon", "hun", "chahiye", "chahye", "kaise", "kese", "kaisa", "kaisi",
+    "shukriya", "shukria", "batao", "batado", "batayein", "bataen", "bataiye", "batana",
+    "kitna", "kitne", "kitni", "theek", "thik", "acha", "achha", "sahi", "karein", "karna",
+    "karo", "karta", "karti", "mera", "meri", "mere", "apka", "aapka", "apki", "aapki",
+    "kahan", "kyun", "kab", "kaun", "kis", "zaroor", "bilkul", "wali", "k", "ke", "ka",
+    "ki", "ko", "se", "me", "mein", "par", "pe", "yeh", "ye", "woh", "wo", "ji", "jee",
+    "bhai", "janab", "assalam", "assalamualaikum", "salam", "walaikum", "kar", "dein", "do"
+}
+
 
 def detect_language(
     text: str,
@@ -35,7 +70,7 @@ def detect_language(
             "confidence": 0.5
         }
 
-    # 1. Check Arabic / Perso-Arabic Script Characters
+    # 1. Arabic / Perso-Arabic Script
     arabic_chars = re.findall(r'[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff]', raw_text)
     non_space_len = len(re.sub(r'\s+', '', raw_text))
     is_arabic_script = len(arabic_chars) >= 2 or (len(arabic_chars) > 0 and len(arabic_chars) / max(1, non_space_len) >= 0.25)
@@ -52,7 +87,7 @@ def detect_language(
                 "name": "Pashto (Arabic Script)",
                 "confidence": 0.95
             }
-        elif len(urdu_chars) > 0 or len(arabic_chars) >= 3:
+        elif len(urdu_chars) > 0 or len(arabic_chars) >= 2:
             return {
                 "language": "urdu",
                 "script": "arabic",
@@ -61,37 +96,37 @@ def detect_language(
                 "confidence": 0.92
             }
 
-    # 2. Check Roman / Latin Script Vocabulary
-    lower_tokens = set(re.findall(r'[a-zA-Z]+', raw_text.lower()))
+    # 2. Latin Script (Roman Pashto vs Roman Urdu vs English)
+    clean_latin = re.sub(r'[^a-z0-9\s]', ' ', raw_text.lower())
+    tokens = [w for w in clean_latin.split() if w]
+    token_set = set(tokens)
 
-    roman_urdu_words = {
-        "kya", "kia", "hai", "hain", "kese", "kaise", "kaisa", "ho", "hoon", "hun",
-        "bhai", "shukriya", "madad", "ap", "aap", "mera", "meri", "karna", "chahiye",
-        "chahye", "kitna", "kitne", "kitni", "batao", "bataein", "acha", "theek", "shukran"
-    }
-    roman_pashto_words = {
-        "tsomra", "somra", "pakar", "ghwaram", "ghwari", "marasta", "de", "da", "di",
-        "staso", "zama", "kawal", "karey", "sangay", "sanga", "wroor", "manana"
-    }
+    ngrams_2 = [" ".join(tokens[i:i+2]) for i in range(len(tokens) - 1)]
+    all_phrases = set(ngrams_2)
 
-    pashto_hits = len(lower_tokens.intersection(roman_pashto_words))
-    urdu_hits = len(lower_tokens.intersection(roman_urdu_words))
+    pashto_phrase_hits = len(all_phrases.intersection(PASHTO_PHRASES))
+    pashto_word_hits = len(token_set.intersection(PASHTO_WORDS))
+    pashto_score = pashto_phrase_hits * 3 + pashto_word_hits
 
-    if pashto_hits > urdu_hits and pashto_hits >= 1:
+    urdu_phrase_hits = len(all_phrases.intersection(ROMAN_URDU_PHRASES))
+    urdu_word_hits = len(token_set.intersection(ROMAN_URDU_WORDS))
+    urdu_score = urdu_phrase_hits * 3 + urdu_word_hits
+
+    if pashto_score > urdu_score and pashto_score >= 1:
         return {
             "language": "pashto",
             "script": "latin",
             "format": "roman_pashto",
             "name": "Roman Pashto",
-            "confidence": 0.88
+            "confidence": min(0.95, 0.70 + 0.08 * pashto_score)
         }
-    elif urdu_hits >= 1:
+    elif urdu_score > 0:
         return {
             "language": "urdu",
             "script": "latin",
             "format": "roman_urdu",
             "name": "Roman Urdu",
-            "confidence": 0.85
+            "confidence": min(0.95, 0.70 + 0.08 * urdu_score)
         }
 
     return {
