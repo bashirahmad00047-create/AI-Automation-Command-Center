@@ -43,12 +43,16 @@ function resolveBaseAuthDir() {
 function resolveTenantAuthDir(baseDir, tenantId) {
   const cleanTenant = (tenantId || 'default').toString().trim().replace(/[^a-zA-Z0-9_\-\.]/g, '_');
   
-  // Backward compatibility: If tenantId is 'default' and baseDir directly contains creds.json,
-  // continue using baseDir so existing single-tenant sessions are preserved without re-scanning QR.
-  if (cleanTenant === 'default') {
+  // Backward compatibility: If tenantId is 'default' or default enterprise org ('org-enterprise-default'),
+  // use baseDir so default single-tenant sessions and dashboard requests share the same credentials without mismatch.
+  if (cleanTenant === 'default' || cleanTenant === 'org-enterprise-default') {
     const legacyCreds = path.join(baseDir, 'creds.json');
     if (fs.existsSync(legacyCreds)) {
       return baseDir;
+    }
+    const tenantOrg = path.join(baseDir, `tenant_${cleanTenant}`);
+    if (fs.existsSync(path.join(tenantOrg, 'creds.json'))) {
+      return tenantOrg;
     }
     const tenantDefault = path.join(baseDir, 'tenant_default');
     if (fs.existsSync(tenantDefault)) {

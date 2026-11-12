@@ -590,7 +590,8 @@ def auth_forgot_password():
             logger.info("Password reset token generated for user %s: %s (in-app/dev mode)", user.email, raw_token)
 
         dev_token = raw_token
-        dev_url = f"http://localhost:5000/#reset-token={raw_token}"
+        base_app_url = (request.host_url.rstrip("/") if request else (os.environ.get("APP_BASE_URL") or os.environ.get("SERVER_BASE_URL") or "")).rstrip("/")
+        dev_url = f"{base_app_url}/#reset-token={raw_token}"
 
         # Safely log audit event (TOKEN AND HASH ARE NEVER LOGGED)
         log_audit_event("auth.forgot_password_request", "user", user.id, {"email": user.email}, user_id=user.id)
@@ -2750,20 +2751,21 @@ def api_whatsapp_bridge_qr():
 
     force_refresh = request.args.get("force_refresh", "").lower() in ("true", "1", "yes")
 
+    current_org_id = request.args.get("org_id") or getattr(g, "org_id", None) or "org-enterprise-default"
+
     # 0. If force_refresh is requested, proactively wipe DB session snapshot and local auth folder
     if force_refresh:
         try:
             from wa_bridge_manager import clear_wa_session_in_db, resolve_auth_dir
-            clear_wa_session_in_db(tenant_id="default")
-            auth_dir = resolve_auth_dir()
-            if os.path.exists(auth_dir):
-                import shutil
-                shutil.rmtree(auth_dir, ignore_errors=True)
-                os.makedirs(auth_dir, exist_ok=True)
+            import shutil
+            for t_id in [current_org_id, "default"]:
+                clear_wa_session_in_db(tenant_id=t_id)
+                a_dir = resolve_auth_dir(tenant_id=t_id)
+                if os.path.exists(a_dir):
+                    shutil.rmtree(a_dir, ignore_errors=True)
+                    os.makedirs(a_dir, exist_ok=True)
         except Exception as _clr_err:
             logger.warning(f"[WA Bridge] Session clear on force_refresh error: {_clr_err}")
-
-    current_org_id = request.args.get("org_id") or getattr(g, "org_id", None) or "org-enterprise-default"
 
     # 1. Guard check: if bridge is already live & connected, and not forcing refresh, return immediately
     if not force_refresh:
@@ -2865,21 +2867,41 @@ def api_whatsapp_bridge_qr():
 
 @api_v1.route("/whatsapp/bridge-qr-refresh", methods=["POST", "GET"])
 @api_v1.route("/whatsapp/qr/refresh", methods=["POST", "GET"])
+@api_v1.route("/whatsapp/reset", methods=["POST", "GET"])
+@api_v1.route("/wa/reset", methods=["POST", "GET"])
 def api_whatsapp_bridge_qr_refresh():
     """Forces the Baileys bridge to close any stuck socket, reset un-paired credentials,
-    and generate a brand new fresh QR code immediately.
+    and generate a brand new fresh QR code immediately within 3 seconds.
     """
-    import requests
+    import requests, shutil
+    current_org_id = request.args.get("org_id") or getattr(g, "org_id", None) or "org-enterprise-default"
+
+    # Wiping credentials & DB session for both current org and default
+    try:
+        from wa_bridge_manager import clear_wa_session_in_db, resolve_auth_dir
+        for t_id in [current_org_id, "default"]:
+            clear_wa_session_in_db(tenant_id=t_id)
+            a_dir = resolve_auth_dir(tenant_id=t_id)
+            if os.path.exists(a_dir):
+                shutil.rmtree(a_dir, ignore_errors=True)
+                os.makedirs(a_dir, exist_ok=True)
+    except Exception as clr_err:
+        logger.warning(f"[WA Bridge] Error clearing credentials on QR refresh: {clr_err}")
+
     try:
         from wa_bridge_manager import ensure_wa_bridge_running
         ensure_wa_bridge_running(timeout_seconds=3.0)
     except Exception:
         pass
 
-    current_org_id = request.args.get("org_id") or getattr(g, "org_id", None) or "org-enterprise-default"
-    refresh_url = os.environ.get("BAILEYS_BRIDGE_REFRESH_URL", f"http://127.0.0.1:3001/refresh-qr?org_id={current_org_id}")
+    refresh_url = os.environ.get("BAILEYS_BRIDGE_REFRESH_URL", "http://127.0.0.1:3001/refresh-qr")
     try:
-        resp = requests.post(refresh_url, params={"org_id": current_org_id}, json={"org_id": current_org_id}, timeout=4.0)
+        resp = requests.post(
+            refresh_url,
+            params={"org_id": current_org_id, "force_refresh": "true"},
+            json={"org_id": current_org_id, "force_refresh": True},
+            timeout=4.0
+        )
         data = resp.json() if resp.text else {"success": True, "status": "refreshing"}
         return jsonify(data), 200
     except Exception as e:
@@ -3303,22 +3325,25 @@ def api_whatsapp_pairing_code():
 @api_v1.route("/whatsapp/logout", methods=["POST", "DELETE"])
 @api_v1.route("/whatsapp/logout-reset", methods=["POST", "DELETE"])
 @api_v1.route("/whatsapp/bridge-disconnect", methods=["POST", "DELETE"])
+@api_v1.route("/whatsapp/disconnect", methods=["POST", "DELETE"])
+@api_v1.route("/wa/disconnect", methods=["POST", "DELETE"])
 def api_whatsapp_bridge_disconnect():
     """Explicitly unlinks WhatsApp session, wipes DB session backup and local auth folder, and restarts socket."""
     import requests, shutil
+    current_org_id = request.args.get("org_id") or getattr(g, "org_id", None) or "org-enterprise-default"
     try:
         from wa_bridge_manager import clear_wa_session_in_db, resolve_auth_dir
-        clear_wa_session_in_db()
-        auth_dir = resolve_auth_dir()
-        if os.path.exists(auth_dir):
-            shutil.rmtree(auth_dir, ignore_errors=True)
-            os.makedirs(auth_dir, exist_ok=True)
+        for t_id in [current_org_id, "default"]:
+            clear_wa_session_in_db(tenant_id=t_id)
+            auth_dir = resolve_auth_dir(tenant_id=t_id)
+            if os.path.exists(auth_dir):
+                shutil.rmtree(auth_dir, ignore_errors=True)
+                os.makedirs(auth_dir, exist_ok=True)
     except Exception as e:
         logger.warning(f"[WA Bridge] Error clearing DB/local auth on disconnect: {e}")
 
     # Notify Node bridge to destroy socket and delete auth
-    current_org_id = request.args.get("org_id") or getattr(g, "org_id", None) or "org-enterprise-default"
-    bridge_url = os.environ.get("BAILEYS_BRIDGE_LOGOUT_URL", f"http://127.0.0.1:3001/disconnect?org_id={current_org_id}")
+    bridge_url = os.environ.get("BAILEYS_BRIDGE_LOGOUT_URL", "http://127.0.0.1:3001/disconnect")
     try:
         requests.post(bridge_url, params={"org_id": current_org_id}, json={"org_id": current_org_id}, timeout=4.0)
     except Exception:
@@ -3641,7 +3666,14 @@ SESSION_DIR = os.path.join(BASE_STORAGE, "baileys_sessions")
 AUDIO_STORAGE_DIR = os.path.join(BASE_STORAGE, "uploads", "audio")
 os.makedirs(SESSION_DIR, exist_ok=True)
 os.makedirs(AUDIO_STORAGE_DIR, exist_ok=True)
-BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000").rstrip("/")
+def get_public_base_url():
+    try:
+        from flask import request as flask_req, has_request_context
+        if has_request_context() and flask_req:
+            return flask_req.host_url.rstrip("/")
+    except Exception:
+        pass
+    return (os.environ.get("APP_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
 
 
 # ==========================================
@@ -3728,7 +3760,8 @@ def process_and_save_voice_note(payload: dict, raw_audio_bytes: bytes = None):
 
     encoded_b64 = base64.b64encode(raw_audio_bytes).decode("utf-8")
     data_uri = f"data:audio/ogg;codecs=opus;base64,{encoded_b64}"
-    public_url = f"{BASE_URL}/uploads/audio/{file_name}"
+    base_prefix = get_public_base_url()
+    public_url = f"{base_prefix}/uploads/audio/{file_name}" if base_prefix else f"/uploads/audio/{file_name}"
 
     return {
         "file_name": file_name,
@@ -4727,10 +4760,8 @@ def api_send_voice_call_link():
             return jsonify({"success": False, "error": "A valid phone number is required"}), 400
 
         if not call_url or "localhost" in call_url or "127.0.0.1" in call_url:
-            base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
-            if "localhost" in base_url or "127.0.0.1" in base_url:
-                base_url = "https://ai-automation-command-center-4.onrender.com"
-            call_url = f"{base_url.rstrip('/')}/call/{clean_phone}"
+            base_url = (request.host_url.rstrip("/") if request else (os.environ.get("APP_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "")).rstrip("/")
+            call_url = f"{base_url}/call/{clean_phone}"
 
         message_text = (
             f"Assalam-o-Alaikum {customer_name}! 📞\n\n"
@@ -4799,10 +4830,8 @@ def api_call_initiate():
         if not clean_phone or len(clean_phone) < 7:
             return jsonify({"success": False, "error": "A valid phone number is required"}), 400
 
-        base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
-        if "localhost" in base_url or "127.0.0.1" in base_url:
-            base_url = "https://ai-automation-command-center-4.onrender.com"
-        call_url = f"{base_url.rstrip('/')}/call/{clean_phone}"
+        base_url = (request.host_url.rstrip("/") if request else (os.environ.get("APP_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "")).rstrip("/")
+        call_url = f"{base_url}/call/{clean_phone}"
 
         with _ACTIVE_CALL_SESSIONS_LOCK:
             _ACTIVE_CALL_SESSIONS[clean_phone] = {
@@ -6212,8 +6241,8 @@ def whatsapp_webhook_ingress():
                 clean_first = first_sender.split("@")[0]
             if clean_first and reply_text and "/call/" not in reply_text:
                 if WhatsAppService.should_attach_call_link(first_body, clean_first, is_group=False):
-                    base_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_BASE_URL") or "https://ai-automation-command-center-4.onrender.com"
-                    reply_text = f"{reply_text}\n\n📞 *Live AI Voice Call:* {base_url.rstrip('/')}/call/{clean_first}"
+                    base_url = (request.host_url.rstrip("/") if request else (os.environ.get("APP_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "")).rstrip("/")
+                    reply_text = f"{reply_text}\n\n📞 *Live AI Voice Call:* {base_url}/call/{clean_first}"
 
         return jsonify({
             "status": "ok",

@@ -108,10 +108,13 @@ def resolve_auth_dir(root_dir: str = None, tenant_id: str = None) -> str:
             base_auth = os.path.join(root_dir, "baileys_auth")
 
     clean_tenant = str(tenant_id or "default").strip()
-    if clean_tenant == "default":
+    if clean_tenant in ("default", "org-enterprise-default"):
         legacy_creds = os.path.join(base_auth, "creds.json")
         if os.path.exists(legacy_creds):
             return base_auth
+        tenant_org = os.path.join(base_auth, f"tenant_{clean_tenant}")
+        if os.path.exists(os.path.join(tenant_org, "creds.json")):
+            return tenant_org
         default_dir = os.path.join(base_auth, "tenant_default")
         if os.path.exists(default_dir):
             return default_dir
@@ -667,25 +670,25 @@ def ensure_wa_bridge_running(timeout_seconds: float = 5.0, port: int = 3001, app
         # 5. Spawn node wa_bridge.js as detached persistent process
         try:
             log_path = os.path.join(root_dir, "wa_bridge.log")
-            with open(log_path, "a", encoding="utf-8") as log_out:
-                popen_kwargs = {
-                    "cwd": root_dir,
-                    "env": env,
-                    "stdout": log_out,
-                    "stderr": log_out,
-                }
-                if sys.platform == "win32":
-                    popen_kwargs["creationflags"] = (
-                        subprocess.CREATE_NEW_PROCESS_GROUP
-                        | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-                    )
-                else:
-                    popen_kwargs["start_new_session"] = True
-
-                _bridge_proc = subprocess.Popen(
-                    [node_bin, bridge_script],
-                    **popen_kwargs
+            log_out = open(log_path, "a", encoding="utf-8", buffering=1)
+            popen_kwargs = {
+                "cwd": root_dir,
+                "env": env,
+                "stdout": log_out,
+                "stderr": log_out,
+            }
+            if sys.platform == "win32":
+                popen_kwargs["creationflags"] = (
+                    subprocess.CREATE_NEW_PROCESS_GROUP
+                    | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
                 )
+            else:
+                popen_kwargs["start_new_session"] = True
+
+            _bridge_proc = subprocess.Popen(
+                [node_bin, bridge_script],
+                **popen_kwargs
+            )
             logger.info(f"[WA Bridge] Subprocess spawned (PID: {_bridge_proc.pid}) on port {port}")
         except Exception as spawn_err:
             logger.error(f"[WA Bridge] Failed to spawn {bridge_script}: {spawn_err}")

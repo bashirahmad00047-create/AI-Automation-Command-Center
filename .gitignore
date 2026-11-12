@@ -35,6 +35,8 @@ automation_storage/*.json
 automation_storage/output/*
 !automation_storage/output/.gitkeep
 !automation_storage/logs/.gitkeep
+static/audio/*.oga
+static/audio/*.ogg
 
 # IDEs and OS metadata
 .idea/
@@ -78,6 +80,8 @@ fix_*.py
 # Node.js dependencies & Baileys session storage
 node_modules/
 baileys_auth/
+baileys_auth*/
+auth_info_baileys*/
 .node/
 wa_bridge.log
 

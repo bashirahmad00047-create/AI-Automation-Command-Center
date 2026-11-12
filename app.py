@@ -52,15 +52,15 @@ _wa_bridge_proc_lock = threading.Lock()
 
 def start_wa_bridge_subprocess(app_ref=None):
     """Spawns `node wa_bridge.js` on port 3001 as a persistent background subprocess when the server starts."""
-    if os.environ.get("WA_BRIDGE_INTERNAL") == "1" or os.environ.get("GUNICORN_STARTED") == "1":
-        # start.sh already supervises wa_bridge.js in the background
-        return
     try:
-        from wa_bridge_manager import ensure_wa_bridge_running
-        ensure_wa_bridge_running(timeout_seconds=3.0, app=app_ref)
+        from wa_bridge_manager import ensure_wa_bridge_running, is_port_reachable
+        if is_port_reachable("127.0.0.1", 3001, timeout=0.4):
+            return True
+        return ensure_wa_bridge_running(timeout_seconds=5.0, app=app_ref)
     except Exception as e:
         if app_ref:
             app_ref.logger.warning(f"[WhatsApp Bridge] Failed to start bridge subprocess: {e}")
+        return False
 
 
 # Auto-seed sample audit logs on startup if empty
@@ -1166,10 +1166,25 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     @application.route("/api/v1/whatsapp/bridge-qr-refresh", methods=["POST", "GET"])
     @application.route("/api/whatsapp/qr/refresh", methods=["POST", "GET"])
     @application.route("/api/v1/whatsapp/qr/refresh", methods=["POST", "GET"])
+    @application.route("/api/whatsapp/reset", methods=["POST", "GET"])
+    @application.route("/api/v1/whatsapp/reset", methods=["POST", "GET"])
+    @application.route("/api/wa/reset", methods=["POST", "GET"])
+    @application.route("/api/v1/wa/reset", methods=["POST", "GET"])
     def route_whatsapp_bridge_qr_refresh():
         """Signals the bridge to reset any stalled socket and generate a fresh QR code."""
         from api_v1 import api_whatsapp_bridge_qr_refresh
         return api_whatsapp_bridge_qr_refresh()
+
+    @application.route("/api/whatsapp/disconnect", methods=["POST", "DELETE"])
+    @application.route("/api/v1/whatsapp/disconnect", methods=["POST", "DELETE"])
+    @application.route("/api/whatsapp/logout", methods=["POST", "DELETE"])
+    @application.route("/api/v1/whatsapp/logout", methods=["POST", "DELETE"])
+    @application.route("/api/wa/disconnect", methods=["POST", "DELETE"])
+    @application.route("/api/v1/wa/disconnect", methods=["POST", "DELETE"])
+    def route_whatsapp_bridge_disconnect():
+        """Unlinks WhatsApp device, purges session credentials and generates a fresh QR."""
+        from api_v1 import api_whatsapp_bridge_disconnect
+        return api_whatsapp_bridge_disconnect()
 
     @application.route("/api/whatsapp/bridge-qr.png", methods=["GET"])
     @application.route("/api/v1/whatsapp/bridge-qr.png", methods=["GET"])

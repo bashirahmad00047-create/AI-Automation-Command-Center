@@ -52,16 +52,15 @@ const {
 const activeSessions = new Map(); // orgId -> session object
 
 function getAuthDirForOrg(orgId) {
-  const cleanOrg = (orgId || 'default').toString().trim().replace(/[^a-zA-Z0-9_\-\.]/g, '_');
-  const dirName = `auth_info_baileys_${cleanOrg}`;
-  // For backward compatibility on default org: if legacy baileys_auth/creds.json exists, use it
-  if (cleanOrg === 'default') {
-    const legacyPath = path.join(__dirname, 'baileys_auth');
-    if (fs.existsSync(path.join(legacyPath, 'creds.json'))) {
-      return legacyPath;
-    }
+  if (typeof sessionPool !== 'undefined' && sessionPool.resolveAuthDir) {
+    return sessionPool.resolveAuthDir(orgId);
   }
-  const orgAuthDir = path.join(__dirname, dirName);
+  const cleanOrg = (orgId || 'default').toString().trim().replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+  const baseDir = path.join(__dirname, 'baileys_auth');
+  if (cleanOrg === 'default' || cleanOrg === 'org-enterprise-default') {
+    return baseDir;
+  }
+  const orgAuthDir = path.join(baseDir, `tenant_${cleanOrg}`);
   if (!fs.existsSync(orgAuthDir)) {
     fs.mkdirSync(orgAuthDir, { recursive: true });
   }
@@ -1716,161 +1715,93 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
   if (tenantId === 'default') isStarting = true;
 
   if (skipRestore) {
-
     try {
-
-      if (fs.existsSync(AUTH_DIR)) {
-
-        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-
-        fs.mkdirSync(AUTH_DIR, { recursive: true });
-
+      if (fs.existsSync(authDir)) {
+        fs.rmSync(authDir, { recursive: true, force: true });
+        fs.mkdirSync(authDir, { recursive: true });
       }
-
+      if (tenantId !== 'default') {
+        const defDir = sessionPool.resolveAuthDir('default');
+        if (fs.existsSync(defDir) && defDir !== authDir) {
+          fs.rmSync(defDir, { recursive: true, force: true });
+          fs.mkdirSync(defDir, { recursive: true });
+        }
+      }
     } catch (_) {}
-
-    triggerSessionClear();
-
+    triggerSessionClear(tenantId);
+    if (tenantId !== 'default') {
+      triggerSessionClear('default');
+    }
   }
 
-
-
   try {
-
-    destroyOldSocket();
-
-
+    destroyOldSocket(tenantId);
 
     // Ensure auth storage directory exists
-
-    if (!fs.existsSync(AUTH_DIR)) {
-
-      fs.mkdirSync(AUTH_DIR, { recursive: true });
-
+    if (!fs.existsSync(authDir)) {
+      fs.mkdirSync(authDir, { recursive: true });
     }
-
-
 
     // Query DB for session credentials if local creds are absent or corrupted
-
-    const credsCheckPath = path.join(AUTH_DIR, 'creds.json');
-
+    const credsCheckPath = path.join(authDir, 'creds.json');
     let credsNeedRestore = false;
-
     if (!fs.existsSync(credsCheckPath) || fs.statSync(credsCheckPath).size < 100) {
-
       credsNeedRestore = true;
-
     } else {
-
       try {
-
         const parsed = JSON.parse(fs.readFileSync(credsCheckPath, 'utf8'));
-
         const hasNoise = Boolean(parsed && parsed.noiseKey && (parsed.noiseKey.private || parsed.noiseKey.public));
-
         if (!hasNoise) {
-
-          console.log('[WhatsApp Bridge] Local creds.json lacks valid crypto keys. Purging corrupted stub...');
-
+          console.log(`[WhatsApp Bridge] Local creds.json lacks valid crypto keys for '${tenantId}'. Purging corrupted stub...`);
           try { fs.unlinkSync(credsCheckPath); } catch (_) {}
-
           credsNeedRestore = true;
-
         }
-
       } catch (e) {
-
-        console.warn('[WhatsApp Bridge] Existing creds.json is invalid JSON. Purging...');
-
+        console.warn(`[WhatsApp Bridge] Existing creds.json is invalid JSON for '${tenantId}'. Purging...`);
         try { fs.unlinkSync(credsCheckPath); } catch (_) {}
-
         credsNeedRestore = true;
-
       }
-
     }
-
-
 
     if (credsNeedRestore && !skipRestore) {
-
       try {
-
-        console.log('[WhatsApp Bridge] Checking database for saved session credentials...');
-
-        const restored = await tryRestoreFromPythonBackend();
-
+        console.log(`[WhatsApp Bridge] Checking database for saved session credentials (tenant: '${tenantId}')...`);
+        const restored = await tryRestoreFromPythonBackend(tenantId);
         if (restored) {
-
-          console.log('[WhatsApp Bridge] Restored permanent session from Database!');
-
+          console.log(`[WhatsApp Bridge] Restored permanent session from Database for '${tenantId}'!`);
         }
-
       } catch (_) {}
-
     }
 
-
-
     // Load or reset multi-file auth credentials safely with automatic corrupt session recovery
-
     let state, saveCreds;
-
     try {
-
-      const auth = await useMultiFileAuthState(AUTH_DIR);
-
+      const auth = await useMultiFileAuthState(authDir);
       state = auth.state;
-
       saveCreds = auth.saveCreds;
-
     } catch (authErr) {
-
-      console.error('[WhatsApp Bridge] Auth state read error:', authErr.message);
-
-      // Purge corrupted files in AUTH_DIR and recreate clean state
-
+      console.error(`[WhatsApp Bridge] Auth state read error for '${tenantId}':`, authErr.message);
+      // Purge corrupted files in authDir and recreate clean state
       try {
-
-        if (fs.existsSync(AUTH_DIR)) {
-
-          const files = fs.readdirSync(AUTH_DIR);
-
+        if (fs.existsSync(authDir)) {
+          const files = fs.readdirSync(authDir);
           for (const file of files) {
-
             try {
-
-              fs.unlinkSync(path.join(AUTH_DIR, file));
-
+              fs.unlinkSync(path.join(authDir, file));
             } catch (_) {}
-
           }
-
         } else {
-
-          fs.mkdirSync(AUTH_DIR, { recursive: true });
-
+          fs.mkdirSync(authDir, { recursive: true });
         }
-
       } catch (cleanErr) {
-
         console.error('[WhatsApp Bridge] Clean auth directory notice:', cleanErr.message);
-
       }
 
-
-
       try {
-
-        const auth = await useMultiFileAuthState(AUTH_DIR);
-
+        const auth = await useMultiFileAuthState(authDir);
         state = auth.state;
-
         saveCreds = auth.saveCreds;
-
-        console.log('[WhatsApp Bridge] Clean auth state re-initialized successfully after corruption recovery.');
-
+        console.log(`[WhatsApp Bridge] Clean auth state re-initialized successfully for '${tenantId}'.`);
       } catch (reAuthErr) {
 
         console.error('[WhatsApp Bridge] Secondary auth recovery error (using memory state):', reAuthErr.message);
@@ -1934,71 +1865,41 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
 
 
     // Version discovery with safe default fallback
-
     let version = [2, 3000, 1043857760];
-
-    let isLatest = false;
-
+    let isLatest = true;
     try {
-
-      const vInfo = await fetchLatestBaileysVersion();
-
+      const vInfo = await Promise.race([
+        fetchLatestBaileysVersion(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+      ]);
       if (vInfo && Array.isArray(vInfo.version)) {
-
         version = vInfo.version;
-
         isLatest = !!vInfo.isLatest;
-
       }
-
     } catch (vErr) {
-
-      console.warn('[WhatsApp Bridge] Version check skipped, using standard version:', vErr.message);
-
+      console.warn('[WhatsApp Bridge] Version check note, using standard version:', vErr.message);
     }
-
     console.log(`[WhatsApp Bridge] Using WA Web v${version.join('.')}, isLatest: ${isLatest}`);
 
-
-
     // Create Baileys socket with high resilience settings
-
     sock = makeWASocket({
-
       version,
-
       auth: state,
-
       logger: pino({ level: 'silent' }),
-
       printQRInTerminal: false,
-
       syncFullHistory: false,
-
       markOnlineOnConnect: true,
-
       connectTimeoutMs: 60000,
-
       defaultQueryTimeoutMs: 60000,
-
       keepAliveIntervalMs: 30000,
-
       retryRequestDelayMs: 250,
-
       browser: Browsers.macOS('Desktop'),
-
       getMessage: async (key) => {
-
         if (key && key.id && inMemoryMessageStore.has(key.id)) {
-
           return inMemoryMessageStore.get(key.id);
-
         }
-
         return undefined;
-
       }
-
     });
 
     session.sock = sock;
@@ -2006,67 +1907,36 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
     activeSessions.set(tenantId, session);
 
     // Safely persist session credentials (only sync to DB once authenticated)
-
     sock.ev.on('creds.update', async () => {
-
       try {
-
         if (typeof saveCreds === 'function') {
-
           await saveCreds();
-
         }
-
-        if (isAuthenticatedCreds(AUTH_DIR) || Boolean(sock?.user?.id)) {
-
-          triggerSessionBackup();
-
+        if (isAuthenticatedCreds(authDir) || Boolean(sock?.user?.id)) {
+          triggerSessionBackup(tenantId);
         }
-
       } catch (saveErr) {
-
         console.error('[WhatsApp Bridge] Failed to save creds:', saveErr.message);
-
       }
-
     });
 
-
-
     // Connection life-cycle handler
-
     let credsWatchdogTimer = null;
-
     if (state.creds && state.creds.registered && !skipRestore) {
-
       credsWatchdogTimer = setTimeout(async () => {
-
-        if (!isConnected && !latestQr && !sock?.user?.id) {
-
-          console.warn('[WhatsApp Bridge Watchdog] Stale saved credentials detected (no connection after 6s). Force-wiping auth to emit fresh QR...');
-
-          destroyOldSocket();
-
+        if (!session.isConnected && !session.latestQr && !sock?.user?.id) {
+          console.warn(`[WhatsApp Bridge Watchdog] Stale saved credentials detected for '${tenantId}' (no connection after 6s). Force-wiping auth to emit fresh QR within 3s...`);
+          destroyOldSocket(tenantId);
           try {
-
-            if (fs.existsSync(AUTH_DIR)) {
-
-              fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-
-              fs.mkdirSync(AUTH_DIR, { recursive: true });
-
+            if (fs.existsSync(authDir)) {
+              fs.rmSync(authDir, { recursive: true, force: true });
+              fs.mkdirSync(authDir, { recursive: true });
             }
-
           } catch (_) {}
-
-          triggerSessionClear();
-
-          startWhatsAppBridge(true).catch(() => {});
-
+          triggerSessionClear(tenantId);
+          startWhatsAppBridge(tenantId, true).catch(() => {});
         }
-
       }, 6000);
-
     }
 
 
@@ -2086,7 +1956,6 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
 
 
       // INSTANT CONNECTED STATE SETTING ON FIRST LINE BEFORE ANY DB BACKUP OR CHAT SYNC
-
       if (connection === 'open') {
         session.isConnected = true;
         session.isStarting = false;
@@ -2098,7 +1967,7 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
         if (sock?.user?.id) {
           session.authenticatedUserPhone = sock.user.id.split(':')[0].replace(/\D/g, '');
         }
-        if (tenantId === 'default') {
+        if (tenantId === 'default' || tenantId === 'org-enterprise-default') {
           isConnected = true;
           latestQr = null;
           latestQrDataUrl = null;
@@ -2109,7 +1978,7 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
       } else if (connection === 'close') {
         session.isConnected = false;
         session.isStarting = false;
-        if (tenantId === 'default') {
+        if (tenantId === 'default' || tenantId === 'org-enterprise-default') {
           isConnected = false;
         }
       }
@@ -2119,214 +1988,166 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
         session.currentQr = qr;
         session.latestQr = qr;
         session.lastQrGeneratedTime = Date.now();
-        if (tenantId === 'default') {
+        if (tenantId === 'default' || tenantId === 'org-enterprise-default') {
           currentQr = qr;
           latestQr = qr;
           lastQrGeneratedTime = Date.now();
         }
 
         console.log('\n===============================================================');
-
         console.log('  SCAN THIS QR CODE IN WHATSAPP TO LINK FOR FREE');
-
         console.log('  Steps: WhatsApp -> Settings/Menu -> Linked Devices -> Link a Device');
-
         console.log('===============================================================');
-
         try {
-
-          if (process.stdout.isTTY && !process.env.RENDER) {
-
-            qrcodeTerminal.generate(qr, { small: true });
-
-          }
-
-        } catch (tErr) {
-
-          // ignore terminal write error in non-TTY environments
-
-        }
-
+          qrcodeTerminal.generate(qr, { small: true });
+        } catch (_) {}
         console.log('===============================================================\n');
 
-
-
         // Immediately pre-generate base64 Data URI in memory using qrcode.toDataURL()
-
         qrcode.toDataURL(qr, {
-
           errorCorrectionLevel: 'M',
-
           type: 'image/png',
-
           margin: 2,
-
           width: 240,
-
           color: { dark: '#000000', light: '#ffffff' }
-
         }).then((url) => {
           session.latestQrDataUrl = url;
           session.currentQrUrl = url;
-          if (tenantId === 'default') {
+          if (tenantId === 'default' || tenantId === 'org-enterprise-default') {
             latestQrDataUrl = url;
             currentQrUrl = url;
           }
         }).catch((err) => {
-
           console.error('[Bridge QR] Error generating QR Data URL:', err.message);
-
         });
 
-
-
         // Pre-generate SVG string
-
         qrcode.toString(qr, {
-
           type: 'svg',
-
           margin: 2,
-
           width: 240
-
         }).then((svg) => {
           session.currentQrSvg = svg;
-          if (tenantId === 'default') {
+          if (tenantId === 'default' || tenantId === 'org-enterprise-default') {
             currentQrSvg = svg;
           }
         }).catch((err) => {
-
           console.error('[Bridge QR] Error generating QR SVG:', err.message);
-
         });
-
       }
-
-
 
       if (connection === 'close') {
-
-        isConnected = false;
+        session.isConnected = false;
+        session.isStarting = false;
+        if (tenantId === 'default' || tenantId === 'org-enterprise-default') {
+          isConnected = false;
+        }
 
         const statusCode =
-
           lastDisconnect?.error instanceof Boom
-
             ? lastDisconnect.error.output?.statusCode
-
             : lastDisconnect?.error?.output?.statusCode;
 
+        const isLoggedOut = (statusCode === DisconnectReason.loggedOut || statusCode === 401);
+        const isBadSession = (statusCode === DisconnectReason.badSession || statusCode === 500);
 
+        console.warn(`[WhatsApp Bridge] Connection closed for tenant '${tenantId}' (code: ${statusCode}, isLoggedOut: ${isLoggedOut}, isBadSession: ${isBadSession}).`);
 
-        const isLoggedOut = (statusCode === DisconnectReason.loggedOut);
+        // If loggedOut (401) or badSession disconnect happens:
+        // Automatically delete the auth folder and immediately generate a fresh base64 QR code within 3 seconds!
+        if (isLoggedOut || isBadSession) {
+          console.warn(`[WhatsApp Bridge] LoggedOut / BadSession (code ${statusCode}) detected for '${tenantId}'. Purging auth folder & DB session to emit fresh QR code immediately...`);
+          try {
+            if (fs.existsSync(authDir)) {
+              fs.rmSync(authDir, { recursive: true, force: true });
+              fs.mkdirSync(authDir, { recursive: true });
+            }
+            if (tenantId !== 'default') {
+              const defDir = sessionPool.resolveAuthDir('default');
+              if (fs.existsSync(defDir) && defDir !== authDir) {
+                fs.rmSync(defDir, { recursive: true, force: true });
+                fs.mkdirSync(defDir, { recursive: true });
+              }
+            }
+          } catch (e) {
+            console.error(`[WhatsApp Bridge] Error wiping auth folder on ${statusCode}:`, e.message);
+          }
 
-        console.warn(`[WhatsApp Bridge] Connection closed (code: ${statusCode}, isLoggedOut: ${isLoggedOut}).`);
+          triggerSessionClear(tenantId);
+          if (tenantId !== 'default') {
+            triggerSessionClear('default');
+          }
 
+          session.latestQr = null;
+          session.latestQrDataUrl = null;
+          session.currentQr = null;
+          session.currentQrUrl = null;
+          session.currentQrSvg = null;
+          if (tenantId === 'default' || tenantId === 'org-enterprise-default') {
+            latestQr = null;
+            latestQrDataUrl = null;
+            currentQr = null;
+            currentQrUrl = null;
+            currentQrSvg = null;
+          }
 
+          destroyOldSocket(tenantId);
 
-        if (isLoggedOut) {
-
-          console.warn('[WhatsApp Bridge] Disconnect notice (code 401). Preserving DB backup; resetting in-memory socket for re-connection...');
-
-          // DO NOT delete DB session here: transient 401 during Render redeploy / rolling restart must not destroy DB backup!
-
-          // Explicit logout is handled exclusively by POST /disconnect endpoint.
-
-          currentQr = null;
-
-          currentQrUrl = null;
-
-          currentQrSvg = null;
-
+          clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(() => {
+            console.log(`[WhatsApp Bridge] Generating fresh base64 QR code for '${tenantId}' within 3 seconds...`);
+            startWhatsAppBridge(tenantId, true).catch(err => {
+              console.error(`[WhatsApp Bridge] Immediate restart failed:`, err.message);
+            });
+          }, 300);
+          return;
         }
 
+        destroyOldSocket(tenantId);
 
-
-        destroyOldSocket();
-
-
-
-        // Bulletproof Safe Backoff Auto-Recovery (5s -> 10s -> 20s)
-
+        // Safe Backoff Auto-Recovery
         reconnectAttempts++;
-
-        const backoffDelays = [5000, 10000, 20000];
-
-        let restartDelay = backoffDelays[Math.min(reconnectAttempts - 1, backoffDelays.length - 1)];
-
+        let restartDelay = 5000;
         if (statusCode === DisconnectReason.restartRequired) {
-
           restartDelay = 1000;
-
-          console.log('[WhatsApp Bridge Auto-Recovery] Server requested restart (code 515). Re-syncing in 1s...');
-
+          console.log(`[WhatsApp Bridge Auto-Recovery] Server requested restart (code 515). Re-syncing in 1s for '${tenantId}'...`);
+        } else if (statusCode === 408) {
+          // QR timed out waiting for link: refresh socket quickly to emit next QR code
+          restartDelay = 1200;
+          console.log(`[WhatsApp Bridge Auto-Recovery] QR code expired (code 408). Generating next QR code in 1.2s for '${tenantId}'...`);
         } else {
-
-          console.log(`[WhatsApp Bridge Auto-Recovery] Safe backoff reconnect attempt #${reconnectAttempts} in ${restartDelay / 1000}s...`);
-
+          const backoffDelays = [3000, 6000, 10000];
+          restartDelay = backoffDelays[Math.min(reconnectAttempts - 1, backoffDelays.length - 1)];
+          console.log(`[WhatsApp Bridge Auto-Recovery] Reconnect attempt #${reconnectAttempts} in ${restartDelay / 1000}s for '${tenantId}'...`);
         }
-
-
-
-        console.log(`[WhatsApp Bridge Auto-Recovery] Scheduling socket re-sync in ${restartDelay}ms...`);
 
         clearTimeout(reconnectTimer);
-
         reconnectTimer = setTimeout(() => {
-
-          startWhatsAppBridge().catch((retryErr) => {
-
-            console.error('[WhatsApp Bridge Auto-Recovery] Reconnect attempt failed:', retryErr.message);
-
-            // Continuous auto-recovery: never halts
-
+          startWhatsAppBridge(tenantId, false).catch((retryErr) => {
+            console.error(`[WhatsApp Bridge Auto-Recovery] Reconnect attempt failed for '${tenantId}':`, retryErr.message);
             clearTimeout(reconnectTimer);
-
             reconnectTimer = setTimeout(() => {
-
-              startWhatsAppBridge(true).catch(() => {});
-
-            }, 5000);
-
+              startWhatsAppBridge(tenantId, true).catch(() => {});
+            }, 3000);
           });
-
         }, restartDelay);
-
       } else if (connection === 'open') {
-
         isConnected = true;
-
         latestQr = null;
-
         latestQrDataUrl = null;
-
         currentQr = null;
-
         currentQrUrl = null;
-
         currentQrSvg = null;
-
         reconnectAttempts = 0;
-
-        triggerSessionBackup();
-
+        triggerSessionBackup(tenantId);
         const userPhone = sock?.user?.id ? sock.user.id.split(':')[0] : 'Linked Number';
-
         console.log('\n===============================================================');
-
         console.log(` [WhatsApp Bridge] Connected successfully! Auto-recovery active.`);
-
         console.log(` Active Phone: +${userPhone}`);
-
         console.log(` REST API listening on port ${PORT}`);
-
         console.log(` Python Webhook target: ${PYTHON_WEBHOOK_URL}`);
-
         console.log('===============================================================\n');
-
       }
-
     });
 
 
@@ -4241,10 +4062,30 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
     // When force_refresh is requested, or when reconnect endpoint is hit:
     if (isForceRefresh) {
       console.log(`[WhatsApp Bridge] Force-refreshing QR session for tenant '${tenantId}': destroying socket and wiping credentials...`);
+      const authDir = session?.authDir || sessionPool.resolveAuthDir(tenantId);
+      try {
+        if (fs.existsSync(authDir)) {
+          fs.rmSync(authDir, { recursive: true, force: true });
+          fs.mkdirSync(authDir, { recursive: true });
+        }
+        if (tenantId !== 'default') {
+          const defDir = sessionPool.resolveAuthDir('default');
+          if (fs.existsSync(defDir) && defDir !== authDir) {
+            fs.rmSync(defDir, { recursive: true, force: true });
+            fs.mkdirSync(defDir, { recursive: true });
+          }
+        }
+      } catch (_) {}
+
+      triggerSessionClear(tenantId);
+      if (tenantId !== 'default') {
+        triggerSessionClear('default');
+      }
+
       if (typeof sessionPool !== 'undefined' && sessionPool.destroySession) {
         sessionPool.destroySession(tenantId);
       } else {
-        destroyOldSocket();
+        destroyOldSocket(tenantId);
       }
       if (session) {
         session.isStarting = true;
@@ -4252,6 +4093,7 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
         session.latestQrDataUrl = null;
         session.currentQr = null;
         session.currentQrUrl = null;
+        session.currentQrSvg = null;
       }
       latestQr = null;
       latestQrDataUrl = null;
@@ -4262,10 +4104,10 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
       // Start fresh socket for tenant
       startWhatsAppBridge(tenantId, true).catch(e => console.error(`[WhatsApp Bridge] Force restart error for ${tenantId}:`, e.message));
 
-      // Wait up to 3.5s for fresh QR code
+      // Wait up to 3s for fresh QR code
       const startWait = Date.now();
-      while (!session?.latestQr && !session?.currentQr && !latestQr && (Date.now() - startWait < 3500)) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+      while (!session?.latestQr && !session?.currentQr && !latestQr && (Date.now() - startWait < 3000)) {
+        await new Promise(resolve => setTimeout(resolve, 80));
       }
     } else if (!session?.sock && !session?.isStarting && !session?.latestQr && !session?.currentQr && !genuinelyConnected) {
       console.log(`[WhatsApp Bridge] Dynamic socket initialization for tenant '${tenantId}' on /qr request...`);
@@ -4463,88 +4305,103 @@ app.get('/qr.svg', async (req, res) => {
 
  */
 
-app.all(['/refresh-qr', '/qr-refresh', '/qr/refresh', '/api/qr/refresh', '/restart-socket'], async (req, res) => {
+app.all(['/refresh-qr', '/qr-refresh', '/qr/refresh', '/api/qr/refresh', '/restart-socket', '/reset', '/wa/reset'], async (req, res) => {
+  const tenantId = (typeof sessionPool !== 'undefined' && sessionPool.extractTenantId) ? sessionPool.extractTenantId(req) : 'default';
+  const session = sessionPool.getOrCreateSession(tenantId);
+  const authDir = session.authDir;
 
-  console.log('[WhatsApp Bridge] Fresh QR generation requested via /refresh-qr endpoint.');
+  console.log(`[WhatsApp Bridge] Fresh QR generation requested via /refresh-qr endpoint for '${tenantId}'.`);
 
   try {
-
-    isConnected = false;
-
-    currentQr = null;
-
-    currentQrUrl = null;
-
-    currentQrSvg = null;
-
-    destroyOldSocket();
-
-
-
-    // If device is not already connected, clean pending credentials to guarantee a fresh pairing QR
-
-    if (!sock?.user) {
-
-      try {
-
-        if (fs.existsSync(AUTH_DIR)) {
-
-          const files = fs.readdirSync(AUTH_DIR);
-
-          for (const file of files) {
-
-            try {
-
-              fs.unlinkSync(path.join(AUTH_DIR, file));
-
-            } catch (_) {}
-
-          }
-
-        }
-
-      } catch (_) {}
-
+    session.isConnected = false;
+    session.currentQr = null;
+    session.currentQrUrl = null;
+    session.currentQrSvg = null;
+    session.latestQr = null;
+    session.latestQrDataUrl = null;
+    session.isStarting = true;
+    if (tenantId === 'default' || tenantId === 'org-enterprise-default') {
+      isConnected = false;
+      currentQr = null;
+      currentQrUrl = null;
+      currentQrSvg = null;
+      latestQr = null;
+      latestQrDataUrl = null;
+      isStarting = true;
     }
 
+    destroyOldSocket(tenantId);
 
+    // Automatically delete the auth folder and trigger session clear
+    try {
+      if (fs.existsSync(authDir)) {
+        fs.rmSync(authDir, { recursive: true, force: true });
+        fs.mkdirSync(authDir, { recursive: true });
+      }
+      if (tenantId !== 'default') {
+        const defDir = sessionPool.resolveAuthDir('default');
+        if (fs.existsSync(defDir) && defDir !== authDir) {
+          fs.rmSync(defDir, { recursive: true, force: true });
+          fs.mkdirSync(defDir, { recursive: true });
+        }
+      }
+    } catch (_) {}
 
-    isStarting = false;
+    triggerSessionClear(tenantId);
+    if (tenantId !== 'default') {
+      triggerSessionClear('default');
+    }
 
-    setTimeout(() => {
+    // Immediately start fresh socket
+    startWhatsAppBridge(tenantId, true).catch(e => console.error('[WhatsApp Bridge] Socket restart error:', e.message));
 
-      startWhatsAppBridge().catch(e => console.error('[WhatsApp Bridge] Socket restart error:', e.message));
+    // Wait up to 3 seconds for fresh base64 QR code
+    const startWait = Date.now();
+    while (!session?.latestQr && !session?.currentQr && !latestQr && (Date.now() - startWait < 3000)) {
+      await new Promise(resolve => setTimeout(resolve, 80));
+    }
 
-    }, 200);
+    const qrText = session?.latestQr || session?.currentQr || latestQr || currentQr;
+    let qrDataUrl = session?.latestQrDataUrl || session?.currentQrUrl || latestQrDataUrl || currentQrUrl;
 
-
+    if (qrText && !qrDataUrl) {
+      try {
+        qrDataUrl = await qrcode.toDataURL(qrText, {
+          errorCorrectionLevel: 'M',
+          type: 'image/png',
+          margin: 2,
+          width: 280,
+          color: { dark: '#000000', light: '#ffffff' }
+        });
+        session.latestQrDataUrl = qrDataUrl;
+        session.currentQrUrl = qrDataUrl;
+        if (tenantId === 'default' || tenantId === 'org-enterprise-default') {
+          latestQrDataUrl = qrDataUrl;
+          currentQrUrl = qrDataUrl;
+        }
+      } catch (_) {}
+    }
 
     return res.status(200).json({
-
       success: true,
-
-      status: 'refreshing',
-
-      message: 'Generating fresh QR code...'
-
+      tenant_id: tenantId,
+      org_id: tenantId,
+      status: qrText ? 'qr_ready' : 'refreshing',
+      connected: false,
+      phone: null,
+      qr: qrText || null,
+      qr_image: qrDataUrl || null,
+      qrUrl: qrDataUrl || null,
+      message: qrText ? 'Fresh QR code generated' : 'Generating fresh QR code...'
     });
-
   } catch (refreshErr) {
-
     console.error('[WhatsApp Bridge] Error during /refresh-qr:', refreshErr.message);
-
     return res.status(200).json({
-
       success: false,
-
       status: 'error',
-
       message: 'Failed to restart QR session: ' + refreshErr.message
-
     });
-
   }
-
 });
 
 
@@ -4814,73 +4671,68 @@ app.post(['/create-group', '/api/create-group'], async (req, res) => {
 
 
 app.post(['/disconnect', '/logout'], async (req, res) => {
-
-  console.log('[WhatsApp Bridge] Explicit logout requested by user.');
+  const tenantId = (typeof sessionPool !== 'undefined' && sessionPool.extractTenantId) ? sessionPool.extractTenantId(req) : 'default';
+  const session = (typeof sessionPool !== 'undefined' && sessionPool.getSession) ? sessionPool.getSession(tenantId) : null;
+  console.log(`[WhatsApp Bridge] Explicit logout requested for tenant '${tenantId}'.`);
 
   try {
-
-    if (sock && typeof sock.logout === 'function') {
-
+    if (session?.sock && typeof session.sock.logout === 'function') {
+      await session.sock.logout();
+    } else if (sock && typeof sock.logout === 'function') {
       await sock.logout();
-
     }
-
   } catch (_) {}
 
-
-
-  isConnected = false;
-
-  currentQr = null;
-
-  currentQrUrl = null;
-
-  currentQrSvg = null;
-
-
-
+  const authDir = session?.authDir || (typeof sessionPool !== 'undefined' ? sessionPool.resolveAuthDir(tenantId) : path.join(__dirname, 'baileys_auth'));
   try {
-
-    if (fs.existsSync(AUTH_DIR)) {
-
-      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-
-      fs.mkdirSync(AUTH_DIR, { recursive: true });
-
+    if (fs.existsSync(authDir)) {
+      fs.rmSync(authDir, { recursive: true, force: true });
+      fs.mkdirSync(authDir, { recursive: true });
     }
-
+    if (tenantId !== 'default') {
+      const defDir = typeof sessionPool !== 'undefined' ? sessionPool.resolveAuthDir('default') : path.join(__dirname, 'baileys_auth');
+      if (fs.existsSync(defDir) && defDir !== authDir) {
+        fs.rmSync(defDir, { recursive: true, force: true });
+        fs.mkdirSync(defDir, { recursive: true });
+      }
+    }
   } catch (err) {
-
     console.error('[WhatsApp Bridge] Failed to clean auth directory on logout:', err.message);
-
   }
 
+  triggerSessionClear(tenantId);
+  if (tenantId !== 'default') {
+    triggerSessionClear('default');
+  }
 
-
-  triggerSessionClear();
-
-  destroyOldSocket();
-
-
+  if (session) {
+    session.isConnected = false;
+    session.currentQr = null;
+    session.currentQrUrl = null;
+    session.currentQrSvg = null;
+    session.latestQr = null;
+    session.latestQrDataUrl = null;
+    session.destroySocket();
+  }
+  destroyOldSocket(tenantId);
+  if (tenantId === 'default' || tenantId === 'org-enterprise-default') {
+    isConnected = false;
+    currentQr = null;
+    currentQrUrl = null;
+    currentQrSvg = null;
+    latestQr = null;
+    latestQrDataUrl = null;
+  }
 
   clearTimeout(reconnectTimer);
-
   reconnectTimer = setTimeout(() => {
-
-    startWhatsAppBridge(true).catch(() => {});
-
-  }, 1000);
-
-
+    startWhatsAppBridge(tenantId, true).catch(() => {});
+  }, 200);
 
   return res.json({
-
     success: true,
-
     message: 'WhatsApp device logged out and session cleared.'
-
   });
-
 });
 
 
