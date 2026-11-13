@@ -51,36 +51,46 @@ const {
 // Dynamic Multi-Tenant Session Map (Audit Area 15 / Step 4)
 const activeSessions = new Map(); // orgId -> session object
 
+function resolveSessionsDir(req) {
+  const rawTenant = req?.query?.tenant_id || req?.body?.tenant_id || 'default';
+  const tenantId = String(rawTenant).replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
+  const sessionsDir = path.join(__dirname, 'baileys_auth', tenantId);
+  if (!fs.existsSync(sessionsDir)) {
+    try { fs.mkdirSync(sessionsDir, { recursive: true }); } catch (_) {}
+  }
+  return { tenantId, sessionsDir };
+}
+
 function getAuthDirForOrg(orgId) {
-  if (typeof sessionPool !== 'undefined' && sessionPool.resolveAuthDir) {
+  if (typeof sessionPool !== 'undefined' && sessionPool.resolveAuthDir && typeof orgId === 'string') {
     return sessionPool.resolveAuthDir(orgId);
   }
-  const cleanOrg = (orgId || 'default').toString().trim().replace(/[^a-zA-Z0-9_\-\.]/g, '_');
-  const baseDir = path.join(__dirname, 'baileys_auth');
-  if (cleanOrg === 'default' || cleanOrg === 'org-enterprise-default') {
-    return baseDir;
+  const rawTenant = (typeof orgId === 'object' && orgId !== null)
+    ? (orgId.query?.tenant_id || orgId.body?.tenant_id || orgId.query?.org_id || orgId.body?.org_id || 'default')
+    : (orgId || 'default');
+  const tenantId = String(rawTenant).replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
+  const sessionsDir = path.join(__dirname, 'baileys_auth', tenantId);
+  if (!fs.existsSync(sessionsDir)) {
+    try { fs.mkdirSync(sessionsDir, { recursive: true }); } catch (_) {}
   }
-  const orgAuthDir = path.join(baseDir, `tenant_${cleanOrg}`);
-  if (!fs.existsSync(orgAuthDir)) {
-    fs.mkdirSync(orgAuthDir, { recursive: true });
-  }
-  return orgAuthDir;
+  return sessionsDir;
 }
 
 function extractOrgId(req) {
-  return (
+  const rawTenant =
+    req?.query?.tenant_id ||
+    req?.body?.tenant_id ||
     req?.query?.org_id ||
     req?.body?.org_id ||
     req?.query?.organization_id ||
     req?.body?.organization_id ||
     req?.headers?.['x-org-id'] ||
     req?.headers?.['x-organization-id'] ||
-    req?.query?.tenant_id ||
-    req?.body?.tenant_id ||
     process.env.ORG_ID ||
     process.env.TENANT_ID ||
-    'default'
-  ).toString().trim();
+    'default';
+  const tenantId = String(rawTenant).replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
+  return tenantId;
 }
 
 const express = require('express');
@@ -2553,66 +2563,78 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
 
 
         for (const msg of messages) {
+          try {
+            if (!msg || typeof msg !== 'object' || !msg.key || typeof msg.key !== 'object') {
+              continue;
+            }
 
-          // Capture raw untouched JID & participant BEFORE any normalization
+            // Capture raw untouched JID & participant BEFORE any normalization
 
-          const rawUntouchedJid = msg.key?.remoteJid || '';
+            const rawUntouchedJid = msg.key?.remoteJid || '';
 
-          const rawParticipant = msg.key?.participant || msg.participant || null;
+            const rawParticipant = msg.key?.participant || msg.participant || null;
 
-          if (rawUntouchedJid) {
+            if (rawUntouchedJid) {
 
-            replyJidMap.set(rawUntouchedJid, rawUntouchedJid);
+              replyJidMap.set(rawUntouchedJid, rawUntouchedJid);
 
-          }
+            }
 
-          if (rawUntouchedJid && rawUntouchedJid.endsWith('@lid')) {
+            if (rawUntouchedJid && rawUntouchedJid.endsWith('@lid')) {
 
-            rawLidByPhone.set('923471000668', rawUntouchedJid);
+              rawLidByPhone.set('923471000668', rawUntouchedJid);
 
-            lastInboundJidByPhone.set('923471000668', rawUntouchedJid);
+              lastInboundJidByPhone.set('923471000668', rawUntouchedJid);
 
-          }
-
-
-
-          if (msg.key && msg.message) {
-
-            storeMessageForRetry(msg.key, msg.message);
-
-          }
-
-          const ownPhone = sock?.user?.id ? cleanPhoneNumber(sock.user.id.split(':')[0]) : '';
-
-          const ownLid = sock?.user?.lid ? sock.user.lid.split(':')[0].split('@')[0] : '';
-
-          const remoteJid = msg.key?.remoteJid || '';
-
-          const msgId = msg.key?.id || '';
-
-          const remClean = remoteJid.split(':')[0].split('@')[0];
-
-          const isSelfChat = (remClean === ownPhone || (ownLid && remClean === ownLid));
+            }
 
 
 
-          // Allow self-chat messages from user for testing, but block normal outbound msgs to contacts & bot echo loops
+            if (msg.key && msg.message) {
 
-          if (msg.key?.fromMe && !isSelfChat) continue;
+              storeMessageForRetry(msg.key, msg.message);
 
-          if (msg.key?.fromMe && (sentAiMessageIds.has(msgId) || msgId.startsWith('BAE5') || msgId.startsWith('3EB0'))) continue;
+            }
+
+            const ownPhone = sock?.user?.id ? cleanPhoneNumber(sock.user.id.split(':')[0]) : '';
+
+            const ownLid = sock?.user?.lid ? sock.user.lid.split(':')[0].split('@')[0] : '';
+
+            const remoteJid = msg.key?.remoteJid || '';
+
+            const msgId = msg.key?.id || '';
+
+            const remClean = remoteJid.split(':')[0].split('@')[0];
+
+            const isSelfChat = Boolean(remClean && ((ownPhone && remClean === ownPhone) || (ownLid && remClean === ownLid)));
 
 
 
-          // Block status stories
+            // Allow self-chat messages from user for testing, but block normal outbound msgs to contacts & bot echo loops
 
-          if (remoteJid === 'status@broadcast') continue;
+            if (msg.key?.fromMe && !isSelfChat) continue;
+
+            if (msg.key?.fromMe && (sentAiMessageIds.has(msgId) || msgId.startsWith('BAE5') || msgId.startsWith('3EB0'))) continue;
 
 
 
-          const isGroupChat = remoteJid.endsWith('@g.us') || remoteJid.endsWith('@broadcast');
+            // Block status stories and newsletters
 
-          const participantJid = msg.key?.participant || '';
+            if (remoteJid === 'status@broadcast' || remoteJid.endsWith('@broadcast') || remoteJid.endsWith('@newsletter')) continue;
+
+
+
+            // Feature 1: Differentiate between group messages (jid ending in @g.us) and private messages
+
+            const jid = remoteJid;
+
+            const isGroup = jid.endsWith('@g.us');
+
+            const isPrivate = !isGroup;
+
+            const isGroupChat = isGroup;
+
+            const participantJid = msg.key?.participant || '';
 
           
 
@@ -2815,6 +2837,19 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
 
 
           let text = extractMessageText(unwrappedMsg, msg.message);
+
+          // Feature 3: Delete functionality - if incoming message text is exactly '!delete', delete for everyone
+          if (text && text.trim() === '!delete') {
+            console.log(`[Delete Action] Message ${messageId} is exactly '!delete'. Deleting message for everyone via sock.sendMessage...`);
+            try {
+              if (sock && typeof sock.sendMessage === 'function') {
+                await sock.sendMessage(remoteJid, { delete: msg.key });
+              }
+            } catch (delErr) {
+              console.error(`[Delete Action Error] Could not delete message:`, delErr.message);
+            }
+            continue;
+          }
 
           let isVoice = false;
 
@@ -3744,17 +3779,95 @@ if (!text) text = '[Voice note]';
 
             } else if (resData.reply && !isVoice && !isAudio && !resData.send_as_voice && !resData.is_voice) {
 
-              await new Promise(r => setTimeout(r, jitterMs));
+              if (isPrivate) {
 
-              try {
+                // Feature 2: For private messages, create a human-like reply flow to avoid bans:
 
-                sentMsg = await sendWithDualJid({ text: String(resData.reply) }, 'composing');
+                // 1) Mark the message as read
 
-                if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
+                try {
 
-              } catch (tErr) {
+                  if (sock && typeof sock.readMessages === 'function') {
 
-                console.warn('[Direct Bridge Text Error]:', tErr.message);
+                    await sock.readMessages([msg.key]);
+
+                  }
+
+                } catch (readErr) {
+
+                  console.debug('[Anti-Ban Read Notice]', readErr.message);
+
+                }
+
+
+
+                // 2) Send a 'composing' (typing) presence update
+
+                try {
+
+                  if (sock && typeof sock.sendPresenceUpdate === 'function') {
+
+                    await sock.sendPresenceUpdate('composing', remoteJid);
+
+                  }
+
+                } catch (presErr) {
+
+                  console.debug('[Anti-Ban Composing Notice]', presErr.message);
+
+                }
+
+
+
+                // 3) Wait for 3 seconds
+
+                await new Promise(resolve => setTimeout(resolve, 3000));
+
+
+
+                // 4) Send the reply text
+
+                try {
+
+                  sentMsg = await sock.sendMessage(remoteJid, { text: String(resData.reply) });
+
+                  if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
+
+                } catch (tErr) {
+
+                  console.warn('[Direct Bridge Private Reply Error]:', tErr.message);
+
+                }
+
+
+
+                // 5) Reset presence to paused
+
+                try {
+
+                  if (sock && typeof sock.sendPresenceUpdate === 'function') {
+
+                    await sock.sendPresenceUpdate('paused', remoteJid);
+
+                  }
+
+                } catch (_) {}
+
+              } else {
+
+                await new Promise(r => setTimeout(r, jitterMs));
+
+                try {
+
+                  sentMsg = await sendWithDualJid({ text: String(resData.reply) }, 'composing');
+
+                  if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
+
+                } catch (tErr) {
+
+                  console.warn('[Direct Bridge Text Error]:', tErr.message);
+
+                }
 
               }
 
@@ -3768,31 +3881,87 @@ if (!text) text = '[Voice note]';
 
           enqueueContactTask(targetJid, async () => {
 
-            const resData = await dispatchWebhookToPython(payload);
+            try {
+
+              const resData = await dispatchWebhookToPython(payload);
 
 
 
-            const isRecent = (Date.now() / 1000 - timestamp) < 300;
+              const isRecent = (Date.now() / 1000 - timestamp) < 300;
 
-            // Only deliver automated AI replies if Flask didn't already dispatch via /send-message
+              // Deliver automated AI replies if Flask didn't already dispatch via /send-message
 
-            if (resData && !resData.dispatched && (!isHistoryAppend || isRecent) && (resData.reply || resData.audio_base64 || resData.image_url || resData.image_base64)) {
+              if (resData && !resData.dispatched && (!isHistoryAppend || isRecent) && (resData.reply || resData.audio_base64 || resData.image_url || resData.image_base64)) {
 
-              await deliverAiResponse(resData, targetJid);
+                await deliverAiResponse(resData, targetJid);
+
+              } else if (isPrivate && !resData?.dispatched && (!isHistoryAppend || isRecent)) {
+
+                // Feature 2: Fallback human-like reply flow for private messages
+
+                const replyContent = resData?.reply;
+
+                if (replyContent) {
+
+                  try {
+
+                    if (sock && typeof sock.readMessages === 'function') {
+
+                      await sock.readMessages([msg.key]);
+
+                    }
+
+                    if (sock && typeof sock.sendPresenceUpdate === 'function') {
+
+                      await sock.sendPresenceUpdate('composing', remoteJid);
+
+                    }
+
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+
+                    const sent = await sock.sendMessage(remoteJid, { text: String(replyContent) });
+
+                    if (sent?.key?.id) sentAiMessageIds.add(sent.key.id);
+
+                    if (sock && typeof sock.sendPresenceUpdate === 'function') {
+
+                      await sock.sendPresenceUpdate('paused', remoteJid);
+
+                    }
+
+                  } catch (privErr) {
+
+                    console.error('[Private Message Reply Flow Error]:', privErr.message);
+
+                  }
+
+                }
+
+              }
+
+            } catch (dispatchErr) {
+
+              console.error('[Queue Task Dispatch Error]:', dispatchErr.message);
 
             }
 
           });
 
+        } catch (msgErr) {
+
+          console.error(`[WhatsApp Bridge] Error processing message ${msg?.key?.id || 'unknown'}:`, msgErr.message || msgErr);
+
         }
-
-      } catch (upsertErr) {
-
-        console.error('[WhatsApp Bridge] messages.upsert processing error:', upsertErr.message);
 
       }
 
-    });
+    } catch (upsertErr) {
+
+      console.error('[WhatsApp Bridge] messages.upsert processing error:', upsertErr.message);
+
+    }
+
+  });
 
 
 
