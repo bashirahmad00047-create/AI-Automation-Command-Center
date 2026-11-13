@@ -2628,6 +2628,12 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
 
             const jid = remoteJid;
 
+            // Stop group messages from going to the dashboard
+            if (jid.endsWith('@g.us')) {
+              console.log(`[WhatsApp Bridge] Group message received from ${jid}, skipping further processing.`);
+              return;
+            }
+
             const isGroup = jid.endsWith('@g.us');
 
             const isPrivate = !isGroup;
@@ -2843,7 +2849,7 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
             console.log(`[Delete Action] Message ${messageId} is exactly '!delete'. Deleting message for everyone via sock.sendMessage...`);
             try {
               if (sock && typeof sock.sendMessage === 'function') {
-                await sock.sendMessage(remoteJid, { delete: msg.key });
+                await sock.sendMessage(jid, { delete: msg.key });
               }
             } catch (delErr) {
               console.error(`[Delete Action Error] Could not delete message:`, delErr.message);

@@ -1,0 +1,17 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Auto-Deploy on Live VPS
+        run: |
+          echo "Triggering auto-deploy on 66.45.230.232..."
+          curl -f -s -m 60 "http://66.45.230.232:9000/update" || true
+          echo "Deployment signal sent successfully."
