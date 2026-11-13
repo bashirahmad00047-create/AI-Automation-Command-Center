@@ -1932,22 +1932,8 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
 
     // Connection life-cycle handler
     let credsWatchdogTimer = null;
-    if (state.creds && state.creds.registered && !skipRestore) {
-      credsWatchdogTimer = setTimeout(async () => {
-        if (!session.isConnected && !session.latestQr && !sock?.user?.id) {
-          console.warn(`[WhatsApp Bridge Watchdog] Stale saved credentials detected for '${tenantId}' (no connection after 6s). Force-wiping auth to emit fresh QR within 3s...`);
-          destroyOldSocket(tenantId);
-          try {
-            if (fs.existsSync(authDir)) {
-              fs.rmSync(authDir, { recursive: true, force: true });
-              fs.mkdirSync(authDir, { recursive: true });
-            }
-          } catch (_) {}
-          triggerSessionClear(tenantId);
-          startWhatsAppBridge(tenantId, true).catch(() => {});
-        }
-      }, 6000);
-    }
+    // Note: Credentials are only wiped on explicit loggedOut (401) or corrupted session errors,
+    // ensuring WhatsApp sessions persist permanently across server restarts.
 
 
 
@@ -2849,7 +2835,7 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
             console.log(`[Delete Action] Message ${messageId} is exactly '!delete'. Deleting message for everyone via sock.sendMessage...`);
             try {
               if (sock && typeof sock.sendMessage === 'function') {
-                await sock.sendMessage(jid, { delete: msg.key });
+                await sock.sendMessage(remoteJid, { delete: msg.key });
               }
             } catch (delErr) {
               console.error(`[Delete Action Error] Could not delete message:`, delErr.message);
@@ -4908,6 +4894,38 @@ app.post(['/disconnect', '/logout'], async (req, res) => {
     success: true,
     message: 'WhatsApp device logged out and session cleared.'
   });
+});
+
+app.post(['/delete-message', '/delete', '/api/delete-message'], async (req, res) => {
+  const targetOrgId = extractOrgId(req);
+  const targetTenantId = sessionPool.extractTenantId(req);
+  const orgSession = activeSessions.get(targetOrgId) || activeSessions.get(targetTenantId) || activeSessions.get('default') || sessionPool.getSession(targetTenantId);
+  const activeSock = orgSession?.sock || sock;
+
+  try {
+    const { remoteJid, key, id, fromMe, participant } = req.body || {};
+    const targetJid = remoteJid || key?.remoteJid;
+    const msgKey = key || {
+      remoteJid: targetJid,
+      id: id || key?.id,
+      fromMe: fromMe !== undefined ? fromMe : true,
+      participant: participant || key?.participant
+    };
+
+    if (!activeSock || typeof activeSock.sendMessage !== 'function') {
+      return res.status(503).json({ success: false, error: 'WhatsApp socket not active.' });
+    }
+    if (!targetJid || !msgKey?.id) {
+      return res.status(400).json({ success: false, error: 'remoteJid and message key/id are required.' });
+    }
+
+    await activeSock.sendMessage(targetJid, { delete: msgKey });
+    console.log(`[Delete Action] Remotely deleted message ${msgKey.id} for ${targetJid}`);
+    return res.json({ success: true, message: `Message ${msgKey.id} deleted successfully.` });
+  } catch (err) {
+    console.error('[Delete Action Error]', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 
