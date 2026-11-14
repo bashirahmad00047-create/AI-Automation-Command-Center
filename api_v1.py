@@ -5958,14 +5958,16 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
             msg_body = ""
 
         if not msg_body:
-            if msg.get("is_audio") or msg.get("message_type") in ("audio", "voice", "audioMessage", "voiceMessage") or media_candidate:
-                msg_body = "🎤 Voice message"
-            elif msg.get("message_type") in ("image", "imageMessage"):
+            if msg.get("is_image") or msg.get("message_type") in ("image", "imageMessage"):
                 msg_body = "📷 Photo"
+            elif msg.get("is_audio") or msg.get("message_type") in ("audio", "voice", "audioMessage", "voiceMessage"):
+                msg_body = "🎤 Voice message"
             elif msg.get("message_type") in ("document", "documentMessage"):
                 msg_body = "📄 Document"
             elif msg.get("location"):
                 msg_body = "📍 Shared Location"
+            elif media_candidate:
+                msg_body = "📷 Photo" if msg.get("is_image") else "🎤 Voice message"
             else:
                 logger.info(f"Skipping empty non-content inbound message payload: {msg_id}")
                 continue
@@ -6077,7 +6079,13 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
                 logger.error(f"Error triggering engine: {e}")
 
         if not rule_replied:
-            is_v = (
+            is_img = bool(
+                msg.get("is_image")
+                or str(msg.get("message_type") or "").lower() in ("image", "imagemessage", "photomessage")
+                or str(msg_body).strip().lower() in ("📷 photo", "[photo]", "[image]", "[image message]")
+                or bool(msg.get("image_base64"))
+            )
+            is_v = False if is_img else (
                 WhatsAppService.is_audio_message(
                     message_type=msg.get("message_type"),
                     body=msg_body,
@@ -6107,10 +6115,13 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
                     is_voice_inbound=is_v,
                     reply_as_voice=is_v,
                     ptt=is_v,
-                    message_type=msg.get("message_type") or ("voiceMessage" if is_v else "text"),
-                    download_url=msg.get("download_url"),
-                    audio_base64=msg.get("audio_base64"),
-                    media_url=msg.get("media_url") or msg.get("download_url"),
+                    is_image=is_img,
+                    image_base64=msg.get("image_base64") or (msg.get("raw") or {}).get("image_base64") or (msg.get("raw") or {}).get("imageBase64"),
+                    message_type="imageMessage" if is_img else (msg.get("message_type") or ("voiceMessage" if is_v else "text")),
+                    download_url=media_candidate,
+                    audio_base64=msg.get("audio_base64") if not is_img else None,
+                    media_url=media_candidate,
+                    raw_payload=msg,
                     direct_bridge=direct_bridge
                 )
             except Exception as auto_err:

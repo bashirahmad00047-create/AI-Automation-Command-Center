@@ -3265,10 +3265,50 @@ if (!text) text = '[Voice note]';
           } else if (unwrappedMsg?.imageMessage) {
 
             isImage = true;
+            isAudio = false;
+            isVoice = false;
 
             typeMessage = 'imageMessage';
 
             if (!text) text = unwrappedMsg.imageMessage.caption || '[Photo]';
+
+            try {
+              let imgBuf = null;
+              try {
+                imgBuf = await downloadMediaMessage(
+                  msg,
+                  'buffer',
+                  {},
+                  {
+                    logger: pino({ level: 'silent' }),
+                    reuploadRequest: sock?.updateMediaMessage
+                  }
+                );
+              } catch (_) {}
+
+              if (!imgBuf || imgBuf.length === 0) {
+                try {
+                  imgBuf = await downloadMediaMessage(
+                    { key: msg.key, message: unwrappedMsg },
+                    'buffer',
+                    {},
+                    {
+                      logger: pino({ level: 'silent' }),
+                      reuploadRequest: sock?.updateMediaMessage
+                    }
+                  );
+                } catch (_) {}
+              }
+
+              if (imgBuf && imgBuf.length > 0) {
+                const imgMime = unwrappedMsg.imageMessage.mimetype || 'image/jpeg';
+                audioBase64 = imgBuf.toString('base64');
+                audioDataUrl = `data:${imgMime};base64,${audioBase64}`;
+                console.log(`[Media Download Success] Downloaded image (${imgBuf.length} bytes) for ${senderPhone}`);
+              }
+            } catch (imgDlErr) {
+              console.warn('[Media Download Error] Could not download image buffer:', imgDlErr.message);
+            }
 
           } else if (unwrappedMsg?.documentMessage) {
 
@@ -3492,11 +3532,13 @@ if (!text) text = '[Voice note]';
 
                 mimeType: isAudio ? 'audio/ogg' : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg'),
 
-                audioBase64: audioBase64,
+                audioBase64: isAudio ? audioBase64 : undefined,
+
+                imageBase64: isImage ? audioBase64 : undefined,
 
                 mediaUrl: audioDataUrl,
 
-                audioUrl: audioDataUrl,
+                audioUrl: isAudio ? audioDataUrl : undefined,
 
                 downloadUrl: audioDataUrl,
 
@@ -3536,11 +3578,11 @@ if (!text) text = '[Voice note]';
 
             mediaUrl: audioDataUrl,
 
-            audioUrl: audioDataUrl,
+            audioUrl: isAudio ? audioDataUrl : undefined,
 
             media_url: audioDataUrl,
 
-            audio_url: audioDataUrl,
+            audio_url: isAudio ? audioDataUrl : undefined,
 
             downloadUrl: audioDataUrl,
 
@@ -3558,7 +3600,7 @@ if (!text) text = '[Voice note]';
 
               mediaUrl: audioDataUrl,
 
-              audioUrl: audioDataUrl,
+              audioUrl: isAudio ? audioDataUrl : undefined,
 
               mimeType: isAudio ? 'audio/ogg' : (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg'),
 
@@ -3568,25 +3610,33 @@ if (!text) text = '[Voice note]';
 
             } : undefined,
 
-            audio_base64: audioBase64,
+            is_image: isImage,
 
-            audioBase64: audioBase64,
+            isImage: isImage,
+
+            image_base64: isImage ? audioBase64 : undefined,
+
+            imageBase64: isImage ? audioBase64 : undefined,
+
+            audio_base64: isAudio ? audioBase64 : undefined,
+
+            audioBase64: isAudio ? audioBase64 : undefined,
 
             parent_msg_id: quotedStanzaId,
 
             parent_message_id: quotedStanzaId,
 
-            is_voice: isVoice || isAudio,
+            is_voice: !isImage && (isVoice || isAudio),
 
-            send_as_voice: isVoice || isAudio,
+            send_as_voice: !isImage && (isVoice || isAudio),
 
-            is_voice_inbound: isVoice || isAudio,
+            is_voice_inbound: !isImage && (isVoice || isAudio),
 
-            ptt: isVoice || isAudio,
+            ptt: !isImage && (isVoice || isAudio),
 
             is_audio: isAudio,
 
-            mimetype: isAudio ? 'audio/ogg' : undefined,
+            mimetype: isAudio ? 'audio/ogg' : (isImage ? (unwrappedMsg?.imageMessage?.mimetype || 'image/jpeg') : undefined),
 
             mime_type: isAudio ? 'audio/ogg' : undefined,
 

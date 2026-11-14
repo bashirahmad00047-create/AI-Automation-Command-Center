@@ -160,8 +160,10 @@ def extract_message_body_and_quote(
         if not reply_text:
             caption = (
                 message_data_or_item.get("caption")
+                or (message_data_or_item.get("imageMessage") or {}).get("caption")
                 or (message_data_or_item.get("fileMessageData") or {}).get("caption")
                 or (message_data_or_item.get("image") or {}).get("caption")
+                or (message_data_or_item.get("documentMessage") or {}).get("caption")
                 or ""
             )
             if caption:
@@ -310,33 +312,53 @@ def parse_green_api_payload(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 or "textMessage"
             )
 
-            is_voice = (
-                type_msg in ("audioMessage", "voiceMessage")
-                or bool(msg_data.get("ptt"))
-                or bool(data.get("ptt"))
-                or bool(msg_data.get("audioMessage"))
-                or bool(data.get("is_voice"))
-            )
             is_image = (
-                type_msg in ("imageMessage", "photoMessage")
+                type_msg in ("imageMessage", "photoMessage", "image")
                 or bool(msg_data.get("imageMessage"))
+                or bool(data.get("is_image"))
+                or bool(data.get("isImage"))
+                or bool((msg_data.get("fileMessageData") or {}).get("imageBase64"))
+            )
+            is_voice = (
+                not is_image and (
+                    type_msg in ("audioMessage", "voiceMessage")
+                    or bool(msg_data.get("ptt"))
+                    or bool(data.get("ptt"))
+                    or bool(msg_data.get("audioMessage"))
+                    or bool(data.get("is_voice"))
+                )
             )
 
             text_content = extract_message_body_and_quote(msg_data, msg_type=type_msg)
             if not text_content:
-                if is_voice:
-                    text_content = "🎤 Voice message"
-                elif is_image:
+                if is_image:
                     text_content = "📷 Photo"
+                elif is_voice:
+                    text_content = "🎤 Voice message"
 
             media_url = (
-                (msg_data.get("fileMessageData") or {}).get("downloadUrl")
+                data.get("mediaUrl")
+                or data.get("media_url")
+                or data.get("downloadUrl")
+                or data.get("download_url")
+                or (msg_data.get("fileMessageData") or {}).get("downloadUrl")
+                or (msg_data.get("fileMessageData") or {}).get("mediaUrl")
                 or (msg_data.get("imageMessage") or {}).get("url")
                 or (msg_data.get("audioMessage") or {}).get("url")
-                or data.get("media_url")
-                or data.get("download_url")
                 or None
             )
+
+            img_b64 = (
+                data.get("image_base64")
+                or data.get("imageBase64")
+                or (msg_data.get("fileMessageData") or {}).get("imageBase64")
+                or (data.get("audio_base64") if is_image else None)
+            )
+            aud_b64 = (
+                data.get("audio_base64")
+                or data.get("audioBase64")
+                or (msg_data.get("fileMessageData") or {}).get("audioBase64")
+            ) if not is_image else None
 
             messages.append({
                 "message_id": message_id,
@@ -348,12 +370,15 @@ def parse_green_api_payload(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "text": text_content,
                 "body": text_content,
                 "type": type_msg,
-                "message_type": "audio" if is_voice else ("image" if is_image else "text"),
+                "message_type": "image" if is_image else ("audio" if is_voice else "text"),
                 "is_voice": is_voice,
                 "is_audio": is_voice,
                 "is_image": is_image,
                 "is_group": is_group,
                 "media_url": media_url,
+                "download_url": media_url,
+                "image_base64": img_b64,
+                "audio_base64": aud_b64,
                 "instance_id": instance_data.get("idInstance"),
                 "raw": data
             })

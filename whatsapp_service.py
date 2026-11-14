@@ -604,10 +604,13 @@ class WhatsAppService:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content([
-                full_prompt,
-                {"mime_type": mime_type or "image/jpeg", "data": image_bytes}
-            ])
+            response = model.generate_content(
+                [
+                    full_prompt,
+                    {"mime_type": mime_type or "image/jpeg", "data": image_bytes}
+                ],
+                request_options={"timeout": 6.0}
+            )
             if response and hasattr(response, "text") and response.text:
                 return cls._clean_ai_dual_or_text(response.text)
         except Exception as e:
@@ -795,10 +798,13 @@ class WhatsAppService:
                 import google.generativeai as genai
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(model_name)
-                response = model.generate_content([
-                    prompt,
-                    {"mime_type": mime_type or "image/jpeg", "data": image_bytes}
-                ])
+                response = model.generate_content(
+                    [
+                        prompt,
+                        {"mime_type": mime_type or "image/jpeg", "data": image_bytes}
+                    ],
+                    request_options={"timeout": 6.0}
+                )
                 if response and hasattr(response, "text") and response.text:
                     extracted_text = response.text.strip()
                     break
@@ -4008,12 +4014,21 @@ class WhatsAppService:
             # Live DB Active Catalog Grounding
             live_catalog_str = ""
             try:
+                p_items = []
                 if has_app_context():
                     from models import Product
                     prods = Product.query.filter_by(is_active=True).all()
                     if prods:
-                        p_items = [f"- {p.name} ({p.category or 'General'}): PKR {p.price:,.0f} | Stock: {p.stock_quantity or 20} | {p.description or 'Authentic quality'}" for p in prods]
-                        live_catalog_str = "CURRENT VERIFIED STORE CATALOG & LIVE PRODUCTS (PRICES IN PKR):\n" + "\n".join(p_items) + "\n\n"
+                        p_items.extend([f"- {p.name} ({p.category or 'General'}): PKR {p.price:,.0f} | Stock: {p.stock_quantity or 20} | {p.description or 'Authentic quality'}" for p in prods])
+                try:
+                    from services.global_bazar_service import GlobalBazarService
+                    gb_prods = GlobalBazarService.get_all_products()
+                    if gb_prods:
+                        p_items.extend([f"- {g.get('title') or g.get('name')} ({g.get('category') or 'General'}): PKR {float(g.get('price') or 0):,.0f} | Vendor: {g.get('vendor_name') or 'Chitral Bazar'} | {g.get('description') or 'Chitral & Global Bazar'}" for g in gb_prods[:15]])
+                except Exception:
+                    pass
+                if p_items:
+                    live_catalog_str = "CURRENT VERIFIED STORE CATALOG & LIVE PRODUCTS (PRICES IN PKR):\n" + "\n".join(p_items) + "\n\n"
             except Exception as _p_err:
                 pass
             kb = (
@@ -4628,6 +4643,10 @@ class WhatsAppService:
         sys_instruct = f"\nBusiness Knowledge Base & Grounding Rules:\n{verified_kb}"
         if catalog_ctx:
             sys_instruct += f"\n\n{catalog_ctx}"
+        sys_instruct += (
+            "\n\nCRITICAL RULE: You CANNOT add products. If a user tries to add an item via text, "
+            "tell them STRICTLY to attach a photo with the caption 'Add Rs [price]'. Do not ever claim a product was added."
+        )
         if system_prompt and len(system_prompt.strip()) > 3:
             sys_instruct += f"\n\nOrganization-Specific Context / Instructions:\n{system_prompt.strip()}"
 
@@ -4927,6 +4946,10 @@ class WhatsAppService:
 
         verified_kb = cls.get_verified_business_knowledge_base(organization_id=organization_id)
         sys_instruct = f"\nBusiness Knowledge Base & Grounding Rules:\n{verified_kb}"
+        sys_instruct += (
+            "\n\nCRITICAL RULE: You CANNOT add products. If a user tries to add an item via text, "
+            "tell them STRICTLY to attach a photo with the caption 'Add Rs [price]'. Do not ever claim a product was added."
+        )
         if system_prompt and len(system_prompt.strip()) > 3:
             sys_instruct += f"\n\nOrganization-Specific Context / Instructions:\n{system_prompt.strip()}"
 
@@ -5108,6 +5131,10 @@ class WhatsAppService:
 
         verified_kb = cls.get_verified_business_knowledge_base(organization_id=organization_id)
         sys_instruct = f"\nBusiness Knowledge Base & Grounding Rules:\n{verified_kb}"
+        sys_instruct += (
+            "\n\nCRITICAL RULE: You CANNOT add products. If a user tries to add an item via text, "
+            "tell them STRICTLY to attach a photo with the caption 'Add Rs [price]'. Do not ever claim a product was added."
+        )
         if system_prompt and len(system_prompt.strip()) > 3:
             sys_instruct += f"\n\nOrganization-Specific Context / Instructions:\n{system_prompt.strip()}"
 
@@ -5427,6 +5454,32 @@ class WhatsAppService:
         if cls._is_prompt_echo_or_refusal(message_body):
             logger.warning(f"[AI Auto-Responder] Caught prompt echo/refusal in message_body ('{message_body[:80]}'), resetting to voice note acknowledgement.")
             message_body = "[Voice note]"
+
+        # Safeguard against AI Hallucination when user sends a standalone price/number without an image
+        num_only = re.sub(r'[\s,/\\-]|rs\.?|pkr', '', str(message_body or '').lower()).strip()
+        if num_only.isdigit() and len(num_only) <= 7 and not any(tag in str(message_body).lower() for tag in ("[photo]", "[image]", "📷")):
+            val_pkr = int(num_only)
+            msg_price_guide = (
+                f"Aap ne PKR {val_pkr:,} bheja hai.\n\n"
+                f"Agar aap apna product Chitral & Global Bazar par live karna chahte hain, "
+                f"to baraye meharbani product ki picture (photo) ke sath yeh price send karein taake AI background remove karke foran live kar sake!"
+            )
+            return {
+                "reply_body": msg_price_guide,
+                "intent": "catalog_guidance",
+                "urgency": 10,
+                "lead_score": 60,
+                "route_department": "Sales",
+                "entities": {},
+                "mode": "standalone_price_guard",
+                "detected_language": "urdu",
+                "detected_script": "roman",
+                "language_format": "roman_urdu",
+                "is_gemini": False,
+                "is_groq": False,
+                "is_ai_generated": False,
+                "confidence": 100
+            }
 
         from nlp_engine import NLPEngine
         engine = NLPEngine()
@@ -6075,18 +6128,26 @@ class WhatsAppService:
     @classmethod
     def is_image_message(cls, text: Optional[str] = None, download_url: Optional[str] = None, **kwargs) -> bool:
         """Determines if an incoming message contains or represents an image."""
-        if kwargs.get("is_image") or kwargs.get("media_type") == "image":
+        if kwargs.get("is_image") or kwargs.get("isImage") or kwargs.get("media_type") == "image":
             return True
-        if kwargs.get("image_bytes") or kwargs.get("file") or kwargs.get("image"):
+        if kwargs.get("image_bytes") or kwargs.get("file") or kwargs.get("image") or kwargs.get("image_base64") or kwargs.get("imageBase64"):
             return True
         m_type = str(kwargs.get("message_type") or kwargs.get("type") or "").lower()
-        if m_type in ("imagemessage", "image"):
+        if m_type in ("imagemessage", "image", "photomessage"):
             return True
         engine_res = kwargs.get("engine_res")
-        if isinstance(engine_res, dict) and engine_res.get("message_type") in ("imageMessage", "image"):
+        if isinstance(engine_res, dict) and engine_res.get("message_type") in ("imageMessage", "image", "photoMessage"):
             return True
+        raw_p = kwargs.get("raw_payload")
+        if isinstance(raw_p, dict):
+            if raw_p.get("is_image") or raw_p.get("isImage") or str(raw_p.get("message_type") or "").lower() in ("image", "imagemessage"):
+                return True
+            raw_msg = raw_p.get("raw") or raw_p.get("rawMessage") or {}
+            if isinstance(raw_msg, dict):
+                if raw_msg.get("imageMessage") or (raw_msg.get("message") or {}).get("imageMessage"):
+                    return True
         t_clean = str(text or "").strip().lower()
-        if t_clean in ("[image]", "[image message]", "[photo]", "[picture]"):
+        if t_clean in ("[image]", "[image message]", "[photo]", "[picture]", "📷 photo"):
             return True
         if download_url:
             d_lower = str(download_url).lower().split("?")[0]
@@ -6114,7 +6175,7 @@ class WhatsAppService:
         if not text:
             return False
         lower = text.lower()
-        if lower in ("[image]", "[image message]", "[photo]", "[picture]", "(no text)", "[audio]", "[voice note]"):
+        if lower in ("[image]", "[image message]", "[photo]", "[picture]", "(no text)", "[audio]", "[voice note]", "📷 photo"):
             return False
 
         # Numeric value check (e.g., "2500", "2,850", "3500/-", "1500.00")
@@ -6125,13 +6186,14 @@ class WhatsAppService:
         # Keywords check: "add", "sell", "price", "rs", or numeric value
         inventory_keywords = {
             "add", "sell", "price", "rs", "rs.", "pkr", "rate", "cost", "sale",
-            "bechna", "becho", "item", "product", "catalog", "suit", "kurta", "shirt"
+            "bechna", "becho", "item", "product", "catalog", "suit", "kurta", "shirt",
+            "shawl", "chugha", "cap", "pattu", "craft", "chitral", "chitrali", "hunza"
         }
         tokens = set(re.findall(r'[a-zA-Z#]+|\d+', lower))
         if any(kw in tokens for kw in inventory_keywords):
             return True
 
-        if any(kw in lower for kw in ("rs", "pkr", "price", "sell", "add")):
+        if any(kw in lower for kw in ("rs", "pkr", "price", "sell", "add", "bazar", "store")):
             return True
 
         if any(c.isdigit() for c in lower) and len(lower) < 120:
@@ -6959,6 +7021,11 @@ class WhatsAppService:
 
 
     @classmethod
+    def force_dispatch_auto_responder(cls, *args, **kwargs):
+        """Forces immediate inbound auto-response evaluation with strict image bypass."""
+        return cls.handle_inbound_auto_response(*args, **kwargs)
+
+    @classmethod
     def handle_inbound_message(cls, *args, **kwargs):
         """Alias for handle_inbound_auto_response."""
         return cls.handle_inbound_auto_response(*args, **kwargs)
@@ -6984,9 +7051,36 @@ class WhatsAppService:
         if not sender_phone:
             return None
 
-        # Determine if message is an incoming audio/voice note
+        # =========================================================================
+        # STRICT FORCE IMAGE BYPASS (TOP-LEVEL GUARD)
+        # If the message contains an image AND an inventory caption (like "add rs 150"),
+        # immediately process it via the local inventory database, send the
+        # " Product Successfully Added..." response, and return immediately.
+        # NEVER let this request reach the AI LLM.
+        # =========================================================================
+        raw_body_str = str(message_body or "").strip()
+        is_image_top = cls.is_image_message(raw_body_str, download_url=download_url, **kwargs)
+        if is_image_top and cls.is_inventory_caption(raw_body_str):
+            org_id_top = organization_id or "org-enterprise-default"
+            clean_p_top = cls.format_phone_number(sender_phone)
+            raw_chat_top = chat_id or kwargs.get("chat_id") or kwargs.get("chatId") or (f"{clean_p_top}@s.whatsapp.net" if clean_p_top else sender_phone)
+            logger.info(f"[Force Image Bypass] Inbound image with inventory caption detected at TOP: '{raw_body_str}'. Bypassing all LLM pipelines.")
+            catalog_res = cls.handle_whatsapp_inventory_image(
+                organization_id=org_id_top,
+                sender_phone=clean_p_top or sender_phone,
+                message_body=raw_body_str,
+                download_url=download_url,
+                chat_id=raw_chat_top,
+                message_id=message_id,
+                **kwargs
+            )
+            if catalog_res:
+                return catalog_res
+
+        # Determine if message is an incoming image
         clean_body = str(message_body or "").strip()
         body_clean_str = clean_body.lower()
+        is_image_msg = cls.is_image_message(clean_body, download_url=download_url, **kwargs)
 
         # Check if incoming message is already wrapped with transcribed customer speech
         pre_extracted = cls.extract_voice_transcript(clean_body)
@@ -6995,7 +7089,7 @@ class WhatsAppService:
             message_body = pre_extracted
             clean_body = message_body
             body_clean_str = clean_body.lower()
-            is_voice_inbound = bool(
+            is_voice_inbound = False if is_image_msg else bool(
                 is_voice
                 or download_url
                 or kwargs.get("is_voice")
@@ -7004,7 +7098,7 @@ class WhatsAppService:
                 or inbound_type_early in ("audio", "voice", "ptt", "audiomessage", "voicemessage")
             )
         else:
-            is_voice_inbound = bool(
+            is_voice_inbound = False if is_image_msg else bool(
                 is_voice
                 or kwargs.get("is_voice")
                 or kwargs.get("is_audio")
@@ -7012,13 +7106,17 @@ class WhatsAppService:
                 or inbound_type_early in ("audio", "voice", "ptt", "audiomessage", "voicemessage")
                 or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]", "🎤 voice message", "🎤 voice note", "🎤 audio message")
                 or body_clean_str.startswith(("[voice", "[audio", "[ptt", "🎤 voice", "🎤 audio", "🎤"))
-                or (not clean_body and bool(download_url))
+                or (not clean_body and bool(download_url) and not is_image_msg)
                 or bool(download_url and any(ext in str(download_url).lower() for ext in (".oga", ".ogg", ".opus", ".mp3", ".wav", "data:audio")))
-                or bool(kwargs.get("audio_base64") or kwargs.get("audioBase64"))
+                or bool((kwargs.get("audio_base64") or kwargs.get("audioBase64")) and not is_image_msg)
             )
 
         if not clean_body:
-            if is_voice_inbound or download_url:
+            if is_image_msg:
+                message_body = "[Photo]"
+                body_clean_str = "[photo]"
+                clean_body = "[Photo]"
+            elif is_voice_inbound or (download_url and not is_image_msg):
                 message_body = "[Voice note]"
                 body_clean_str = "[voice note]"
                 clean_body = "[Voice note]"
@@ -7230,21 +7328,34 @@ class WhatsAppService:
             except Exception as gen_err:
                 logger.warning(f"Image generation error: {gen_err}")
 
-        # 0b. Check if incoming message is an image/photo for Gemini Vision analysis
-        is_image_inbound = bool(
-            body_clean_str in ("[image]", "[image message]", "[photo]", "[picture]")
-            or (download_url and any(download_url.lower().split("?")[0].endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp")))
-            or (isinstance(engine_res, dict) and engine_res.get("message_type") in ("imageMessage", "image"))
-        )
-        if is_image_inbound and (download_url or message_id):
+        # 0b. Check if incoming message is an image/photo
+        is_image_inbound = cls.is_image_message(clean_body, download_url=download_url, **kwargs)
+        if is_image_inbound:
             try:
-                logger.info(f"Downloading incoming image for Gemini Vision analysis for {clean_phone} (message_id={message_id})...")
-                img_bytes = cls._download_media(
-                    chat_id=sender_phone,
-                    message_id=message_id,
-                    download_url=download_url,
-                    organization_id=org_id
-                )
+                img_bytes = kwargs.get("image_bytes")
+                if not img_bytes and kwargs.get("image_base64"):
+                    import base64
+                    try:
+                        clean_b64 = str(kwargs["image_base64"]).split("base64,")[-1].strip()
+                        img_bytes = base64.b64decode(clean_b64)
+                    except Exception:
+                        pass
+                if not img_bytes and download_url and str(download_url).startswith("data:image"):
+                    import base64
+                    try:
+                        clean_b64 = str(download_url).split("base64,")[-1].strip()
+                        img_bytes = base64.b64decode(clean_b64)
+                    except Exception:
+                        pass
+                if not img_bytes and (download_url or message_id):
+                    logger.info(f"Downloading incoming image for analysis for {clean_phone} (message_id={message_id})...")
+                    img_bytes = cls._download_media(
+                        chat_id=sender_phone,
+                        message_id=message_id,
+                        download_url=download_url,
+                        organization_id=org_id
+                    )
+
                 if img_bytes:
                     # Check if image has inventory caption for AI Auto-Catalog
                     if cls.is_inventory_caption(clean_body):
@@ -7361,21 +7472,6 @@ class WhatsAppService:
                             quoted_message_id=message_id
                         )
 
-                        # Send automated voice note confirmation
-                        try:
-                            voice_script = f"Salam {sender_name or 'mohtaram sarif'}! Aapki {amt:,.0f} rupaye ki payment {provider} ke zariye kamyabi se verify ho chuki hai. Order confirm ho gaya hai aur jald dispatch kar diya jayega. Shukriya!"
-                            v_bytes = cls._synthesize_edge_tts(voice_script, language="urdu", organization_id=org_id)
-                            if v_bytes:
-                                cls.send_message(
-                                    organization_id=org_id,
-                                    to_phone=clean_phone,
-                                    chat_id=real_chat_id,
-                                    audio_bytes=v_bytes,
-                                    is_voice=True
-                                )
-                        except Exception as v_err:
-                            logger.debug(f"Voice note receipt confirmation error: {v_err}")
-
                         return {
                             "success": True,
                             "action": "payment_receipt_verified",
@@ -7390,20 +7486,19 @@ class WhatsAppService:
                     vision_analysis = cls.call_gemini_vision(
                         image_bytes=img_bytes,
                         mime_type="image/jpeg",
-                        prompt=clean_body if clean_body not in ("[image]", "[image message]", "[photo]") else None,
+                        prompt=clean_body if clean_body not in ("[image]", "[image message]", "[photo]", "📷 photo", "[picture]") else None,
                         organization_id=org_id,
                         customer_name=sender_name
                     )
                     if vision_analysis and vision_analysis.strip():
                         logger.info(f"Gemini Vision successfully analyzed image for {clean_phone}: '{vision_analysis[:80]}...'")
                         vision_reply_text = re.sub(r"[*_~`#>]", "", vision_analysis).strip()
-                        send_res = cls.send_green_api_message(
+                        send_res = cls.send_message(
                             organization_id=org_id,
                             to_phone=clean_phone,
                             chat_id=real_chat_id,
                             message_text=vision_reply_text,
-                            quoted_message_id=message_id,
-                            allow_fallback=False
+                            quoted_message_id=message_id
                         )
                         return {
                             "success": True,
@@ -7412,8 +7507,39 @@ class WhatsAppService:
                             "mode": "gemini_vision",
                             "dispatch": send_res
                         }
+
+                # Safe fallback acknowledgement for image messages to prevent audio fallthrough or text hallucination
+                safe_img_reply = "Shukriya! Aapki picture receive ho gayi hai. Hamari team isay dekh kar foran guide karegi. Agar koi specific sawal ya price ho to batayein!"
+                send_res = cls.send_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    chat_id=real_chat_id,
+                    message_text=safe_img_reply,
+                    quoted_message_id=message_id
+                )
+                return {
+                    "success": True,
+                    "action": "image_received_safe_ack",
+                    "reply_body": safe_img_reply,
+                    "mode": "image_handler",
+                    "dispatch": send_res
+                }
             except Exception as img_err:
                 logger.warning(f"Image ingress vision analysis notice: {img_err}")
+                err_reply = "Shukriya! Aapki picture receive ho gayi hai. Hamari team isay dekh kar foran guide karegi."
+                send_res = cls.send_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone,
+                    chat_id=real_chat_id,
+                    message_text=err_reply,
+                    quoted_message_id=message_id
+                )
+                return {
+                    "success": True,
+                    "action": "image_received_safe_ack",
+                    "reply_body": err_reply,
+                    "dispatch": send_res
+                }
 
         # Check if incoming message is an audio / voice note message (.oga, audioMessage, etc.)
         if is_voice_inbound and (not clean_body or body_clean_str in ("[voice note]", "[voice message]", "[audio message]", "[audiomessage]", "[voicemessage]", "[audio]", "[ptt]", "[voice]", "(no text)", "🎤 voice message", "🎤 voice note", "🎤 audio message") or body_clean_str.startswith(("[voice", "[audio", "[ptt", "🎤 voice", "🎤 audio"))):
@@ -11230,7 +11356,37 @@ class WhatsAppService:
                     query = query.filter(Product.name.ilike(f"%{clean_term}%"))
 
             products = query.order_by(Product.name.asc()).limit(limit).all()
-            return [p.to_dict() for p in products]
+            res_items = [p.to_dict() for p in products]
+
+            try:
+                from services.global_bazar_service import GlobalBazarService
+                gb_items = GlobalBazarService.get_all_products()
+                for g in gb_items:
+                    g_title = g.get("title") or g.get("name") or "Product"
+                    g_cat = g.get("category") or "Chitrali Crafts"
+                    g_desc = g.get("description") or ""
+                    g_dict = {
+                        "id": g.get("id"),
+                        "name": g_title,
+                        "title": g_title,
+                        "price": float(g.get("price") or 0.0),
+                        "category": g_cat,
+                        "description": g_desc,
+                        "stock_quantity": int(g.get("stock") or g.get("stock_quantity") or 20),
+                        "image_url": g.get("image_url") or "",
+                        "currency": "PKR",
+                        "vendor_name": g.get("vendor_name") or "Verified Vendor"
+                    }
+                    if search_query and search_query.strip():
+                        q_low = search_query.strip().lower()
+                        if q_low in g_title.lower() or q_low in g_cat.lower() or q_low in g_desc.lower():
+                            res_items.append(g_dict)
+                    else:
+                        res_items.append(g_dict)
+            except Exception as _gb_err:
+                logger.debug(f"[query_product_catalog] Global-Bazar fetch notice: {_gb_err}")
+
+            return res_items[:limit]
         except Exception as e:
             logger.error(f"Error querying product catalog: {e}")
             return []

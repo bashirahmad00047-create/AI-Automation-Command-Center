@@ -269,6 +269,9 @@ def construct_gemini_prompt(
             "\nCONVERSATION CONTEXT ENFORCEMENT:\n"
             "You MUST use the provided Recent Conversation History to maintain full context. Answer follow-up questions directly based on previous turns, and never ask for information already given."
         ),
+        (
+            "\nCRITICAL RULE: You CANNOT add products. If a user tries to add an item via text, tell them STRICTLY to attach a photo with the caption 'Add Rs [price]'. Do not ever claim a product was added."
+        ),
         lang_directive
     ]
     if lang_info.get("format") == "english":
