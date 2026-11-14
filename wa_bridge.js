@@ -4014,19 +4014,21 @@ if (!text) text = '[Voice note]';
               } else if (isPrivate && !resData?.dispatched && (!isHistoryAppend || isRecent)) {
                 // Feature 2: Fallback human-like reply flow for private messages
                 const replyContent = resData?.reply;
+                const cleanDestPhone = cleanPhoneNumber(remoteJid) || cleanPhoneNumber(senderPhone);
+                const targetDestJid = (remoteJid && remoteJid.endsWith('@g.us')) ? remoteJid : (cleanDestPhone ? `${cleanDestPhone}@s.whatsapp.net` : remoteJid);
                 if (replyContent) {
                   try {
                     if (sock && typeof sock.readMessages === 'function') {
                       await sock.readMessages([msg.key]);
                     }
                     if (sock && typeof sock.sendPresenceUpdate === 'function') {
-                      await sock.sendPresenceUpdate('composing', remoteJid);
+                      await sock.sendPresenceUpdate('composing', targetDestJid);
                     }
                     await new Promise(resolve => setTimeout(resolve, 3000));
-                    const sent = await sock.sendMessage(remoteJid, { text: String(replyContent) });
+                    const sent = await sock.sendMessage(targetDestJid, { text: String(replyContent) });
                     if (sent?.key?.id) sentAiMessageIds.add(sent.key.id);
                     if (sock && typeof sock.sendPresenceUpdate === 'function') {
-                      await sock.sendPresenceUpdate('paused', remoteJid);
+                      await sock.sendPresenceUpdate('paused', targetDestJid);
                     }
                   } catch (privErr) {
                     console.error('[Private Message Reply Flow Error]:', privErr.message);
@@ -4046,12 +4048,14 @@ if (!text) text = '[Voice note]';
                 console.warn(`[AI Generation Timeout]: Generation exceeded 15 seconds for ${remoteJid}. Aborted and sending fallback message.`);
                 try {
                   const fallbackText = "System is experiencing heavy load. Please type your message in text format.";
+                  const cleanFallbackPhone = cleanPhoneNumber(remoteJid) || cleanPhoneNumber(senderPhone);
+                  const fallbackDestJid = (remoteJid && remoteJid.endsWith('@g.us')) ? remoteJid : (cleanFallbackPhone ? `${cleanFallbackPhone}@s.whatsapp.net` : remoteJid);
                   if (sock && typeof sock.sendMessage === 'function') {
-                    const fallbackSent = await sock.sendMessage(remoteJid, { text: fallbackText });
+                    const fallbackSent = await sock.sendMessage(fallbackDestJid, { text: fallbackText });
                     if (fallbackSent?.key?.id) sentAiMessageIds.add(fallbackSent.key.id);
                   }
                   if (sock && typeof sock.sendPresenceUpdate === 'function') {
-                    await sock.sendPresenceUpdate('paused', remoteJid).catch(() => {});
+                    await sock.sendPresenceUpdate('paused', fallbackDestJid).catch(() => {});
                   }
                 } catch (fbErr) {
                   console.error('[AI Fallback Message Send Error]:', fbErr.message);
@@ -5098,12 +5102,24 @@ app.post(['/chats/delete', '/delete-chat', '/api/chats/delete'], (req, res) => {
 
 
 
-app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
+app.post([
+  '/send-message',
+  '/send_message',
+  '/send',
+  '/send-audio',
+  '/send_audio',
+  '/api/send-message',
+  '/api/send_message',
+  '/api/v1/send-message',
+  '/api/v1/send_message',
+  '/messages/send',
+  '/api/messages/send'
+], async (req, res, next) => {
   const targetOrgId = extractOrgId(req);
   const orgSession = activeSessions.get(targetOrgId) || activeSessions.get('default') || sessionPool.getSession(targetOrgId);
   const targetTenantId = sessionPool.extractTenantId(req);
   const activeSession = sessionPool.getSession(targetTenantId) || sessionPool.getSession('default') || sessionPool.getOrCreateSession(targetTenantId);
-
+  const activeSock = orgSession?.sock || activeSession?.sock || sock;
 
   try {
 
@@ -5115,7 +5131,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
     try {
 
-      chatId = req.body?.chatId || req.body?.to || req.body?.recipient || req.body?.to_phone || req.body?.phone || req.body?.target || req.body?.contact;
+      chatId = req.body?.chatId || req.body?.chat_id || req.body?.to || req.body?.recipient || req.body?.to_phone || req.body?.phone || req.body?.target || req.body?.contact;
 
       message = req.body?.message !== undefined ? req.body.message : (req.body?.text !== undefined ? req.body.text : (req.body?.body !== undefined ? req.body.body : req.body?.caption));
 
@@ -5513,13 +5529,15 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
             console.log(`[POST /send-message Audio] Dispatching to ${sendTgt} (${primaryAudioPayload.mimetype})...`);
 
-            const res = await sock.sendMessage(sendTgt, primaryAudioPayload); // NO { quoted: msg }!
+            const res = await (activeSock || sock).sendMessage(sendTgt, primaryAudioPayload); // NO { quoted: msg }!
 
             if (res?.key?.id) {
 
               sent = res;
 
               audioSent = true;
+
+              sentAiMessageIds.add(res.key.id);
 
               console.log("[DELIVERED TO WA]", sendTgt, res.key.id);
 
@@ -5535,13 +5553,15 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
               try {
 
-                const res2 = await sock.sendMessage(sendTgt, fallbackAudioPayload);
+                const res2 = await (activeSock || sock).sendMessage(sendTgt, fallbackAudioPayload);
 
                 if (res2?.key?.id) {
 
                   sent = res2;
 
                   audioSent = true;
+
+                  sentAiMessageIds.add(res2.key.id);
 
                   console.log("[DELIVERED TO WA]", sendTgt, res2.key.id);
 
@@ -5625,15 +5645,18 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
               const imageBuffer = Buffer.from(cleanBase64, 'base64');
 
-              sent = await sock.sendMessage(sendTgt, { image: imageBuffer, caption }, sendOptions);
+              sent = await (activeSock || sock).sendMessage(sendTgt, { image: imageBuffer, caption }, sendOptions);
 
             } else if (imageUrl) {
 
-              sent = await sock.sendMessage(sendTgt, { image: { url: imageUrl }, caption }, sendOptions);
+              sent = await (activeSock || sock).sendMessage(sendTgt, { image: { url: imageUrl }, caption }, sendOptions);
 
             }
 
-            if (sent?.key?.id) break;
+            if (sent?.key?.id) {
+              sentAiMessageIds.add(sent.key.id);
+              break;
+            }
 
           } catch (firstImgErr) {
 
@@ -5645,15 +5668,18 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
                 const imageBuffer = Buffer.from(cleanBase64, 'base64');
 
-                sent = await sock.sendMessage(sendTgt, { image: imageBuffer, caption });
+                sent = await (activeSock || sock).sendMessage(sendTgt, { image: imageBuffer, caption });
 
               } else if (imageUrl) {
 
-                sent = await sock.sendMessage(sendTgt, { image: { url: imageUrl }, caption });
+                sent = await (activeSock || sock).sendMessage(sendTgt, { image: { url: imageUrl }, caption });
 
               }
 
-              if (sent?.key?.id) break;
+              if (sent?.key?.id) {
+                sentAiMessageIds.add(sent.key.id);
+                break;
+              }
 
             } catch (_) {}
 
@@ -5661,7 +5687,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
         }
 
-        try { await sock.sendPresenceUpdate('paused', primarySendTarget); } catch (_) {}
+        try { await (activeSock || sock).sendPresenceUpdate('paused', primarySendTarget); } catch (_) {}
 
       } else {
 
@@ -5704,11 +5730,13 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
             console.log(`[POST /send-message Text] Dispatching to ${sendTgt}...`);
 
-            const res = await sock.sendMessage(sendTgt, { text: textToSend }); // NO { quoted: msg }!
+            const res = await (activeSock || sock).sendMessage(sendTgt, { text: textToSend }); // NO { quoted: msg }!
 
             if (res?.key?.id) {
 
               sent = res;
+
+              sentAiMessageIds.add(res.key.id);
 
               console.log("[DELIVERED TO WA]", sendTgt, res.key.id);
 
@@ -5724,7 +5752,7 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
         }
 
-        try { await sock.sendPresenceUpdate('paused', primarySendTarget); } catch (_) {}
+        try { await (activeSock || sock).sendPresenceUpdate('paused', primarySendTarget); } catch (_) {}
 
       }
 
