@@ -2994,10 +2994,9 @@ def api_whatsapp_conversations():
             digits = "".join(filter(str.isdigit, sid or sphone))
             if digits and (digits in deleted_ids or f"{digits}@g.us" in deleted_ids):
                 return True
-        # Filter explicitly deleted individual message IDs (wam-..., BAE5..., etc.)
-        if sid and (sid.startswith("wam-") or sid.startswith("BAE5") or sid.startswith("3EB0") or len(sid) > 20):
-            if sid in deleted_ids:
-                return True
+        # Filter explicitly deleted individual message IDs
+        if sid and sid in deleted_ids:
+            return True
         # Normal 1-on-1 customer contacts are NEVER blacklisted
         return False
 
@@ -3015,6 +3014,10 @@ def api_whatsapp_conversations():
                 sender_str = str(m_d.get("sender") or "")
                 recip_str = str(m_d.get("recipient") or "")
                 if "@g.us" in sender_str or "@g.us" in recip_str:
+                    continue
+                m_row_id = str(m_d.get("id") or "")
+                m_wamid = str(m_d.get("whatsapp_message_id") or "")
+                if m_row_id in deleted_ids or m_wamid in deleted_ids:
                     continue
                 is_grp = bool(m_d.get("is_group") or "@g.us" in sender_str or "@g.us" in recip_str)
                 m_name = m_d.get("chat_name") or m_d.get("sender_name") or ""

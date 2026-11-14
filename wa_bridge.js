@@ -401,7 +401,7 @@ let detectedWorkingBackendUrl = null;
 
 
 
-async function dispatchWebhookToPython(payload, explicitOrgId = null) {
+async function dispatchWebhookToPython(payload, explicitOrgId = null, externalSignal = null) {
   const orgId = explicitOrgId || payload?.org_id || payload?.organization_id || payload?.tenant_id || 'default';
 
   const flaskBase = getFlaskBackendUrl();
@@ -448,15 +448,30 @@ async function dispatchWebhookToPython(payload, explicitOrgId = null) {
 
   for (let attempt = 1; attempt <= 2; attempt++) {
 
+    if (externalSignal && externalSignal.aborted) break;
+
     for (const targetUrl of uniqueUrls) {
+
+      if (externalSignal && externalSignal.aborted) break;
 
       try {
 
         const controller = new AbortController();
+        if (externalSignal) {
+          if (externalSignal.aborted) {
+            controller.abort();
+          } else {
+            externalSignal.addEventListener('abort', () => {
+              try { controller.abort(); } catch (_) {}
+            }, { once: true });
+          }
+        }
 
         const sep = targetUrl.includes('?') ? '&' : '?';
         const targetUrlWithOrg = `${targetUrl}${sep}org_id=${encodeURIComponent(orgId)}`;
-        const timeoutId = setTimeout(() => controller.abort(), 25000);
+        const timeoutId = setTimeout(() => {
+          try { controller.abort(); } catch (_) {}
+        }, 14000);
 
         const resp = await fetch(targetUrlWithOrg, {
 
@@ -1725,6 +1740,62 @@ function storeMessageForRetry(key, message) {
 
 }
 
+/**
+ * Explicitly and permanently purges a message from all local arrays, caches,
+ * in-memory stores, and the SQLite database to eliminate ghost history.
+ */
+async function purgeMessageLocallyAndRemotely(msgId, jid = null) {
+  if (!msgId) return;
+  const cleanId = String(msgId).trim();
+  if (!cleanId) return;
+
+  // 1. Register in deleted blacklist and persist to storage/deleted_ids.json
+  deletedMessagesSet.add(cleanId);
+  saveDeletedIdsToFile();
+
+  // 2. Explicitly remove from in-memory decryption store
+  inMemoryMessageStore.delete(cleanId);
+
+  // 3. Explicitly purge from recentIncomingMessages array (feeds /messages/recent)
+  for (let i = recentIncomingMessages.length - 1; i >= 0; i--) {
+    const m = recentIncomingMessages[i];
+    if (m && (m.idMessage === cleanId || m.message_id === cleanId || m.id === cleanId || m.whatsapp_message_id === cleanId)) {
+      recentIncomingMessages.splice(i, 1);
+    }
+  }
+
+  // 4. Clear lastMessage preview from activeChatsMap if matching
+  if (jid && activeChatsMap.has(jid)) {
+    const chat = activeChatsMap.get(jid);
+    if (chat && (chat.lastMessageId === cleanId || chat.last_message_id === cleanId)) {
+      chat.lastMessage = '';
+      activeChatsMap.set(jid, chat);
+    }
+  }
+
+  // 5. Synchronously notify Python backend to purge record from SQLite WhatsAppMessage DB
+  try {
+    const pPort = resolvePythonPort();
+    const flaskBase = getFlaskBackendUrl();
+    const candidateUrls = [
+      `${flaskBase}/api/v1/whatsapp/messages/${encodeURIComponent(cleanId)}`,
+      `http://127.0.0.1:${pPort}/api/v1/whatsapp/messages/${encodeURIComponent(cleanId)}`
+    ];
+    for (const url of candidateUrls) {
+      try {
+        fetch(url, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Internal-Bridge': '1'
+          },
+          body: JSON.stringify({ remote_delete: false, message_id: cleanId })
+        }).catch(() => {});
+      } catch (_) {}
+    }
+  } catch (_) {}
+}
+
 
 
 /**
@@ -2199,44 +2270,61 @@ async function startWhatsAppBridge(param1 = 'default', param2 = false) {
 
 
 
-    // Real-time message delivery & read receipts listener
-
+    // Real-time message delivery & read receipts listener, plus revokes
     sock.ev.on('messages.update', async (updates) => {
-
       try {
-
         if (!updates || !Array.isArray(updates)) return;
-
         for (const update of updates) {
-
           const key = update.key;
-
           const status = update.update?.status;
-
           if (key && status) {
-
             const statusStr = status >= 4 ? 'read' : (status >= 3 ? 'delivered' : 'sent');
-
             dispatchWebhookToPython({
-
               typeWebhook: 'messageStatus',
-
               idMessage: key.id,
-
               status: statusStr,
-
               chatId: key.remoteJid,
-
               timestamp: Math.floor(Date.now() / 1000)
-
             }).catch(() => {});
-
           }
 
+          // Detect revoke or protocol message delete in updates
+          const msgStub = update.update?.messageStubType;
+          const protoType = update.update?.message?.protocolMessage?.type;
+          if (protoType === 0 || protoType === 'REVOKE' || msgStub === 1 || msgStub === 'REVOKE') {
+            const targetId = update.update?.message?.protocolMessage?.key?.id || key?.id;
+            if (targetId) {
+              console.log(`[Baileys messages.update Revoke] Target message: ${targetId}`);
+              await purgeMessageLocallyAndRemotely(targetId, key?.remoteJid);
+            }
+          }
         }
-
       } catch (_) {}
+    });
 
+    // Real-time message deletion listener (fixes ghost history)
+    sock.ev.on('messages.delete', async (item) => {
+      try {
+        if (!item) return;
+        if (Array.isArray(item.keys)) {
+          for (const key of item.keys) {
+            if (key?.id) {
+              console.log(`[Baileys messages.delete] Key received: ${key.id} (remoteJid: ${key.remoteJid})`);
+              await purgeMessageLocallyAndRemotely(key.id, key.remoteJid);
+            }
+          }
+        } else if (item.all && item.jid) {
+          console.log(`[Baileys messages.delete] Purging all messages for chat: ${item.jid}`);
+          for (let i = recentIncomingMessages.length - 1; i >= 0; i--) {
+            const m = recentIncomingMessages[i];
+            if (m && (m.chatId === item.jid || m.sender === item.jid || m.recipient === item.jid)) {
+              recentIncomingMessages.splice(i, 1);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[Baileys messages.delete Error]:', err.message);
+      }
     });
 
 
@@ -2831,6 +2919,23 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
 
 
 
+          // Check for message revocation / protocol message deletion
+          const isRevoke = (
+            rawMsg?.protocolMessage?.type === 0 ||
+            rawMsg?.protocolMessage?.type === 'REVOKE' ||
+            msg.messageStubType === 1 ||
+            msg.messageStubType === 'REVOKE'
+          );
+          if (isRevoke) {
+            const targetRevokedId = rawMsg?.protocolMessage?.key?.id || msg.key?.id;
+            console.log(`[Baileys Upsert Revoke] Revoke detected for ${targetRevokedId}. Purging locally and remotely...`);
+            if (targetRevokedId) {
+              await purgeMessageLocallyAndRemotely(targetRevokedId, remoteJid);
+            }
+            await purgeMessageLocallyAndRemotely(messageId, remoteJid);
+            continue;
+          }
+
           // Decryption Error / PreKey / Bad MAC / Empty Payload Recovery
 
           if (!unwrappedMsg || Object.keys(unwrappedMsg).length === 0 || msg.messageStubType) {
@@ -2903,12 +3008,35 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
           if (text && text.trim() === '!delete') {
             console.log(`[Delete Action] Message ${messageId} is exactly '!delete'. Deleting message for everyone via sock.sendMessage...`);
             try {
-              if (sock && typeof sock.sendMessage === 'function') {
-                await sock.sendMessage(remoteJid, { delete: msg.key });
+              const contextInfo = unwrappedMsg?.extendedTextMessage?.contextInfo ||
+                                  unwrappedMsg?.contextInfo ||
+                                  rawMsg?.extendedTextMessage?.contextInfo ||
+                                  rawMsg?.contextInfo ||
+                                  msg.message?.extendedTextMessage?.contextInfo;
+              const targetStanzaId = contextInfo?.stanzaId;
+              if (targetStanzaId) {
+                console.log(`[Delete Action] Found quoted target message: ${targetStanzaId}`);
+                if (sock && typeof sock.sendMessage === 'function') {
+                  const targetParticipant = contextInfo?.participant;
+                  await sock.sendMessage(remoteJid, {
+                    delete: {
+                      remoteJid,
+                      fromMe: targetParticipant ? (cleanPhoneNumber(targetParticipant.split('@')[0]) === cleanPhoneNumber(sock.user?.id?.split(':')[0])) : true,
+                      id: targetStanzaId,
+                      participant: targetParticipant
+                    }
+                  });
+                }
+                await purgeMessageLocallyAndRemotely(targetStanzaId, remoteJid);
+              } else {
+                if (sock && typeof sock.sendMessage === 'function') {
+                  await sock.sendMessage(remoteJid, { delete: msg.key });
+                }
               }
             } catch (delErr) {
               console.error(`[Delete Action Error] Could not delete message:`, delErr.message);
             }
+            await purgeMessageLocallyAndRemotely(messageId, remoteJid);
             continue;
           }
 
@@ -3960,73 +4088,76 @@ if (!text) text = '[Voice note]';
 
 
           // FIFO Sequential Queue Dispatch (Zero Dropped Questions & Human Shield)
-
           enqueueContactTask(targetJid, async () => {
+            const aiAbortController = new AbortController();
+            let timeoutTimer = null;
 
-            try {
+            const timeoutPromise = new Promise((_, reject) => {
+              timeoutTimer = setTimeout(() => {
+                try { aiAbortController.abort(); } catch (_) {}
+                reject(new Error('AI_PIPELINE_TIMEOUT'));
+              }, 15000);
+            });
 
-              const resData = await dispatchWebhookToPython(payload);
-
-
+            const aiGenerationProcess = async () => {
+              const resData = await dispatchWebhookToPython(payload, null, aiAbortController.signal);
 
               const isRecent = (Date.now() / 1000 - timestamp) < 300;
 
               // Deliver automated AI replies if Flask didn't already dispatch via /send-message
-
               if (resData && !resData.dispatched && (!isHistoryAppend || isRecent) && (resData.reply || resData.audio_base64 || resData.image_url || resData.image_base64)) {
-
                 await deliverAiResponse(resData, targetJid);
-
               } else if (isPrivate && !resData?.dispatched && (!isHistoryAppend || isRecent)) {
-
                 // Feature 2: Fallback human-like reply flow for private messages
-
                 const replyContent = resData?.reply;
-
                 if (replyContent) {
-
                   try {
-
                     if (sock && typeof sock.readMessages === 'function') {
-
                       await sock.readMessages([msg.key]);
-
                     }
-
                     if (sock && typeof sock.sendPresenceUpdate === 'function') {
-
                       await sock.sendPresenceUpdate('composing', remoteJid);
-
                     }
-
                     await new Promise(resolve => setTimeout(resolve, 3000));
-
                     const sent = await sock.sendMessage(remoteJid, { text: String(replyContent) });
-
                     if (sent?.key?.id) sentAiMessageIds.add(sent.key.id);
-
                     if (sock && typeof sock.sendPresenceUpdate === 'function') {
-
                       await sock.sendPresenceUpdate('paused', remoteJid);
-
                     }
-
                   } catch (privErr) {
-
                     console.error('[Private Message Reply Flow Error]:', privErr.message);
-
                   }
-
                 }
-
               }
+              return resData;
+            };
 
+            try {
+              await Promise.race([aiGenerationProcess(), timeoutPromise]);
             } catch (dispatchErr) {
-
-              console.error('[Queue Task Dispatch Error]:', dispatchErr.message);
-
+              const isTimeout = dispatchErr?.message === 'AI_PIPELINE_TIMEOUT' ||
+                                dispatchErr?.name === 'AbortError' ||
+                                aiAbortController.signal.aborted;
+              if (isTimeout) {
+                console.warn(`[AI Generation Timeout]: Generation exceeded 15 seconds for ${remoteJid}. Aborted and sending fallback message.`);
+                try {
+                  const fallbackText = "System is experiencing heavy load. Please type your message in text format.";
+                  if (sock && typeof sock.sendMessage === 'function') {
+                    const fallbackSent = await sock.sendMessage(remoteJid, { text: fallbackText });
+                    if (fallbackSent?.key?.id) sentAiMessageIds.add(fallbackSent.key.id);
+                  }
+                  if (sock && typeof sock.sendPresenceUpdate === 'function') {
+                    await sock.sendPresenceUpdate('paused', remoteJid).catch(() => {});
+                  }
+                } catch (fbErr) {
+                  console.error('[AI Fallback Message Send Error]:', fbErr.message);
+                }
+              } else {
+                console.error('[Queue Task Dispatch Error]:', dispatchErr.message);
+              }
+            } finally {
+              if (timeoutTimer) clearTimeout(timeoutTimer);
             }
-
           });
 
         } catch (msgErr) {
@@ -5003,9 +5134,9 @@ app.post(['/delete-message', '/delete', '/api/delete-message'], async (req, res)
       participant: participant || key?.participant
     };
 
-    if (msgKey?.id) {
-      deletedMessagesSet.add(String(msgKey.id));
-      saveDeletedIdsToFile();
+    const targetId = msgKey?.id || id;
+    if (targetId) {
+      await purgeMessageLocallyAndRemotely(targetId, targetJid);
     }
 
     if (!activeSock || typeof activeSock.sendMessage !== 'function') {
