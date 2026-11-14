@@ -2713,14 +2713,6 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
 
             }
 
-            if (rawUntouchedJid && rawUntouchedJid.endsWith('@lid')) {
-
-              rawLidByPhone.set('923471000668', rawUntouchedJid);
-
-              lastInboundJidByPhone.set('923471000668', rawUntouchedJid);
-
-            }
-
 
 
             if (msg.key && msg.message) {
@@ -3410,30 +3402,6 @@ if (!text) text = '[Voice note]';
 
           }
 
-          if (cleanDigitsSender === '923471000668' || (pushName && pushName.toLowerCase().includes('bashir')) || (rawUntouchedJid && rawUntouchedJid.includes('7142')) || (remoteJid && remoteJid.includes('7142'))) {
-
-            lastInboundJidByPhone.set('923471000668', jidToSave);
-
-            lastInboundJidByPhone.set('+923471000668', jidToSave);
-
-            lastInboundJidByPhone.set('923471000668@s.whatsapp.net', jidToSave);
-
-            lastInboundJidByPhone.set('7142', jidToSave);
-
-            lastInboundJidByPhone.set('+7142', jidToSave);
-
-            if (rawUntouchedJid && rawUntouchedJid.endsWith('@lid')) {
-
-              rawLidByPhone.set('923471000668', rawUntouchedJid);
-
-              rawLidByPhone.set('+923471000668', rawUntouchedJid);
-
-            }
-
-          }
-
-
-
           const resolvedPhoneJid = (cleanDigitsSender && cleanDigitsSender.length >= 10 && cleanDigitsSender.length <= 13)
 
             ? `${cleanDigitsSender}@s.whatsapp.net`
@@ -3675,72 +3643,31 @@ if (!text) text = '[Voice note]';
 
 
             // Dual-JID: Determine active Signal session JID vs Standard phone JID
+            const cleanTarget = cleanPhoneNumber(finalTargetJid || targetJid || senderPhone || remoteJid);
+            const cleanPhone = cleanTarget || cleanPhoneNumber(senderPhone) || cleanPhoneNumber(remoteJid);
+            const isGroupChat = (remoteJid && remoteJid.endsWith('@g.us')) || (finalTargetJid && finalTargetJid.endsWith('@g.us'));
 
-            const cleanTarget = cleanPhoneNumber(finalTargetJid || targetJid || senderPhone);
-
-            const standardJid = cleanTarget ? `${cleanTarget}@s.whatsapp.net` : (finalTargetJid || targetJid || remoteJid);
-
-            const mappedSessionJid = (cleanTarget && rawLidByPhone.get(cleanTarget)) ||
-
-                                     (cleanTarget && lastInboundJidByPhone.get(cleanTarget)) ||
-
-                                     lastInboundJidByPhone.get(senderPhone) ||
-
-                                     lastInboundJidByPhone.get(cleanDigitsSender) ||
-
-                                     (rawUntouchedJid && rawUntouchedJid.endsWith('@lid') ? rawUntouchedJid : null) ||
-
-                                     (remoteJid && remoteJid.endsWith('@lid') ? remoteJid : null);
-
-
-
-            let primaryTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : standardJid;
-
-            let fallbackTarget = (primaryTarget === mappedSessionJid) ? standardJid : ((mappedSessionJid && mappedSessionJid !== standardJid) ? mappedSessionJid : null);
-
-
+            let primaryTarget = isGroupChat
+              ? (finalTargetJid || remoteJid)
+              : (cleanPhone ? `${cleanPhone}@s.whatsapp.net` : (finalTargetJid || remoteJid));
 
             if (primaryTarget && primaryTarget.endsWith('@c.us')) primaryTarget = primaryTarget.replace('@c.us', '@s.whatsapp.net');
 
-            if (fallbackTarget && fallbackTarget.endsWith('@c.us')) fallbackTarget = fallbackTarget.replace('@c.us', '@s.whatsapp.net');
-
-
-
             const shouldSendVoice = Boolean((resData.audio_base64 || resData.audio_url || resData.media_url) && (resData.send_as_voice || resData.is_voice || isVoice || isAudio));
-
             const shouldSendImage = Boolean(resData.image_url || resData.image_base64);
-
             const jitterMs = Math.floor(Math.random() * 2000) + 3000; // 3.0s - 5.0s human delay
-
-
 
             await acquireAntiSpamDispatchSlot();
 
-
-
-            // Dispatch to resolved targets without { quoted: msg }
-
-            const cleanPhone = cleanTarget || '923471000668';
-
+            // Dispatch strictly prioritizing canonical WhatsApp @s.whatsapp.net or group @g.us
             const targets = new Set();
-
-            if (rawUntouchedJid) targets.add(rawUntouchedJid);
-
-            if (cleanTarget && phoneToReplyJidMap.get(cleanTarget)) targets.add(phoneToReplyJidMap.get(cleanTarget));
-
-            if (phoneToReplyJidMap.get(senderPhone)) targets.add(phoneToReplyJidMap.get(senderPhone));
-
-            if (phoneToReplyJidMap.get(remoteJid)) targets.add(phoneToReplyJidMap.get(remoteJid));
-
-            if (cleanTarget && rawLidByPhone.get(cleanTarget)) targets.add(rawLidByPhone.get(cleanTarget));
-
-            if (cleanPhone) targets.add(`${cleanPhone}@s.whatsapp.net`);
-
-            if (standardJid) targets.add(standardJid);
-
-            if (finalTargetJid) targets.add(finalTargetJid);
-
-            if (primaryTarget) targets.add(primaryTarget);
+            if (isGroupChat) {
+              targets.add(primaryTarget);
+            } else if (cleanPhone && cleanPhone.length >= 7) {
+              targets.add(`${cleanPhone}@s.whatsapp.net`);
+            } else if (primaryTarget) {
+              targets.add(primaryTarget);
+            }
 
 
 
@@ -4013,54 +3940,31 @@ if (!text) text = '[Voice note]';
 
                 // 2) Send a 'composing' (typing) presence update
 
+                const textTarget = isGroupChat ? (finalTargetJid || remoteJid) : (cleanPhone ? `${cleanPhone}@s.whatsapp.net` : remoteJid);
                 try {
-
                   if (sock && typeof sock.sendPresenceUpdate === 'function') {
-
-                    await sock.sendPresenceUpdate('composing', remoteJid);
-
+                    await sock.sendPresenceUpdate('composing', textTarget);
                   }
-
                 } catch (presErr) {
-
                   console.debug('[Anti-Ban Composing Notice]', presErr.message);
-
                 }
-
-
 
                 // 3) Wait for 3 seconds
-
                 await new Promise(resolve => setTimeout(resolve, 3000));
 
-
-
                 // 4) Send the reply text
-
                 try {
-
-                  sentMsg = await sock.sendMessage(remoteJid, { text: String(resData.reply) });
-
+                  sentMsg = await sock.sendMessage(textTarget, { text: String(resData.reply) });
                   if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
-
                 } catch (tErr) {
-
                   console.warn('[Direct Bridge Private Reply Error]:', tErr.message);
-
                 }
 
-
-
                 // 5) Reset presence to paused
-
                 try {
-
                   if (sock && typeof sock.sendPresenceUpdate === 'function') {
-
-                    await sock.sendPresenceUpdate('paused', remoteJid);
-
+                    await sock.sendPresenceUpdate('paused', textTarget);
                   }
-
                 } catch (_) {}
 
               } else {
@@ -4232,7 +4136,8 @@ if (!text) text = '[Voice note]';
 
 const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 
 
@@ -5346,51 +5251,36 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
     }
 
-    // Dual-JID Routing: keep jid normalized for DB/Dashboard, but resolve active session JID for socket delivery
-
+    // Canonical recipient resolution: WhatsApp messages to contacts must strictly target @s.whatsapp.net
     const cleanTargetPhone = cleanPhoneNumber(jid) || cleanPhoneNumber(chatId);
 
     if (jid.endsWith('@lid')) {
-
-      const resPh = lidToPhoneMap.get(jid) || (jid.includes('7142') ? '923471000668' : null);
-
-      if (resPh) {
-
+      const resPh = lidToPhoneMap.get(jid) || cleanTargetPhone;
+      if (resPh && resPh.length >= 7 && resPh.length <= 15) {
         jid = `${resPh}@s.whatsapp.net`;
-
       }
-
     }
 
     if (!jid || jid.startsWith('@') || (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us') && !jid.endsWith('@lid'))) {
-
       return res.status(400).json({
-
         success: false,
-
         error: `Invalid recipient JID: '${chatId}' -> '${jid}'. Outbound replies must strictly target a valid @s.whatsapp.net or @g.us JID.`
-
       });
-
     }
 
-
-
-    const mappedSessionJid = (cleanTargetPhone && rawLidByPhone.get(cleanTargetPhone)) ||
-
-                             (cleanTargetPhone && lastInboundJidByPhone.get(cleanTargetPhone)) ||
-
-                             lastInboundJidByPhone.get(chatId) ||
-
-                             lastInboundJidByPhone.get(jid) ||
-
-                             (cleanTargetPhone ? phoneToLidMap.get(cleanTargetPhone) : null);
-
-
-
-    let primarySendTarget = (mappedSessionJid && mappedSessionJid.endsWith('@lid')) ? mappedSessionJid : jid;
-
-    let fallbackSendTarget = (primarySendTarget === mappedSessionJid) ? jid : ((mappedSessionJid && mappedSessionJid !== jid) ? mappedSessionJid : null);
+    const cleanTargetDigits = cleanTargetPhone || cleanPhoneNumber(chatId) || cleanPhoneNumber(jid);
+    let primarySendTarget = jid;
+    if (jid && jid.endsWith('@g.us')) {
+      primarySendTarget = jid;
+    } else if (cleanTargetDigits && cleanTargetDigits.length >= 7 && cleanTargetDigits.length <= 15) {
+      primarySendTarget = `${cleanTargetDigits}@s.whatsapp.net`;
+    } else if (jid && jid.endsWith('@lid')) {
+      const resPh = lidToPhoneMap.get(jid);
+      if (resPh) {
+        primarySendTarget = `${resPh}@s.whatsapp.net`;
+      }
+    }
+    let fallbackSendTarget = (primarySendTarget !== jid && !jid.endsWith('@lid')) ? jid : null;
 
 
 
@@ -5601,20 +5491,17 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
 
 
         const cleanTargetDigits = cleanTargetPhone || cleanPhoneNumber(jid);
-
         const sendTargets = new Set();
-
-        if (cleanTargetDigits && phoneToReplyJidMap.get(cleanTargetDigits)) sendTargets.add(phoneToReplyJidMap.get(cleanTargetDigits));
-
-        if (cleanTargetDigits && rawLidByPhone.get(cleanTargetDigits)) sendTargets.add(rawLidByPhone.get(cleanTargetDigits));
-
-        if (cleanTargetDigits && lastInboundJidByPhone.get(cleanTargetDigits)) sendTargets.add(lastInboundJidByPhone.get(cleanTargetDigits));
-
-        if (cleanTargetDigits) sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);
-
-        if (jid) sendTargets.add(jid);
-
-        if (primarySendTarget) sendTargets.add(primarySendTarget);
+        if (jid && jid.endsWith('@g.us')) {
+          sendTargets.add(jid);
+        } else if (cleanTargetDigits && cleanTargetDigits.length >= 7) {
+          sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);
+        } else if (primarySendTarget) {
+          sendTargets.add(primarySendTarget);
+        }
+        if (jid && !jid.endsWith('@lid')) {
+          sendTargets.add(jid);
+        }
 
 
 
@@ -5797,20 +5684,17 @@ app.post(['/send-message', '/send', '/send-audio'], async (req, res, next) => {
         const textToSend = String(message || '');
 
         const cleanTargetDigits = cleanTargetPhone || cleanPhoneNumber(jid);
-
         const sendTargets = new Set();
-
-        if (cleanTargetDigits && phoneToReplyJidMap.get(cleanTargetDigits)) sendTargets.add(phoneToReplyJidMap.get(cleanTargetDigits));
-
-        if (cleanTargetDigits && rawLidByPhone.get(cleanTargetDigits)) sendTargets.add(rawLidByPhone.get(cleanTargetDigits));
-
-        if (cleanTargetDigits && lastInboundJidByPhone.get(cleanTargetDigits)) sendTargets.add(lastInboundJidByPhone.get(cleanTargetDigits));
-
-        if (cleanTargetDigits) sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);
-
-        if (jid) sendTargets.add(jid);
-
-        if (primarySendTarget) sendTargets.add(primarySendTarget);
+        if (jid && jid.endsWith('@g.us')) {
+          sendTargets.add(jid);
+        } else if (cleanTargetDigits && cleanTargetDigits.length >= 7) {
+          sendTargets.add(`${cleanTargetDigits}@s.whatsapp.net`);
+        } else if (primarySendTarget) {
+          sendTargets.add(primarySendTarget);
+        }
+        if (jid && !jid.endsWith('@lid')) {
+          sendTargets.add(jid);
+        }
 
 
 

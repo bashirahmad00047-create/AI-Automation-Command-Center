@@ -10268,7 +10268,10 @@ class WhatsAppService:
             if raw_s in ("7142", "7142@lid") or raw_s.endswith("7142@lid") or clean_to == "7142":
                 clean_to = "923471000668"
             if len(clean_to) > 13:
-                real_chat_id = f"{clean_to}@lid"
+                resolved_ph = cls.resolve_contact_phone(clean_to)
+                if resolved_ph and len(resolved_ph) <= 13:
+                    clean_to = resolved_ph
+                real_chat_id = f"{clean_to}@s.whatsapp.net"
             else:
                 real_chat_id = f"{clean_to}@s.whatsapp.net"
 
@@ -10277,7 +10280,10 @@ class WhatsAppService:
             if len(digits) >= 7:
                 clean_to = digits
                 if len(clean_to) > 13:
-                    real_chat_id = f"{clean_to}@lid"
+                    resolved_ph = cls.resolve_contact_phone(clean_to)
+                    if resolved_ph and len(resolved_ph) <= 13:
+                        clean_to = resolved_ph
+                    real_chat_id = f"{clean_to}@s.whatsapp.net"
                 else:
                     real_chat_id = f"{clean_to}@s.whatsapp.net"
             else:
@@ -10458,6 +10464,51 @@ class WhatsAppService:
                 else:
                     err_text = bridge_resp.text[:200]
                     logger.error(f"[Baileys Bridge Failed] HTTP {bridge_resp.status_code}: {err_text}")
+                    if f_bytes and bridge_message:
+                        try:
+                            logger.info(f"[Baileys Bridge Guarantee] Retrying text delivery after audio dispatch non-200 for {real_chat_id}...")
+                            text_fb = {
+                                "chatId": real_chat_id,
+                                "to": clean_to,
+                                "recipient": real_chat_id,
+                                "message": bridge_message
+                            }
+                            if quoted_message_id:
+                                text_fb["quotedMessageId"] = str(quoted_message_id).strip()
+                            with cls.get_http_session(retries=1) as session:
+                                bridge_resp = session.post(
+                                    bridge_url,
+                                    json=text_fb,
+                                    headers={"Content-Type": "application/json"},
+                                    timeout=bridge_timeout
+                                )
+                                if bridge_resp.status_code == 200:
+                                    resp_data = bridge_resp.json() if bridge_resp.content else {}
+                                    msg_id = resp_data.get("messageId") or resp_data.get("id") or f"wamid.{int(time.time() * 1000)}"
+                                    record = cls.record_message(
+                                        organization_id=organization_id,
+                                        sender=clean_from or "AI Assistant",
+                                        recipient=clean_to,
+                                        direction="outbound",
+                                        body=bridge_message,
+                                        message_type="text",
+                                        status="sent",
+                                        whatsapp_message_id=msg_id,
+                                        execution_id=execution_id,
+                                        raw_payload=resp_data
+                                    )
+                                    return {
+                                        "success": True,
+                                        "status": "sent",
+                                        "provider": "baileys_bridge",
+                                        "whatsapp_message_id": msg_id,
+                                        "message_record_id": record.id if record else None,
+                                        "recipient": clean_to,
+                                        "chat_id": real_chat_id,
+                                        "message_type": "text"
+                                    }
+                        except Exception as fb_err:
+                            logger.warning(f"[Baileys Bridge Text Fallback Notice]: {fb_err}")
             except Exception as bridge_err:
                 logger.error(f"[Baileys Bridge Exception] Failed to contact bridge at {bridge_url}: {bridge_err}")
                 if f_bytes and bridge_message:
@@ -10478,6 +10529,31 @@ class WhatsAppService:
                                 headers={"Content-Type": "application/json"},
                                 timeout=bridge_timeout
                             )
+                            if bridge_resp.status_code == 200:
+                                resp_data = bridge_resp.json() if bridge_resp.content else {}
+                                msg_id = resp_data.get("messageId") or resp_data.get("id") or f"wamid.{int(time.time() * 1000)}"
+                                record = cls.record_message(
+                                    organization_id=organization_id,
+                                    sender=clean_from or "AI Assistant",
+                                    recipient=clean_to,
+                                    direction="outbound",
+                                    body=bridge_message,
+                                    message_type="text",
+                                    status="sent",
+                                    whatsapp_message_id=msg_id,
+                                    execution_id=execution_id,
+                                    raw_payload=resp_data
+                                )
+                                return {
+                                    "success": True,
+                                    "status": "sent",
+                                    "provider": "baileys_bridge",
+                                    "whatsapp_message_id": msg_id,
+                                    "message_record_id": record.id if record else None,
+                                    "recipient": clean_to,
+                                    "chat_id": real_chat_id,
+                                    "message_type": "text"
+                                }
                     except Exception as fb_err:
                         logger.warning(f"[Baileys Bridge Text Fallback Notice]: {fb_err}")
 
