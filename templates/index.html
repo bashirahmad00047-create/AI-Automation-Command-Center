@@ -1199,8 +1199,8 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
                         </div>
                     </div>
 
-                    <!-- Message Stream (Wallpaper Background) -->
-                    <div id="waMessagesStream" class="wa-messages-container">
+                    <!-- Unified Message Stream (Wallpaper Background) -->
+                    <div id="mainChatArea" class="wa-messages-container">
                         <div style="margin: auto; text-align: center; color: #8696a0; max-width: 380px;">
                             <div style="font-size: 3rem; margin-bottom: 12px; opacity: 0.8;">📱</div>
                             <div style="font-size: 1.15rem; font-weight: 600; color: #e9edef; margin-bottom: 6px;">WhatsApp Web Console</div>
@@ -1415,8 +1415,8 @@ curl -X POST "https://ai-automation-command-center-4.onrender.com/api/v1/webhook
 
             </div>
 
-            <!-- VIEW 2: CLASSIC GATEWAY CONFIG & RAW AUDIT TABLE -->
-            <div id="waClassicViewContainer" class="dashboard-columns" style="display: none;">
+            <!-- VIEW 2: STRIPPED / DEPRECATED DUPLICATE CONTAINER -->
+            <div id="waClassicViewContainer" class="dashboard-columns" style="display: none !important;" aria-hidden="true">
                 <!-- Left: Configuration & Outbound Dispatcher -->
                 <div class="hud-panel flex-1">
                     <div class="panel-header">

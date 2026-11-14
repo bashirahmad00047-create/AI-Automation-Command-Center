@@ -3001,24 +3001,28 @@ def api_whatsapp_conversations():
         # Normal 1-on-1 customer contacts are NEVER blacklisted
         return False
 
-    # 1. Fetch ALL persisted messages without org_id restrictions (Strictly blocking @g.us group chats)
+    # 1. Fetch persisted messages from database (Strictly blocking @g.us group chats)
+    cutoff_24h = datetime.datetime.utcnow() - datetime.timedelta(hours=24)
     try:
         messages = WhatsAppMessage.query.filter(
             ~WhatsAppMessage.sender.like("%@g.us"),
-            ~WhatsAppMessage.recipient.like("%@g.us"),
-            ~WhatsAppMessage.sender.like("120363%"),
-            ~WhatsAppMessage.recipient.like("120363%")
-        ).order_by(WhatsAppMessage.created_at.desc()).limit(500).all()
-        msg_dicts = [
-            m.to_dict() for m in messages
-            if not is_blacklisted(
-                m.whatsapp_message_id or m.id,
-                m.chat_name or m.sender_name,
-                is_group=bool(m.is_group or (m.recipient and "@g.us" in m.recipient) or (m.sender and "@g.us" in m.sender))
-            )
-            and not (m.sender and "@g.us" in m.sender)
-            and not (m.recipient and "@g.us" in m.recipient)
-        ]
+            ~WhatsAppMessage.recipient.like("%@g.us")
+        ).order_by(WhatsAppMessage.created_at.desc()).limit(1000).all()
+        msg_dicts = []
+        for m in messages:
+            try:
+                m_d = m.to_dict()
+                sender_str = str(m_d.get("sender") or "")
+                recip_str = str(m_d.get("recipient") or "")
+                if "@g.us" in sender_str or "@g.us" in recip_str:
+                    continue
+                is_grp = bool(m_d.get("is_group") or "@g.us" in sender_str or "@g.us" in recip_str)
+                m_name = m_d.get("chat_name") or m_d.get("sender_name") or ""
+                m_id = m_d.get("whatsapp_message_id") or m_d.get("id") or ""
+                if not is_blacklisted(m_id, m_name, item_phone=sender_str, is_group=is_grp):
+                    msg_dicts.append(m_d)
+            except Exception as row_err:
+                logger.debug(f"Row parsing notice: {row_err}")
     except Exception as m_err:
         logger.warning(f"Error fetching WhatsAppMessage: {m_err}")
         try: db.session.rollback()
@@ -3032,7 +3036,7 @@ def api_whatsapp_conversations():
             continue
         partner = m.get("sender") if m.get("direction") == "inbound" else m.get("recipient")
         partner_str = str(partner or "Unknown")
-        if "@g.us" in partner_str or partner_str.startswith("120363"):
+        if "@g.us" in partner_str:
             continue
         key = "".join(filter(str.isdigit, partner_str))
         if not key:
@@ -3084,7 +3088,7 @@ def api_whatsapp_conversations():
                     if not b_key:
                         b_key = str(b_id)
                     
-                    b_is_grp = bool(b_chat.get("is_group") or str(b_id).endswith("@g.us") or "@g.us" in str(b_id) or str(b_id).startswith("120363"))
+                    b_is_grp = bool(b_chat.get("is_group") or str(b_id).endswith("@g.us") or "@g.us" in str(b_id))
                     if b_is_grp:
                         continue
 
@@ -3112,9 +3116,9 @@ def api_whatsapp_conversations():
     except Exception as b_err:
         logger.debug(f"Notice querying Baileys bridge chats: {b_err}")
 
-    # 3. Query all CRM Leads regardless of org_id mismatch
+    # 3. Query CRM Leads created within the last 24 hours
     try:
-        leads = Lead.query.order_by(Lead.created_at.desc()).limit(50).all()
+        leads = Lead.query.filter(Lead.created_at >= cutoff_24h).order_by(Lead.created_at.desc()).limit(50).all()
         for l in leads:
             if l.phone and l.phone != "N/A":
                 clean_p = "".join(filter(str.isdigit, l.phone))
@@ -3145,7 +3149,7 @@ def api_whatsapp_conversations():
             "is_group": False,
             "chat_type": "individual",
             "last_message": "Assalam-o-Alaikum! BashFlow AI assistant is active & ready.",
-            "timestamp": "2026-11-06 18:30:00",
+            "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "is_audio": False,
             "unread_count": 0,
             "messages": []
@@ -6122,6 +6126,33 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
         clean_first = WhatsAppService.resolve_contact_phone(first_sender, sender_name=sender_contact_name)
         if not clean_first or len(clean_first) < 10:
             clean_first = "923471000668" if ("7142" in str(first_sender) or "bashir" in str(sender_contact_name).lower()) else re.sub(r"\D", "", str(first_sender))
+
+        # Ensure outbound AI response is persistently recorded to WhatsAppMessage and emitted
+        if reply_text and clean_first:
+            try:
+                out_body = f"🎤 {reply_text}" if (is_voice_flag or send_as_voice_flag) else reply_text
+                existing_out = WhatsAppMessage.query.filter_by(
+                    recipient=clean_first,
+                    direction="outbound"
+                ).order_by(WhatsAppMessage.created_at.desc()).first()
+                if not existing_out or existing_out.body != out_body:
+                    ai_out_rec = WhatsAppService.record_message(
+                        organization_id=org_id,
+                        sender="BashFlow AI",
+                        recipient=clean_first,
+                        direction="outbound",
+                        body=out_body,
+                        media_url=f"data:audio/ogg;base64,{audio_b64}" if audio_b64 else None,
+                        status="sent",
+                        whatsapp_message_id=ai_reply.get("whatsapp_message_id") if isinstance(ai_reply, dict) else None,
+                        message_type="audio" if (is_voice_flag or send_as_voice_flag) else "text",
+                        raw_payload={"ai_generated": True, "audio_base64": audio_b64}
+                    )
+                    db.session.commit()
+            except Exception as _out_rec_err:
+                logger.warning(f"Outbound AI response persistence check: {_out_rec_err}")
+                try: db.session.rollback()
+                except Exception: pass
     return {
         "status": "ok",
         "provider": "green_api",
@@ -6793,6 +6824,7 @@ def list_whatsapp_messages():
 
     limit = min(int(request.args.get("limit", 150)), 500)
     chat_id = request.args.get("chat_id") or request.args.get("contact")
+    hours = request.args.get("hours", default=24, type=int)
     query = WhatsAppMessage.query.filter(
         db.or_(
             WhatsAppMessage.organization_id == org_id,
@@ -6800,6 +6832,10 @@ def list_whatsapp_messages():
             WhatsAppMessage.organization_id.is_(None)
         )
     )
+    if hours and hours > 0:
+        import datetime
+        cutoff_m = datetime.datetime.utcnow() - datetime.timedelta(hours=hours)
+        query = query.filter(WhatsAppMessage.created_at >= cutoff_m)
 
     if chat_id:
         raw_chat = str(chat_id).strip()

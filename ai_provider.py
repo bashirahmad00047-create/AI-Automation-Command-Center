@@ -325,7 +325,7 @@ class GeminiAIProvider(BaseAIProvider):
                 return groq.generate_draft_response(name, company, intent, lead_score, route_department, message)
             return self._fallback.generate_draft_response(name, company, intent, lead_score, route_department, message)
 
-    def generate_text(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 500) -> str:
+    def generate_text(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 1000) -> str:
         key = self.effective_api_key
         if not key:
             groq = self._groq_fallback
@@ -334,10 +334,15 @@ class GeminiAIProvider(BaseAIProvider):
             return self._fallback.generate_text(prompt, system_prompt, max_tokens)
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
-            full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+            behavior_directive = (
+                "You are a highly capable and attentive AI assistant. "
+                "When a user sends a long message or voice note, you must analyze it carefully and address EVERY SINGLE QUESTION or point they raised. "
+                "Provide detailed, comprehensive, and professional answers. Never artificially truncate your response."
+            )
+            full_prompt = f"{system_prompt}\n\n{behavior_directive}\n\n{prompt}" if system_prompt else f"{behavior_directive}\n\n{prompt}"
             payload = {
                 "contents": [{"parts": [{"text": full_prompt}]}],
-                "generationConfig": {"maxOutputTokens": max_tokens}
+                "generationConfig": {"maxOutputTokens": 1000}
             }
             req = urllib.request.Request(
                 url,
@@ -553,7 +558,7 @@ class GroqAIProvider(BaseAIProvider):
         )
         return self.generate_text(prompt, max_tokens=300)
 
-    def generate_text(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 500) -> str:
+    def generate_text(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 1000) -> str:
         key = self.effective_api_key
         if not key:
             return self._fallback.generate_text(prompt, system_prompt, max_tokens)
@@ -563,14 +568,21 @@ class GroqAIProvider(BaseAIProvider):
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json"
             }
+            behavior_directive = (
+                "You are a highly capable and attentive AI assistant. "
+                "When a user sends a long message or voice note, you must analyze it carefully and address EVERY SINGLE QUESTION or point they raised. "
+                "Provide detailed, comprehensive, and professional answers. Never artificially truncate your response."
+            )
             messages = []
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "system", "content": f"{system_prompt}\n\n{behavior_directive}"})
+            else:
+                messages.append({"role": "system", "content": behavior_directive})
             messages.append({"role": "user", "content": prompt})
             payload = {
                 "model": self.model,
                 "messages": messages,
-                "max_tokens": max_tokens,
+                "max_tokens": 1000,
                 "temperature": 0.6
             }
             resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=8)

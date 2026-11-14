@@ -88,6 +88,14 @@
             this.activeChatId = chatId || phone;
             window.activeWhatsAppChatId = this.activeChatId;
 
+            if (window.$ && typeof $('#mainChatArea').empty === 'function') {
+                $('#mainChatArea').empty();
+            }
+            const mca = document.getElementById('mainChatArea');
+            if (mca) mca.innerHTML = '';
+            const wms = document.getElementById('waMessagesStream');
+            if (wms && wms !== mca) wms.innerHTML = '';
+
             // Update mobile viewport: show chat area, hide list on small screens
             const listPanel = document.querySelector('.whatsapp-conversations-sidebar, .wa-chat-list-panel');
             const chatPanel = document.querySelector('.whatsapp-chat-main-area, .wa-chat-detail-panel');

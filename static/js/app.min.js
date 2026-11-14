@@ -5436,9 +5436,9 @@ function scheduleNextWhatsAppPoll(customDelay = null) {
     let delay = customDelay;
     if (delay === null) {
         if (waPollFailures === 0) {
-            delay = (waSocket && waSocket.connected) ? 25000 : 3500;
+            delay = 3500;
         } else {
-            delay = Math.min(30000, Math.round(3000 * Math.pow(1.5, waPollFailures)));
+            delay = Math.min(15000, Math.round(3000 * Math.pow(1.3, waPollFailures)));
         }
     }
     waPollTimer = setTimeout(async () => {
@@ -5682,6 +5682,8 @@ function groupWhatsAppConversations(messages) {
             };
         }
         map[normKey].messages.push(m);
+        // Ensure conversation messages are sorted chronologically ascending (oldest first, newest last)
+        map[normKey].messages.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
         // Update last message preview to the most recent message (last in array)
         const latestMsg = map[normKey].messages[map[normKey].messages.length - 1];
         let latestText = (latestMsg.body && latestMsg.body !== '(no text)') ? latestMsg.body : ((latestMsg.is_audio || latestMsg.type === 'audio' || latestMsg.message_type === 'audio') ? '🎤 Voice message' : '(no text)');
@@ -5712,7 +5714,40 @@ function handleWhatsAppChatSearch(val) {
     renderWhatsAppWebUI(waAllMessagesCache, false);
 }
 
+function selectChat(partner, contactName, phone) {
+    if (window.$ && typeof $('#mainChatArea').empty === 'function') {
+        $('#mainChatArea').empty();
+    }
+    const mca = document.getElementById('mainChatArea');
+    if (mca) mca.innerHTML = '';
+    const wms = document.getElementById('waMessagesStream');
+    if (wms && wms !== mca) wms.innerHTML = '';
+
+    // Remove any secondary modal or overlapping div causing double interface
+    const overlapping = document.querySelectorAll('.chat-modal, .secondary-chat-box, #secondaryChatContainer, #waClassicViewContainer');
+    overlapping.forEach(el => {
+        if (el) el.style.display = 'none';
+    });
+
+    return selectWhatsAppChat(partner || phone || contactName);
+}
+window.selectChat = selectChat;
+
 function selectWhatsAppChat(partner) {
+    if (window.$ && typeof $('#mainChatArea').empty === 'function') {
+        $('#mainChatArea').empty();
+    }
+    const mca = document.getElementById('mainChatArea');
+    if (mca) mca.innerHTML = '';
+    const wms = document.getElementById('waMessagesStream');
+    if (wms && wms !== mca) wms.innerHTML = '';
+
+    // Hide any conflicting secondary containers causing double interface
+    const overlapping = document.querySelectorAll('.chat-modal, .secondary-chat-box, #secondaryChatContainer, #waClassicViewContainer');
+    overlapping.forEach(el => {
+        if (el) el.style.display = 'none';
+    });
+
     waActiveChatPartner = normalizeWaPhone(partner) || partner;
     if (window.innerWidth <= 768) {
         enterMobileChatView();
@@ -7365,7 +7400,7 @@ window.toggleActiveGroupAi = toggleActiveGroupAi;
 
 function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender = false) {
     const convList = document.getElementById('waConversationList');
-    const msgStream = document.getElementById('waMessagesStream');
+    const msgStream = document.getElementById('mainChatArea') || document.getElementById('waMessagesStream');
     if (!convList || !msgStream) return;
 
     const conversations = groupWhatsAppConversations(messages);
@@ -7495,7 +7530,7 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                 }
 
                 return `
-                    <div class="wa-chat-item ${isActive ? 'active' : ''}" onclick="selectWhatsAppChat('${escapeHtml(c.normalizedPhone || c.phone)}')">
+                    <div class="wa-chat-item ${isActive ? 'active' : ''}" onclick="selectChat('${escapeHtml(c.normalizedPhone || c.phone)}')">
                         <div class="wa-avatar" style="background-color: ${avatarColor};">
                             ${escapeHtml(initials)}
                         </div>

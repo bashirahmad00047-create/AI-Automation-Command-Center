@@ -141,6 +141,38 @@ def convert_mp3_to_ogg_opus(mp3_bytes: bytes) -> Optional[bytes]:
     return None
 
 
+def _is_english_response(response_text: str, language_hint: Optional[str] = None) -> bool:
+    """Bulletproof intercept: returns True if text is English, completely bypassing DB lookup."""
+    txt = str(response_text or "").strip()
+    if not txt:
+        return True
+    try:
+        from services.ai_responder import detect_language
+        dl = detect_language(txt)
+        if isinstance(dl, dict) and dl.get("language") == "english":
+            return True
+        elif isinstance(dl, str) and dl.lower() == "english":
+            return True
+    except Exception:
+        pass
+    if str(language_hint or "").lower() in ("en", "english"):
+        return True
+    has_arabic = any('\u0600' <= ch <= '\u06FF' for ch in txt)
+    if has_arabic:
+        return False
+    wds = re.findall(r'[a-zA-Z]+', txt.lower())
+    ru_wds = {
+        "salam", "assalam", "assalamoalaikum", "assalam-o-alaikum", "assalamualaikum", "walaikum", "walekum",
+        "kya", "kia", "kaise", "kese", "theek", "thik", "bhai", "shukriya", "janab", "sahab", "ji", "jee",
+        "hain", "hoon", "hun", "hai", "nahi", "nhi", "nahin", "mujhe", "mjhe", "humein", "hum", "ap", "aap",
+        "apka", "aapka", "apki", "aapki", "apke", "aapke", "karo", "karein", "karain", "karna", "raha", "rahe",
+        "rahi", "gaya", "gaye", "gayi", "chahiye", "zaroor", "bilkul", "bohot", "boht", "acha", "achha", "achi"
+    }
+    if sum(1 for w in wds if w in ru_wds) >= 2 or any(w in wds for w in ["salam", "assalam", "theek", "shukriya", "walaikum", "bilkul"]):
+        return False
+    return True
+
+
 def synthesize_edge_tts(
     text: str,
     voice: Optional[str] = None,
@@ -164,33 +196,24 @@ def synthesize_edge_tts(
     if not clean_text:
         clean_text = str(text).strip()
 
+    response_text = clean_text or str(text).strip()
     lang_str = str(language or "").lower()
-    is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in clean_text)
-    words = re.findall(r'[a-zA-Z]+', clean_text.lower())
-    roman_urdu_words = {
-        "salam", "assalam", "assalamoalaikum", "assalam-o-alaikum", "assalamualaikum", "walaikum", "walekum",
-        "kya", "kia", "kaise", "kese", "theek", "thik", "bhai", "shukriya", "janab", "sahab", "ji", "jee",
-        "hain", "hoon", "hun", "hai", "nahi", "nhi", "nahin", "mujhe", "mjhe", "humein", "hum", "ap", "aap",
-        "apka", "aapka", "apki", "aapki", "apke", "aapke", "karo", "karein", "karain", "karna", "raha", "rahe",
-        "rahi", "gaya", "gaye", "gayi", "chahiye", "zaroor", "bilkul", "bohot", "boht", "acha", "achha", "achi",
-        "walay", "wale", "wala", "wali", "kitna", "kitne", "kitni", "paisay", "paise", "rupay", "rupaye",
-        "shukria", "meherbani", "sunayein", "sunao", "batayein", "batao", "rabta", "order", "delivery", "kahan",
-        "kidhar", "kab", "tak", "hoga", "hogi", "hogaya", "hogayi", "kuch", "aur", "ye", "yeh", "wo", "woh",
-        "mein", "main", "se", "ko", "par", "pe", "ka", "ke", "ki", "bhi"
-    }
-    is_roman_urdu = sum(1 for w in words if w in roman_urdu_words) >= 2 or any(w in words for w in ["salam", "assalam", "theek", "shukriya", "walaikum", "bilkul"])
-    is_english = bool(lang_str in ("en", "english") or (not is_arabic_script and not is_roman_urdu))
-    is_urdu = not is_english and ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script or is_roman_urdu)
+    is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in response_text)
 
-    # Dynamic TTS Voice Override: If the response text is in English, forcefully override
-    # to en-US-AvaMultilingualNeural (English Female), completely ignoring the database default.
+    # Bulletproof English Female TTS Override:
+    # Completely bypass the DB lookup for English.
+    # If detect_language(response_text) == 'english': voice_id = 'en-US-AvaMultilingualNeural'.
+    # Under no circumstances should the system fetch the active voice from the database if the text is English.
+    is_english = _is_english_response(response_text, language)
+
     if is_english:
-        active_voice = "en-US-AvaMultilingualNeural"
-        voice = "en-US-AvaMultilingualNeural"
+        voice_id = "en-US-AvaMultilingualNeural"
+        active_voice = voice_id
+        voice = voice_id
         language = "en"
         is_urdu = False
     else:
-        # Read active default voice saved in AI Voice Studio
+        # Strictly fetch DB/environment voice ONLY when NOT English
         studio_default_voice = None
         try:
             from models import SystemSetting
@@ -200,6 +223,21 @@ def synthesize_edge_tts(
         if not studio_default_voice:
             studio_default_voice = os.environ.get("EDGE_TTS_VOICE", "ur-PK-AsadNeural")
         studio_default_voice = str(studio_default_voice).strip()
+
+        words = re.findall(r'[a-zA-Z]+', response_text.lower())
+        roman_urdu_words = {
+            "salam", "assalam", "assalamoalaikum", "assalam-o-alaikum", "assalamualaikum", "walaikum", "walekum",
+            "kya", "kia", "kaise", "kese", "theek", "thik", "bhai", "shukriya", "janab", "sahab", "ji", "jee",
+            "hain", "hoon", "hun", "hai", "nahi", "nhi", "nahin", "mujhe", "mjhe", "humein", "hum", "ap", "aap",
+            "apka", "aapka", "apki", "aapki", "apke", "aapke", "karo", "karein", "karain", "karna", "raha", "rahe",
+            "rahi", "gaya", "gaye", "gayi", "chahiye", "zaroor", "bilkul", "bohot", "boht", "acha", "achha", "achi",
+            "walay", "wale", "wala", "wali", "kitna", "kitne", "kitni", "paisay", "paise", "rupay", "rupaye",
+            "shukria", "meherbani", "sunayein", "sunao", "batayein", "batao", "rabta", "order", "delivery", "kahan",
+            "kidhar", "kab", "tak", "hoga", "hogi", "hogaya", "hogayi", "kuch", "aur", "ye", "yeh", "wo", "woh",
+            "mein", "main", "se", "ko", "par", "pe", "ka", "ke", "ki", "bhi"
+        }
+        is_roman_urdu = sum(1 for w in words if w in roman_urdu_words) >= 2 or any(w in words for w in ["salam", "assalam", "theek", "shukriya", "walaikum", "bilkul"])
+        is_urdu = not is_english and ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script or is_roman_urdu)
 
         # Determine optimal neural voice with Auto Language Detection (Urdu vs Regional)
         if is_urdu:
@@ -230,7 +268,17 @@ def synthesize_edge_tts(
     if not re.match(r"^[+-]\d+%$", str(comm_vol)):
         comm_vol = "+0%"
 
-    speech_input = clean_text[:600]
+    speech_input = clean_text.strip()
+    # Sentence-boundary safety: allow comprehensive responses (up to 4000 chars) for detailed voice notes
+    if len(speech_input) > 4000:
+        truncated = speech_input[:4000]
+        last_delim = max(truncated.rfind(". "), truncated.rfind("! "), truncated.rfind("? "), truncated.rfind("۔ "), truncated.rfind("\n"))
+        if last_delim > 1500:
+            speech_input = truncated[:last_delim + 1].strip()
+        else:
+            last_space = truncated.rfind(" ")
+            speech_input = (truncated[:last_space] if last_space > 1500 else truncated).strip() + "."
+
     if is_urdu or is_arabic_script:
         # Strip intra-sentence commas that cause Edge-TTS to hesitate
         speech_input = re.sub(r'[,،]', ' ', speech_input)
@@ -272,7 +320,11 @@ def synthesize_gtts(text: str, language: Optional[str] = None) -> Optional[bytes
     g_lang = "ur" if ("ur" in lang_str or "urdu" in lang_str or "roman_urdu" in lang_str) else "en"
 
     try:
-        tts = gTTS(text=clean_text[:500], lang=g_lang)
+        gtts_text = clean_text.strip()
+        if len(gtts_text) > 4000:
+            last_delim = max(gtts_text[:4000].rfind(". "), gtts_text[:4000].rfind("! "), gtts_text[:4000].rfind("۔ "))
+            gtts_text = (gtts_text[:last_delim + 1] if last_delim > 1500 else gtts_text[:4000]).strip()
+        tts = gTTS(text=gtts_text, lang=g_lang)
         buf = io.BytesIO()
         tts.write_to_fp(buf)
         data = buf.getvalue()
@@ -301,16 +353,13 @@ def generate_spoken_audio(
     if not text or not str(text).strip():
         return None
 
-    # Dynamic TTS Voice Override: If the response text is in English, forcefully override the voice
-    # parameter to en-US-AvaMultilingualNeural (English Female) ignoring the database default
+    # Bulletproof English Female TTS Override:
+    # If detect_language(response_text) == 'english': voice_id = 'en-US-AvaMultilingualNeural'.
+    # Under no circumstances should the system fetch the active voice from the database if the text is English.
     raw_str = str(text).strip()
-    has_ar = any('\u0600' <= ch <= '\u06FF' for ch in raw_str)
-    wds = re.findall(r'[a-zA-Z]+', raw_str.lower())
-    ru_wds = {"salam", "assalam", "aap", "ap", "aapka", "apka", "madad", "shukriya", "jee", "ji", "hain", "kya", "theek", "bilkul", "chahiye"}
-    is_ru = sum(1 for w in wds if w in ru_wds) >= 2 or any(w in wds for w in ["salam", "assalam", "shukriya", "theek", "bilkul"])
-    lang_s = str(language or "").lower()
-    if (lang_s in ("en", "english") or not has_ar) and not is_ru:
-        voice = "en-US-AvaMultilingualNeural"
+    if _is_english_response(raw_str, language):
+        voice_id = "en-US-AvaMultilingualNeural"
+        voice = voice_id
         language = "en"
 
     clean_text = clean_speech_text(text, language=language)

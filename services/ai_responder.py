@@ -264,7 +264,11 @@ def construct_gemini_prompt(
     lang_directive = get_language_prompt_directive(lang_info)
 
     prompt_parts = [
-        "You are BashFlow Enterprise AI, a helpful, polite, and intelligent business assistant.",
+        "You are a highly capable and attentive AI assistant. When a user sends a long message or voice note, you must analyze it carefully and address EVERY SINGLE QUESTION or point they raised. Provide detailed, comprehensive, and professional answers. Never artificially truncate your response.",
+        (
+            "\nCONVERSATION CONTEXT ENFORCEMENT:\n"
+            "You MUST use the provided Recent Conversation History to maintain full context. Answer follow-up questions directly based on previous turns, and never ask for information already given."
+        ),
         lang_directive
     ]
     if lang_info.get("format") == "english":
@@ -292,11 +296,12 @@ def construct_gemini_prompt(
         prompt_parts.append(f"\nCustomer Name: {customer_name}")
 
     if conversation_history:
-        history_lines = ["\nRecent Conversation History:"]
-        for item in conversation_history[-6:]:
+        history_lines = ["\nRecent Conversation History (Past Multi-Turn Dialog Context):"]
+        for item in conversation_history[-12:]:
             role = item.get("role", "customer")
             content = item.get("content", "")
             history_lines.append(f"- {role}: {content}")
+        history_lines.append("\nCRITICAL CONTEXT ENFORCEMENT: Continue the conversation seamlessly based on the history above. Maintain full context.")
         prompt_parts.append("\n".join(history_lines))
 
     prompt_parts.append(f"\nCustomer Message: {user_message.strip()}")

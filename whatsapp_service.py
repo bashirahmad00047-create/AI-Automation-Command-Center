@@ -596,7 +596,7 @@ class WhatsAppService:
         full_prompt = (
             f"You are a friendly, helpful conversational AI assistant for {b_name}.\n"
             f"{cust_label} has shared an image with the inquiry: '{user_prompt}'.\n"
-            "Analyze the contents of this image accurately and respond politely in 2-3 concise sentences in the customer's language (Roman Urdu, Urdu, or English). Do NOT send corporate introductory speeches. Do NOT use markdown symbols (*, #)."
+            "Analyze the contents of this image accurately and provide a detailed, comprehensive, and helpful response addressing all questions in the customer's language (Roman Urdu, Urdu, or English). Do NOT send corporate introductory speeches. Do NOT use markdown symbols (*, #)."
         )
 
         # 1. Try google.generativeai SDK
@@ -2521,6 +2521,37 @@ class WhatsAppService:
         return t
 
     @classmethod
+    def _is_english_response(cls, response_text: str, language_hint: Optional[str] = None) -> bool:
+        """Bulletproof intercept: returns True if text is English, completely bypassing DB lookup."""
+        txt = str(response_text or "").strip()
+        if not txt:
+            return True
+        try:
+            dl = cls.detect_language(txt)
+            if isinstance(dl, dict) and dl.get("language") == "english":
+                return True
+            elif isinstance(dl, str) and dl.lower() == "english":
+                return True
+        except Exception:
+            pass
+        if str(language_hint or "").lower() in ("en", "english"):
+            return True
+        has_arabic = any('\u0600' <= ch <= '\u06FF' for ch in txt)
+        if has_arabic:
+            return False
+        wds = re.findall(r'[a-zA-Z]+', txt.lower())
+        ru_wds = {
+            "salam", "assalam", "assalamoalaikum", "assalam-o-alaikum", "assalamualaikum", "walaikum", "walekum",
+            "kya", "kia", "kaise", "kese", "theek", "thik", "bhai", "shukriya", "janab", "sahab", "ji", "jee",
+            "hain", "hoon", "hun", "hai", "nahi", "nhi", "nahin", "mujhe", "mjhe", "humein", "hum", "ap", "aap",
+            "apka", "aapka", "apki", "aapki", "apke", "aapke", "karo", "karein", "karain", "karna", "raha", "rahe",
+            "rahi", "gaya", "gaye", "gayi", "chahiye", "zaroor", "bilkul", "bohot", "boht", "acha", "achha", "achi"
+        }
+        if sum(1 for w in wds if w in ru_wds) >= 2 or any(w in wds for w in ["salam", "assalam", "theek", "shukriya", "walaikum", "bilkul"]):
+            return False
+        return True
+
+    @classmethod
     def _synthesize_edge_tts(
         cls,
         text: str,
@@ -2557,31 +2588,34 @@ class WhatsAppService:
                 clean_speech = raw_txt
 
             is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in clean_speech)
-            words = re.findall(r'[a-zA-Z]+', clean_speech.lower())
-            roman_urdu_words = {
-                "salam", "assalam", "assalamoalaikum", "assalam-o-alaikum", "assalamualaikum", "walaikum", "walekum",
-                "kya", "kia", "kaise", "kese", "theek", "thik", "bhai", "shukriya", "janab", "sahab", "ji", "jee",
-                "hain", "hoon", "hun", "hai", "nahi", "nhi", "nahin", "mujhe", "mjhe", "humein", "hum", "ap", "aap",
-                "apka", "aapka", "apki", "aapki", "apke", "aapke", "karo", "karein", "karain", "karna", "raha", "rahe",
-                "rahi", "gaya", "gaye", "gayi", "chahiye", "zaroor", "bilkul", "bohot", "boht", "acha", "achha", "achi",
-                "walay", "wale", "wala", "wali", "kitna", "kitne", "kitni", "paisay", "paise", "rupay", "rupaye",
-                "shukria", "meherbani", "sunayein", "sunao", "batayein", "batao", "rabta", "order", "delivery", "kahan",
-                "kidhar", "kab", "tak", "hoga", "hogi", "hogaya", "hogayi", "kuch", "aur", "ye", "yeh", "wo", "woh",
-                "mein", "main", "se", "ko", "par", "pe", "ka", "ke", "ki", "bhi", "sirf", "lekin", "magar"
-            }
-            is_roman_urdu = sum(1 for w in words if w in roman_urdu_words) >= 2 or any(w in words for w in ["salam", "assalam", "theek", "shukriya", "walaikum", "bilkul"])
-            is_english = bool(lang_str in ("en", "english") or (not is_arabic_script and not is_roman_urdu))
-            is_urdu = not is_english and ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script or is_roman_urdu)
+            # Bulletproof English Female TTS Override:
+            # Completely bypass the DB lookup for English.
+            # If detect_language(response_text) == 'english': voice_id = 'en-US-AvaMultilingualNeural'
+            # Under no circumstances should the system fetch the active voice from the database if the text is English.
+            is_english = cls._is_english_response(clean_speech, language)
 
-            # Dynamic TTS Voice Override:
-            # If the response text is in English, forcefully override to en-US-AvaMultilingualNeural,
-            # completely ignoring the UI / database default ('ur-PK-AsadNeural').
             if is_english:
-                active_voice = "en-US-AvaMultilingualNeural"
-                voice = "en-US-AvaMultilingualNeural"
+                voice_id = "en-US-AvaMultilingualNeural"
+                active_voice = voice_id
+                voice = voice_id
                 language = "en"
                 is_urdu = False
             else:
+                words = re.findall(r'[a-zA-Z]+', clean_speech.lower())
+                roman_urdu_words = {
+                    "salam", "assalam", "assalamoalaikum", "assalam-o-alaikum", "assalamualaikum", "walaikum", "walekum",
+                    "kya", "kia", "kaise", "kese", "theek", "thik", "bhai", "shukriya", "janab", "sahab", "ji", "jee",
+                    "hain", "hoon", "hun", "hai", "nahi", "nhi", "nahin", "mujhe", "mjhe", "humein", "hum", "ap", "aap",
+                    "apka", "aapka", "apki", "aapki", "apke", "aapke", "karo", "karein", "karain", "karna", "raha", "rahe",
+                    "rahi", "gaya", "gaye", "gayi", "chahiye", "zaroor", "bilkul", "bohot", "boht", "acha", "achha", "achi",
+                    "walay", "wale", "wala", "wali", "kitna", "kitne", "kitni", "paisay", "paise", "rupay", "rupaye",
+                    "shukria", "meherbani", "sunayein", "sunao", "batayein", "batao", "rabta", "order", "delivery", "kahan",
+                    "kidhar", "kab", "tak", "hoga", "hogi", "hogaya", "hogayi", "kuch", "aur", "ye", "yeh", "wo", "woh",
+                    "mein", "main", "se", "ko", "par", "pe", "ka", "ke", "ki", "bhi", "sirf", "lekin", "magar"
+                }
+                is_roman_urdu = sum(1 for w in words if w in roman_urdu_words) >= 2 or any(w in words for w in ["salam", "assalam", "theek", "shukriya", "walaikum", "bilkul"])
+                is_urdu = not is_english and ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script or is_roman_urdu)
+
                 studio_voice = (
                     cls._get_tenant_or_global_setting("EDGE_TTS_VOICE", organization_id=organization_id)
                     or os.environ.get("EDGE_TTS_VOICE")
@@ -2850,7 +2884,7 @@ class WhatsAppService:
                 output_format.lower() in ('oga', 'ogg', 'opus')
                 or (language and ('ur' in language.lower() or 'urdu' in language.lower()))
             )
-            edge_bytes = cls._synthesize_edge_tts(clean_text[:500], language=language, organization_id=organization_id, voice=voice)
+            edge_bytes = cls._synthesize_edge_tts(clean_text, language=language, organization_id=organization_id, voice=voice)
             if edge_bytes and len(edge_bytes) > 64:
                 ogg_converted = cls.convert_mp3_to_ogg_opus(edge_bytes)
                 if ogg_converted and ogg_converted[:4] == b'OggS':
@@ -3732,21 +3766,35 @@ class WhatsAppService:
             return []
 
         org_id = organization_id or "org-enterprise-default"
-        clean_contact = cls.format_phone_number(sender_phone)
-        last_digits = clean_contact[-8:] if len(clean_contact) >= 8 else clean_contact
+        clean_contact = cls.format_phone_number(sender_phone) or str(sender_phone)
+        digits_only = "".join(filter(str.isdigit, str(sender_phone)))
+        last_digits = digits_only[-8:] if len(digits_only) >= 8 else digits_only
 
         try:
-            msgs = WhatsAppMessage.query.filter(
+            phone_conds = [
+                WhatsAppMessage.sender == clean_contact,
+                WhatsAppMessage.sender == str(sender_phone),
+                WhatsAppMessage.recipient == clean_contact,
+                WhatsAppMessage.recipient == str(sender_phone),
+            ]
+            if last_digits and len(last_digits) >= 7:
+                phone_conds.extend([
+                    WhatsAppMessage.sender.like(f"%{last_digits}%"),
+                    WhatsAppMessage.recipient.like(f"%{last_digits}%")
+                ])
+
+            org_cond = db.or_(
                 WhatsAppMessage.organization_id == org_id,
-                (
-                    (WhatsAppMessage.sender == clean_contact) |
-                    (WhatsAppMessage.sender == sender_phone) |
-                    (WhatsAppMessage.sender.like(f"%{last_digits}")) |
-                    (WhatsAppMessage.recipient == clean_contact) |
-                    (WhatsAppMessage.recipient == sender_phone) |
-                    (WhatsAppMessage.recipient.like(f"%{last_digits}"))
-                )
-            ).order_by(WhatsAppMessage.created_at.desc(), WhatsAppMessage.id.desc()).limit(limit).all()
+                WhatsAppMessage.organization_id == "org-enterprise-default",
+                WhatsAppMessage.organization_id.is_(None)
+            ) if org_id else True
+
+            msgs = WhatsAppMessage.query.filter(
+                org_cond,
+                db.or_(*phone_conds),
+                ~WhatsAppMessage.sender.like("%@g.us"),
+                ~WhatsAppMessage.recipient.like("%@g.us")
+            ).order_by(WhatsAppMessage.created_at.desc(), WhatsAppMessage.id.desc()).limit(max(limit, 15)).all()
 
             history: List[Dict[str, Any]] = []
             for m in reversed(msgs):
@@ -4293,7 +4341,7 @@ class WhatsAppService:
                     "0. TONE & PERSONA (HIGHLY PROFESSIONAL INTERNATIONAL STANDARD): When communicating in English, you MUST use a highly professional, polite, standard international business tone. Strictly NO local Pakistani slang, desi persona, cultural honorifics (such as 'bhai', 'janab', 'sahab', 'sb', 'ji'), or Roman Urdu phrasing (such as 'salam', 'walaikum', 'theek', 'acha', 'shukriya', 'kya', 'hain', 'mein') unless the customer explicitly initiated the conversation in Roman Urdu first. Maintain a polished, courteous, globally appropriate customer service standard.\n"
                     "1. STRICT LANGUAGE MATCHING: Since the customer messaged in English, formulate your entire reply 100% in clear, fluent English. Under no circumstances should you mix Urdu words into the English reply.\n"
                     "2. PROFESSIONAL GREETINGS: If the customer greets you in English (e.g. 'Hello', 'Hi', 'Good morning', 'How are you'), reply warmly and professionally in English (e.g., 'Hello! Thank you for reaching out. How can I assist you today?'). NEVER greet with 'Walaikum Assalam' or 'bhai' when responding in English.\n"
-                    "3. DIRECT & HELPFUL: Answer what the customer asked directly, clearly, and concisely in 1 to 3 short polite sentences.\n"
+                    "3. ATTENTIVE & COMPREHENSIVE RESPONSES: You are a highly capable and attentive AI assistant. When a user sends a long message or voice note, you must analyze it carefully and address EVERY SINGLE QUESTION or point they raised. Provide detailed, comprehensive, and professional answers. Never artificially truncate your response. You MUST use the provided chat_history to maintain unbroken context.\n"
                     "4. DUAL OUTPUT JSON FORMAT: Always output response as a clean JSON object with two fields:\n"
                     '   {"display_text": "<Clean, highly professional English text without markdown artifacts>", "voice_script": "<Natural standard English speech text for Microsoft Edge Neural English TTS (en-US-AvaMultilingualNeural)>", "speech_text": "<Natural standard English speech text matching voice_script>"}\n'
                     "   If JSON is not possible, deliver clean text directly without asterisks or hashtags."
@@ -4304,7 +4352,7 @@ class WhatsAppService:
                     "0. TONE & PERSONA: When communicating in English, you MUST use a highly professional, polite, standard international business tone. Strictly NO local Pakistani slang, desi persona, cultural honorifics ('bhai', 'janab', 'sahab', 'sb', 'ji'), or Roman Urdu phrasing ('acha', 'theek', 'salam', 'shukriya') unless the customer explicitly initiated in Roman Urdu first.\n"
                     "1. STRICT LANGUAGE MATCHING: Formulate your entire reply 100% in clear, fluent English. Strictly NO Urdu mixing.\n"
                     "2. PROFESSIONAL GREETINGS: Reply with standard international English greetings ('Hello!', 'Good day!', 'Hi there!'). NEVER use 'Walaikum Assalam' or 'bhai'.\n"
-                    "3. DIRECT & HELPFUL: Deliver 1 to 3 smooth, helpful, professional sentences without markdown symbols."
+                    "3. ATTENTIVE & COMPREHENSIVE RESPONSES: You are a highly capable and attentive AI assistant. When a user sends a long message or voice note, you must analyze it carefully and address EVERY SINGLE QUESTION or point they raised. Provide detailed, comprehensive, and professional answers. Never artificially truncate your response."
                 )
         else:
             if dual_output:
@@ -4313,7 +4361,7 @@ class WhatsAppService:
                     "0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, heavy, bookish words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein (Urdu mein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor').\n"
                     "1. STRICT LANGUAGE MATCHING: Agar user ne Urdu (ya Roman Urdu) mein pucha hai toh jawab 100% natural Pakistani Urdu mein dein. Kisi bhi surat mein zaban mix ya galat translate na ho.\n"
                     "2. NATURAL GREETINGS: If customer says 'Kaise ho ap', 'Salam', or greets you, reply warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
-                    "3. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, helpful conversational partner. Answer what the customer asked directly and politely in 1 to 3 short friendly sentences.\n"
+                    "3. TAFSEELI AUR JAME JAWAB: You are a highly capable and attentive AI assistant. When a user sends a long message or voice note, you must analyze it carefully and address EVERY SINGLE QUESTION or point they raised. Provide detailed, comprehensive, and professional answers. Never artificially truncate your response. Chat history ka mukammal istemal karein taake har cheez ka rabt qayam rahe.\n"
                     "4. DUAL OUTPUT JSON FORMAT: Always output response as a clean JSON object with two fields:\n"
                     '   {"display_text": "<Conversational Roman Urdu / English for chat bubble transcript without markdown artifacts>", "voice_script": "<Pure conversational Urdu Nastaliq script (اردو) with English technical/product terms kept natural or transliterated e.g. آرڈر ٹریکنگ, سروس, ڈیلیوری, بیش فلو for Microsoft Edge Neural Pakistani TTS>", "speech_text": "<Pure Urdu script matching voice_script>"}\n'
                     "   If JSON is not possible, deliver clean text directly without asterisks or hashtags."
@@ -4324,7 +4372,7 @@ class WhatsAppService:
                     "0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, heavy, bookish words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor'.\n"
                     "1. STRICT LANGUAGE MATCHING: Jawab 100% natural Pakistani Urdu / Roman Urdu mein dein.\n"
                     "2. NATURAL GREETINGS: Warm greetings like 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein...'.\n"
-                    "3. GENERAL-PURPOSE & DIRECT: 1 to 3 short, friendly, polite sentences without markdown symbols."
+                    "3. TAFSEELI AUR JAME JAWAB: You are a highly capable and attentive AI assistant. When a user sends a long message or voice note, you must analyze it carefully and address EVERY SINGLE QUESTION or point they raised. Provide detailed, comprehensive, and professional answers. Never artificially truncate your response."
                 )
 
     class MultimodalAudioResult(tuple):
@@ -4599,13 +4647,20 @@ class WhatsAppService:
         history_section = ""
         if conversation_history:
             history_lines = []
-            for item in conversation_history[-5:]:
+            for item in conversation_history[-12:]:
                 r = item.get("role", "Customer")
-                c = item.get("content", "").strip()
+                c = (item.get("formatted_content") or item.get("content", "")).strip()
                 if c:
                     history_lines.append(f"{r}: {c}")
             if history_lines:
-                history_section = "\n\nRecent Conversation History (Past 3-5 Turns in Pakistan Time):\n" + "\n".join(history_lines)
+                history_section = (
+                    "\n\nRecent Conversation History (Past Multi-Turn Dialog in Pakistan Time):\n"
+                    + "\n".join(history_lines)
+                    + "\n\nCRITICAL CONTEXT AWARENESS:\n"
+                    "Seamlessly continue the conversation based on the conversation history above. "
+                    "Remember previous details, product inquiries, names, and orders discussed. "
+                    "NEVER ask the customer for information they have already provided."
+                )
 
         b_name = cls.get_tenant_business_name(organization_id=organization_id)
         cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
@@ -4614,7 +4669,7 @@ class WhatsAppService:
         protocol_directive = cls._get_assistant_protocol_directive(lang_info.get("format", "english"), dual_output=True)
         pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
         prompt = (
-            f"You are a friendly, highly intelligent conversational AI assistant for {b_name}.\n"
+            f"You are a highly capable and attentive AI assistant for {b_name}. When a user sends a long message or voice note, you must analyze it carefully and address EVERY SINGLE QUESTION or point they raised. Provide detailed, comprehensive, and professional answers. Never artificially truncate your response.\n"
             f"Current Real-World Time: {pkt_time_str}.\n"
             f"{sys_instruct}{history_section}\n\n"
             f"{lang_directive}\n\n"
@@ -4876,13 +4931,20 @@ class WhatsAppService:
         history_section = ""
         if conversation_history:
             history_lines = []
-            for item in conversation_history[-5:]:
+            for item in conversation_history[-12:]:
                 r = item.get("role", "Customer")
                 c = (item.get("formatted_content") or item.get("content", "")).strip()
                 if c:
                     history_lines.append(f"{r}: {c}")
             if history_lines:
-                history_section = "\n\nRecent Conversation History (Past 3-5 Turns in Pakistan Time):\n" + "\n".join(history_lines)
+                history_section = (
+                    "\n\nRecent Conversation History (Past Multi-Turn Dialog in Pakistan Time):\n"
+                    + "\n".join(history_lines)
+                    + "\n\nCRITICAL CONTEXT AWARENESS:\n"
+                    "Seamlessly continue the conversation based on the conversation history above. "
+                    "Remember previous details, product inquiries, names, and orders discussed. "
+                    "NEVER ask the customer for information they have already provided."
+                )
 
         b_name = cls.get_tenant_business_name(organization_id=organization_id)
         pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
@@ -4955,7 +5017,7 @@ class WhatsAppService:
 
         b_name = cls.get_tenant_business_name(organization_id=organization_id)
         messages: List[Dict[str, str]] = [
-            {"role": "system", "content": f"You are an intelligent, polite, and direct AI assistant for {b_name}.{sys_instruct}"}
+            {"role": "system", "content": f"You are a highly capable and attentive AI assistant for {b_name}. When a user sends a long message or voice note, you must analyze it carefully and address EVERY SINGLE QUESTION or point they raised. Provide detailed, comprehensive, and professional answers. Never artificially truncate your response.{sys_instruct}"}
         ]
         if conversation_history:
             for turn in conversation_history[-6:]:
@@ -4972,7 +5034,7 @@ class WhatsAppService:
                     "model": m_name,
                     "messages": messages,
                     "temperature": 0.6,
-                    "max_tokens": 400
+                    "max_tokens": 1000
                 }
                 resp = requests.post(
                     "https://api.groq.com/openai/v1/chat/completions",
@@ -7289,12 +7351,12 @@ class WhatsAppService:
                     from services.voice_engine import generate_spoken_audio as voice_engine_synth
                     emerg_lang = "en" if synth_lang == "en" else "ur"
                     emerg_voice = "en-US-AvaMultilingualNeural" if emerg_lang == "en" else None
-                    emerg_res = voice_engine_synth(text=clean_reply_text[:500], language=emerg_lang, organization_id=org_id, output_format="oga", voice=emerg_voice)
+                    emerg_res = voice_engine_synth(text=clean_reply_text, language=emerg_lang, organization_id=org_id, output_format="oga", voice=emerg_voice)
                     emerg_bytes = emerg_res[0] if (emerg_res and emerg_res[0]) else None
                     if not emerg_bytes:
                         from gtts import gTTS
                         import io
-                        tts = gTTS(text=clean_reply_text[:500], lang=emerg_lang)
+                        tts = gTTS(text=clean_reply_text, lang=emerg_lang)
                         buf = io.BytesIO()
                         tts.write_to_fp(buf)
                         emerg_bytes = buf.getvalue()
@@ -9788,7 +9850,7 @@ class WhatsAppService:
         chk_sender = str(sender or "")
         chk_recip = str(recipient or "")
         chk_chat = str(kwargs.get("chat_id") or (raw_payload.get("chat_id") if isinstance(raw_payload, dict) else "") or (raw_payload.get("remoteJid") if isinstance(raw_payload, dict) else "") or "")
-        if "@g.us" in chk_sender or "@g.us" in chk_recip or "@g.us" in chk_chat or chk_sender.startswith("120363") or chk_recip.startswith("120363"):
+        if chk_sender.endswith("@g.us") or chk_recip.endswith("@g.us") or chk_chat.endswith("@g.us") or "@g.us" in chk_sender or "@g.us" in chk_recip or "@g.us" in chk_chat:
             logger.info(f"[Group Chat Hard-Block] Suppressed @g.us message record from DB and Socket.IO broadcast: sender={chk_sender}, recip={chk_recip}")
             return None
 
@@ -9876,8 +9938,8 @@ class WhatsAppService:
                         sio = current_app.config.get("SOCKETIO") or getattr(current_app, "socketio", None)
                     if sio:
                         msg_dict = msg.to_dict()
-                        sio.emit("new_whatsapp_message", msg_dict)
-                        sio.emit("whatsapp_message", msg_dict)
+                        sio.emit("new_whatsapp_message", msg_dict, namespace="/", broadcast=True)
+                        sio.emit("whatsapp_message", msg_dict, namespace="/", broadcast=True)
                 except Exception:
                     pass
 
