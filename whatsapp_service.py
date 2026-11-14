@@ -390,10 +390,11 @@ class WhatsAppService:
         t = re.sub(r"[*_~`#>]", "", t)
         t = re.sub(r"^\s*[-*\xe2\x80\xa2]\s*", "", t, flags=re.MULTILINE)
 
-        # Detect script
-        is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in (t or ""))
+        # Detect script and language
         lang_str = str(language or "").lower()
-        use_urdu_script = is_arabic_script or lang_str in ("ur", "urdu")
+        is_english = bool(lang_str in ("en", "english") or (not any('\u0600' <= ch <= '\u06FF' for ch in (t or "")) and not any(w in re.findall(r'[a-zA-Z]+', (t or "").lower()) for w in ["salam", "assalam", "aap", "ap", "madad", "shukriya", "jee", "hain", "kya", "kar"])))
+        is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in (t or "")) if not is_english else False
+        use_urdu_script = (is_arabic_script or lang_str in ("ur", "urdu")) and not is_english
 
         # 1. Number commas: 2,060 -> 2060
         t = re.sub(r'(\d+),(\d+)', r'\g<1>\g<2>', t)
@@ -480,9 +481,11 @@ class WhatsAppService:
                 t = re.sub(r'[\(\[\]\{\)]', ' ', t)
                 t = re.sub(r'[-–—]{2,}', ' ', t)
                 t = re.sub(r'(?<=\s)[-–—](?=\s)', ' ', t)
-            # Maintains pure Latin script so ElevenLabs Multilingual V2 does not glitch on script switching
-            t = re.sub(r"https?://\S+", "hamari website", t)
-            t = re.sub(r"www\.\S+", "hamari website", t)
+            if not is_english:
+                t = re.sub(r"https?://\S+", "hamari website", t)
+                t = re.sub(r"www\.\S+", "hamari website", t)
+            else:
+                t = re.sub(r"https?://\S+|www\.\S+", "", t)
 
             # Clean rigid bullet structures into fluid spoken pauses
             t = re.sub(r"^\s*(?:\d+[\.\-\)\:]\s*|[-*•]\s*)", "", t, flags=re.MULTILINE)
@@ -496,12 +499,16 @@ class WhatsAppService:
                 t = re.sub(r'OpsFlow', 'Opsflow', t)
 
             # 1. Spoken expansions of logistics and corporate jargon
-            t = re.sub(r"\b24/7\b", "chobees ghante", t)
-            t = re.sub(r"\bCOD\b", "cash on delivery", t, flags=re.IGNORECASE)
-            t = re.sub(r"\bM&P\b", "M and P", t, flags=re.IGNORECASE)
-            t = re.sub(r"(?i)\b(tracking[\s\-]?(id|number|no)?)\b[:\s]*", "tracking number, ", t)
-            t = re.sub(r"(?i)\b(moaziz\s*(sarif|customer)|dear customer)\b", "yar", t)
-            t = re.sub(r"(?i)\b(baraye meherbani|barah-e-karam)\b", "zara", t)
+            if not is_english:
+                t = re.sub(r"\b24/7\b", "chobees ghante", t)
+                t = re.sub(r"\bCOD\b", "cash on delivery", t, flags=re.IGNORECASE)
+                t = re.sub(r"\bM&P\b", "M and P", t, flags=re.IGNORECASE)
+                t = re.sub(r"(?i)\b(tracking[\s\-]?(id|number|no)?)\b[:\s]*", "tracking number, ", t)
+                t = re.sub(r"(?i)\b(moaziz\s*(sarif|customer)|dear customer)\b", "yar", t)
+                t = re.sub(r"(?i)\b(baraye meherbani|barah-e-karam)\b", "zara", t)
+            else:
+                t = re.sub(r"\b24/7\b", "twenty four seven", t)
+                t = re.sub(r"\bCOD\b", "cash on delivery", t, flags=re.IGNORECASE)
 
             # 2. Grammar & pricing adjustments (e.g. "Aap ka fee 25000 hai" -> "Aap ki fee, pachees hazar rupay hai")
             t = re.sub(
@@ -1098,7 +1105,7 @@ class WhatsAppService:
         from models import WhatsAppDeletedItem
         org_id = organization_id or "org-enterprise-default"
         raw_contact = str(contact_phone or "").strip()
-        is_grp = raw_contact.endswith("@g.us")
+        is_grp = raw_contact.endswith("@g.us") or raw_contact.startswith("120363") or "@g.us" in raw_contact
         clean_contact = raw_contact.replace("@c.us", "").replace("@s.whatsapp.net", "").strip()
         formatted_contact = cls.format_phone_number(clean_contact) if not is_grp else None
         digits_only = "".join(filter(str.isdigit, str(clean_contact)))
@@ -2273,12 +2280,28 @@ class WhatsAppService:
     def _parse_dual_ai_output(cls, raw_reply: str, language: Optional[str] = None) -> Tuple[str, str]:
         """Parses dual-output AI responses into:
         1. display_text: Clean, conversational Roman Urdu / English for chat bubble transcript.
-        2. speech_text: Pure Urdu Nastaliq script (اردو) with transliterated terms for natural Pakistani Edge-TTS.
+        2. speech_text: Pure Urdu Nastaliq script (اردو) with transliterated terms for natural Pakistani Edge-TTS,
+           OR natural English speech text for English TTS.
         """
         if not raw_reply or not str(raw_reply).strip():
             return ("", "")
 
         cleaned_raw = str(raw_reply).strip()
+
+        def _is_text_english(text_sample: str) -> bool:
+            if not text_sample:
+                return True
+            if any('\u0600' <= ch <= '\u06FF' for ch in text_sample):
+                return False
+            words = re.findall(r'[a-zA-Z]+', text_sample.lower())
+            ru_words = {
+                "salam", "assalam", "aap", "ap", "aapka", "apka", "aapki", "apki", "madad",
+                "shukriya", "jee", "ji", "hain", "hoon", "hai", "nahi", "nhi", "kya", "kia",
+                "kaise", "theek", "bilkul", "bhai", "karo", "karein", "chahiye", "zaroor"
+            }
+            if sum(1 for w in words if w in ru_words) >= 2 or any(w in words for w in ["salam", "assalam", "shukriya", "theek", "bilkul"]):
+                return False
+            return True
 
         # Check for JSON format (either pure JSON or wrapped in ```json ... ```)
         import json
@@ -2295,8 +2318,12 @@ class WhatsAppService:
                     disp = str(parsed.get("display_text") or parsed.get("displayText") or parsed.get("text") or "").strip()
                     spch = str(parsed.get("voice_script") or parsed.get("speech_text") or parsed.get("speechText") or parsed.get("audio_text") or "").strip()
                     if disp:
-                        if not spch:
-                            spch = cls.roman_to_urdu_script(disp)
+                        if _is_text_english(disp):
+                            # Strictly English: NEVER transliterate to Urdu!
+                            spch = disp if (not spch or any('\u0600' <= ch <= '\u06FF' for ch in spch)) else spch
+                        else:
+                            if not spch:
+                                spch = cls.roman_to_urdu_script(disp)
                         return (disp, spch)
             except Exception:
                 pass
@@ -2306,16 +2333,22 @@ class WhatsAppService:
         spch_m = re.search(r"\[(?:VOICE_SCRIPT|SPEECH_TEXT)\](.*?)\[/(?:VOICE_SCRIPT|SPEECH_TEXT)\]", cleaned_raw, re.DOTALL | re.IGNORECASE)
         if disp_m:
             disp = disp_m.group(1).strip()
-            spch = spch_m.group(1).strip() if spch_m else cls.roman_to_urdu_script(disp)
+            if _is_text_english(disp):
+                spch = disp
+            else:
+                spch = spch_m.group(1).strip() if spch_m else cls.roman_to_urdu_script(disp)
             return (disp, spch)
 
         # Fallback: Plain text response
         clean_disp = re.sub(r"[*_~`#>]", "", cleaned_raw).strip()
-        lang_s = str(language or "").lower()
-        if "urdu" in lang_s or lang_s == "ur":
-            clean_speech = cls.roman_to_urdu_script(clean_disp)
-        else:
+        if _is_text_english(clean_disp):
             clean_speech = clean_disp
+        else:
+            lang_s = str(language or "").lower()
+            if "urdu" in lang_s or lang_s == "ur":
+                clean_speech = cls.roman_to_urdu_script(clean_disp)
+            else:
+                clean_speech = clean_disp
         return (clean_disp, clean_speech)
 
     @staticmethod
@@ -2354,10 +2387,14 @@ class WhatsAppService:
         t = re.sub(r'(?i)([\d,]+)\s*(?:pkr|rs\.?)\b', r'\1 rupees', t)
 
         # Injects natural conversational micro-pauses for human breathing
-        t = re.sub(r'(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|as-salamu alaykum|salam)\b(?!\s*[\,\،])', r'\1، ', t)
-        t = re.sub(r'(?i)\b(jee\s*bilkul|ji\s*bilkul|ji\s*haan|jee\s*haan)\b(?!\s*[\,\،])', r'\1، ', t)
-        t = re.sub(r'(?i)\b(bohot\s*shukriya|boht\s*shukriya|shukriya|thank\s*you|thanks)\b(?!\s*[\,\،])', r'\1، ', t)
-        t = re.sub(r'(?i)\b(acha\s*dekhein|achha\s*dekhein|dekhein)\b(?!\s*[\,\،])', r'\1، ', t)
+        lang_s = str(language or "").lower()
+        if "en" in lang_s or "english" in lang_s:
+            t = re.sub(r'(?i)\b(thank\s*you|thanks)\b(?!\s*\,)', r'\1, ', t)
+        else:
+            t = re.sub(r'(?i)\b(assalam[\s\-]?[uo]?[\s\-]?[a-z]*|as-salamu alaykum|salam)\b(?!\s*[\,\،])', r'\1، ', t)
+            t = re.sub(r'(?i)\b(jee\s*bilkul|ji\s*bilkul|ji\s*haan|jee\s*haan)\b(?!\s*[\,\،])', r'\1، ', t)
+            t = re.sub(r'(?i)\b(bohot\s*shukriya|boht\s*shukriya|shukriya)\b(?!\s*[\,\،])', r'\1، ', t)
+            t = re.sub(r'(?i)\b(acha\s*dekhein|achha\s*dekhein|dekhein)\b(?!\s*[\,\،])', r'\1، ', t)
 
         # Clean multiple spaces and punctuation
         t = re.sub(r'[\.]{2,}|\u2026', ' ', t)
@@ -2406,6 +2443,18 @@ class WhatsAppService:
             return ""
         import re
         t = str(text).strip()
+
+        # Guard: If text is pure standard English, do NOT apply Roman Urdu transliterations
+        has_arabic = any('\u0600' <= ch <= '\u06FF' for ch in t)
+        words_lower = re.findall(r'[a-zA-Z]+', t.lower())
+        ru_words = {
+            "salam", "assalam", "aap", "ap", "aapka", "apka", "madad", "shukriya",
+            "jee", "ji", "hain", "hoon", "hai", "nahi", "nhi", "kya", "kia", "kaise",
+            "theek", "bilkul", "bhai", "karo", "karein", "chahiye"
+        }
+        is_ru = sum(1 for w in words_lower if w in ru_words) >= 2 or any(w in words_lower for w in ["salam", "assalam", "shukriya", "theek", "bilkul"])
+        if not has_arabic and not is_ru:
+            return t
 
         # 1. Apply Custom Pronunciation Dictionary
         cdict = custom_dict if (custom_dict is not None and isinstance(custom_dict, dict)) else cls.get_custom_pronunciations(organization_id=organization_id)
@@ -2498,12 +2547,15 @@ class WhatsAppService:
             clean_speech = re.sub(r'[*_~`#>•\-\[\]\(\)]', ' ', raw_txt)
             clean_speech = re.sub(r'[\U00010000-\U0010ffff]', '', clean_speech)
             clean_speech = re.sub(r'[\.]{2,}|\u2026|[-]{2,}', ' ', clean_speech)
-            clean_speech = re.sub(r'[,\،]{2,}', '،', clean_speech)
+            lang_str = str(language or "").lower()
+            if "en" in lang_str or "english" in lang_str:
+                clean_speech = re.sub(r'[,]{2,}', ', ', clean_speech)
+            else:
+                clean_speech = re.sub(r'[,\،]{2,}', '،', clean_speech)
             clean_speech = re.sub(r'\s+', ' ', clean_speech).strip()
             if not clean_speech:
                 clean_speech = raw_txt
 
-            lang_str = str(language or "").lower()
             is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in clean_speech)
             words = re.findall(r'[a-zA-Z]+', clean_speech.lower())
             roman_urdu_words = {
@@ -2518,13 +2570,45 @@ class WhatsAppService:
                 "mein", "main", "se", "ko", "par", "pe", "ka", "ke", "ki", "bhi", "sirf", "lekin", "magar"
             }
             is_roman_urdu = sum(1 for w in words if w in roman_urdu_words) >= 2 or any(w in words for w in ["salam", "assalam", "theek", "shukriya", "walaikum", "bilkul"])
-            is_urdu = ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script or is_roman_urdu)
+            is_english = bool(lang_str in ("en", "english") or (not is_arabic_script and not is_roman_urdu))
+            is_urdu = not is_english and ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script or is_roman_urdu)
 
-            studio_voice = (
-                cls._get_tenant_or_global_setting("EDGE_TTS_VOICE", organization_id=organization_id)
-                or os.environ.get("EDGE_TTS_VOICE")
-                or "ur-PK-AsadNeural"
-            ).strip()
+            # Dynamic TTS Voice Override:
+            # If the response text is in English, forcefully override to en-US-AvaMultilingualNeural,
+            # completely ignoring the UI / database default ('ur-PK-AsadNeural').
+            if is_english:
+                active_voice = "en-US-AvaMultilingualNeural"
+                voice = "en-US-AvaMultilingualNeural"
+                language = "en"
+                is_urdu = False
+            else:
+                studio_voice = (
+                    cls._get_tenant_or_global_setting("EDGE_TTS_VOICE", organization_id=organization_id)
+                    or os.environ.get("EDGE_TTS_VOICE")
+                    or "ur-PK-AsadNeural"
+                ).strip()
+
+                # Auto Language Detection & Voice Matching:
+                # If Urdu or Roman Urdu -> automatically use whatever Urdu voice is currently saved as active default in AI Voice Studio
+                if is_urdu:
+                    if "ur-pk" in studio_voice.lower() or "asad" in studio_voice.lower() or "uzma" in studio_voice.lower():
+                        active_voice = studio_voice
+                    elif voice and ("ur-pk" in str(voice).lower() or "asad" in str(voice).lower() or "uzma" in str(voice).lower()):
+                        active_voice = str(voice).strip()
+                    else:
+                        active_voice = "ur-PK-AsadNeural"
+                elif "pashto" in lang_str or lang_str == "ps":
+                    active_voice = "ps-AF-LatifaNeural"
+                elif "arabic" in lang_str or lang_str == "ar":
+                    active_voice = "ar-SA-ZariyahNeural"
+                elif "hindi" in lang_str or lang_str == "hi":
+                    active_voice = "hi-IN-MadhurNeural"
+                elif "spanish" in lang_str or lang_str == "es":
+                    active_voice = "es-ES-ElviraNeural"
+                elif "french" in lang_str or lang_str == "fr":
+                    active_voice = "fr-FR-DeniseNeural"
+                else:
+                    active_voice = "en-US-AvaMultilingualNeural"
 
             configured_rate = (
                 rate
@@ -2541,34 +2625,6 @@ class WhatsAppService:
                 or cls._get_tenant_or_global_setting("EDGE_TTS_VOLUME", organization_id=organization_id)
                 or os.environ.get("EDGE_TTS_VOLUME")
             )
-
-            # Auto Language Detection & Voice Matching:
-            # If Urdu or Roman Urdu -> automatically use whatever Urdu voice is currently saved as active default in AI Voice Studio
-            if is_urdu:
-                if "ur-pk" in studio_voice.lower() or "asad" in studio_voice.lower() or "uzma" in studio_voice.lower():
-                    active_voice = studio_voice
-                elif voice and ("ur-pk" in str(voice).lower() or "asad" in str(voice).lower() or "uzma" in str(voice).lower()):
-                    active_voice = str(voice).strip()
-                else:
-                    active_voice = "ur-PK-AsadNeural"
-            elif "pashto" in lang_str or lang_str == "ps":
-                active_voice = "ps-AF-LatifaNeural"
-            elif "arabic" in lang_str or lang_str == "ar":
-                active_voice = "ar-SA-ZariyahNeural"
-            elif "hindi" in lang_str or lang_str == "hi":
-                active_voice = "hi-IN-MadhurNeural"
-            elif "spanish" in lang_str or lang_str == "es":
-                active_voice = "es-ES-ElviraNeural"
-            elif "french" in lang_str or lang_str == "fr":
-                active_voice = "fr-FR-DeniseNeural"
-            else:
-                # English context
-                if "en-" in studio_voice.lower() or "andrew" in studio_voice.lower() or "ava" in studio_voice.lower():
-                    active_voice = studio_voice
-                elif voice and "en-" in str(voice).lower():
-                    active_voice = str(voice).strip()
-                else:
-                    active_voice = "en-US-AvaMultilingualNeural"
 
             if configured_rate:
                 active_rate = str(configured_rate).strip()
@@ -2596,12 +2652,15 @@ class WhatsAppService:
             else:
                 active_volume = "+10%" if is_urdu else "+0%"
 
-            # Apply Pakistani pronunciation normalization (including custom pronunciation dictionary)
-            speech_for_tts = cls.normalize_pakistani_pronunciation(
-                text=clean_speech,
-                persona=active_voice,
-                organization_id=organization_id
-            )
+            # Apply Pakistani pronunciation normalization (only for Urdu / Roman Urdu)
+            if is_urdu and not is_english:
+                speech_for_tts = cls.normalize_pakistani_pronunciation(
+                    text=clean_speech,
+                    persona=active_voice,
+                    organization_id=organization_id
+                )
+            else:
+                speech_for_tts = clean_speech
 
             if is_urdu or any('\u0600' <= ch <= '\u06FF' for ch in speech_for_tts):
                 # 100% Smooth Single-Breath Cadence: Strip intra-sentence commas and pause markers that cause Edge-TTS to hesitate
@@ -2754,6 +2813,18 @@ class WhatsAppService:
     ) -> Optional[Tuple[bytes, str, str]]:
         if not text or not str(text).strip():
             return None
+
+        # Dynamic TTS Voice Override: If the response text is in English, forcefully override the voice
+        # parameter to en-US-AvaMultilingualNeural (English Female) ignoring the database default
+        raw_str = str(text or "").strip()
+        has_ar = any('\u0600' <= ch <= '\u06FF' for ch in raw_str)
+        wds = re.findall(r'[a-zA-Z]+', raw_str.lower())
+        ru_wds = {"salam", "assalam", "aap", "ap", "aapka", "apka", "madad", "shukriya", "jee", "ji", "hain", "kya", "theek", "bilkul", "chahiye"}
+        is_ru = sum(1 for w in wds if w in ru_wds) >= 2 or any(w in wds for w in ["salam", "assalam", "shukriya", "theek", "bilkul"])
+        lang_s = str(language or "").lower()
+        if (lang_s in ("en", "english") or not has_ar) and not is_ru:
+            voice = "en-US-AvaMultilingualNeural"
+            language = "en"
 
         clean_text = cls.preprocess_text_for_human_speech(text, language=language)
         clean_text = cls.humanize_speech_text(clean_text or text, language=language)
@@ -6346,19 +6417,17 @@ class WhatsAppService:
                 body_clean_str = "salam"
                 clean_body = "Salam"
 
-        # Group Settings Control: Ignore newsletters, status broadcasts, and groups unless explicitly permitted
+        # Group Settings Control: Ignore newsletters, status broadcasts, and groups
         sender_str = str(sender_phone or "").strip().lower()
         chat_str = str(chat_id or "").strip().lower()
         if not sender_str or "status" in sender_str or "broadcast" in sender_str or "@newsletter" in sender_str:
             return None
 
-        # Check if group conversation (@g.us)
+        # Check if group conversation (@g.us): Group Chat Hard-Block
         is_grp = bool("@g.us" in sender_str or "@g.us" in chat_str or sender_str.startswith("120363") or kwargs.get("isGroup"))
         if is_grp:
-            target_group_jid = chat_str if "@g.us" in chat_str else sender_str
-            if not cls.is_ai_allowed_in_group(target_group_jid, organization_id=organization_id):
-                logger.info(f"[Group AI Shield] AI is disabled for group '{target_group_jid}'. Group responses require explicit admin enablement.")
-                return None
+            logger.info(f"[Group Chat Hard-Block] Group message strictly blocked: sender={sender_str}, chat={chat_str}")
+            return None
 
         # Resolve real WhatsApp chat ID (e.g. 923209350858@c.us or group/lid)
         raw_chat = (
@@ -7141,21 +7210,44 @@ class WhatsAppService:
 
             if should_synth_voice:
                 try:
-                    speech_text = generated.get("voice_script") or generated.get("speech_text") or kwargs.get("tts_script") or clean_reply_text
-                    detected_lang_str = str(kwargs.get("detected_lang") or "").lower()
-                    has_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in (speech_text or clean_reply_text or ""))
-                    is_urdu_context = (
-                        "ur" in detected_lang_str
-                        or "urdu" in detected_lang_str
-                        or has_arabic_script
-                        or any(word in (clean_reply_text or "").lower() for word in ["salam", "aap", "madad", "shukriya", "jee", "hain", "kya", "kar"])
+                    # Language detection for outgoing speech synthesis:
+                    clean_reply_lower = (clean_reply_text or "").lower()
+                    has_arabic_in_reply = any('\u0600' <= ch <= '\u06FF' for ch in (clean_reply_text or ""))
+                    reply_words = re.findall(r'[a-zA-Z]+', clean_reply_lower)
+                    roman_urdu_markers = {
+                        "salam", "assalam", "assalamoalaikum", "assalamualaikum", "walaikum", "walekum",
+                        "aap", "ap", "aapka", "apka", "aapki", "apki", "aapke", "apke", "madad", "shukriya",
+                        "jee", "ji", "hain", "hoon", "hun", "hai", "nahi", "nhi", "nahin", "mujhe", "mjhe",
+                        "humein", "kya", "kia", "kaise", "kese", "kar", "karo", "karein", "karna", "theek",
+                        "thik", "bilkul", "bhai", "chahiye", "zaroor", "bohot", "boht", "acha", "achha"
+                    }
+                    is_roman_urdu = (
+                        sum(1 for w in reply_words if w in roman_urdu_markers) >= 2
+                        or any(w in reply_words for w in ["salam", "assalam", "shukriya", "theek", "bilkul"])
                     )
-                    synth_lang = "ur" if is_urdu_context else (kwargs.get("detected_lang") or "en") 
+
+                    is_urdu_context = bool(has_arabic_in_reply or is_roman_urdu)
+                    if not is_urdu_context:
+                        det_lang = cls.detect_language(clean_reply_text)
+                        if det_lang.get("language") == "urdu" or det_lang.get("format") in ("urdu_arabic", "roman_urdu"):
+                            is_urdu_context = True
+
+                    if is_urdu_context:
+                        synth_lang = "ur"
+                        speech_text = generated.get("voice_script") or generated.get("speech_text") or kwargs.get("tts_script") or clean_reply_text
+                        target_voice = None  # Uses active default Urdu voice from AI Voice Studio (ur-PK-AsadNeural / ur-PK-UzmaNeural)
+                    else:
+                        # Strictly English -> English Natural Female (en-US-AvaMultilingualNeural)
+                        synth_lang = "en"
+                        speech_text = clean_reply_text
+                        target_voice = "en-US-AvaMultilingualNeural"
+
                     audio_res = cls.generate_spoken_audio(
                         text=speech_text,
                         language=synth_lang,
                         organization_id=org_id,
-                        output_format="oga"
+                        output_format="oga",
+                        voice=target_voice
                     )
                     if audio_res:
                         audio_b, audio_fn, audio_mt = audio_res
@@ -7185,7 +7277,7 @@ class WhatsAppService:
                                 ptt=True
                             )
                             dispatch_res = audio_dispatch_res
-                            logger.info(f"[Voice Dispatch Guarantee] Dispatched OGG Opus PTT voice note to {real_chat_id}: result={audio_dispatch_res}")
+                            logger.info(f"[Voice Dispatch Guarantee] Dispatched OGG Opus PTT voice note to {real_chat_id} (voice={target_voice or 'studio_urdu'}, lang={synth_lang}): result={audio_dispatch_res}")
                 except Exception as tts_err:
                     tts_failed = True
                     logger.warning(f"[Voice Fallback Notice] Voice synthesis/dispatch failed for {real_chat_id}: {tts_err}. Falling back to text.")
@@ -7193,14 +7285,16 @@ class WhatsAppService:
             # Emergency voice synthesis: If voice dispatch failed on inbound voice and no audio was produced
             if is_voice_inbound and not tts_failed and not audio_res and (not dispatch_res or (isinstance(dispatch_res, dict) and not dispatch_res.get("success"))):
                 try:
-                    logger.info(f"[Emergency Voice Dispatch] Generating emergency audio for {real_chat_id}...")
+                    logger.info(f"[Emergency Voice Dispatch] Generating emergency audio for {real_chat_id} (lang={synth_lang})...")
                     from services.voice_engine import generate_spoken_audio as voice_engine_synth
-                    emerg_res = voice_engine_synth(text=clean_reply_text[:500], language="ur", organization_id=org_id, output_format="oga")
+                    emerg_lang = "en" if synth_lang == "en" else "ur"
+                    emerg_voice = "en-US-AvaMultilingualNeural" if emerg_lang == "en" else None
+                    emerg_res = voice_engine_synth(text=clean_reply_text[:500], language=emerg_lang, organization_id=org_id, output_format="oga", voice=emerg_voice)
                     emerg_bytes = emerg_res[0] if (emerg_res and emerg_res[0]) else None
                     if not emerg_bytes:
                         from gtts import gTTS
                         import io
-                        tts = gTTS(text=clean_reply_text[:500], lang="ur")
+                        tts = gTTS(text=clean_reply_text[:500], lang=emerg_lang)
                         buf = io.BytesIO()
                         tts.write_to_fp(buf)
                         emerg_bytes = buf.getvalue()
@@ -9690,6 +9784,14 @@ class WhatsAppService:
         **kwargs
     ) -> WhatsAppMessage:
         """Persists a WhatsApp message record in the tenant workspace with real-world Pakistan local time."""
+        # Group Chat Hard-Block: Completely drop any @g.us group messages from DB & Socket.IO
+        chk_sender = str(sender or "")
+        chk_recip = str(recipient or "")
+        chk_chat = str(kwargs.get("chat_id") or (raw_payload.get("chat_id") if isinstance(raw_payload, dict) else "") or (raw_payload.get("remoteJid") if isinstance(raw_payload, dict) else "") or "")
+        if "@g.us" in chk_sender or "@g.us" in chk_recip or "@g.us" in chk_chat or chk_sender.startswith("120363") or chk_recip.startswith("120363"):
+            logger.info(f"[Group Chat Hard-Block] Suppressed @g.us message record from DB and Socket.IO broadcast: sender={chk_sender}, recip={chk_recip}")
+            return None
+
         if not created_at:
             ts = raw_payload.get("timestamp") if isinstance(raw_payload, dict) else None
             created_at = cls.get_pakistan_time(ts)

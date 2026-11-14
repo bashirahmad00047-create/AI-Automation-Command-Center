@@ -2987,9 +2987,12 @@ def api_whatsapp_conversations():
         # Always filter targeted spam group chats
         if "english learning" in sname or "ایمان" in sname or "english learning" in sid.lower() or "ایمان" in sid.lower():
             return True
-        # Filter specifically deleted group chats (@g.us)
-        if is_group or sid.endswith("@g.us") or sphone.endswith("@g.us"):
+        # Filter specifically deleted group chats (@g.us or 120363...)
+        if is_group or sid.endswith("@g.us") or sphone.endswith("@g.us") or sid.startswith("120363") or sphone.startswith("120363"):
             if sid in deleted_ids or sphone in deleted_ids:
+                return True
+            digits = "".join(filter(str.isdigit, sid or sphone))
+            if digits and (digits in deleted_ids or f"{digits}@g.us" in deleted_ids):
                 return True
         # Filter explicitly deleted individual message IDs (wam-..., BAE5..., etc.)
         if sid and (sid.startswith("wam-") or sid.startswith("BAE5") or sid.startswith("3EB0") or len(sid) > 20):
@@ -2998,16 +3001,23 @@ def api_whatsapp_conversations():
         # Normal 1-on-1 customer contacts are NEVER blacklisted
         return False
 
-    # 1. Fetch ALL persisted messages without org_id restrictions
+    # 1. Fetch ALL persisted messages without org_id restrictions (Strictly blocking @g.us group chats)
     try:
-        messages = WhatsAppMessage.query.order_by(WhatsAppMessage.created_at.desc()).limit(500).all()
+        messages = WhatsAppMessage.query.filter(
+            ~WhatsAppMessage.sender.like("%@g.us"),
+            ~WhatsAppMessage.recipient.like("%@g.us"),
+            ~WhatsAppMessage.sender.like("120363%"),
+            ~WhatsAppMessage.recipient.like("120363%")
+        ).order_by(WhatsAppMessage.created_at.desc()).limit(500).all()
         msg_dicts = [
             m.to_dict() for m in messages
             if not is_blacklisted(
                 m.whatsapp_message_id or m.id,
                 m.chat_name or m.sender_name,
-                is_group=bool(m.is_group or (m.recipient and m.recipient.endswith("@g.us")) or (m.sender and m.sender.endswith("@g.us")))
+                is_group=bool(m.is_group or (m.recipient and "@g.us" in m.recipient) or (m.sender and "@g.us" in m.sender))
             )
+            and not (m.sender and "@g.us" in m.sender)
+            and not (m.recipient and "@g.us" in m.recipient)
         ]
     except Exception as m_err:
         logger.warning(f"Error fetching WhatsAppMessage: {m_err}")
@@ -3017,10 +3027,14 @@ def api_whatsapp_conversations():
 
     conv_map = {}
     for m in reversed(msg_dicts):
-        is_grp = bool(m.get("is_group"))
+        is_grp = bool(m.get("is_group") or (m.get("sender") and "@g.us" in m["sender"]) or (m.get("recipient") and "@g.us" in m["recipient"]))
+        if is_grp:
+            continue
         partner = m.get("sender") if m.get("direction") == "inbound" else m.get("recipient")
         partner_str = str(partner or "Unknown")
-        key = partner_str if is_grp else "".join(filter(str.isdigit, partner_str))
+        if "@g.us" in partner_str or partner_str.startswith("120363"):
+            continue
+        key = "".join(filter(str.isdigit, partner_str))
         if not key:
             key = partner_str
 
@@ -3070,8 +3084,8 @@ def api_whatsapp_conversations():
                     if not b_key:
                         b_key = str(b_id)
                     
-                    b_is_grp = bool(b_chat.get("is_group") or str(b_id).endswith("@g.us"))
-                    if b_is_grp and is_blacklisted(b_key, b_chat.get("name"), b_chat.get("phone"), is_group=True):
+                    b_is_grp = bool(b_chat.get("is_group") or str(b_id).endswith("@g.us") or "@g.us" in str(b_id) or str(b_id).startswith("120363"))
+                    if b_is_grp:
                         continue
 
                     if "7142" in b_key or "7142" in str(b_id) or (b_chat.get("name") and "bashir" in str(b_chat.get("name")).lower()):
@@ -3139,7 +3153,12 @@ def api_whatsapp_conversations():
 
     conversations = [
         c for c in conv_map.values()
-        if not (c.get("is_group") and is_blacklisted(c.get("id"), c.get("name"), c.get("phone"), is_group=True))
+        if not c.get("is_group")
+        and "@g.us" not in str(c.get("id") or "")
+        and "@g.us" not in str(c.get("partner") or "")
+        and "@g.us" not in str(c.get("phone") or "")
+        and not str(c.get("id") or "").startswith("120363")
+        and not is_blacklisted(c.get("id"), c.get("name"), c.get("phone"), is_group=False)
     ]
     conversations.sort(key=lambda c: str(c.get("timestamp") or ""), reverse=True)
 

@@ -1040,8 +1040,8 @@ class WhatsAppMessage(db.Model):
             "is_ai_generated": is_ai_generated,
             "response_source": response_source,
             "ai_intent": ai_intent,
-            "is_group": bool((self.sender and "@g.us" in str(self.sender)) or (self.recipient and "@g.us" in str(self.recipient))),
-            "chat_type": "group" if bool((self.sender and "@g.us" in str(self.sender)) or (self.recipient and "@g.us" in str(self.recipient))) else "individual",
+            "is_group": bool(getattr(self, "is_group", False) or (self.sender and ("@g.us" in str(self.sender) or str(self.sender).startswith("120363"))) or (self.recipient and ("@g.us" in str(self.recipient) or str(self.recipient).startswith("120363")))),
+            "chat_type": "group" if bool(getattr(self, "is_group", False) or (self.sender and ("@g.us" in str(self.sender) or str(self.sender).startswith("120363"))) or (self.recipient and ("@g.us" in str(self.recipient) or str(self.recipient).startswith("120363")))) else "individual",
             "status": self.status,
             "execution_id": self.execution_id,
             "error_message": self.error_message,
@@ -1078,7 +1078,7 @@ class WhatsAppMessage(db.Model):
         Also registers deleted JIDs in WhatsAppDeletedItem registry to prevent Baileys resurrection.
         """
         raw_contact = str(contact_phone or "").strip()
-        is_grp = raw_contact.endswith("@g.us")
+        is_grp = raw_contact.endswith("@g.us") or raw_contact.startswith("120363") or "@g.us" in raw_contact
         clean_contact = raw_contact.replace("@c.us", "").replace("@s.whatsapp.net", "").strip()
         digits_only = "".join(filter(str.isdigit, clean_contact))
         last_digits = digits_only[-8:] if len(digits_only) >= 8 else digits_only

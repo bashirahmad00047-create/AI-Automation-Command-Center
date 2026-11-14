@@ -78,7 +78,11 @@ def clean_speech_text(text: str, language: Optional[str] = None) -> str:
 
     # 5. Normalize punctuation and repeated ellipsis
     clean = re.sub(r'[\.]{2,}|\u2026|[-]{2,}', ' ', clean)
-    clean = re.sub(r'[,،]{2,}', '،', clean)
+    lang_str = str(language or "").lower()
+    if "en" in lang_str or "english" in lang_str:
+        clean = re.sub(r'[,]{2,}', ', ', clean)
+    else:
+        clean = re.sub(r'[,،]{2,}', '،', clean)
     clean = re.sub(r'\s+', ' ', clean).strip()
 
     return clean
@@ -175,39 +179,42 @@ def synthesize_edge_tts(
         "mein", "main", "se", "ko", "par", "pe", "ka", "ke", "ki", "bhi"
     }
     is_roman_urdu = sum(1 for w in words if w in roman_urdu_words) >= 2 or any(w in words for w in ["salam", "assalam", "theek", "shukriya", "walaikum", "bilkul"])
-    is_urdu = ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script or is_roman_urdu)
+    is_english = bool(lang_str in ("en", "english") or (not is_arabic_script and not is_roman_urdu))
+    is_urdu = not is_english and ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script or is_roman_urdu)
 
-    # Read active default voice saved in AI Voice Studio
-    studio_default_voice = None
-    try:
-        from models import SystemSetting
-        studio_default_voice = SystemSetting.get_val("EDGE_TTS_VOICE")
-    except Exception:
-        pass
-    if not studio_default_voice:
-        studio_default_voice = os.environ.get("EDGE_TTS_VOICE", "ur-PK-AsadNeural")
-    studio_default_voice = str(studio_default_voice).strip()
-
-    # Determine optimal neural voice with Auto Language Detection (Urdu vs English)
-    if is_urdu:
-        if "ur-pk" in studio_default_voice.lower() or "asad" in studio_default_voice.lower() or "uzma" in studio_default_voice.lower():
-            active_voice = studio_default_voice
-        elif voice and ("ur-pk" in str(voice).lower() or "asad" in str(voice).lower() or "uzma" in str(voice).lower()):
-            active_voice = str(voice).strip()
-        else:
-            active_voice = "ur-PK-AsadNeural"
-    elif "pashto" in lang_str or lang_str == "ps":
-        active_voice = "ps-AF-LatifaNeural"
-    elif "arabic" in lang_str or lang_str == "ar":
-        active_voice = "ar-SA-ZariyahNeural"
-    elif "hindi" in lang_str or lang_str == "hi":
-        active_voice = "hi-IN-MadhurNeural"
+    # Dynamic TTS Voice Override: If the response text is in English, forcefully override
+    # to en-US-AvaMultilingualNeural (English Female), completely ignoring the database default.
+    if is_english:
+        active_voice = "en-US-AvaMultilingualNeural"
+        voice = "en-US-AvaMultilingualNeural"
+        language = "en"
+        is_urdu = False
     else:
-        # English
-        if "en-" in studio_default_voice.lower() or "andrew" in studio_default_voice.lower() or "ava" in studio_default_voice.lower():
-            active_voice = studio_default_voice
-        elif voice and "en-" in str(voice).lower():
-            active_voice = str(voice).strip()
+        # Read active default voice saved in AI Voice Studio
+        studio_default_voice = None
+        try:
+            from models import SystemSetting
+            studio_default_voice = SystemSetting.get_val("EDGE_TTS_VOICE")
+        except Exception:
+            pass
+        if not studio_default_voice:
+            studio_default_voice = os.environ.get("EDGE_TTS_VOICE", "ur-PK-AsadNeural")
+        studio_default_voice = str(studio_default_voice).strip()
+
+        # Determine optimal neural voice with Auto Language Detection (Urdu vs Regional)
+        if is_urdu:
+            if "ur-pk" in studio_default_voice.lower() or "asad" in studio_default_voice.lower() or "uzma" in studio_default_voice.lower():
+                active_voice = studio_default_voice
+            elif voice and ("ur-pk" in str(voice).lower() or "asad" in str(voice).lower() or "uzma" in str(voice).lower()):
+                active_voice = str(voice).strip()
+            else:
+                active_voice = "ur-PK-AsadNeural"
+        elif "pashto" in lang_str or lang_str == "ps":
+            active_voice = "ps-AF-LatifaNeural"
+        elif "arabic" in lang_str or lang_str == "ar":
+            active_voice = "ar-SA-ZariyahNeural"
+        elif "hindi" in lang_str or lang_str == "hi":
+            active_voice = "hi-IN-MadhurNeural"
         else:
             active_voice = "en-US-AvaMultilingualNeural"
 
@@ -293,6 +300,18 @@ def generate_spoken_audio(
     """
     if not text or not str(text).strip():
         return None
+
+    # Dynamic TTS Voice Override: If the response text is in English, forcefully override the voice
+    # parameter to en-US-AvaMultilingualNeural (English Female) ignoring the database default
+    raw_str = str(text).strip()
+    has_ar = any('\u0600' <= ch <= '\u06FF' for ch in raw_str)
+    wds = re.findall(r'[a-zA-Z]+', raw_str.lower())
+    ru_wds = {"salam", "assalam", "aap", "ap", "aapka", "apka", "madad", "shukriya", "jee", "ji", "hain", "kya", "theek", "bilkul", "chahiye"}
+    is_ru = sum(1 for w in wds if w in ru_wds) >= 2 or any(w in wds for w in ["salam", "assalam", "shukriya", "theek", "bilkul"])
+    lang_s = str(language or "").lower()
+    if (lang_s in ("en", "english") or not has_ar) and not is_ru:
+        voice = "en-US-AvaMultilingualNeural"
+        language = "en"
 
     clean_text = clean_speech_text(text, language=language)
     if not clean_text:

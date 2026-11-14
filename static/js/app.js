@@ -5657,10 +5657,10 @@ function groupWhatsAppConversations(messages) {
             return;
         }
 
-        const isGroup = rawPartner && String(rawPartner).includes('@g.us');
+        const isGroup = Boolean(m.is_group || (rawPartner && (String(rawPartner).includes('@g.us') || String(rawPartner).startsWith('120363'))) || (m.chat_id && String(m.chat_id).includes('@g.us')));
         const isLid = rawPartner && (String(rawPartner).includes('@lid') || String(rawPartner).replace(/\D/g, '').length > 13);
         const resolvedPhone = m.resolved_phone || (isLid ? '' : rawPartner);
-        const normKey = isGroup ? rawPartner : (resolvedPhone ? normalizeWaPhone(resolvedPhone) : (normalizeWaPhone(rawPartner) || 'Unknown'));
+        const normKey = isGroup ? (rawPartner && String(rawPartner).includes('@g.us') ? rawPartner : `${rawPartner}@g.us`) : (resolvedPhone ? normalizeWaPhone(resolvedPhone) : (normalizeWaPhone(rawPartner) || 'Unknown'));
         const displayPhone = isGroup ? (m.chat_name || 'WhatsApp Group') : (resolvedPhone ? formatWaDisplayPhone(resolvedPhone) : (m.sender_name || formatWaDisplayPhone(rawPartner)));
         const contactName = isGroup ? (m.chat_name || 'WhatsApp Group') : (m.sender_name || (resolvedPhone ? formatWaDisplayPhone(resolvedPhone) : formatWaDisplayPhone(rawPartner)));
 
@@ -7372,20 +7372,23 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
 
     // Apply chat filter (All | Unread | Contacts | Groups) & Group Isolation
     let filteredConv = conversations.filter(c => {
-        const isGrp = Boolean(c.isGroup || (c.phone && c.phone.includes('@g.us')) || (c.normalizedPhone && c.normalizedPhone.includes('@g.us')));
+        const isGrp = Boolean(c.isGroup || (c.phone && (c.phone.includes('@g.us') || c.phone.startsWith('120363'))) || (c.normalizedPhone && (c.normalizedPhone.includes('@g.us') || c.normalizedPhone.startsWith('120363'))));
         const unreadCount = (c.messages || []).filter(m => m.direction === 'inbound' && m.status !== 'read').length;
 
+        // Permanent filter out of suppressed spam groups
+        const sName = (c.name || '').toLowerCase();
+        if (sName.includes('english learning') || sName.includes('ایمان')) return false;
+
         if (waCurrentFilter === 'unread') {
-            return unreadCount > 0;
+            return unreadCount > 0 && (!waHideGroupsFromAll || !isGrp);
         } else if (waCurrentFilter === 'contacts') {
             return !isGrp;
         } else if (waCurrentFilter === 'groups') {
             return isGrp;
         } else {
-            // 'all'
+            // 'all': strictly isolate groups from main 1-on-1 dashboard list when waHideGroupsFromAll is active
             if (waHideGroupsFromAll && isGrp) {
-                const hasDirectChats = conversations.some(ch => !ch.isGroup && !(ch.phone && ch.phone.includes('@g.us')));
-                if (hasDirectChats) return false;
+                return false;
             }
             return true;
         }
@@ -7401,10 +7404,30 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
     }
 
     // Calculate and update live filter tab counters (All | Unread | Contacts | Groups)
-    const allCount = conversations.filter(c => !waHideGroupsFromAll || !c.isGroup).length;
-    const unreadCountTotal = conversations.filter(c => (c.messages || []).some(m => m.direction === 'inbound' && m.status !== 'read')).length;
-    const contactsCount = conversations.filter(c => !c.isGroup).length;
-    const groupsCount = conversations.filter(c => c.isGroup).length;
+    const allCount = conversations.filter(c => {
+        const isGrp = Boolean(c.isGroup || (c.phone && (c.phone.includes('@g.us') || c.phone.startsWith('120363'))));
+        const sName = (c.name || '').toLowerCase();
+        if (sName.includes('english learning') || sName.includes('ایمان')) return false;
+        return (!waHideGroupsFromAll || !isGrp);
+    }).length;
+    const unreadCountTotal = conversations.filter(c => {
+        const isGrp = Boolean(c.isGroup || (c.phone && (c.phone.includes('@g.us') || c.phone.startsWith('120363'))));
+        const sName = (c.name || '').toLowerCase();
+        if (sName.includes('english learning') || sName.includes('ایمان')) return false;
+        return (!waHideGroupsFromAll || !isGrp) && (c.messages || []).some(m => m.direction === 'inbound' && m.status !== 'read');
+    }).length;
+    const contactsCount = conversations.filter(c => {
+        const isGrp = Boolean(c.isGroup || (c.phone && (c.phone.includes('@g.us') || c.phone.startsWith('120363'))));
+        const sName = (c.name || '').toLowerCase();
+        if (sName.includes('english learning') || sName.includes('ایمان')) return false;
+        return !isGrp;
+    }).length;
+    const groupsCount = conversations.filter(c => {
+        const isGrp = Boolean(c.isGroup || (c.phone && (c.phone.includes('@g.us') || c.phone.startsWith('120363'))));
+        const sName = (c.name || '').toLowerCase();
+        if (sName.includes('english learning') || sName.includes('ایمان')) return false;
+        return isGrp;
+    }).length;
 
     const chipAll = document.getElementById('waChipAll');
     if (chipAll) chipAll.textContent = `All (${allCount})`;

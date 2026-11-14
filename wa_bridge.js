@@ -974,9 +974,12 @@ function isBlacklisted(jid, name = '', phone = '') {
   if (sName.includes('english learning') || sName.includes('ایمان') || sJid.toLowerCase().includes('english learning') || sJid.toLowerCase().includes('ایمان')) {
     return true;
   }
+  const isGrp = Boolean(sJid.endsWith('@g.us') || sPhone.endsWith('@g.us') || sJid.startsWith('120363') || sPhone.startsWith('120363'));
   // Group chats specifically marked as deleted in blacklist
-  if ((sJid.endsWith('@g.us') || sPhone.endsWith('@g.us')) && (deletedJidsSet.has(sJid) || deletedJidsSet.has(sPhone))) {
-    return true;
+  if (isGrp) {
+    if (deletedJidsSet.has(sJid) || deletedJidsSet.has(sPhone)) return true;
+    const digits = sJid.replace(/\D/g, '') || sPhone.replace(/\D/g, '');
+    if (digits && (deletedJidsSet.has(digits) || deletedJidsSet.has(`${digits}@g.us`))) return true;
   }
   // Normal 1-on-1 contacts must NEVER be permanently blacklisted
   return false;
@@ -986,7 +989,7 @@ function saveChatToStore(chat) {
 
   if (!chat || !chat.id) return;
 
-  if (chat.id === 'status@broadcast') return;
+  if (chat.id === 'status@broadcast' || chat.id.includes('@g.us')) return;
 
   let chatId = chat.id;
 
@@ -2602,6 +2605,14 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
               continue;
             }
 
+            // Group Chat Hard-Block: Stop group chats at the very source.
+            // If msg.key.remoteJid contains @g.us, completely drop it immediately (do NOT emit to Socket.IO, do not save it, do not send it to Python).
+            const earlyRemoteJid = String(msg.key?.remoteJid || '');
+            if (earlyRemoteJid.includes('@g.us')) {
+              console.log(`[WhatsApp Bridge] Hard-blocking @g.us group message at source: ${earlyRemoteJid}. Completely dropped.`);
+              continue;
+            }
+
             // Capture raw untouched JID & participant BEFORE any normalization
 
             const rawUntouchedJid = msg.key?.remoteJid || '';
@@ -2673,9 +2684,9 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
             const jid = remoteJid;
 
             // Stop group messages from going to the dashboard
-            if (jid.endsWith('@g.us')) {
+            if (jid.endsWith('@g.us') || jid.startsWith('120363')) {
               console.log(`[WhatsApp Bridge] Group message received from ${jid}, skipping further processing.`);
-              return;
+              continue;
             }
 
             const isGroup = jid.endsWith('@g.us');
