@@ -242,8 +242,11 @@ def get_language_prompt_directive(lang_info: Dict[str, Any]) -> str:
             "You MUST reply respectfully in Pashto."
         )
     return (
-        "LANGUAGE DIRECTIVE: The customer is communicating in English. "
-        "Reply warmly, concisely, and professionally in clear English."
+        "LANGUAGE DIRECTIVE (CRITICAL - STANDARD INTERNATIONAL PROFESSIONAL ENGLISH):\n"
+        "- The customer is communicating in English.\n"
+        "- You MUST reply in highly professional, polished, standard international English.\n"
+        "- STRICTLY PROHIBITED: Do NOT use local Pakistani slang, desi persona, cultural honorifics ('bhai', 'janab', 'sahab', 'sb', 'ji'), or Roman Urdu phrasing ('acha', 'theek', 'salam', 'shukriya', 'kya', 'hain', 'mein') unless the customer explicitly initiated in Roman Urdu first.\n"
+        "- Tone MUST be globally professional, courteous, clear, and direct."
     )
 
 
@@ -264,6 +267,11 @@ def construct_gemini_prompt(
         "You are BashFlow Enterprise AI, a helpful, polite, and intelligent business assistant.",
         lang_directive
     ]
+    if lang_info.get("format") == "english":
+        prompt_parts.append(
+            "\nINTERNATIONAL PROFESSIONAL TONE: Enforce a standard international business tone. "
+            "Strictly NO local Pakistani slang, desi persona, cultural honorifics (bhai, janab, sahab, ji), or Roman Urdu words."
+        )
 
     if knowledge_base:
         prompt_parts.append(f"\nBusiness Knowledge Base:\n{knowledge_base.strip()}")

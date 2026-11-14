@@ -1151,10 +1151,12 @@ class WhatsAppService:
             db.session.delete(m)
         db.session.commit()
 
-        # Add all candidate JIDs/phones to deleted blacklist table & cache
-        for c in candidates:
-            if c:
-                WhatsAppDeletedItem.mark_deleted(c, item_type="group" if is_grp else "chat")
+        # Only add GROUP JIDs to permanent blacklist table so group spam never re-syncs.
+        # NEVER permanently blacklist 1-on-1 customer contacts (only their individual deleted message IDs were marked above).
+        if is_grp:
+            for c in candidates:
+                if c:
+                    WhatsAppDeletedItem.mark_deleted(c, item_type="group")
 
         # Direct raw SQLite hard-delete across all database files
         import sqlite3
@@ -4191,11 +4193,12 @@ class WhatsAppService:
             )
         elif fmt == "english":
             return (
-                "LANGUAGE REQUIREMENT (CRITICAL - 100% FLUENT CONVERSATIONAL ENGLISH):\n"
+                "LANGUAGE REQUIREMENT (CRITICAL - 100% FLUENT STANDARD INTERNATIONAL PROFESSIONAL ENGLISH):\n"
                 f"- The customer messaged in English: '{clean_text}'.\n"
-                "- You MUST formulate your entire reply 100% in clear, friendly, natural conversational English as an approachable customer representative.\n"
-                "- TONE (NATURAL FRIENDLY HUMAN): Strictly DO NOT sound like a news broadcaster, radio announcer, or corporate robot. Speak in short, crisp sentences.\n"
-                "- NATURAL FILLERS: Use conversational markers like 'Sure thing', 'Got it', 'Let me check', 'Of course', 'Right away'.\n"
+                "- You MUST formulate your entire reply 100% in highly professional, standard international English.\n"
+                "- TONE & PERSONA: Highly professional, polite, standard international business tone. Strictly NO local Pakistani slang, desi persona, cultural honorifics ('bhai', 'janab', 'sahab', 'sb', 'ji'), or Roman Urdu phrasing ('acha', 'theek', 'salam', 'shukriya', 'kya', 'hain', 'mein') unless the customer explicitly initiated in Roman Urdu first.\n"
+                "- Speak in clear, crisp, helpful, and courteous sentences with standard international customer service standards.\n"
+                "- GREETINGS: Use standard professional international greetings (e.g. 'Hello', 'Good day', 'Hi there! How can I assist you today?'). NEVER greet with 'Walaikum Assalam' or 'bhai' when responding in English.\n"
                 "- STRICT NO-MIX: Do NOT translate or mix Urdu words into the English reply."
             )
         else:
@@ -4206,6 +4209,52 @@ class WhatsAppService:
                 "- Do NOT answer in English by default.\n"
                 "- Use natural Roman Urdu phrasing: e.g. 'Salam! Khush-amdeed, main aapki kya madad kar sakta hoon?'."
             )
+
+    @classmethod
+    def _get_assistant_protocol_directive(cls, lang_format: str, dual_output: bool = True) -> str:
+        """Returns strict persona, tone, and output formatting guidelines matching the detected language.
+        Strictly enforces standard international professional English when replying in English.
+        """
+        if lang_format == "english":
+            if dual_output:
+                return (
+                    "CONVERSATIONAL AI ASSISTANT PROTOCOL (PROFESSIONAL INTERNATIONAL ENGLISH - DUAL OUTPUT):\n"
+                    "0. TONE & PERSONA (HIGHLY PROFESSIONAL INTERNATIONAL STANDARD): When communicating in English, you MUST use a highly professional, polite, standard international business tone. Strictly NO local Pakistani slang, desi persona, cultural honorifics (such as 'bhai', 'janab', 'sahab', 'sb', 'ji'), or Roman Urdu phrasing (such as 'salam', 'walaikum', 'theek', 'acha', 'shukriya', 'kya', 'hain', 'mein') unless the customer explicitly initiated the conversation in Roman Urdu first. Maintain a polished, courteous, globally appropriate customer service standard.\n"
+                    "1. STRICT LANGUAGE MATCHING: Since the customer messaged in English, formulate your entire reply 100% in clear, fluent English. Under no circumstances should you mix Urdu words into the English reply.\n"
+                    "2. PROFESSIONAL GREETINGS: If the customer greets you in English (e.g. 'Hello', 'Hi', 'Good morning', 'How are you'), reply warmly and professionally in English (e.g., 'Hello! Thank you for reaching out. How can I assist you today?'). NEVER greet with 'Walaikum Assalam' or 'bhai' when responding in English.\n"
+                    "3. DIRECT & HELPFUL: Answer what the customer asked directly, clearly, and concisely in 1 to 3 short polite sentences.\n"
+                    "4. DUAL OUTPUT JSON FORMAT: Always output response as a clean JSON object with two fields:\n"
+                    '   {"display_text": "<Clean, highly professional English text without markdown artifacts>", "voice_script": "<Natural standard English speech text for Microsoft Edge Neural English TTS (en-US-AvaMultilingualNeural)>", "speech_text": "<Natural standard English speech text matching voice_script>"}\n'
+                    "   If JSON is not possible, deliver clean text directly without asterisks or hashtags."
+                )
+            else:
+                return (
+                    "CONVERSATIONAL AI ASSISTANT PROTOCOL (PROFESSIONAL INTERNATIONAL ENGLISH):\n"
+                    "0. TONE & PERSONA: When communicating in English, you MUST use a highly professional, polite, standard international business tone. Strictly NO local Pakistani slang, desi persona, cultural honorifics ('bhai', 'janab', 'sahab', 'sb', 'ji'), or Roman Urdu phrasing ('acha', 'theek', 'salam', 'shukriya') unless the customer explicitly initiated in Roman Urdu first.\n"
+                    "1. STRICT LANGUAGE MATCHING: Formulate your entire reply 100% in clear, fluent English. Strictly NO Urdu mixing.\n"
+                    "2. PROFESSIONAL GREETINGS: Reply with standard international English greetings ('Hello!', 'Good day!', 'Hi there!'). NEVER use 'Walaikum Assalam' or 'bhai'.\n"
+                    "3. DIRECT & HELPFUL: Deliver 1 to 3 smooth, helpful, professional sentences without markdown symbols."
+                )
+        else:
+            if dual_output:
+                return (
+                    "CONVERSATIONAL AI ASSISTANT PROTOCOL (NATURAL DOSTANA INSAAN - DUAL OUTPUT):\n"
+                    "0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, heavy, bookish words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein (Urdu mein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor').\n"
+                    "1. STRICT LANGUAGE MATCHING: Agar user ne Urdu (ya Roman Urdu) mein pucha hai toh jawab 100% natural Pakistani Urdu mein dein. Kisi bhi surat mein zaban mix ya galat translate na ho.\n"
+                    "2. NATURAL GREETINGS: If customer says 'Kaise ho ap', 'Salam', or greets you, reply warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
+                    "3. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, helpful conversational partner. Answer what the customer asked directly and politely in 1 to 3 short friendly sentences.\n"
+                    "4. DUAL OUTPUT JSON FORMAT: Always output response as a clean JSON object with two fields:\n"
+                    '   {"display_text": "<Conversational Roman Urdu / English for chat bubble transcript without markdown artifacts>", "voice_script": "<Pure conversational Urdu Nastaliq script (اردو) with English technical/product terms kept natural or transliterated e.g. آرڈر ٹریکنگ, سروس, ڈیلیوری, بیش فلو for Microsoft Edge Neural Pakistani TTS>", "speech_text": "<Pure Urdu script matching voice_script>"}\n'
+                    "   If JSON is not possible, deliver clean text directly without asterisks or hashtags."
+                )
+            else:
+                return (
+                    "CONVERSATIONAL AI ASSISTANT PROTOCOL (NATURAL DOSTANA INSAAN):\n"
+                    "0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, heavy, bookish words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor'.\n"
+                    "1. STRICT LANGUAGE MATCHING: Jawab 100% natural Pakistani Urdu / Roman Urdu mein dein.\n"
+                    "2. NATURAL GREETINGS: Warm greetings like 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein...'.\n"
+                    "3. GENERAL-PURPOSE & DIRECT: 1 to 3 short, friendly, polite sentences without markdown symbols."
+                )
 
     class MultimodalAudioResult(tuple):
         """Container for multimodal audio transcription, display reply, TTS script, and detected language.
@@ -4491,6 +4540,7 @@ class WhatsAppService:
         cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
         lang_info = cls.detect_language(clean_text, conversation_history=conversation_history)
         lang_directive = cls.get_language_prompt_directive(lang_info, clean_text)
+        protocol_directive = cls._get_assistant_protocol_directive(lang_info.get("format", "english"), dual_output=True)
         pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
         prompt = (
             f"You are a friendly, highly intelligent conversational AI assistant for {b_name}.\n"
@@ -4498,14 +4548,7 @@ class WhatsAppService:
             f"{sys_instruct}{history_section}\n\n"
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"CONVERSATIONAL AI ASSISTANT PROTOCOL (ULTRA-HUMAN PAKISTANI URDU VOICE ENGINE - DUAL OUTPUT):\n"
-            f"0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, heavy, bookish words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein (Urdu mein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor'; English mein: 'Sure thing', 'Got it', 'Let me check', 'Of course').\n"
-            f"1. STRICT LANGUAGE MATCHING: Agar user ne Urdu (ya Roman Urdu) mein pucha hai toh jawab 100% natural Pakistani Urdu mein dein. Agar English mein baat ki hai toh جواب 100% fluent English mein dein. Kisi bhi surat mein zaban mix ya galat translate na ho.\n"
-            f"2. NATURAL GREETINGS: If customer says 'Kaise ho ap', 'Salam', or greets you, reply warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
-            f"3. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, helpful conversational partner. Answer what the customer asked directly and politely in 1 to 3 short friendly sentences.\n"
-            f"4. DUAL OUTPUT JSON FORMAT: Always output response as a clean JSON object with two fields:\n"
-            f"   {{\"display_text\": \"<Conversational Roman Urdu / English for chat bubble transcript without markdown artifacts>\", \"voice_script\": \"<Pure conversational Urdu Nastaliq script (اردو) with English technical/product terms kept natural or transliterated e.g. آرڈر ٹریکنگ, سروس, ڈیلیوری, بیش فلو for Microsoft Edge Neural Pakistani TTS>\", \"speech_text\": \"<Pure Urdu script matching voice_script>\"}}\n"
-            f"   If JSON is not possible, deliver clean text directly without asterisks or hashtags."
+            f"{protocol_directive}"
         )
 
         # Anti-filler and catalog recitation for short follow-ups
@@ -4758,6 +4801,7 @@ class WhatsAppService:
         cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
         lang_info = cls.detect_language(clean_text, conversation_history=conversation_history)
         lang_directive = cls.get_language_prompt_directive(lang_info, clean_text)
+        protocol_directive = cls._get_assistant_protocol_directive(lang_info.get("format", "english"), dual_output=True)
         history_section = ""
         if conversation_history:
             history_lines = []
@@ -4777,14 +4821,7 @@ class WhatsAppService:
             f"{sys_instruct}{history_section}\n\n"
             f"{lang_directive}\n\n"
             f"{cust_label} has sent the following message: '{clean_text}'.\n\n"
-            f"CONVERSATIONAL AI ASSISTANT PROTOCOL (NATURAL DOSTANA INSAAN - DUAL OUTPUT):\n"
-            f"0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, heavy, bookish words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein (Urdu mein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor'; English mein: 'Sure thing', 'Got it', 'Let me check', 'Of course').\n"
-            f"1. STRICT LANGUAGE MATCHING: Agar user ne Urdu (ya Roman Urdu) mein pucha hai toh jawab 100% natural Pakistani Urdu mein dein. Agar English mein baat ki hai toh جواب 100% fluent English mein dein. Kisi bhi surat mein zaban mix ya galat translate na ho.\n"
-            f"2. NATURAL GREETINGS: If customer says 'Kaise ho ap', 'Salam', or greets you, reply warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
-            f"3. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, helpful conversational partner. Answer what the customer asked directly and politely in 1 to 3 short friendly sentences.\n"
-            f"4. DUAL OUTPUT JSON FORMAT: Always output response as a clean JSON object with two fields:\n"
-            f"   {{\"display_text\": \"<Conversational Roman Urdu / English for chat bubble transcript without markdown artifacts>\", \"voice_script\": \"<Pure conversational Urdu Nastaliq script (اردو) with English technical/product terms kept natural or transliterated e.g. آرڈر ٹریکنگ, سروس, ڈیلیوری, بیش فلو for Microsoft Edge Neural Pakistani TTS>\", \"speech_text\": \"<Pure Urdu script matching voice_script>\"}}\n"
-            f"   If JSON is not possible, deliver clean text directly without asterisks or hashtags."
+            f"{protocol_directive}"
         )
 
         # Anti-filler and catalog recitation for short follow-ups
@@ -4938,6 +4975,7 @@ class WhatsAppService:
         cust_label = f"A customer named '{customer_name.strip()}'" if customer_name and customer_name.strip() else "A customer"
         lang_info = cls.detect_language(clean_text, conversation_history=conversation_history)
         lang_directive = cls.get_language_prompt_directive(lang_info, clean_text)
+        protocol_directive = cls._get_assistant_protocol_directive(lang_info.get("format", "english"), dual_output=False)
         b_name = cls.get_tenant_business_name(organization_id=organization_id)
         pkt_time_str = cls.get_pakistan_time().strftime("%A, %Y-%m-%d %I:%M %p PKT (Pakistan Time / Asia/Karachi, UTC+5)")
 
@@ -4946,12 +4984,7 @@ class WhatsAppService:
             f"Current Real-World Time: {pkt_time_str}.\n\n"
             f"{sys_instruct}\n\n"
             f"{lang_directive}\n\n"
-            f"CONVERSATIONAL AI ASSISTANT PROTOCOL (NATURAL DOSTANA INSAAN):\n"
-            f"0. TONE & HUMAN CADENCE: Strictly DO NOT sound like a news anchor, news reporter, radio announcer, or formal broadcaster. NEVER use stiff, heavy, bookish words. AI ka lehja bilkul aam bol-chal wala, dostana aur natural customer representative jaisa hona chahiye. Chote sentences bolein aur natural conversational fillers istemal karein (Urdu mein: 'Jee bilkul', 'Acha dekhein', 'Behtar', 'Zaroor'; English mein: 'Sure thing', 'Got it', 'Let me check', 'Of course').\n"
-            f"1. STRICT LANGUAGE MATCHING: Agar user ne Urdu (ya Roman Urdu) mein pucha hai toh jawab 100% natural Pakistani Urdu mein dein. Agar English mein baat ki hai toh jawab 100% fluent English mein dein. Kisi bhi surat mein zaban mix ya galat translate na ho.\n"
-            f"2. NATURAL GREETINGS: If customer says 'Kaise ho ap', 'Salam', or greets you, reply warmly and naturally: e.g., 'Walaikum Assalam! Main bilkul theek hoon, aap sunayein aap kaise hain? Jee bilkul, batayein main aap ki kya madad kar sakta hoon?'.\n"
-            f"3. GENERAL-PURPOSE & DIRECT: Chat dynamically as a friendly, helpful conversational partner. Answer what the customer asked directly and politely in 1 to 3 short friendly sentences. Do not pitch software or pricing unless asked.\n"
-            f"4. Pure Clean Text: Deliver 1 to 3 smooth, friendly sentences. No asterisks, hashtags, or bullet symbols."
+            f"{protocol_directive}"
         )
 
         messages = [{"role": "system", "content": sys_content}]
@@ -8172,6 +8205,28 @@ class WhatsAppService:
             })
             return messages
 
+        if type_webhook in ("outgoingAPIMessageReceived", "outgoingMessageReceived"):
+            out_target = data.get("recipient") or (data.get("senderData") or {}).get("chatId") or data.get("chatId") or ""
+            out_phone = cls.format_phone_number(str(out_target).split("@")[0].split(":")[0])
+            out_body = data.get("reply") or (data.get("messageData") or {}).get("textMessageData", {}).get("textMessage") or data.get("message") or ""
+            msg_id = data.get("idMessage") or data.get("whatsapp_message_id") or f"out_{int(time.time()*1000)}"
+            messages.append({
+                "message_id": msg_id,
+                "from_phone": "system",
+                "sender": "Baileys WhatsApp Bridge",
+                "recipient": out_target or f"{out_phone}@s.whatsapp.net",
+                "chat_id": out_target or f"{out_phone}@s.whatsapp.net",
+                "recipient_phone_id": out_target or f"{out_phone}@s.whatsapp.net",
+                "display_phone_number": out_phone,
+                "timestamp": data.get("timestamp") or int(time.time()),
+                "direction": "outbound",
+                "message_type": (data.get("messageData") or {}).get("typeMessage") or "text",
+                "body": out_body,
+                "status": "delivered",
+                "raw": data
+            })
+            return messages
+
         if type_webhook != "incomingMessageReceived":
             # Non-message notifications (e.g., stateInstanceChanged, deviceInfo, etc.)
             return messages
@@ -9708,11 +9763,19 @@ class WhatsAppService:
 
                 # Real-time WebSocket / Socket.IO broadcast to frontend dashboard
                 try:
-                    from app import socketio
-                    if socketio:
+                    sio = None
+                    try:
+                        from app import socketio as _app_sio
+                        sio = _app_sio
+                    except Exception:
+                        pass
+                    if not sio and has_app_context():
+                        from flask import current_app
+                        sio = current_app.config.get("SOCKETIO") or getattr(current_app, "socketio", None)
+                    if sio:
                         msg_dict = msg.to_dict()
-                        socketio.emit("new_whatsapp_message", msg_dict)
-                        socketio.emit("whatsapp_message", msg_dict)
+                        sio.emit("new_whatsapp_message", msg_dict)
+                        sio.emit("whatsapp_message", msg_dict)
                 except Exception:
                     pass
 

@@ -970,14 +970,15 @@ function isBlacklisted(jid, name = '', phone = '') {
   const sName = String(name || '').toLowerCase();
   const sPhone = String(phone || '').trim();
 
-  if (sName.includes('english learning') || sName.includes('ایمان') || sJid.toLowerCase().includes('english learning')) {
+  // Purge/hide targeted spam groups
+  if (sName.includes('english learning') || sName.includes('ایمان') || sJid.toLowerCase().includes('english learning') || sJid.toLowerCase().includes('ایمان')) {
     return true;
   }
-  if (deletedJidsSet.has(sJid) || deletedJidsSet.has(sPhone)) return true;
-  const digits = sJid.replace(/\D/g, '');
-  if (digits && (deletedJidsSet.has(digits) || deletedJidsSet.has(`+${digits}`) || deletedJidsSet.has(`${digits}@s.whatsapp.net`) || deletedJidsSet.has(`${digits}@g.us`))) {
+  // Group chats specifically marked as deleted in blacklist
+  if ((sJid.endsWith('@g.us') || sPhone.endsWith('@g.us')) && (deletedJidsSet.has(sJid) || deletedJidsSet.has(sPhone))) {
     return true;
   }
+  // Normal 1-on-1 contacts must NEVER be permanently blacklisted
   return false;
 }
 
@@ -2637,9 +2638,15 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
 
             const msgId = msg.key?.id || '';
 
-            if (rawUntouchedJid && isBlacklisted(rawUntouchedJid)) continue;
-            if (remoteJid && isBlacklisted(remoteJid)) continue;
+            // Check specifically deleted individual message IDs
             if (msgId && deletedMessagesSet.has(msgId)) continue;
+
+            // Only filter group chats through blacklist - NEVER drop 1-on-1 customer chats
+            const isGroupTarget = Boolean(remoteJid.endsWith('@g.us') || rawUntouchedJid.endsWith('@g.us'));
+            if (isGroupTarget) {
+              if (rawUntouchedJid && isBlacklisted(rawUntouchedJid)) continue;
+              if (remoteJid && isBlacklisted(remoteJid)) continue;
+            }
 
             const remClean = remoteJid.split(':')[0].split('@')[0];
 
@@ -3617,6 +3624,27 @@ if (!text) text = '[Voice note]';
                     deliveredResult = sent;
 
                     sentAiMessageIds.add(sent.key.id);
+
+                    try {
+                      dispatchWebhookToPython({
+                        typeWebhook: 'outgoingAPIMessageReceived',
+                        messageData: {
+                          typeMessage: shouldSendVoice ? 'audio' : (shouldSendImage ? 'image' : 'text'),
+                          textMessageData: { textMessage: resData.reply || '' }
+                        },
+                        senderData: {
+                          sender: cleanPhone,
+                          chatId: jid,
+                          recipient: jid
+                        },
+                        idMessage: sent.key.id,
+                        direction: 'outbound',
+                        status: 'delivered',
+                        is_ai_response: true,
+                        reply: resData.reply,
+                        dispatched: true
+                      }).catch(() => {});
+                    } catch (_) {}
 
                     await sock.sendPresenceUpdate('paused', jid).catch(() => {});
 

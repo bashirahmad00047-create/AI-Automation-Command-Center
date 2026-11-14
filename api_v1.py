@@ -2980,25 +2980,35 @@ def api_whatsapp_conversations():
 
     deleted_ids = WhatsAppDeletedItem.get_all_deleted_ids()
 
-    def is_blacklisted(item_id: str, item_name: str = "", item_phone: str = "") -> bool:
+    def is_blacklisted(item_id: str, item_name: str = "", item_phone: str = "", is_group: bool = False) -> bool:
         sid = str(item_id or "").strip()
         sname = str(item_name or "").lower()
         sphone = str(item_phone or "").strip()
-        if "english learning" in sname or "ایمان" in sname or "english learning" in sid.lower():
+        # Always filter targeted spam group chats
+        if "english learning" in sname or "ایمان" in sname or "english learning" in sid.lower() or "ایمان" in sid.lower():
             return True
-        if sid and sid in deleted_ids:
-            return True
-        if sphone and sphone in deleted_ids:
-            return True
-        digits = "".join(filter(str.isdigit, sid))
-        if digits and (digits in deleted_ids or f"+{digits}" in deleted_ids or f"{digits}@s.whatsapp.net" in deleted_ids or f"{digits}@g.us" in deleted_ids):
-            return True
+        # Filter specifically deleted group chats (@g.us)
+        if is_group or sid.endswith("@g.us") or sphone.endswith("@g.us"):
+            if sid in deleted_ids or sphone in deleted_ids:
+                return True
+        # Filter explicitly deleted individual message IDs (wam-..., BAE5..., etc.)
+        if sid and (sid.startswith("wam-") or sid.startswith("BAE5") or sid.startswith("3EB0") or len(sid) > 20):
+            if sid in deleted_ids:
+                return True
+        # Normal 1-on-1 customer contacts are NEVER blacklisted
         return False
 
     # 1. Fetch ALL persisted messages without org_id restrictions
     try:
-        messages = WhatsAppMessage.query.order_by(WhatsAppMessage.created_at.desc()).limit(300).all()
-        msg_dicts = [m.to_dict() for m in messages if not is_blacklisted(m.id or m.whatsapp_message_id, m.chat_name or m.sender_name, m.sender or m.recipient)]
+        messages = WhatsAppMessage.query.order_by(WhatsAppMessage.created_at.desc()).limit(500).all()
+        msg_dicts = [
+            m.to_dict() for m in messages
+            if not is_blacklisted(
+                m.whatsapp_message_id or m.id,
+                m.chat_name or m.sender_name,
+                is_group=bool(m.is_group or (m.recipient and m.recipient.endswith("@g.us")) or (m.sender and m.sender.endswith("@g.us")))
+            )
+        ]
     except Exception as m_err:
         logger.warning(f"Error fetching WhatsAppMessage: {m_err}")
         try: db.session.rollback()
@@ -3014,8 +3024,8 @@ def api_whatsapp_conversations():
         if not key:
             key = partner_str
 
-        # Filter out deleted or purged chats
-        if is_blacklisted(key, m.get("chat_name") or m.get("sender_name"), partner_str):
+        # Filter out deleted group chats, but NEVER drop valid 1-on-1 customer chats
+        if is_grp and is_blacklisted(key, m.get("chat_name") or m.get("sender_name"), partner_str, is_group=True):
             continue
 
         # Merge ghost 7142 thread into Bashir khani (+923471000668)
@@ -3060,7 +3070,8 @@ def api_whatsapp_conversations():
                     if not b_key:
                         b_key = str(b_id)
                     
-                    if is_blacklisted(b_key, b_chat.get("name"), b_chat.get("phone")):
+                    b_is_grp = bool(b_chat.get("is_group") or str(b_id).endswith("@g.us"))
+                    if b_is_grp and is_blacklisted(b_key, b_chat.get("name"), b_chat.get("phone"), is_group=True):
                         continue
 
                     if "7142" in b_key or "7142" in str(b_id) or (b_chat.get("name") and "bashir" in str(b_chat.get("name")).lower()):
@@ -3093,7 +3104,7 @@ def api_whatsapp_conversations():
         for l in leads:
             if l.phone and l.phone != "N/A":
                 clean_p = "".join(filter(str.isdigit, l.phone))
-                if clean_p and clean_p not in conv_map and not is_blacklisted(clean_p, l.name, l.phone):
+                if clean_p and clean_p not in conv_map:
                     conv_map[clean_p] = {
                         "id": clean_p,
                         "partner": l.phone,
@@ -3110,8 +3121,8 @@ def api_whatsapp_conversations():
     except Exception as l_err:
         logger.debug(f"Notice syncing fallback leads: {l_err}")
 
-    # 4. GUARANTEE Bashir khani (+92 347 1000668) is present if not explicitly deleted
-    if "923471000668" not in conv_map and not is_blacklisted("923471000668", "Bashir khani"):
+    # 4. GUARANTEE Bashir khani (+92 347 1000668) is present
+    if "923471000668" not in conv_map:
         conv_map["923471000668"] = {
             "id": "923471000668",
             "partner": "+923471000668",
@@ -3126,7 +3137,10 @@ def api_whatsapp_conversations():
             "messages": []
         }
 
-    conversations = [c for c in conv_map.values() if not is_blacklisted(c.get("id"), c.get("name"), c.get("phone"))]
+    conversations = [
+        c for c in conv_map.values()
+        if not (c.get("is_group") and is_blacklisted(c.get("id"), c.get("name"), c.get("phone"), is_group=True))
+    ]
     conversations.sort(key=lambda c: str(c.get("timestamp") or ""), reverse=True)
 
     return jsonify({
@@ -5900,6 +5914,30 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
             else:
                 logger.info(f"Skipping empty non-content inbound message payload: {msg_id}")
                 continue
+
+        if msg.get("direction") == "outbound":
+            record = WhatsAppService.record_message(
+                organization_id=org_id,
+                sender=msg.get("sender", "Baileys WhatsApp Bridge"),
+                recipient=msg.get("recipient") or msg.get("chat_id") or msg.get("from_phone"),
+                direction="outbound",
+                body=msg_body or msg.get("reply") or "",
+                media_url=media_candidate,
+                status="delivered",
+                whatsapp_message_id=msg_id,
+                message_type=msg.get("message_type", "text"),
+                raw_payload=msg
+            )
+            try:
+                db.session.commit()
+                if msg_id:
+                    WhatsAppService.mark_message_processed(msg_id)
+            except Exception as c_err:
+                logger.error(f"Error committing outbound message to DB: {c_err}")
+                try: db.session.rollback()
+                except Exception: pass
+            processed_count += 1
+            continue
 
         record = WhatsAppService.record_message(
             organization_id=org_id,

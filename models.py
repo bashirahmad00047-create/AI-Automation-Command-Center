@@ -1208,20 +1208,15 @@ class WhatsAppDeletedItem(db.Model):
         if not item_id:
             return False
         clean_id = str(item_id).strip()
-        # Fast file-cache check first
         f_cache = cls.load_file_cache()
         if clean_id in f_cache:
             return True
-        digits = "".join(filter(str.isdigit, clean_id))
-        if digits and digits in f_cache:
-            return True
-
-        # Database check
+        if clean_id.endswith("@g.us"):
+            digits = "".join(filter(str.isdigit, clean_id))
+            if digits and (digits in f_cache or f"{digits}@g.us" in f_cache):
+                return True
         try:
-            q_ids = [clean_id]
-            if digits:
-                q_ids.extend([digits, f"+{digits}", f"{digits}@s.whatsapp.net", f"{digits}@c.us"])
-            found = cls.query.filter(cls.id.in_(q_ids)).first()
+            found = cls.query.filter_by(id=clean_id).first()
             if found:
                 return True
         except Exception:
