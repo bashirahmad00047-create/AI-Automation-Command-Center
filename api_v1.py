@@ -6052,6 +6052,83 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
     # STEP 2: Isolated AI Auto-Responder Execution
     for record, msg, msg_body in saved_items:
         msg_id = msg.get("message_id")
+        media_candidate = (
+            msg.get("media_url")
+            or msg.get("download_url")
+            or msg.get("audio_url")
+            or msg.get("mediaUrl")
+            or msg.get("downloadUrl")
+            or (record.media_url if record else None)
+        )
+        is_img = bool(
+            msg.get("is_image")
+            or str(msg.get("message_type") or "").lower() in ("image", "imagemessage", "photomessage")
+            or str(msg_body).strip().lower() in ("📷 photo", "[photo]", "[image]", "[image message]")
+            or bool(msg.get("image_base64"))
+            or WhatsAppService.is_image_message(msg_body, download_url=media_candidate, raw_payload=msg)
+        )
+
+        # STRICT FORCE IMAGE BYPASS: If inbound message is an inventory image, catalog immediately & bypass rules/LLM
+        if is_img and WhatsAppService.is_inventory_caption(msg_body):
+            logger.info(f"[Strict AI Bypass] Early intercept of inventory image before rules/LLM: '{msg_body}'")
+            try:
+                WhatsAppService.handle_whatsapp_inventory_image(
+                    organization_id=org_id,
+                    sender_phone=msg.get("from_phone", "unknown"),
+                    message_body=msg_body,
+                    download_url=media_candidate,
+                    chat_id=msg.get("chat_id") or msg.get("from_phone"),
+                    message_id=msg_id,
+                    image_base64=msg.get("image_base64") or (msg.get("raw") or {}).get("image_base64") or (msg.get("raw") or {}).get("imageBase64"),
+                    raw_payload=msg,
+                    direct_bridge=direct_bridge
+                )
+            except Exception as inv_err:
+                logger.error(f"[Strict AI Bypass Error] {inv_err}")
+            continue
+
+        # STRICT HARDCODED BYPASS 1: "meri dukan"
+        clean_body_str = str(msg_body or "").strip().lower()
+        if clean_body_str in ("meri dukan", "meri dukaan", "my shop", "my store"):
+            try:
+                WhatsAppService.handle_inbound_auto_response(
+                    organization_id=org_id,
+                    sender_phone=msg.get("from_phone", "unknown"),
+                    chat_id=msg.get("chat_id") or msg.get("from_phone"),
+                    message_body=msg_body,
+                    sender_name=msg.get("sender_name", ""),
+                    message_id=msg_id,
+                    message_timestamp=msg.get("timestamp"),
+                    raw_payload=msg,
+                    direct_bridge=direct_bridge
+                )
+            except Exception as dukan_err:
+                logger.error(f"[Strict AI Bypass meri dukan Error] {dukan_err}")
+            continue
+
+        # STRICT HARDCODED BYPASS 2: Text with price keywords but is_image is False
+        has_price_kw = bool(
+            re.search(r'(?i)(?:\b(?:rs\.?|pkr|price|rate|cost)\s*[:=]?\s*\d+|\b\d+\s*(?:rs|pkr|rupees|rupay|/-)|\badd\s*(?:rs\.?|pkr)?\s*[:=]?\s*\d+|\badd\b.*\b\d+)', str(msg_body or ""))
+            or (WhatsAppService.is_inventory_caption(msg_body) and any(c.isdigit() for c in str(msg_body or "")))
+        )
+        if not is_img and has_price_kw:
+            try:
+                WhatsAppService.handle_inbound_auto_response(
+                    organization_id=org_id,
+                    sender_phone=msg.get("from_phone", "unknown"),
+                    chat_id=msg.get("chat_id") or msg.get("from_phone"),
+                    message_body=msg_body,
+                    sender_name=msg.get("sender_name", ""),
+                    message_id=msg_id,
+                    message_timestamp=msg.get("timestamp"),
+                    is_image=False,
+                    raw_payload=msg,
+                    direct_bridge=direct_bridge
+                )
+            except Exception as price_err:
+                logger.error(f"[Strict AI Bypass price kw Error] {price_err}")
+            continue
+
         rule_replied = False
         if engine:
             event_data = {
@@ -6363,6 +6440,33 @@ def whatsapp_webhook_ingress():
                     )
                 except Exception as opt_err:
                     logger.warning(f"Failed to record automatic opt-in: {opt_err}")
+
+            # STRICT FORCE IMAGE BYPASS (Unified Inbound Webhook)
+            is_inbound_img = bool(
+                msg.get("is_image")
+                or str(msg.get("message_type") or "").lower() in ("image", "imagemessage", "photomessage")
+                or str(msg.get("body") or "").strip().lower() in ("📷 photo", "[photo]", "[image]", "[image message]")
+                or bool(msg.get("image_base64"))
+                or WhatsAppService.is_image_message(msg.get("body", ""), download_url=media_candidate, raw_payload=msg)
+            )
+            if is_inbound_img and WhatsAppService.is_inventory_caption(msg.get("body", "")):
+                logger.info(f"[Strict AI Bypass] Unified webhook inventory image intercepted before rules/LLM: '{msg.get('body')}'")
+                try:
+                    WhatsAppService.handle_whatsapp_inventory_image(
+                        organization_id=target_org_id,
+                        sender_phone=msg.get("from_phone", "unknown"),
+                        message_body=msg.get("body", ""),
+                        download_url=media_candidate,
+                        chat_id=msg.get("chat_id") or msg.get("from_phone"),
+                        message_id=msg_id,
+                        image_base64=msg.get("image_base64") or (msg.get("raw") or {}).get("image_base64") or (msg.get("raw") or {}).get("imageBase64"),
+                        raw_payload=msg,
+                        direct_bridge=True
+                    )
+                except Exception as inv_err:
+                    logger.error(f"[Strict AI Bypass Unified Webhook Error] {inv_err}")
+                processed_count += 1
+                continue
 
             rule_replied = False
             if engine:

@@ -5680,8 +5680,30 @@ function groupWhatsAppConversations(messages) {
         const displayPhone = isGroup ? (m.chat_name || 'WhatsApp Group') : (resolvedPhone ? formatWaDisplayPhone(resolvedPhone) : (m.sender_name || formatWaDisplayPhone(rawPartner)));
         const contactName = isGroup ? (m.chat_name || 'WhatsApp Group') : (m.sender_name || (resolvedPhone ? formatWaDisplayPhone(resolvedPhone) : formatWaDisplayPhone(rawPartner)));
 
+        const isMsgImg = Boolean(
+            m.is_image ||
+            m.message_type === 'image' ||
+            m.message_type === 'imageMessage' ||
+            m.message_type === 'photomessage' ||
+            m.image_base64 ||
+            (m.raw_payload && (m.raw_payload.image_base64 || m.raw_payload.imageBase64)) ||
+            (m.media_url && !m.is_audio && (m.media_url.startsWith('data:image') || /\.(jpeg|jpg|png|webp|gif)/i.test(m.media_url))) ||
+            (m.body && (/^📷\s*photo/i.test(m.body) || /^\[(photo|image)\]/i.test(m.body)))
+        );
+        const isMsgAud = !isMsgImg && Boolean(
+            m.is_audio ||
+            m.type === 'audio' ||
+            m.message_type === 'audio' ||
+            m.message_type === 'voiceMessage' ||
+            m.message_type === 'ptt' ||
+            m.audio_url ||
+            (m.media_url && (m.media_url.startsWith('data:audio') || /\.(ogg|oga|opus|mp3|wav|m4a)/i.test(m.media_url)))
+        );
+
         if (!map[normKey]) {
-            let initialMsg = (m.body && m.body !== '(no text)') ? m.body : (m.is_audio ? '🎙️ Voice note' : '(no text)');
+            let initialMsg = (m.body && m.body !== '(no text)')
+                ? m.body
+                : (isMsgImg ? '📷 Photo' : (isMsgAud ? '🎙️ Voice note' : '(no text)'));
             if (initialMsg.includes('[quotedMessage]')) {
                 initialMsg = initialMsg.replace(/\[quotedMessage\]/gi, 'Quoted message');
             }
@@ -5693,7 +5715,8 @@ function groupWhatsAppConversations(messages) {
                 name: contactName,
                 lastMessage: initialMsg,
                 timestamp: m.created_at || '',
-                is_audio: Boolean(m.is_audio || m.type === 'audio' || m.message_type === 'audio' || m.audio_url || m.media_url),
+                is_audio: isMsgAud,
+                is_image: isMsgImg,
                 messages: []
             };
         }
@@ -5723,13 +5746,36 @@ function groupWhatsAppConversations(messages) {
         map[normKey].messages.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
         // Update last message preview to the most recent message (last in array)
         const latestMsg = map[normKey].messages[map[normKey].messages.length - 1];
-        let latestText = (latestMsg.body && latestMsg.body !== '(no text)') ? latestMsg.body : ((latestMsg.is_audio || latestMsg.type === 'audio' || latestMsg.message_type === 'audio') ? '🎤 Voice message' : '(no text)');
+        const latestIsImg = Boolean(
+            latestMsg.is_image ||
+            latestMsg.message_type === 'image' ||
+            latestMsg.message_type === 'imageMessage' ||
+            latestMsg.message_type === 'photomessage' ||
+            latestMsg.image_base64 ||
+            (latestMsg.raw_payload && (latestMsg.raw_payload.image_base64 || latestMsg.raw_payload.imageBase64)) ||
+            (latestMsg.media_url && !latestMsg.is_audio && (latestMsg.media_url.startsWith('data:image') || /\.(jpeg|jpg|png|webp|gif)/i.test(latestMsg.media_url))) ||
+            (latestMsg.body && (/^📷\s*photo/i.test(latestMsg.body) || /^\[(photo|image)\]/i.test(latestMsg.body)))
+        );
+        const latestIsAud = !latestIsImg && Boolean(
+            latestMsg.is_audio ||
+            latestMsg.type === 'audio' ||
+            latestMsg.message_type === 'audio' ||
+            latestMsg.message_type === 'voiceMessage' ||
+            latestMsg.message_type === 'ptt' ||
+            latestMsg.audio_url ||
+            (latestMsg.media_url && (latestMsg.media_url.startsWith('data:audio') || /\.(ogg|oga|opus|mp3|wav|m4a)/i.test(latestMsg.media_url)))
+        );
+
+        let latestText = (latestMsg.body && latestMsg.body !== '(no text)')
+            ? latestMsg.body
+            : (latestIsImg ? '📷 Photo' : (latestIsAud ? '🎤 Voice message' : '(no text)'));
         if (latestText.includes('[quotedMessage]')) {
             latestText = latestText.replace(/\[quotedMessage\]/gi, 'Quoted message');
         }
         map[normKey].lastMessage = latestText;
         map[normKey].timestamp = latestMsg.created_at || map[normKey].timestamp;
-        map[normKey].is_audio = Boolean(latestMsg.is_audio || latestMsg.type === 'audio' || latestMsg.message_type === 'audio' || latestMsg.audio_url || latestMsg.media_url);
+        map[normKey].is_audio = latestIsAud;
+        map[normKey].is_image = latestIsImg;
         // Prefer real contact name or resolved phone over 14-digit raw strings
         if (m.sender_name && (!map[normKey].name || map[normKey].name === 'WhatsApp Contact' || map[normKey].name.startsWith('9178') || map[normKey].name.length > 13)) {
             map[normKey].name = m.sender_name;
@@ -7548,7 +7594,12 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                 const avatarColor = getWaAvatarColor(c.phone);
                 const initials = (c.name || c.phone || '?').substring(0, 2).toUpperCase();
                 let previewText = c.lastMessage || '';
-                const previewIcon = (c.is_audio && !previewText.startsWith('🎙️') && !previewText.startsWith('🎤')) ? '🎙️ ' : '';
+                let previewIcon = '';
+                if (c.is_image && !previewText.startsWith('📷')) {
+                    previewIcon = '📷 ';
+                } else if (c.is_audio && !previewText.startsWith('🎙️') && !previewText.startsWith('🎤')) {
+                    previewIcon = '🎙️ ';
+                }
                 const unreadCount = (c.messages || []).filter(m => m.direction === 'inbound' && m.status !== 'read').length;
                 if (previewText.includes('> Quoted:')) {
                     const parts = previewText.split('> Quoted:');
@@ -7726,18 +7777,52 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                 const isRead = m.status === 'read';
                 const isDelivered = m.status === 'delivered' || m.status === 'received';
                 const ticks = isSending ? '🕒' : (isRead ? '<span style="color:#53bdeb;font-weight:bold;">✓✓</span>' : (isDelivered ? '✓✓' : '✓'));
-                let rawMedia = m.mediaUrl || m.media_url || m.audioUrl || m.audio_url || (m.raw_payload && (m.raw_payload.mediaUrl || m.raw_payload.audioUrl || m.raw_payload.audio_base64)) || '';
+                let rawMedia = m.mediaUrl || m.media_url || m.downloadUrl || m.download_url || m.audioUrl || m.audio_url || (m.raw_payload && (m.raw_payload.mediaUrl || m.raw_payload.downloadUrl || m.raw_payload.audioUrl || m.raw_payload.audio_base64 || m.raw_payload.image_base64 || m.raw_payload.imageBase64)) || '';
                 if (rawMedia && typeof rawMedia === 'string') {
                     rawMedia = rawMedia.trim();
-                    if (!rawMedia.startsWith('data:') && !rawMedia.startsWith('http') && !rawMedia.startsWith('/api/') && rawMedia.length > 50) {
-                        rawMedia = `data:audio/ogg;base64,${rawMedia}`;
-                    }
                     if (rawMedia.startsWith('data:')) {
                         rawMedia = rawMedia.replace(/;\s*codecs=[^;,]+/i, '');
                     }
                 }
-                const hasPlayableAudio = Boolean(rawMedia && typeof rawMedia === 'string' && (rawMedia.startsWith('data:audio') || rawMedia.startsWith('http') || rawMedia.startsWith('/api/')));
-                const isVoice = Boolean(
+
+                // Strict Image vs Voice Disambiguation
+                const isImage = Boolean(
+                    m.is_image ||
+                    m.message_type === 'image' ||
+                    m.message_type === 'imageMessage' ||
+                    m.message_type === 'photomessage' ||
+                    Boolean(m.image_base64 || (m.raw_payload && (m.raw_payload.image_base64 || m.raw_payload.imageBase64))) ||
+                    Boolean(rawMedia && (rawMedia.startsWith('data:image') || /\.(jpeg|jpg|png|webp|gif)($|\?)/i.test(rawMedia))) ||
+                    Boolean(m.media_url && /\.(jpeg|jpg|png|webp|gif)($|\?)/i.test(m.media_url)) ||
+                    (m.body && (/^📷\s*photo/i.test(m.body.trim()) || /^\[(photo|image)\]/i.test(m.body.trim())))
+                );
+
+                let imgSrc = '';
+                if (isImage) {
+                    if (rawMedia && (rawMedia.startsWith('data:image') || rawMedia.startsWith('http') || rawMedia.startsWith('/'))) {
+                        imgSrc = rawMedia;
+                    } else if (rawMedia && rawMedia.length > 50 && !rawMedia.startsWith('data:') && !rawMedia.startsWith('http')) {
+                        imgSrc = `data:image/jpeg;base64,${rawMedia}`;
+                    } else if (m.image_base64) {
+                        imgSrc = m.image_base64.startsWith('data:') ? m.image_base64 : `data:image/jpeg;base64,${m.image_base64}`;
+                    } else if (m.raw_payload && (m.raw_payload.image_base64 || m.raw_payload.imageBase64)) {
+                        const b64 = m.raw_payload.image_base64 || m.raw_payload.imageBase64;
+                        imgSrc = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
+                    } else if (m.media_url) {
+                        imgSrc = m.media_url;
+                    } else if (m.id) {
+                        imgSrc = `/api/whatsapp/media/${encodeURIComponent(m.id)}`;
+                    }
+                }
+
+                if (!isImage && rawMedia && typeof rawMedia === 'string') {
+                    if (!rawMedia.startsWith('data:') && !rawMedia.startsWith('http') && !rawMedia.startsWith('/api/') && rawMedia.length > 50) {
+                        rawMedia = `data:audio/ogg;base64,${rawMedia}`;
+                    }
+                }
+
+                const hasPlayableAudio = !isImage && Boolean(rawMedia && typeof rawMedia === 'string' && (rawMedia.startsWith('data:audio') || /\.(ogg|oga|opus|mp3|wav|m4a)($|\?)/i.test(rawMedia) || rawMedia.startsWith('/api/') || rawMedia.startsWith('http')));
+                const isVoice = !isImage && Boolean(
                     hasPlayableAudio ||
                     m.is_audio ||
                     m.is_voice ||
@@ -7752,7 +7837,28 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                 const safeBody = (m.body || m.message || '').replace(/^🎤\s*/, '').replace(/^🎙️\s*/, '').replace(/\[.*?\]/g, '').trim();
 
                 let bodyHtml = '';
-                if (isVoice) {
+                if (isImage) {
+                    const rawImgBody = (m.body || m.message || '').trim();
+                    let imgCaption = rawImgBody.replace(/^(📷\s*photo|\[photo\]|\[image\]|\[image message\])\s*/i, '').trim();
+                    if (imgCaption.toLowerCase() === 'photo' || imgCaption.toLowerCase() === '(no text)' || imgCaption.toLowerCase() === 'image') {
+                        imgCaption = '';
+                    }
+                    bodyHtml = `
+                        <div class="wa-image-bubble" style="max-width: 280px; border-radius: 8px; overflow: hidden; margin-bottom: 4px;">
+                            ${imgSrc ? `
+                                <div style="position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: rgba(0,0,0,0.3);" onclick="openWaImageModal(event, '${escapeHtml(imgSrc)}', '${escapeHtml(imgCaption || 'WhatsApp Photo')}')">
+                                    <img src="${escapeHtml(imgSrc)}" alt="WhatsApp Photo" class="max-w-xs rounded shadow-sm wa-chat-img" style="width: 100%; max-height: 260px; object-fit: cover; display: block; border-radius: 8px; transition: transform 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" onerror="this.onerror=null; this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'100\\' height=\\'100\\' fill=\\'%23888\\' viewBox=\\'0 0 16 16\\'><path d=\\'M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z\\'/><path d=\\'M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z\\'/></svg>';">
+                                    <div style="position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.65); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; pointer-events: none;">🔍 Click to zoom</div>
+                                </div>
+                            ` : `
+                                <div style="padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px; font-size: 0.88em; color: #aebac1; display: flex; align-items: center; gap: 6px;">
+                                    <span>📷</span> <em>Photo (Image preview unavailable)</em>
+                                </div>
+                            `}
+                            ${imgCaption ? `<div class="wa-image-caption" style="margin-top: 6px; word-break: break-word; font-size: 0.9em; color: #e9edef;">${escapeHtml(imgCaption)}</div>` : ''}
+                        </div>
+                    `;
+                } else if (isVoice) {
                     const fallbackBlob = hasPlayableAudio ? getAudioBlobUrl(safeMediaUrl) : '';
                     let audioSrc = '';
                     if (hasPlayableAudio) {
@@ -7863,6 +7969,25 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                                 ${cleanBody ? `<div style="margin-top:6px; font-size:11.5px; color:#e9edef;">${escapeHtml(cleanBody)}</div>` : ''}
                             </div>
                         `;
+                    } else if (
+                        rawBody.toLowerCase() === '[photo]' ||
+                        rawBody.toLowerCase() === '[image]' ||
+                        rawBody.toLowerCase() === '📷 photo' ||
+                        (Boolean(rawMedia || m.media_url || m.download_url) && (rawBody.toLowerCase().includes('photo') || rawBody.toLowerCase().includes('image')))
+                    ) {
+                        const fallbackImg = rawMedia || m.media_url || m.download_url || (m.id ? `/api/whatsapp/media/${encodeURIComponent(m.id)}` : '');
+                        if (fallbackImg) {
+                            bodyHtml = `
+                                <div class="wa-image-bubble" style="max-width: 280px; border-radius: 8px; overflow: hidden; margin-bottom: 4px;">
+                                    <div style="position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: rgba(0,0,0,0.3);" onclick="openWaImageModal(event, '${escapeHtml(fallbackImg)}', 'WhatsApp Photo')">
+                                        <img src="${escapeHtml(fallbackImg)}" alt="Uploaded Photo" class="max-w-xs rounded shadow-sm wa-chat-img" style="width: 100%; max-height: 260px; object-fit: cover; display: block; border-radius: 8px; transition: transform 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" />
+                                        <div style="position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.65); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; pointer-events: none;">🔍 Click to zoom</div>
+                                    </div>
+                                </div>
+                            `;
+                        } else {
+                            bodyHtml = `<div style="word-break: break-word;">${escapeHtml(rawBody)}</div>`;
+                        }
                     } else {
                         const cleanBody = rawBody.replace(/\[quotedMessage\]/gi, 'Quoted message');
                         bodyHtml = `<div style="word-break: break-word;">${escapeHtml(cleanBody || '(no text)')}</div>`;
@@ -11652,6 +11777,23 @@ function closeProductImagePreview() {
     const modal = document.getElementById('modalProductImagePreview');
     if (modal) modal.style.display = 'none';
 }
+
+window.openWaImageModal = function(event, src, caption) {
+    if (event && event.stopPropagation) {
+        event.stopPropagation();
+    }
+    if (!src) return;
+    if (typeof openProductImagePreview === 'function') {
+        openProductImagePreview(encodeURIComponent(src), encodeURIComponent(caption || 'WhatsApp Photo'));
+    } else {
+        const modal = document.getElementById('modalProductImagePreview');
+        const img = document.getElementById('imagePreviewImg');
+        const titleEl = document.getElementById('imagePreviewTitle');
+        if (img) img.src = src;
+        if (titleEl) titleEl.textContent = caption || 'WhatsApp Photo';
+        if (modal) modal.style.display = 'flex';
+    }
+};
 
 
 // ==========================================================================

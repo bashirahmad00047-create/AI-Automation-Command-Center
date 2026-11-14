@@ -7052,18 +7052,67 @@ class WhatsAppService:
             return None
 
         # =========================================================================
-        # STRICT FORCE IMAGE BYPASS (TOP-LEVEL GUARD)
-        # If the message contains an image AND an inventory caption (like "add rs 150"),
-        # immediately process it via the local inventory database, send the
-        # " Product Successfully Added..." response, and return immediately.
-        # NEVER let this request reach the AI LLM.
+        # STRICT HARDCODED AI BYPASS (TOP-LEVEL GUARDS)
+        # 1. "meri dukan" -> Vendor magic link immediately (NEVER reaches AI LLM).
+        # 2. Inbound image with inventory caption -> Auto-catalog immediately (NEVER reaches AI LLM).
+        # 3. Price keywords without image -> Prompt user to attach photo immediately (NEVER reaches AI LLM).
         # =========================================================================
+        org_id_top = organization_id or "org-enterprise-default"
+        clean_p_top = cls.format_phone_number(sender_phone)
+        raw_chat_top = chat_id or kwargs.get("chat_id") or kwargs.get("chatId") or (f"{clean_p_top}@s.whatsapp.net" if clean_p_top else sender_phone)
         raw_body_str = str(message_body or "").strip()
-        is_image_top = cls.is_image_message(raw_body_str, download_url=download_url, **kwargs)
+        cleaned_cmd_lower = raw_body_str.lower().strip()
+
+        # 1. HARDCODED BYPASS: Exactly "meri dukan" (or "meri dukaan", "my shop", "my store")
+        if cleaned_cmd_lower in ("meri dukan", "meri dukaan", "my shop", "my store"):
+            logger.info(f"[Strict AI Bypass] 'meri dukan' command detected at TOP for {sender_phone}. Bypassing AI LLM.")
+            token = ""
+            portal_url = ""
+            try:
+                from services.global_bazar_service import GlobalBazarService
+                v_name = sender_name or (kwargs.get("raw_payload") or {}).get("pushName")
+                vendor_obj = GlobalBazarService.find_or_create_vendor(
+                    name=v_name or f"Shop {clean_p_top[-4:] if clean_p_top else 'Vendor'}",
+                    phone=clean_p_top or sender_phone,
+                    owner_name=v_name or "Vendor"
+                )
+                v_id = vendor_obj.get("id") or 1
+                token = GlobalBazarService.generate_vendor_magic_token(v_id, clean_p_top or sender_phone)
+                base_domain = os.environ.get("VENDOR_PORTAL_BASE_URL", "http://66.45.230.232:5000")
+                portal_url = f"{base_domain}/vendor/auth/{token}"
+                shop_reply = (
+                    "🏪 *Aapki Online Dukaan Tayyar Hai!*\n\n"
+                    f"🔗 http://66.45.230.232:5000/vendor/auth/{token}"
+                )
+            except Exception as e:
+                shop_reply = f"⚠️ Could not generate vendor portal link: {e}"
+
+            try:
+                cls.send_message(
+                    organization_id=org_id_top,
+                    to_phone=clean_p_top or sender_phone,
+                    chat_id=raw_chat_top,
+                    message_text=shop_reply
+                )
+            except Exception as send_err:
+                logger.error(f"[Strict AI Bypass] Failed to send 'meri dukan' reply: {send_err}")
+
+            return {
+                "success": True,
+                "action": "vendor_magic_link",
+                "token": token,
+                "portal_url": portal_url,
+                "reply_body": shop_reply,
+                "reply": shop_reply
+            }
+
+        # 2. HARDCODED BYPASS: Inbound image with inventory caption
+        is_image_top = False if kwargs.get("is_image") is False else bool(
+            kwargs.get("is_image")
+            or kwargs.get("is_image_inbound")
+            or cls.is_image_message(raw_body_str, download_url=download_url, **kwargs)
+        )
         if is_image_top and cls.is_inventory_caption(raw_body_str):
-            org_id_top = organization_id or "org-enterprise-default"
-            clean_p_top = cls.format_phone_number(sender_phone)
-            raw_chat_top = chat_id or kwargs.get("chat_id") or kwargs.get("chatId") or (f"{clean_p_top}@s.whatsapp.net" if clean_p_top else sender_phone)
             logger.info(f"[Force Image Bypass] Inbound image with inventory caption detected at TOP: '{raw_body_str}'. Bypassing all LLM pipelines.")
             catalog_res = cls.handle_whatsapp_inventory_image(
                 organization_id=org_id_top,
@@ -7076,6 +7125,31 @@ class WhatsAppService:
             )
             if catalog_res:
                 return catalog_res
+
+        # 3. HARDCODED BYPASS: Text with price keywords but is_image is False
+        has_price_keywords = bool(
+            re.search(r'(?i)(?:\b(?:rs\.?|pkr|price|rate|cost)\s*[:=]?\s*\d+|\b\d+\s*(?:rs|pkr|rupees|rupay|/-)|\badd\s*(?:rs\.?|pkr)?\s*[:=]?\s*\d+|\badd\b.*\b\d+)', raw_body_str)
+            or (cls.is_inventory_caption(raw_body_str) and any(c.isdigit() for c in raw_body_str))
+        )
+        if not is_image_top and has_price_keywords:
+            logger.info(f"[Strict AI Bypass] Text with price keywords but NO image: '{raw_body_str}'. Bypassing AI LLM.")
+            warning_msg = "⚠️ Item add karne ke liye tasveer attach karna lazmi hai. Kripya tasveer ke caption mein 'Add Rs [price]' likh kar bhejein."
+            try:
+                cls.send_message(
+                    organization_id=org_id_top,
+                    to_phone=clean_p_top or sender_phone,
+                    chat_id=raw_chat_top,
+                    message_text=warning_msg
+                )
+            except Exception as send_err:
+                logger.error(f"[Strict AI Bypass] Failed to send missing image warning: {send_err}")
+
+            return {
+                "success": True,
+                "action": "missing_image_warning",
+                "reply_body": warning_msg,
+                "reply": warning_msg
+            }
 
         # Determine if message is an incoming image
         clean_body = str(message_body or "").strip()
@@ -7163,6 +7237,99 @@ class WhatsAppService:
         else:
             real_chat_id = f"{clean_phone}@s.whatsapp.net" if clean_phone else str(sender_phone)
         org_id = organization_id or "org-enterprise-default"
+
+        # =========================================================================
+        # STRICT FORCE IMAGE BYPASS (TOP-LEVEL GUARD FOR FORCE DISPATCH)
+        # =========================================================================
+        raw_body_str = str(message_body or "").strip()
+        cleaned_cmd_lower = raw_body_str.lower().strip()
+
+        # 1. HARDCODED BYPASS: Exactly "meri dukan"
+        if cleaned_cmd_lower in ("meri dukan", "meri dukaan", "my shop", "my store"):
+            logger.info(f"[Strict AI Bypass] 'meri dukan' command in force_dispatch for {clean_phone or sender_phone}. Bypassing AI LLM.")
+            token = ""
+            portal_url = ""
+            try:
+                from services.global_bazar_service import GlobalBazarService
+                v_name = sender_name or (kwargs.get("raw_payload") or {}).get("pushName")
+                vendor_obj = GlobalBazarService.find_or_create_vendor(
+                    name=v_name or f"Shop {(clean_phone or sender_phone)[-4:]}",
+                    phone=clean_phone or sender_phone,
+                    owner_name=v_name or "Vendor"
+                )
+                v_id = vendor_obj.get("id") or 1
+                token = GlobalBazarService.generate_vendor_magic_token(v_id, clean_phone or sender_phone)
+                base_domain = os.environ.get("VENDOR_PORTAL_BASE_URL", "http://66.45.230.232:5000")
+                portal_url = f"{base_domain}/vendor/auth/{token}"
+                shop_reply = (
+                    "🏪 *Aapki Online Dukaan Tayyar Hai!*\n\n"
+                    f"🔗 http://66.45.230.232:5000/vendor/auth/{token}"
+                )
+            except Exception as e:
+                shop_reply = f"⚠️ Could not generate vendor portal link: {e}"
+
+            try:
+                cls.send_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone or sender_phone,
+                    chat_id=real_chat_id,
+                    message_text=shop_reply
+                )
+            except Exception as send_err:
+                logger.error(f"[Strict AI Bypass] Failed to send 'meri dukan' reply: {send_err}")
+
+            return {
+                "success": True,
+                "action": "vendor_magic_link",
+                "token": token,
+                "portal_url": portal_url,
+                "reply_body": shop_reply,
+                "reply": shop_reply
+            }
+
+        is_image_top = False if kwargs.get("is_image") is False else bool(
+            kwargs.get("is_image")
+            or kwargs.get("is_image_inbound")
+            or cls.is_image_message(raw_body_str, download_url=download_url, **kwargs)
+        )
+        if is_image_top and cls.is_inventory_caption(raw_body_str):
+            logger.info(f"[Force Image Bypass] Inbound image with inventory caption in force_dispatch_auto_responder: '{raw_body_str}'. Bypassing all rules and LLMs.")
+            inv_res = cls.handle_whatsapp_inventory_image(
+                organization_id=org_id,
+                sender_phone=clean_phone or sender_phone,
+                message_body=raw_body_str,
+                download_url=download_url,
+                chat_id=real_chat_id,
+                message_id=message_id,
+                **kwargs
+            )
+            if inv_res:
+                return inv_res
+
+        # 3. HARDCODED BYPASS: Text with price keywords but is_image is False
+        has_price_keywords = bool(
+            re.search(r'(?i)(?:\b(?:rs\.?|pkr|price|rate|cost)\s*[:=]?\s*\d+|\b\d+\s*(?:rs|pkr|rupees|rupay|/-)|\badd\s*(?:rs\.?|pkr)?\s*[:=]?\s*\d+|\badd\b.*\b\d+)', raw_body_str)
+            or (cls.is_inventory_caption(raw_body_str) and any(c.isdigit() for c in raw_body_str))
+        )
+        if not is_image_top and has_price_keywords:
+            logger.info(f"[Strict AI Bypass] Text with price keywords but NO image: '{raw_body_str}'. Bypassing AI LLM.")
+            warning_msg = "⚠️ Item add karne ke liye tasveer attach karna lazmi hai. Kripya tasveer ke caption mein 'Add Rs [price]' likh kar bhejein."
+            try:
+                cls.send_message(
+                    organization_id=org_id,
+                    to_phone=clean_phone or sender_phone,
+                    chat_id=real_chat_id,
+                    message_text=warning_msg
+                )
+            except Exception as send_err:
+                logger.error(f"[Strict AI Bypass] Failed to send missing image warning: {send_err}")
+
+            return {
+                "success": True,
+                "action": "missing_image_warning",
+                "reply_body": warning_msg,
+                "reply": warning_msg
+            }
 
         # Timestamp logging (Zero-drop guarantee: incoming messages are never ignored or dropped based on age)
         if message_timestamp:

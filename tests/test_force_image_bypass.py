@@ -40,5 +40,44 @@ class TestForceImageBypass(unittest.TestCase):
         self.assertIn(expected_rule, prompt)
         print('[CHECK 3 PASS] AI prompt restriction correctly embedded in services/ai_responder.py!')
 
+    def test_4_text_price_keywords_without_image(self):
+        # 4a: "rs 160" without image
+        res_a = WhatsAppService.force_dispatch_auto_responder(
+            organization_id='org-enterprise-default',
+            sender_phone='03129988771',
+            message_body='rs 160',
+            is_image=False,
+            sender_name='Shahi Bazar Vendor'
+        )
+        self.assertIsNotNone(res_a)
+        self.assertEqual(res_a.get('action'), 'missing_image_warning')
+        self.assertIn("Item add karne ke liye tasveer attach karna lazmi hai", res_a.get('reply_body', ''))
+
+        # 4b: "add 150" without image
+        res_b = WhatsAppService.force_dispatch_auto_responder(
+            organization_id='org-enterprise-default',
+            sender_phone='03129988771',
+            message_body='add 150',
+            is_image=False,
+            sender_name='Shahi Bazar Vendor'
+        )
+        self.assertIsNotNone(res_b)
+        self.assertEqual(res_b.get('action'), 'missing_image_warning')
+        self.assertIn("Item add karne ke liye tasveer attach karna lazmi hai", res_b.get('reply_body', ''))
+        print('[CHECK 4 PASS] Text price keywords without image successfully intercepted with warning!')
+
+    def test_5_meri_dukan_magic_link_top_bypass(self):
+        res = WhatsAppService.force_dispatch_auto_responder(
+            organization_id='org-enterprise-default',
+            sender_phone='03129988771',
+            message_body='meri dukan',
+            sender_name='Shahi Bazar Vendor'
+        )
+        self.assertIsNotNone(res)
+        self.assertEqual(res.get('action'), 'vendor_magic_link')
+        self.assertIn("Aapki Online Dukaan Tayyar Hai!", res.get('reply_body', ''))
+        self.assertIn("http://66.45.230.232:5000/vendor/auth/", res.get('reply_body', ''))
+        print('[CHECK 5 PASS] meri dukan command successfully generated magic link at top level!')
+
 if __name__ == '__main__':
     unittest.main()
