@@ -175,8 +175,19 @@ DEMO_PRODUCT_CATALOG: List[Dict[str, Any]] = [
 
 
 def get_all_catalog_items(organization_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Fetches active products from SQLite database with automatic fallback to DEMO_PRODUCT_CATALOG."""
-    db_items: List[Dict[str, Any]] = []
+    """Fetches active products from Global-Bazar-Core and SQLite database with automatic fallback to DEMO_PRODUCT_CATALOG."""
+    catalog_items: List[Dict[str, Any]] = []
+
+    # 1. Fetch live products from Global-Bazar-Core ERP
+    try:
+        from services.global_bazar_service import GlobalBazarService
+        gb_items = GlobalBazarService.get_catalog_items_for_ai()
+        if gb_items:
+            catalog_items.extend(gb_items)
+    except Exception as gb_err:
+        logger.debug(f"[Catalog Data] Global-Bazar fetch notice: {gb_err}")
+
+    # 2. Fetch active products from BashFlow SQLite database
     try:
         from flask import has_app_context
         if has_app_context():
@@ -185,16 +196,25 @@ def get_all_catalog_items(organization_id: Optional[str] = None) -> List[Dict[st
             if organization_id:
                 org_query = query.filter_by(organization_id=organization_id).all()
                 if org_query:
-                    db_items = [p.to_dict() for p in org_query]
-            if not db_items:
+                    catalog_items.extend([p.to_dict() for p in org_query])
+            else:
                 all_active = query.all()
                 if all_active:
-                    db_items = [p.to_dict() for p in all_active]
+                    catalog_items.extend([p.to_dict() for p in all_active])
     except Exception as e:
         logger.debug(f"[Catalog Data] Database query notice: {e}")
 
-    if db_items:
-        return db_items
+    # 3. If neither has items, fallback to comprehensive demo catalog
+    if catalog_items:
+        seen_names = set()
+        deduped = []
+        for it in catalog_items:
+            name_key = str(it.get("name") or "").strip().lower()
+            if name_key and name_key not in seen_names:
+                seen_names.add(name_key)
+                deduped.append(it)
+        return deduped
+
     return DEMO_PRODUCT_CATALOG
 
 

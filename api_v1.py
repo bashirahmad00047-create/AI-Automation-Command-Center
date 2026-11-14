@@ -11564,3 +11564,202 @@ def api_store_marketplace_settings():
     except Exception as e:
         logger.error(f"Marketplace settings error: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# =========================================================================
+# GLOBAL-BAZAR-CORE ERP & INVENTORY MANAGEMENT ENDPOINTS
+# =========================================================================
+
+@api_v1.route("/global-bazar/status", methods=["GET"])
+def api_global_bazar_status():
+    """Checks Global-Bazar-Core database connection and service health."""
+    try:
+        from services.global_bazar_service import GlobalBazarService
+        db_path = GlobalBazarService.get_db_path()
+        db_exists = os.path.exists(db_path)
+        api_online = GlobalBazarService.is_api_online()
+        vendors = GlobalBazarService.get_vendors() if db_exists else []
+        products = GlobalBazarService.get_products() if db_exists else []
+        return jsonify({
+            "success": True,
+            "status": "connected" if db_exists else "db_not_found",
+            "db_path": db_path,
+            "db_exists": db_exists,
+            "api_online": api_online,
+            "vendors_count": len(vendors),
+            "products_count": len(products),
+            "vendors": vendors
+        }), 200
+    except Exception as e:
+        logger.error(f"[GlobalBazar API Error] Status check: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/global-bazar/inventory", methods=["GET"])
+def api_global_bazar_inventory():
+    """Retrieves live products and stock levels from Global-Bazar-Core."""
+    try:
+        from services.global_bazar_service import GlobalBazarService
+        vendor_id = request.args.get("vendor_id", type=int)
+        query = request.args.get("q")
+        category = request.args.get("category")
+        in_stock_only = request.args.get("in_stock_only", "").lower() in ("1", "true")
+        products = GlobalBazarService.get_products(
+            vendor_id=vendor_id,
+            query=query,
+            category=category,
+            in_stock_only=in_stock_only
+        )
+        return jsonify({
+            "success": True,
+            "products": products,
+            "count": len(products)
+        }), 200
+    except Exception as e:
+        logger.error(f"[GlobalBazar API Error] Inventory fetch: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/global-bazar/inventory/stock", methods=["POST"])
+def api_global_bazar_update_stock():
+    """Updates product stock in Global-Bazar-Core."""
+    try:
+        from services.global_bazar_service import GlobalBazarService
+        data = request.get_json(silent=True) or {}
+        product_id = data.get("product_id")
+        if not product_id:
+            return jsonify({"success": False, "error": "product_id is required"}), 400
+
+        quantity_delta = data.get("quantity_delta", 0)
+        new_stock = data.get("new_stock")
+
+        updated = GlobalBazarService.update_product_stock(
+            product_id=int(product_id),
+            quantity_delta=int(quantity_delta) if quantity_delta else 0,
+            new_stock=int(new_stock) if new_stock is not None else None
+        )
+        if not updated:
+            return jsonify({"success": False, "error": f"Product #{product_id} not found"}), 404
+
+        return jsonify({
+            "success": True,
+            "message": f"Stock updated successfully for '{updated.get('title')}'",
+            "product": updated
+        }), 200
+    except Exception as e:
+        logger.error(f"[GlobalBazar API Error] Stock update: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/global-bazar/inventory/add", methods=["POST"])
+def api_global_bazar_add_product():
+    """Adds a new product to Global-Bazar-Core catalog."""
+    try:
+        from services.global_bazar_service import GlobalBazarService
+        data = request.get_json(silent=True) or {}
+        title = data.get("title")
+        price = data.get("price")
+        if not title or price is None:
+            return jsonify({"success": False, "error": "title and price are required"}), 400
+
+        stock = int(data.get("stock", 10))
+        vendor_id = data.get("vendor_id")
+        category = data.get("category", "General")
+        description = data.get("description", "")
+        image_url = data.get("image_url")
+
+        created = GlobalBazarService.add_product(
+            title=title,
+            price=float(price),
+            stock=stock,
+            vendor_id=int(vendor_id) if vendor_id else None,
+            category=category,
+            description=description,
+            image_url=image_url
+        )
+        if not created:
+            return jsonify({"success": False, "error": "Could not create product"}), 500
+
+        return jsonify({
+            "success": True,
+            "message": f"Product '{title}' added to Global-Bazar-Core successfully!",
+            "product": created
+        }), 201
+    except Exception as e:
+        logger.error(f"[GlobalBazar API Error] Add product: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/global-bazar/orders", methods=["GET"])
+def api_global_bazar_orders():
+    """Retrieves orders from Global-Bazar-Core."""
+    try:
+        from services.global_bazar_service import GlobalBazarService
+        vendor_id = request.args.get("vendor_id", type=int)
+        with GlobalBazarService.get_db_connection() as conn:
+            c = conn.cursor()
+            v_id = vendor_id or GlobalBazarService.get_default_vendor_id()
+            rows = c.execute("SELECT * FROM orders WHERE vendor_id = ? ORDER BY id DESC LIMIT 100", (v_id,)).fetchall()
+            orders = [dict(r) for r in rows]
+        return jsonify({
+            "success": True,
+            "orders": orders,
+            "count": len(orders)
+        }), 200
+    except Exception as e:
+        logger.error(f"[GlobalBazar API Error] Orders fetch: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/global-bazar/orders/create", methods=["POST"])
+def api_global_bazar_create_order():
+    """Manual or API-triggered automated order creation with stock deduction and ledger logging."""
+    try:
+        from services.global_bazar_service import GlobalBazarService
+        data = request.get_json(silent=True) or {}
+        customer_phone = data.get("customer_phone", "")
+        customer_name = data.get("customer_name", "Customer")
+        product_identifier = data.get("product_identifier") or data.get("product_id") or data.get("product_name")
+        quantity = int(data.get("quantity", 1))
+        delivery_address = data.get("delivery_address", "WhatsApp Order")
+        vendor_id = data.get("vendor_id")
+
+        if not product_identifier:
+            return jsonify({"success": False, "error": "product_identifier (id or title) is required"}), 400
+
+        result = GlobalBazarService.process_whatsapp_order(
+            customer_phone=customer_phone,
+            customer_name=customer_name,
+            product_identifier=product_identifier,
+            quantity=quantity,
+            delivery_address=delivery_address,
+            vendor_id=int(vendor_id) if vendor_id else None
+        )
+        status_code = 200 if result.get("success") else 400
+        return jsonify(result), status_code
+    except Exception as e:
+        logger.error(f"[GlobalBazar API Error] Order process: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_v1.route("/global-bazar/hisaab", methods=["GET"])
+def api_global_bazar_hisaab():
+    """Returns vendor's daily ledger hisaab-kitaab and net profit."""
+    try:
+        from services.global_bazar_service import GlobalBazarService
+        vendor_id = request.args.get("vendor_id", type=int)
+        summary = GlobalBazarService.get_ledger_summary(vendor_id=vendor_id)
+        # Also fetch recent ledger entries
+        v_id = vendor_id or GlobalBazarService.get_default_vendor_id()
+        with GlobalBazarService.get_db_connection() as conn:
+            c = conn.cursor()
+            rows = c.execute("SELECT * FROM ledger WHERE vendor_id = ? ORDER BY id DESC LIMIT 20", (v_id,)).fetchall()
+            entries = [dict(r) for r in rows]
+        return jsonify({
+            "success": True,
+            "summary": summary,
+            "entries": entries
+        }), 200
+    except Exception as e:
+        logger.error(f"[GlobalBazar API Error] Hisaab fetch: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
