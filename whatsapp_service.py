@@ -4030,21 +4030,27 @@ class WhatsAppService:
             )
             return kb
 
-        # 3. Unconfigured tenant fallback with strict grounding:
-        b_name = tenant_kb.get("business_name") or "Our Organization"
+        # 3. Unconfigured tenant fallback with strict grounding and verified demo catalog:
+        b_name = tenant_kb.get("business_name") or "BashFlow"
         jc_acc = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_NUMBER", org_id) or "03209350858"
         jc_title = cls._get_tenant_or_global_setting("JAZZCASH_ACCOUNT_TITLE", org_id) or "Bashir Uddin"
 
+        catalog_text = ""
+        try:
+            from services.catalog_data import get_default_catalog_context
+            catalog_text = get_default_catalog_context(organization_id=org_id)
+        except Exception:
+            pass
+
         return (
             f"Business Name: {b_name}\n\n"
-            "STATUS: Business knowledge catalog has not yet been populated by organization administrators.\n\n"
+            f"{catalog_text}\n\n"
             f"VERIFIED PAYMENT METHODS: JazzCash: {jc_acc} (Title: {jc_title}), Debit/Credit Card (https://ai-automation-command-center-4.onrender.com).\n\n"
-            "STRICT GROUNDING & ANTI-HALLUCINATION GUARDRAILS:\n"
+            "STRICT GROUNDING & CATALOG INSTRUCTIONS:\n"
             f"1. Greet the customer warmly and politely on behalf of {b_name}.\n"
-            "2. Because specific product catalogs, verified pricing, and delivery policies have not been loaded, DO NOT invent or assume any products, prices, or policies.\n"
-            "3. If the customer asks for prices, products, or quotes, politely ask for clarification or state that our customer specialist will contact them directly with confirmed details.\n"
-            "4. If the customer asks for payment details or confirms a deal, provide the verified payment options listed above.\n"
-            "5. Match the customer's language (Roman Urdu or English) and keep responses brief."
+            "2. When the customer asks for a menu, catalog, products, food items, services, or prices, you MUST read directly from the catalog above and provide real item details, exact prices in PKR, and descriptions.\n"
+            "3. NEVER state that 'our menu catalog is currently being updated' or 'products have not been loaded'. Always present the actual items and prices from this catalog.\n"
+            "4. Match the customer's language (Roman Urdu, Urdu, or English) and provide clear, professional, helpful responses."
         )
 
     @classmethod
@@ -9901,6 +9907,75 @@ class WhatsAppService:
                 else:
                     safe_payload[k] = v
 
+        # Strict Message ID Deduplication:
+        # If msg.key.id or whatsapp_message_id already exists in database, update status instead of creating duplicate!
+        if has_app_context() and whatsapp_message_id:
+            clean_wamid = str(whatsapp_message_id).strip()
+            existing_msg = WhatsAppMessage.query.filter(
+                (WhatsAppMessage.whatsapp_message_id == clean_wamid) |
+                (WhatsAppMessage.id == clean_wamid)
+            ).first()
+            if existing_msg:
+                logger.info(f"[Deduplication] Message ID {clean_wamid} already exists in DB. Updating status to '{status}' instead of creating duplicate.")
+                existing_msg.status = status or existing_msg.status
+                if m_url and not existing_msg.media_url:
+                    existing_msg.media_url = m_url
+                if body and (not existing_msg.body or existing_msg.body in ("[voice note]", "🎤 Voice message")):
+                    existing_msg.body = body
+                try:
+                    db.session.commit()
+                    cls.mark_message_processed(clean_wamid)
+                    # Emit status update via Socket.IO
+                    sio = None
+                    try:
+                        from app import socketio as _app_sio
+                        sio = _app_sio
+                    except Exception:
+                        pass
+                    if not sio and has_app_context():
+                        from flask import current_app
+                        sio = current_app.config.get("SOCKETIO") or getattr(current_app, "socketio", None)
+                    if sio:
+                        sio.emit("whatsapp_message_status", {
+                            "message_id": existing_msg.id,
+                            "whatsapp_message_id": existing_msg.whatsapp_message_id,
+                            "status": existing_msg.status
+                        })
+                except Exception as up_err:
+                    logger.debug(f"[Deduplication Commit Notice]: {up_err}")
+                return existing_msg
+
+        # Outbound Near-Duplicate Intercept:
+        # If an outbound message to the same recipient with identical body was recorded within the last 20 seconds,
+        # update its status and whatsapp_message_id instead of duplicating.
+        if has_app_context() and direction == "outbound" and recipient and body:
+            clean_recip = re.sub(r"\D", "", str(recipient))
+            if clean_recip:
+                recent_cutoff = (created_at or datetime.datetime.utcnow()) - datetime.timedelta(seconds=20)
+                try:
+                    recent_outbound = WhatsAppMessage.query.filter(
+                        WhatsAppMessage.direction == "outbound",
+                        WhatsAppMessage.created_at >= recent_cutoff
+                    ).order_by(WhatsAppMessage.created_at.desc()).limit(10).all()
+                    clean_body_cmp = str(body).replace("🎤", "").replace("🎙️", "").strip()
+                    for prev in recent_outbound:
+                        prev_recip = re.sub(r"\D", "", str(prev.recipient))
+                        if prev_recip and (prev_recip == clean_recip or prev_recip.endswith(clean_recip) or clean_recip.endswith(prev_recip)):
+                            prev_body_cmp = str(prev.body or "").replace("🎤", "").replace("🎙️", "").strip()
+                            if clean_body_cmp and prev_body_cmp and (clean_body_cmp == prev_body_cmp or clean_body_cmp in prev_body_cmp or prev_body_cmp in clean_body_cmp):
+                                logger.info(f"[Deduplication] Outbound AI reply already recorded recently (ID: {prev.id}). Updating status to '{status}' and setting whatsapp_message_id.")
+                                prev.status = status or prev.status
+                                if whatsapp_message_id and not str(prev.whatsapp_message_id).startswith("3EB0"):
+                                    prev.whatsapp_message_id = whatsapp_message_id
+                                if m_url and not prev.media_url:
+                                    prev.media_url = m_url
+                                db.session.commit()
+                                if whatsapp_message_id:
+                                    cls.mark_message_processed(whatsapp_message_id)
+                                return prev
+                except Exception as out_dedup_err:
+                    logger.debug(f"[Outbound Deduplication Notice]: {out_dedup_err}")
+
         msg = WhatsAppMessage(
             id=generate_uuid("wam"),
             organization_id=organization_id or "org-enterprise-default",
@@ -10521,6 +10596,13 @@ class WhatsAppService:
     ) -> str:
         """Formats a list of products into a clean, mobile-optimized WhatsApp catalog showcase."""
         if not products:
+            try:
+                from services.catalog_data import get_all_catalog_items
+                products = get_all_catalog_items(organization_id=organization_id)
+            except Exception:
+                products = []
+
+        if not products:
             return "Hamara product catalog abhi update ho raha hai. Agar aapko kisi specific item ki maloomat chahiye to baraye karam naam batayein!"
 
         lines = []
@@ -10583,7 +10665,11 @@ class WhatsAppService:
                 limit=limit
             )
         if not items:
-            return ""
+            try:
+                from services.catalog_data import get_default_catalog_context
+                return get_default_catalog_context(organization_id=organization_id, search_term=search_term)
+            except Exception:
+                return ""
 
         summary_lines = [
             "LIVE PRODUCT CATALOG & INVENTORY GROUNDING (CRITICAL - ALWAYS USE THESE REAL PRICES & STOCK):",

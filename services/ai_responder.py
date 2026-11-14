@@ -280,8 +280,20 @@ def construct_gemini_prompt(
     if knowledge_base:
         prompt_parts.append(f"\nBusiness Knowledge Base:\n{knowledge_base.strip()}")
 
+    if not catalog_context:
+        try:
+            from services.catalog_data import get_default_catalog_context
+            catalog_context = get_default_catalog_context()
+        except Exception:
+            pass
+
     if catalog_context:
-        prompt_parts.append(f"\nProduct Catalog Information:\n{catalog_context.strip()}")
+        prompt_parts.append(f"\nProduct & Menu Catalog Information:\n{catalog_context.strip()}")
+        prompt_parts.append(
+            "\nCRITICAL CATALOG & MENU DIRECTIVE: When the customer asks for a menu, catalog, services, products, or prices, "
+            "read directly from the Product & Menu Catalog Information above. Provide real item names, exact prices in PKR, and descriptions. "
+            "Never claim that the menu/catalog is being updated or unavailable."
+        )
 
     if system_prompt:
         prompt_parts.append(f"\nCustom Organization Instructions:\n{system_prompt.strip()}")

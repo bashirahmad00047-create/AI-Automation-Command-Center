@@ -5404,11 +5404,27 @@ function initWhatsAppSocket() {
 }
 
 function handleRealtimeWhatsAppMessage(msg) {
-    if (!msg || !msg.id) return;
+    if (!msg || (!msg.id && !msg.whatsapp_message_id)) return;
     if (!Array.isArray(waAllMessagesCache)) waAllMessagesCache = [];
 
-    // Deduplicate or update existing
-    const idx = waAllMessagesCache.findIndex(m => String(m.id) === String(msg.id) || (msg.whatsapp_message_id && String(m.whatsapp_message_id) === String(msg.whatsapp_message_id)));
+    // Strict deduplication or update existing status/fields
+    const idx = waAllMessagesCache.findIndex(m => {
+        if (m.id && msg.id && String(m.id) === String(msg.id)) return true;
+        if (msg.whatsapp_message_id && m.whatsapp_message_id && String(m.whatsapp_message_id) === String(msg.whatsapp_message_id)) return true;
+        if (msg.whatsapp_message_id && m.id && String(m.id) === String(msg.whatsapp_message_id)) return true;
+        if (msg.id && m.whatsapp_message_id && String(m.whatsapp_message_id) === String(msg.id)) return true;
+        if (m.direction === 'outbound' && msg.direction === 'outbound') {
+            const mPartner = normalizeWaPhone(m.recipient || m.sender);
+            const msgPartner = normalizeWaPhone(msg.recipient || msg.sender);
+            if (isSameWaPhone(mPartner, msgPartner)) {
+                const b1 = (m.body || m.message || '').replace(/^🎤\s*/, '').trim();
+                const b2 = (msg.body || msg.message || '').replace(/^🎤\s*/, '').trim();
+                if (b1 && b2 && b1 === b2) return true;
+            }
+        }
+        return false;
+    });
+
     if (idx >= 0) {
         waAllMessagesCache[idx] = Object.assign({}, waAllMessagesCache[idx], msg);
     } else {
@@ -5681,7 +5697,28 @@ function groupWhatsAppConversations(messages) {
                 messages: []
             };
         }
-        map[normKey].messages.push(m);
+        // Strict Message ID Deduplication in Conversation Messages
+        const existingMsgIdx = map[normKey].messages.findIndex(prev => {
+            if (m.id && prev.id && String(m.id) === String(prev.id)) return true;
+            if (m.whatsapp_message_id && prev.whatsapp_message_id && String(m.whatsapp_message_id) === String(prev.whatsapp_message_id)) return true;
+            if (m.id && prev.whatsapp_message_id && String(m.id) === String(prev.whatsapp_message_id)) return true;
+            if (m.whatsapp_message_id && prev.id && String(m.whatsapp_message_id) === String(prev.id)) return true;
+            if (m.direction === 'outbound' && prev.direction === 'outbound') {
+                const b1 = (m.body || m.message || '').replace(/^🎤\s*/, '').trim();
+                const b2 = (prev.body || prev.message || '').replace(/^🎤\s*/, '').trim();
+                if (b1 && b2 && b1 === b2) {
+                    const t1 = new Date(m.created_at || 0).getTime();
+                    const t2 = new Date(prev.created_at || 0).getTime();
+                    if (Math.abs(t1 - t2) < 30000) return true;
+                }
+            }
+            return false;
+        });
+        if (existingMsgIdx >= 0) {
+            map[normKey].messages[existingMsgIdx] = Object.assign({}, map[normKey].messages[existingMsgIdx], m);
+        } else {
+            map[normKey].messages.push(m);
+        }
         // Ensure conversation messages are sorted chronologically ascending (oldest first, newest last)
         map[normKey].messages.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
         // Update last message preview to the most recent message (last in array)
@@ -7614,11 +7651,37 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
         return;
     }
 
-    const partnerMsgs = (messages || []).filter(m => {
+    const partnerMsgsRaw = (messages || []).filter(m => {
         const cleanSender = normalizeWaPhone(m.sender);
         const cleanRecipient = normalizeWaPhone(m.recipient);
         const target = normalizeWaPhone(waActiveChatPartner);
         return isSameWaPhone(cleanSender, target) || isSameWaPhone(cleanRecipient, target);
+    });
+
+    // Strict deduplication by ID, whatsapp_message_id, and identical outbound within 30s
+    const partnerMsgs = [];
+    partnerMsgsRaw.forEach(m => {
+        const foundIdx = partnerMsgs.findIndex(prev => {
+            if (m.id && prev.id && String(m.id) === String(prev.id)) return true;
+            if (m.whatsapp_message_id && prev.whatsapp_message_id && String(m.whatsapp_message_id) === String(prev.whatsapp_message_id)) return true;
+            if (m.id && prev.whatsapp_message_id && String(m.id) === String(prev.whatsapp_message_id)) return true;
+            if (m.whatsapp_message_id && prev.id && String(m.whatsapp_message_id) === String(prev.id)) return true;
+            if (m.direction === 'outbound' && prev.direction === 'outbound') {
+                const b1 = (m.body || m.message || '').replace(/^🎤\s*/, '').trim();
+                const b2 = (prev.body || prev.message || '').replace(/^🎤\s*/, '').trim();
+                if (b1 && b2 && b1 === b2) {
+                    const t1 = new Date(m.created_at || 0).getTime();
+                    const t2 = new Date(prev.created_at || 0).getTime();
+                    if (Math.abs(t1 - t2) < 30000) return true;
+                }
+            }
+            return false;
+        });
+        if (foundIdx >= 0) {
+            partnerMsgs[foundIdx] = Object.assign({}, partnerMsgs[foundIdx], m);
+        } else {
+            partnerMsgs.push(m);
+        }
     });
 
     // Sort chronologically (oldest to newest for chat stream)

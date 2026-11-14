@@ -3026,6 +3026,35 @@ def api_whatsapp_conversations():
                     msg_dicts.append(m_d)
             except Exception as row_err:
                 logger.debug(f"Row parsing notice: {row_err}")
+
+        # Strict Message ID & outbound near-duplicate filtering
+        deduped_msg_dicts = []
+        seen_msg_ids = set()
+        for m_d in msg_dicts:
+            wamid = str(m_d.get("whatsapp_message_id") or "").strip()
+            row_id = str(m_d.get("id") or "").strip()
+            if wamid and wamid in seen_msg_ids:
+                continue
+            if row_id and row_id in seen_msg_ids:
+                continue
+            is_dup = False
+            if m_d.get("direction") == "outbound":
+                r_clean = re.sub(r"\D", "", str(m_d.get("recipient") or ""))
+                b_clean = str(m_d.get("body") or "").replace("🎤", "").replace("🎙️", "").strip()
+                for prev in deduped_msg_dicts:
+                    if prev.get("direction") == "outbound":
+                        pr_clean = re.sub(r"\D", "", str(prev.get("recipient") or ""))
+                        if pr_clean and (pr_clean == r_clean or pr_clean.endswith(r_clean) or r_clean.endswith(pr_clean)):
+                            pb_clean = str(prev.get("body") or "").replace("🎤", "").replace("🎙️", "").strip()
+                            if b_clean and pb_clean and (b_clean == pb_clean or b_clean in pb_clean or pb_clean in b_clean):
+                                is_dup = True
+                                break
+            if is_dup:
+                continue
+            if wamid: seen_msg_ids.add(wamid)
+            if row_id: seen_msg_ids.add(row_id)
+            deduped_msg_dicts.append(m_d)
+        msg_dicts = deduped_msg_dicts
     except Exception as m_err:
         logger.warning(f"Error fetching WhatsAppMessage: {m_err}")
         try: db.session.rollback()
