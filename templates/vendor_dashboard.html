@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ vendor.name if vendor else 'Vendor Portal' }}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        body { background-color: #f8f9fa; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+        .product-img { width: 60px; height: 60px; object-fit: cover; border-radius: 8px; }
+    </style>
+</head>
+<body class="py-4">
+    <div class="container" style="max-width: 600px;">
+        {% if error %}
+            <div class="alert alert-danger text-center">
+                <h5 class="alert-heading">Authentication Error</h5>
+                <p class="mb-0">{{ error }}</p>
+            </div>
+            <div class="text-center mt-3">
+                <a href="/store" class="btn btn-outline-primary btn-sm">Go to Storefront</a>
+            </div>
+        {% elif vendor %}
+            <!-- Shop Header -->
+            <div class="card mb-3 shadow-sm border-0">
+                <div class="card-body text-center bg-primary text-white rounded">
+                    <span class="badge bg-warning text-dark mb-2">Verified Merchant</span>
+                    <h3 class="card-title mb-1">🏪 {{ vendor.name }}</h3>
+                    <p class="mb-0 small opacity-75">Phone: {{ vendor.phone }}{% if vendor.address %} | {{ vendor.address }}{% endif %}</p>
+                </div>
+            </div>
+
+            <!-- Stats Badge -->
+            <div class="card mb-3 shadow-sm border-0">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="fw-bold text-muted">Total Products:</span>
+                        <span class="badge bg-success fs-6 ms-1">{{ total_products or (products|length) }} Items</span>
+                    </div>
+                    <div>
+                        <span class="fw-bold text-muted">Inventory Value:</span>
+                        <span class="badge bg-info text-dark fs-6 ms-1">PKR {{ "{:,.0f}".format(total_inventory_value or 0) }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product List -->
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white fw-bold">Aap Ka Saman (My Inventory)</div>
+                <div class="list-group list-group-flush">
+                    {% if products %}
+                        {% for p in products %}
+                        <div class="list-group-item d-flex align-items-center gap-3 py-3">
+                            <img src="{{ p.image_url or '/static/uploads/default_product.png' }}" 
+                                 class="product-img bg-light" 
+                                 alt="{{ p.title or p.name }}"
+                                 onerror="this.src='https://placehold.co/60x60?text=Item';">
+                            <div class="flex-grow-1">
+                                <h6 class="mb-1 fw-bold">{{ p.title or p.name }}</h6>
+                                <span class="badge bg-light text-dark border">{{ p.category or 'General' }}</span>
+                                <span class="text-success fw-bold ms-2">PKR {{ "{:,.0f}".format(p.price or 0) }}</span>
+                            </div>
+                            <span class="badge bg-secondary">Stock: {{ p.stock or p.stock_quantity or 0 }}</span>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="list-group-item text-center text-muted py-4">
+                            Koi product nahi mila. WhatsApp par photo bhej kar add karein.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="text-center mt-4">
+                <a href="/store" class="btn btn-outline-secondary btn-sm me-2">View Public Store</a>
+                <a href="/vendor/logout" class="btn btn-outline-danger btn-sm">Logout</a>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>

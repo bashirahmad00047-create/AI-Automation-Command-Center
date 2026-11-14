@@ -1013,6 +1013,23 @@
             <span id="productCounter" style="font-size: 0.88rem; color: var(--gray-500); font-weight: 600;">Loading items...</span>
         </div>
 
+        <!-- Vendor / Multi-Shop Filter Bar -->
+        <div id="vendorFilterBar" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:14px; background:#f8fafc; border:1px solid var(--gray-200); border-radius:var(--radius-md); padding:8px 12px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span style="font-size:0.8rem; font-weight:700; color:#475569; display:flex; align-items:center; gap:4px;">
+                    <span>🏪</span> Filter by Shop:
+                </span>
+                <select id="vendorSelectFilter" onchange="filterByVendor(this.value)" style="padding:4px 10px; border-radius:6px; border:1px solid #cbd5e1; font-size:0.8rem; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                    <option value="All">All Shops</option>
+                </select>
+                <span id="activeVendorTag" style="display:none; align-items:center; gap:6px; background:#e0e7ff; color:#3730a3; padding:3px 10px; border-radius:12px; font-weight:700; font-size:0.75rem;">
+                    <span id="activeVendorName"></span>
+                    <button type="button" onclick="filterByVendor('All')" style="border:none; background:transparent; cursor:pointer; color:#4338ca; font-weight:800; font-size:0.9rem; line-height:1;" title="Clear shop filter">&times;</button>
+                </span>
+            </div>
+            <div id="vendorCountInfo" style="font-size:0.75rem; color:#64748b; font-weight:600;"></div>
+        </div>
+
         <div class="products-grid" id="productsGrid">
             <!-- Dynamically populated items with zero broken images -->
         </div>
@@ -1569,10 +1586,60 @@
             }
         }
 
+        let currentVendorFilter = 'All';
+
+        function renderVendorFilterDropdown() {
+            const select = document.getElementById('vendorSelectFilter');
+            const info = document.getElementById('vendorCountInfo');
+            if (!select) return;
+
+            const vendorCounts = {};
+            catalogProducts.forEach(p => {
+                const v = (p.seller_name || p.vendor_name || 'Global Bazar Official').trim();
+                vendorCounts[v] = (vendorCounts[v] || 0) + 1;
+            });
+
+            const uniqueVendors = Object.keys(vendorCounts).sort();
+            let opts = `<option value="All">All Shops (${catalogProducts.length} items)</option>`;
+            uniqueVendors.forEach(vName => {
+                const isSel = (currentVendorFilter === vName) ? 'selected' : '';
+                const safeOpt = vName.replace(/"/g, '&quot;');
+                opts += `<option value="${safeOpt}" ${isSel}>🏪 ${vName} (${vendorCounts[vName]} item${vendorCounts[vName] === 1 ? '' : 's'})</option>`;
+            });
+            select.innerHTML = opts;
+            select.value = currentVendorFilter;
+
+            if (info) {
+                info.textContent = `${uniqueVendors.length} active shop${uniqueVendors.length === 1 ? '' : 's'}`;
+            }
+
+            const activeTag = document.getElementById('activeVendorTag');
+            const activeName = document.getElementById('activeVendorName');
+            if (activeTag && activeName) {
+                if (currentVendorFilter !== 'All') {
+                    activeName.textContent = `Shop: ${currentVendorFilter} (${vendorCounts[currentVendorFilter] || 0} items)`;
+                    activeTag.style.display = 'inline-flex';
+                } else {
+                    activeTag.style.display = 'none';
+                }
+            }
+        }
+
+        function filterByVendor(vendorName) {
+            currentVendorFilter = vendorName || 'All';
+            const select = document.getElementById('vendorSelectFilter');
+            if (select) select.value = currentVendorFilter;
+            renderVendorFilterDropdown();
+            renderProducts();
+        }
+
         // Load Products from Backend API
         async function fetchProducts() {
             try {
-                const res = await fetch('/api/v1/store/products');
+                let res = await fetch('/api/v1/store/products');
+                if (!res.ok) {
+                    res = await fetch('/api/store/products');
+                }
                 if (res.ok) {
                     const data = await res.json();
                     if (data.products && Array.isArray(data.products) && data.products.length > 0) {
@@ -1584,9 +1651,25 @@
             } catch (e) {
                 console.debug('Store API fallback:', e);
             }
+            renderVendorFilterDropdown();
             renderCategoryNav();
             renderProducts();
             renderManagementTable();
+        }
+
+        function getCategoryIcon(catName) {
+            const c = (catName || '').toUpperCase();
+            if (c.includes('FOOD') || c.includes('BURGER')) return '🍔';
+            if (c.includes('BIRYANI') || c.includes('KARAHI') || c.includes('DESI')) return '🍲';
+            if (c.includes('PIZZA') || c.includes('BAKERY')) return '🍕';
+            if (c.includes('HONEY')) return '🍯';
+            if (c.includes('CRAFT') || c.includes('SHAWL') || c.includes('PAKOL') || c.includes('PATTU')) return '🧣';
+            if (c.includes('DRY') || c.includes('FRUIT') || c.includes('NUT') || c.includes('WALNUT')) return '🥜';
+            if (c.includes('GEM') || c.includes('MINERAL')) return '💎';
+            if (c.includes('CLOTH') || c.includes('APPAREL') || c.includes('FASH') || c.includes('KURTA')) return '👔';
+            if (c.includes('FOOT') || c.includes('SHOE')) return '👞';
+            if (c.includes('ELECTR') || c.includes('TECH') || c.includes('MOBILE')) return '📱';
+            return '🛍️';
         }
 
         // Dynamically build category pills from active loaded products in strict requested order
@@ -1601,7 +1684,7 @@
             } else if (activeExperience === 'bazar') {
                 pool = pool.filter(p => {
                     const c = (p.category || '').toLowerCase();
-                    return c.includes('honey') || c.includes('craft') || c.includes('shawl') || c.includes('pakol') || c.includes('fruit') || c.includes('nut') || c.includes('dry') || c.includes('shilajit');
+                    return c.includes('honey') || c.includes('craft') || c.includes('shawl') || c.includes('pakol') || c.includes('fruit') || c.includes('nut') || c.includes('dry') || c.includes('shilajit') || c.includes('gem') || c.includes('mineral') || c.includes('apparel') || c.includes('cloth') || c.includes('footwear') || c.includes('fashion') || c.includes('bazar');
                 });
             }
 
@@ -1615,13 +1698,28 @@
             ];
 
             let html = `<button class="category-pill ${currentFilter === 'All' ? 'active' : ''}" onclick="filterCategory('All')">🌟 All</button>`;
+            const seen = new Set();
             ORDERED_CATEGORIES.forEach(catObj => {
+                seen.add(catObj.name.toLowerCase());
                 const hasProducts = pool.some(p => (p.category || '').toLowerCase() === catObj.name.toLowerCase());
                 if (hasProducts || activeExperience === 'all') {
                     const isActive = (currentFilter === catObj.name) ? 'active' : '';
                     html += `<button class="category-pill ${isActive}" onclick="filterCategory('${catObj.name}')">${catObj.icon} ${catObj.name}</button>`;
                 }
             });
+
+            // Dynamically add any other unique categories in the current product pool
+            pool.forEach(p => {
+                const cat = (p.category || '').trim();
+                if (cat && !seen.has(cat.toLowerCase())) {
+                    seen.add(cat.toLowerCase());
+                    const isActive = (currentFilter === cat) ? 'active' : '';
+                    const icon = getCategoryIcon(cat);
+                    const safeCat = cat.replace(/'/g, "\\'");
+                    html += `<button class="category-pill ${isActive}" onclick="filterCategory('${safeCat}')">${icon} ${cat}</button>`;
+                }
+            });
+
             nav.innerHTML = html;
         }
 
@@ -1636,7 +1734,7 @@
                 if (activeExperience === 'foodpanda') {
                     matchesExp = cat.includes('food') || cat.includes('burger') || cat.includes('biryani') || cat.includes('karahi') || cat.includes('pizza') || cat.includes('bakery') || cat.includes('cafe') || cat.includes('desi');
                 } else if (activeExperience === 'bazar') {
-                    matchesExp = cat.includes('honey') || cat.includes('craft') || cat.includes('shawl') || cat.includes('pakol') || cat.includes('fruit') || cat.includes('nut') || cat.includes('gem') || cat.includes('mineral') || cat.includes('apparel') || cat.includes('footwear');
+                    matchesExp = cat.includes('honey') || cat.includes('craft') || cat.includes('shawl') || cat.includes('pakol') || cat.includes('pattu') || cat.includes('fruit') || cat.includes('nut') || cat.includes('dry') || cat.includes('shilajit') || cat.includes('gem') || cat.includes('mineral') || cat.includes('apparel') || cat.includes('cloth') || cat.includes('footwear') || cat.includes('fashion') || cat.includes('bazar');
                 }
 
                 const matchesCat = (currentFilter === 'All') || (p.category && p.category.toLowerCase().includes(currentFilter.toLowerCase()));
@@ -1645,7 +1743,11 @@
                     (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
                     (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()))
                 );
-                return matchesExp && matchesCat && matchesSearch;
+                const matchesVendor = (currentVendorFilter === 'All') || (
+                    (p.seller_name || '').toLowerCase() === currentVendorFilter.toLowerCase() ||
+                    (p.vendor_name || '').toLowerCase() === currentVendorFilter.toLowerCase()
+                );
+                return matchesExp && matchesCat && matchesSearch && matchesVendor;
             });
 
             counter.textContent = `${filtered.length} product${filtered.length === 1 ? '' : 's'} available`;
@@ -1666,6 +1768,8 @@
                 const delTime = p.delivery_time || (p.category && (p.category.includes('Karahi') || p.category.includes('Burger') || p.category.includes('Biryani')) ? '20-30 mins' : '2-3 Days');
                 const ratingScore = p.rating || '4.8';
                 const ratingCount = p.rating_count || '250+';
+                const vName = p.seller_name || p.vendor_name || 'Verified Store';
+                const safeVendor = vName.replace(/'/g, "\\'");
 
                 return `
                     <div class="product-card">
@@ -1677,9 +1781,11 @@
                             </span>
                         </div>
                         <div class="product-body">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:6px;">
-                                <div style="font-size:0.75rem; color:#b45309; font-weight:700; display:flex; align-items:center; gap:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                                    <span>🍽️</span> ${p.seller_name || 'Verified Kitchen / Store'} ${p.seller_city ? `(${p.seller_city})` : ''}
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:6px; flex-wrap:wrap;">
+                                <div style="font-size:0.75rem; color:#4338ca; font-weight:700; display:flex; align-items:center; gap:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                    <span class="vendor-badge" onclick="filterByVendor('${safeVendor}'); event.stopPropagation();" title="Click to filter items from ${safeVendor}" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px; font-size:0.72rem; color:#4338ca; background:#eef2ff; border:1px solid #c7d2fe; padding:2px 8px; border-radius:12px; font-weight:700; transition:all 0.15s ease;">
+                                        <span>🏪 Shop:</span> ${vName} ${p.seller_city ? `(${p.seller_city})` : ''}
+                                    </span>
                                 </div>
                                 <div style="font-size:0.72rem; color:#059669; font-weight:800; background:#ecfdf5; border:1px solid #a7f3d0; padding:2px 6px; border-radius:4px; white-space:nowrap;">
                                     ⚡ ${delTime}
@@ -2363,6 +2469,18 @@
         document.addEventListener('DOMContentLoaded', () => {
             fetchStoreSettings();
             fetchProducts();
+
+            // Live periodic sync: automatically fetch newly added WhatsApp items every 20 seconds
+            setInterval(() => {
+                fetchProducts();
+            }, 20000);
+
+            // Also refresh immediately whenever user switches back to this tab
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) {
+                    fetchProducts();
+                }
+            });
         });
     </script>
     <!-- Foodpanda Sticky Bottom Cart Bar -->

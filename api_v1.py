@@ -10504,36 +10504,149 @@ def api_store_products():
         else:
             prods = q.all()
 
-        results = []
+        # 1. Fetch live products from local database
+        local_results = []
         for p in prods:
             # Respect seller approval status
             if hasattr(p, 'is_approved') and p.is_approved is False:
                 continue
             cat_lower = (p.category or "").lower()
             is_food = any(k in cat_lower for k in ["biryani", "karahi", "burger", "food", "cafe", "beverage", "chai", "pizza"])
-            results.append({
+            s_name = getattr(p, 'seller_name', None) or getattr(p, 'vendor_name', None) or "Chitral Bazar Official"
+            s_phone = getattr(p, 'seller_phone', None) or getattr(p, 'vendor_phone', None) or ""
+            local_results.append({
                 "id": p.id,
                 "name": p.name,
+                "title": p.name,
                 "category": p.category or "General",
                 "description": p.description or "",
                 "sku": p.sku or "",
                 "price": float(p.price or 0.0),
+                "estimated_price": float(p.price or 0.0),
                 "currency": p.currency or "PKR",
                 "image_url": p.image_url or "",
+                "cleaned_image_url": p.image_url or "",
                 "unit": getattr(p, "unit", "item") or "item",
                 "stock_quantity": int(p.stock_quantity or 0),
                 "stock_status": p.stock_status or "in_stock",
-                "seller_name": getattr(p, 'seller_name', None) or "Chitral Bazar Official",
-                "seller_phone": getattr(p, 'seller_phone', None) or "",
+                "vendor_name": s_name,
+                "seller_name": s_name,
+                "vendor_phone": s_phone,
+                "seller_phone": s_phone,
                 "seller_city": getattr(p, 'seller_city', None) or "Chitral",
                 "seller_price": float(p.seller_price) if getattr(p, 'seller_price', None) is not None else float(p.price or 0.0),
                 "platform_commission": float(getattr(p, 'platform_commission', 0.0) or 0.0),
                 "contact_mode": getattr(p, 'contact_mode', 'smart_broker') or "smart_broker",
                 "delivery_time": "20-30 mins" if is_food else "2-3 Days",
                 "rating": "4.9" if ("honey" in p.name.lower() or "karahi" in p.name.lower() or "biryani" in p.name.lower()) else "4.8",
-                "rating_count": "450+" if is_food else "180+"
+                "rating_count": "450+" if is_food else "180+",
+                "source": "local"
             })
-        return jsonify({"success": True, "products": results, "count": len(results)}), 200
+
+        # 2. Fetch live multi-vendor inventory from Global-Bazar-Core:
+        # First attempt HTTP API at http://127.0.0.1:8000/inventory/products with instant SQLite fallback
+        gb_items = []
+        seen_titles = set()
+
+        from services.global_bazar_service import GlobalBazarService
+        vendors_map = {}
+        try:
+            for v in GlobalBazarService.get_vendors():
+                vendors_map[v["id"]] = v
+        except Exception as v_map_err:
+            logger.debug(f"Vendors map fetch notice: {v_map_err}")
+
+        gb_raw_list = []
+        # Attempt HTTP API
+        try:
+            import urllib.request
+            api_target = "http://127.0.0.1:8000/inventory/products"
+            req = urllib.request.Request(
+                api_target,
+                headers={"User-Agent": "BashFlow-Storefront/1.0", "Accept": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=1.2) as resp:
+                if resp.status == 200:
+                    api_data = json.loads(resp.read().decode("utf-8"))
+                    if isinstance(api_data, list):
+                        gb_raw_list = api_data
+        except Exception:
+            pass
+
+        # Also merge / fallback to local SQLite database global_bazar.db
+        try:
+            sqlite_prods = GlobalBazarService.get_products()
+            seen_gb_ids = {p.get("id") for p in gb_raw_list if p.get("id")}
+            for sp in sqlite_prods:
+                if sp.get("id") not in seen_gb_ids:
+                    gb_raw_list.append(sp)
+        except Exception as gb_fetch_err:
+            logger.warning(f"Global-Bazar inventory merge error: {gb_fetch_err}")
+
+        # Map all Global-Bazar items to unified storefront schema
+        for gp in gb_raw_list:
+            g_title = str(gp.get("title") or gp.get("name") or "").strip()
+            if not g_title:
+                continue
+            norm_key = g_title.lower()
+            if norm_key in seen_titles:
+                continue
+            seen_titles.add(norm_key)
+
+            v_id = gp.get("vendor_id")
+            v_info = vendors_map.get(v_id, {})
+            s_name = v_info.get("name") or v_info.get("owner_name") or gp.get("vendor_name") or gp.get("seller_name") or "Bazar Modern Traders"
+            s_phone = v_info.get("phone") or gp.get("vendor_phone") or gp.get("seller_phone") or "+923007654321"
+            s_city = v_info.get("address") or gp.get("seller_city") or "Lahore / Chitral"
+
+            # Clean and proxy image URL so port 5000 serves it cleanly without broken links
+            raw_img = str(gp.get("image_url") or gp.get("ai_image_url") or "").strip()
+            clean_img = raw_img
+            for prefix in ["http://127.0.0.1:8000", "http://localhost:8000"]:
+                if clean_img.startswith(prefix):
+                    clean_img = clean_img[len(prefix):]
+            if clean_img and not clean_img.startswith("/") and not clean_img.startswith("http") and not clean_img.startswith("data:"):
+                clean_img = "/" + clean_img
+
+            item_price = float(gp.get("price") or gp.get("estimated_price") or 0.0)
+            cat_name = str(gp.get("category") or "Clothing & Apparel").strip()
+
+            gb_items.append({
+                "id": f"gb-{gp.get('id')}",
+                "global_bazar_id": gp.get("id"),
+                "vendor_id": v_id,
+                "name": g_title,
+                "title": g_title,
+                "category": cat_name,
+                "description": gp.get("description") or f"{g_title} available from {s_name}.",
+                "sku": f"GB-{gp.get('id')}",
+                "price": item_price,
+                "estimated_price": item_price,
+                "currency": "PKR",
+                "image_url": clean_img,
+                "cleaned_image_url": clean_img,
+                "unit": "item",
+                "stock_quantity": int(gp.get("stock") or 0),
+                "stock_status": "out_of_stock" if (gp.get("stock") or 0) <= 0 else "in_stock",
+                "vendor_name": s_name,
+                "seller_name": s_name,
+                "vendor_phone": s_phone,
+                "seller_phone": s_phone,
+                "seller_city": s_city,
+                "seller_price": item_price,
+                "platform_commission": float(round(item_price * 0.10, 2)),
+                "contact_mode": "smart_broker",
+                "delivery_time": "2-3 Days",
+                "rating": "4.9",
+                "rating_count": "210+",
+                "source": "global_bazar"
+            })
+
+        # Newly cataloged WhatsApp items appear at the TOP of Featured Products!
+        filtered_local = [lp for lp in local_results if lp["name"].strip().lower() not in seen_titles]
+        all_products = gb_items + filtered_local
+
+        return jsonify({"success": True, "products": all_products, "count": len(all_products)}), 200
     except Exception as e:
         logger.error(f"Store products API error: {e}", exc_info=True)
         return jsonify({"success": False, "products": [], "error": str(e)}), 500
@@ -10547,13 +10660,13 @@ def api_store_checkout():
     """
     try:
         data = request.get_json(silent=True) or {}
-        name = str(data.get("name") or "").strip()
-        phone = str(data.get("phone") or "").strip()
-        address = str(data.get("address") or "").strip()
-        lat = data.get("latitude")
-        lng = data.get("longitude")
+        name = str(data.get("name") or data.get("customer_name") or "").strip()
+        phone = str(data.get("phone") or data.get("customer_phone") or "").strip()
+        address = str(data.get("address") or data.get("customer_address") or "").strip()
+        lat = data.get("latitude") or data.get("lat")
+        lng = data.get("longitude") or data.get("lng")
         payment_method = str(data.get("payment_method") or "cod").strip().lower()
-        items = data.get("items") or []
+        items = data.get("items") or data.get("cart") or []
         receipt_b64 = data.get("receipt_base64")
         org_id = str(data.get("organization_id") or "org-enterprise-default").strip()
 
@@ -10652,8 +10765,9 @@ def api_store_checkout():
         from models import Product
         for it in cleaned_items:
             p_rec = None
-            if it.get("id"):
-                p_rec = db.session.get(Product, it["id"])
+            it_id = str(it.get("id") or "")
+            if it_id and not it_id.startswith("gb-"):
+                p_rec = db.session.get(Product, it_id)
             if not p_rec and it.get("name"):
                 p_rec = Product.query.filter_by(name=it["name"]).first()
             if p_rec:
@@ -10689,6 +10803,88 @@ def api_store_checkout():
                             "chat_url": wa_link,
                             "whatsapp_url": wa_link
                         })
+            else:
+                # Resolve in Global-Bazar-Core!
+                try:
+                    from services.global_bazar_service import GlobalBazarService
+                    gb_id = None
+                    if it_id.startswith("gb-"):
+                        try:
+                            gb_id = int(it_id.replace("gb-", ""))
+                        except ValueError:
+                            pass
+                    elif it_id.isdigit():
+                        gb_id = int(it_id)
+
+                    gb_item = None
+                    if gb_id:
+                        gb_item = GlobalBazarService.get_product_by_id(gb_id)
+                    if not gb_item and it.get("name"):
+                        gb_item = GlobalBazarService.find_product_by_title_or_sku(it["name"])
+
+                    if gb_item:
+                        v_id = gb_item.get("vendor_id")
+                        vendors_map = {v["id"]: v for v in GlobalBazarService.get_vendors()}
+                        v_info = vendors_map.get(v_id, {})
+                        s_name = v_info.get("name") or v_info.get("owner_name") or "Bazar Modern Traders"
+                        s_phone = v_info.get("phone") or "+923007654321"
+                        s_city = v_info.get("address") or "Lahore / Chitral"
+                        s_mode = "smart_broker"
+
+                        it["seller_name"] = s_name
+                        it["seller_phone"] = s_phone
+                        it["seller_city"] = s_city
+                        it["platform_commission"] = float(round(it["price"] * 0.10, 2))
+                        it["contact_mode"] = s_mode
+                        it["global_bazar_id"] = gb_item["id"]
+                        it["vendor_id"] = v_id
+
+                        # 1. Deduct stock in Global-Bazar-Core
+                        GlobalBazarService.update_product_stock(gb_item["id"], quantity_delta=-it["quantity"])
+
+                        # 2. Record order in Global-Bazar-Core
+                        GlobalBazarService.create_order(
+                            vendor_id=v_id,
+                            customer_name=name,
+                            customer_phone=clean_phone,
+                            items_summary=f"{it['quantity']}x {it['name']} @ PKR {it['price']:,.0f}",
+                            total_amount=it["price"] * it["quantity"],
+                            delivery_address=address or "Chitral Storefront Order",
+                            order_source="storefront"
+                        )
+
+                        # 3. Post sale to vendor's ledger
+                        GlobalBazarService.record_ledger_sale(
+                            vendor_id=v_id,
+                            amount=it["price"] * it["quantity"],
+                            category="storefront_sale",
+                            description=f"Storefront Order #{order_num}: {it['quantity']}x {it['name']}"
+                        )
+
+                        # 4. Multi-vendor seller routing
+                        if s_phone and str(s_phone).strip():
+                            clean_sp = str(s_phone).strip()
+                            if clean_sp not in seller_items_map:
+                                seller_items_map[clean_sp] = {
+                                    "seller_name": s_name,
+                                    "contact_mode": s_mode,
+                                    "items": []
+                                }
+                            seller_items_map[clean_sp]["items"].append(it)
+
+                            import urllib.parse
+                            dig_sp = "".join(filter(str.isdigit, clean_sp))
+                            chat_txt = urllib.parse.quote(f"Assalam o Alaikum {s_name}! I placed order #{order.order_number} for {it['name']} on Chitral & Global Bazar.")
+                            wa_link = f"https://wa.me/{dig_sp}?text={chat_txt}"
+                            seller_direct_links.append({
+                                "seller_name": s_name,
+                                "seller_phone": clean_sp,
+                                "product_name": it["name"],
+                                "chat_url": wa_link,
+                                "whatsapp_url": wa_link
+                            })
+                except Exception as gb_chk_err:
+                    logger.warning(f"Global-Bazar checkout attribution notice: {gb_chk_err}")
 
         # Multi-vendor lead message with commission summary
         lead_msg = (
@@ -11383,6 +11579,31 @@ def api_store_seller_list_product():
         db.session.add(lead)
         db.session.commit()
 
+        # Synchronize Seller & Product into Global-Bazar-Core ERP
+        gb_product = None
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            gb_vendor = GlobalBazarService.find_or_create_vendor(
+                name=seller_name,
+                phone=clean_seller_phone,
+                owner_name=seller_name,
+                address=seller_city
+            )
+            v_id = gb_vendor.get("id") if gb_vendor else None
+            gb_product = GlobalBazarService.add_product(
+                title=name,
+                price=price,
+                stock=50,
+                vendor_id=v_id,
+                category=category,
+                description=desc,
+                image_url=img
+            )
+            if gb_product:
+                logger.info(f"[GlobalBazar] Synced seller product #{gb_product.get('id')} for vendor #{v_id} ({seller_name})")
+        except Exception as gb_list_err:
+            logger.warning(f"Failed to sync seller listing to Global-Bazar-Core: {gb_list_err}")
+
         # Send automated WhatsApp confirmation to Seller
         seller_welcome = (
             f"🎉 *Assalam o Alaikum {seller_name}!*\n\n"
@@ -11402,11 +11623,14 @@ def api_store_seller_list_product():
         except Exception as wa_err:
             logger.warning(f"Seller WhatsApp confirmation notice: {wa_err}")
 
-        return jsonify({
+        resp_payload = {
             "success": True,
             "message": f"Mubarak ho! Item '{name}' is now live for sale on Chitral & Global Bazar.",
             "product": prod.to_dict()
-        }), 201
+        }
+        if gb_product:
+            resp_payload["global_bazar_product_id"] = gb_product.get("id")
+        return jsonify(resp_payload), 201
 
     except Exception as e:
         logger.error(f"Seller listing error: {e}", exc_info=True)

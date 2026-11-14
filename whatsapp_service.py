@@ -6025,13 +6025,31 @@ class WhatsAppService:
             or cleaned.startswith("create product:")
 
             or cleaned.startswith("!stock")
-
             or cleaned.startswith("!inventory")
-
             or cleaned.startswith("/stock")
-
             or cleaned.startswith("/inventory")
-
+            or cleaned == "my inventory"
+            or cleaned == "mera saman"
+            or cleaned == "mera samaan"
+            or cleaned.startswith("my inventory")
+            or cleaned.startswith("mera saman")
+            or cleaned.startswith("mera samaan")
+            or cleaned == "!myinventory"
+            or cleaned == "!my_inventory"
+            or cleaned == "/myinventory"
+            or cleaned == "/my_inventory"
+            or cleaned == "meri dukan"
+            or cleaned == "meri dukaan"
+            or cleaned == "my shop"
+            or cleaned == "my store"
+            or cleaned == "!dukan"
+            or cleaned == "!dukaan"
+            or cleaned == "!shop"
+            or cleaned == "!myshop"
+            or cleaned.startswith("meri dukan")
+            or cleaned.startswith("meri dukaan")
+            or cleaned.startswith("my shop")
+            or cleaned.startswith("my store")
             or cleaned.startswith("!hisaab")
 
             or cleaned.startswith("!hisab")
@@ -6220,6 +6238,25 @@ class WhatsAppService:
 
         extracted_price = cls.extract_inventory_price(clean_cap)
 
+        # Multi-vendor identification: capture sender WhatsApp phone and pushName
+        push_name = kwargs.get("pushName") or kwargs.get("push_name") or kwargs.get("sender_name") or kwargs.get("name")
+        vendor_name = str(push_name).strip() if push_name else f"Shop {clean_p[-4:] if clean_p else 'Vendor'}"
+        vendor_phone = clean_p or sender_phone
+
+        vendor_id = 1
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            v_obj = GlobalBazarService.find_or_create_vendor(
+                name=vendor_name,
+                phone=vendor_phone,
+                owner_name=vendor_name,
+                address="Chitral / Pakistan"
+            )
+            if v_obj and v_obj.get("id"):
+                vendor_id = v_obj["id"]
+        except Exception as v_err:
+            logger.warning(f"[AI Catalog] Vendor identification notice: {v_err}")
+
         # 3. Call local FastAPI inventory engine at http://127.0.0.1:8000/inventory/ai-catalog
         fastapi_url = os.environ.get("GLOBAL_BAZAR_CATALOG_URL", "http://127.0.0.1:8000/inventory/ai-catalog")
         ai_res_json = None
@@ -6230,7 +6267,9 @@ class WhatsAppService:
             }
             form_data = {
                 "auto_save": "true",
-                "vendor_id": "1",
+                "vendor_id": str(vendor_id),
+                "vendor_phone": str(vendor_phone),
+                "vendor_name": str(vendor_name),
                 "caption": clean_cap
             }
             if extracted_price:
@@ -6252,7 +6291,10 @@ class WhatsAppService:
                 ai_res_json = GlobalBazarService.process_ai_catalog_direct(
                     image_bytes=img_bytes,
                     caption=clean_cap,
-                    price=extracted_price
+                    price=extracted_price,
+                    vendor_id=vendor_id,
+                    vendor_phone=vendor_phone,
+                    vendor_name=vendor_name
                 )
             except Exception as direct_err:
                 logger.error(f"[AI Catalog Direct Fallback Error] {direct_err}")
@@ -6438,6 +6480,82 @@ class WhatsAppService:
                 "action": "inventory_inquiry",
                 "reply_body": stock_msg,
                 "reply": stock_msg
+            }
+
+        # 1b. VENDOR INVENTORY INQUIRY ("my inventory", "mera saman")
+        if (
+            cmd_lower in ("my inventory", "mera saman", "mera samaan", "!myinventory", "!my_inventory", "/myinventory", "/my_inventory")
+            or cmd_lower.startswith("my inventory")
+            or cmd_lower.startswith("mera saman")
+            or cmd_lower.startswith("mera samaan")
+        ):
+            try:
+                from services.global_bazar_service import GlobalBazarService
+                v_name = raw_payload.get("pushName") or raw_payload.get("push_name") or raw_payload.get("sender_name") if raw_payload else None
+                vendor_inv_msg = GlobalBazarService.get_vendor_inventory_message(phone=clean_p or sender_phone, name=v_name)
+            except Exception as e:
+                vendor_inv_msg = f"⚠️ Could not fetch your inventory: {e}"
+            try:
+                cls.send_message(
+                    organization_id=org_id,
+                    to_phone=sender_phone,
+                    chat_id=target_chat,
+                    message_text=vendor_inv_msg
+                )
+            except Exception as send_err:
+                logger.warning(f"[Global-Bazar my inventory] Dispatch failed: {send_err}")
+            return {
+                "success": True,
+                "action": "vendor_inventory_inquiry",
+                "reply_body": vendor_inv_msg,
+                "reply": vendor_inv_msg
+            }
+
+        # 1c. VENDOR MOBILE PORTAL MAGIC LINK ("meri dukan", "my shop")
+        shop_triggers = (
+            "meri dukan", "meri dukaan", "my shop", "my store",
+            "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop"
+        )
+        if any(cmd_lower == trig or cmd_lower.startswith(trig) for trig in shop_triggers):
+            token = ""
+            portal_url = ""
+            try:
+                from services.global_bazar_service import GlobalBazarService
+                v_name = raw_payload.get("pushName") if raw_payload else None
+                vendor_obj = GlobalBazarService.find_or_create_vendor(
+                    name=v_name or f"Shop {clean_p[-4:] if clean_p else 'Vendor'}",
+                    phone=clean_p or sender_phone,
+                    owner_name=v_name or "Vendor"
+                )
+                v_id = vendor_obj.get("id") or 1
+                token = GlobalBazarService.generate_vendor_magic_token(v_id, clean_p or sender_phone)
+                base_domain = os.environ.get("VENDOR_PORTAL_BASE_URL", "http://66.45.230.232:5000")
+                portal_url = f"{base_domain}/vendor/auth/{token}"
+
+                shop_reply = (
+                    "🏪 *Aapki Online Dukaan Tayyar Hai!*\n\n"
+                    f"🔗 http://66.45.230.232:5000/vendor/auth/{token}"
+                )
+            except Exception as e:
+                shop_reply = f"⚠️ Could not generate vendor portal link: {e}"
+
+            try:
+                cls.send_message(
+                    organization_id=org_id,
+                    to_phone=sender_phone,
+                    chat_id=target_chat,
+                    message_text=shop_reply
+                )
+            except Exception as send_err:
+                logger.warning(f"[Vendor Magic Link] WhatsApp dispatch notice: {send_err}")
+
+            return {
+                "success": True,
+                "action": "vendor_magic_link",
+                "reply_body": shop_reply,
+                "reply": shop_reply,
+                "token": token,
+                "portal_url": portal_url
             }
 
         # 2. HISAAB / LEDGER SUMMARY (!hisaab, !hisab, !summary, !ledger)
@@ -7064,7 +7182,8 @@ class WhatsAppService:
             chat_id=real_chat_id,
             media_url=kwargs.get("media_url") or download_url,
             download_url=download_url,
-            image_base64=kwargs.get("audio_base64") if kwargs.get("is_image") else None
+            image_base64=kwargs.get("audio_base64") if kwargs.get("is_image") else None,
+            raw_payload=kwargs
         )
         if cat_cmd_res:
             return cat_cmd_res

@@ -82,6 +82,125 @@ class GlobalBazarService:
             return vendors[0]["id"]
         return 1
 
+    @classmethod
+    def find_or_create_vendor(
+        cls,
+        name: str,
+        phone: str,
+        owner_name: Optional[str] = None,
+        address: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Finds an existing vendor by phone or creates a new one in Global-Bazar-Core."""
+        try:
+            clean_p = str(phone or "").strip()
+            digits = "".join(filter(str.isdigit, clean_p))[-10:]
+            with cls.get_db_connection() as conn:
+                c = conn.cursor()
+                if digits:
+                    row = c.execute("SELECT * FROM vendors WHERE phone = ? OR phone LIKE ?", (clean_p, f"%{digits}%")).fetchone()
+                else:
+                    row = c.execute("SELECT * FROM vendors WHERE phone = ?", (clean_p,)).fetchone()
+                if row:
+                    return dict(row)
+                row = c.execute("SELECT * FROM vendors WHERE name = ?", (name.strip(),)).fetchone()
+                if row:
+                    return dict(row)
+
+                now_iso = datetime.datetime.utcnow().isoformat()
+                c.execute("""
+                    INSERT INTO vendors (name, owner_name, phone, address, currency, is_active, created_at)
+                    VALUES (?, ?, ?, ?, 'PKR', 1, ?)
+                """, (name.strip(), owner_name or name.strip(), clean_p, address or "Chitral / Pakistan", now_iso))
+                conn.commit()
+                new_id = c.lastrowid
+                new_row = c.execute("SELECT * FROM vendors WHERE id = ?", (new_id,)).fetchone()
+                logger.info(f"[GlobalBazar] Created new vendor #{new_id}: '{name}' ({clean_p})")
+                return dict(new_row) if new_row else {"id": new_id, "name": name, "phone": clean_p}
+        except Exception as e:
+            logger.error(f"[GlobalBazar] Error in find_or_create_vendor: {e}")
+            return {"id": 1, "name": name, "phone": phone}
+
+    @classmethod
+    def get_vendor_by_id(cls, vendor_id: int) -> Optional[Dict[str, Any]]:
+        """Retrieves a single vendor profile by integer ID."""
+        try:
+            with cls.get_db_connection() as conn:
+                c = conn.cursor()
+                row = c.execute("SELECT * FROM vendors WHERE id = ?", (vendor_id,)).fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"[GlobalBazar] Failed to get vendor {vendor_id}: {e}")
+            return None
+
+    @classmethod
+    def get_vendor_dashboard_data(cls, vendor_id: int) -> Dict[str, Any]:
+        """Fetches complete profile, inventory, and stats for a specific vendor's mobile portal."""
+        vendor = cls.get_vendor_by_id(vendor_id)
+        if not vendor:
+            return {}
+
+        products = cls.get_products(vendor_id=vendor_id)
+        total_products = len(products)
+        total_stock = sum(int(p.get("stock") or 0) for p in products)
+        total_inventory_value = sum(float(p.get("price") or 0.0) * int(p.get("stock") or 0) for p in products)
+
+        with cls.get_db_connection() as conn:
+            c = conn.cursor()
+            sales_row = c.execute(
+                "SELECT COALESCE(SUM(amount), 0) as total_sales FROM ledger WHERE vendor_id = ? AND entry_type = 'sale'",
+                (vendor_id,)
+            ).fetchone()
+            total_sales = float(sales_row["total_sales"]) if sales_row else 0.0
+
+            orders_rows = c.execute(
+                "SELECT * FROM orders WHERE vendor_id = ? ORDER BY id DESC LIMIT 25",
+                (vendor_id,)
+            ).fetchall()
+            orders = [dict(r) for r in orders_rows]
+
+            ledger_rows = c.execute(
+                "SELECT * FROM ledger WHERE vendor_id = ? ORDER BY id DESC LIMIT 25",
+                (vendor_id,)
+            ).fetchall()
+            ledger_entries = [dict(r) for r in ledger_rows]
+
+        return {
+            "vendor": vendor,
+            "products": products,
+            "total_products": total_products,
+            "total_stock": total_stock,
+            "total_inventory_value": total_inventory_value,
+            "total_sales": total_sales,
+            "orders": orders,
+            "ledger_entries": ledger_entries
+        }
+
+    MAGIC_TOKEN_SECRET = os.environ.get("VENDOR_TOKEN_SECRET", "bashflow-vendor-magic-portal-secret-key-2026")
+
+    @classmethod
+    def generate_vendor_magic_token(cls, vendor_id: int, phone: str, expires_in_seconds: int = 86400 * 7) -> str:
+        """Generates a secure, short-lived magic link token for vendor authentication."""
+        from itsdangerous import URLSafeTimedSerializer
+        s = URLSafeTimedSerializer(cls.MAGIC_TOKEN_SECRET, salt="vendor-magic-link")
+        return s.dumps({"vendor_id": int(vendor_id), "phone": str(phone).strip()})
+
+    @classmethod
+    def verify_vendor_magic_token(cls, token: str, max_age_seconds: int = 86400 * 7) -> Optional[Dict[str, Any]]:
+        """Verifies vendor magic link token and returns decoded payload with vendor profile."""
+        from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
+        s = URLSafeTimedSerializer(cls.MAGIC_TOKEN_SECRET, salt="vendor-magic-link")
+        try:
+            data = s.loads(token, max_age=max_age_seconds)
+            v_id = data.get("vendor_id")
+            if v_id:
+                vendor = cls.get_vendor_by_id(v_id)
+                if vendor:
+                    return {"vendor": vendor, "payload": data}
+            return None
+        except (SignatureExpired, BadSignature, Exception) as e:
+            logger.warning(f"Vendor token verification notice: {e}")
+            return None
+
     # =========================================================================
     # INVENTORY & PRODUCTS
     # =========================================================================
@@ -231,7 +350,9 @@ class GlobalBazarService:
         image_bytes: Optional[bytes] = None,
         caption: Optional[str] = None,
         price: Optional[float] = None,
-        vendor_id: Optional[int] = None
+        vendor_id: Optional[int] = None,
+        vendor_phone: Optional[str] = None,
+        vendor_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Direct offline/in-process engine for AI cataloging when FastAPI HTTP port is offline.
@@ -263,6 +384,18 @@ class GlobalBazarService:
         description = f"High-quality artisan product crafted for modern aesthetics and daily style. {clean_cap}".strip()
         category = "Apparel & Accessories"
 
+        # Multi-vendor resolution if vendor_id not given
+        target_vendor_id = vendor_id
+        resolved_vendor = None
+        if not target_vendor_id and vendor_phone:
+            v_obj = cls.find_or_create_vendor(
+                name=vendor_name or f"Shop {vendor_phone[-4:]}",
+                phone=vendor_phone,
+                owner_name=vendor_name or "Vendor"
+            )
+            target_vendor_id = v_obj.get("id")
+            resolved_vendor = v_obj
+
         # Save image file to static/uploads
         unique_id = uuid.uuid4().hex
         filename = f"catalog_{unique_id}.png"
@@ -284,7 +417,7 @@ class GlobalBazarService:
             title=title,
             price=final_price,
             stock=15,
-            vendor_id=vendor_id,
+            vendor_id=target_vendor_id,
             category=category,
             description=description,
             image_url=image_url
@@ -300,8 +433,85 @@ class GlobalBazarService:
             "image_url": image_url,
             "filename": filename,
             "saved_product_id": saved_prod["id"] if saved_prod else None,
-            "saved_product": saved_prod
+            "saved_product": saved_prod,
+            "vendor_id": target_vendor_id,
+            "vendor_name": resolved_vendor.get("name") if resolved_vendor else vendor_name,
+            "vendor_phone": resolved_vendor.get("phone") if resolved_vendor else vendor_phone
         }
+
+    @classmethod
+    def get_vendor_inventory_message(cls, phone: str, name: Optional[str] = None) -> str:
+        """
+        Builds a quick WhatsApp inventory report for a vendor based on their sender phone number.
+        Returns total count and list of products added from their WhatsApp number.
+        """
+        try:
+            clean_p = str(phone or "").strip()
+            digits = "".join(filter(str.isdigit, clean_p))[-10:]
+
+            with cls.get_db_connection() as conn:
+                c = conn.cursor()
+                vendor = None
+                if digits:
+                    vendor = c.execute("SELECT * FROM vendors WHERE phone LIKE ? OR phone = ?", (f"%{digits}%", clean_p)).fetchone()
+                if not vendor and name:
+                    vendor = c.execute("SELECT * FROM vendors WHERE name = ?", (name.strip(),)).fetchone()
+
+                v_id = vendor["id"] if vendor else None
+                v_name = (vendor["name"] if vendor else name) or "Vendor"
+
+                products = []
+                if v_id:
+                    rows = c.execute("SELECT * FROM products WHERE vendor_id = ? ORDER BY id DESC", (v_id,)).fetchall()
+                    products = [dict(r) for r in rows]
+
+                # Also search local Flask Product table for items listed with this vendor phone
+                try:
+                    from models import Product
+                    local_items = Product.query.filter(
+                        Product.seller_phone.ilike(f"%{digits}%") if digits else Product.seller_name == v_name
+                    ).all()
+                    for lp in local_items:
+                        if not any(lp.name.strip().lower() == p.get("title", "").strip().lower() for p in products):
+                            products.append({
+                                "id": lp.id,
+                                "title": lp.name,
+                                "price": lp.price,
+                                "stock": lp.stock_quantity or 0,
+                                "category": lp.category
+                            })
+                except Exception:
+                    pass
+
+                if not products:
+                    return (
+                        f"ℹ️ *Aap Ke Number Se Koi Product Registered Nahi Hai*\n\n"
+                        f"📱 *Phone:* {clean_p}\n"
+                        f"Aap ke WhatsApp number se abhi tak koi item Chitral & Global Bazar par add nahi hua.\n\n"
+                        f"📸 *Naya item add karne ka aasan tareeqa:*\n"
+                        f"Kisi bhi product ki photo bhejein aur sath price likhein (maslan: *'Add Rs 2500'*). AI khud background remove kar ke store par live kar dega!"
+                    )
+
+                lines = [
+                    f"📦 *Aap Ka Live Inventory Summary ({v_name})*",
+                    f"📱 *Phone:* {clean_p}",
+                    f"📊 *Total Products:* {len(products)} item(s) live on store\n"
+                ]
+                for idx, p in enumerate(products[:15], 1):
+                    p_title = p.get("title") or p.get("name") or "Product"
+                    p_price = float(p.get("price") or 0.0)
+                    p_stock = int(p.get("stock") or p.get("stock_quantity") or 0)
+                    lines.append(f"{idx}. *{p_title}* - PKR {p_price:,.0f} (Stock: {p_stock})")
+
+                if len(products) > 15:
+                    lines.append(f"\n...aur mazeed {len(products) - 15} items.")
+
+                lines.append("\n✅ Tamam items Chitral & Global Bazar par live hain!")
+                return "\n".join(lines)
+
+        except Exception as e:
+            logger.error(f"[GlobalBazar] Error generating vendor inventory message: {e}")
+            return f"⚠️ Inventory check failed: {e}"
 
     # =========================================================================
     # ORDERS & AUTOMATED FULFILLMENT

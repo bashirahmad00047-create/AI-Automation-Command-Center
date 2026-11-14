@@ -1969,9 +1969,47 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             prods = Product.query.filter_by(is_active=True).order_by(Product.category, Product.name).all()
             jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
             b_name = os.environ.get("BUSINESS_NAME", "Chitral & Global Bazar")
+
+            # Fetch Global-Bazar live items so SSR also displays newly cataloged items at the top
+            all_prods = list(prods)
+            try:
+                from services.global_bazar_service import GlobalBazarService
+                gb_items = GlobalBazarService.get_products()
+                existing_names = {p.name.strip().lower() for p in all_prods if hasattr(p, 'name')}
+                gb_wrapped = []
+                for gi in gb_items:
+                    t = gi.get("title", "").strip()
+                    if t and t.lower() not in existing_names:
+                        existing_names.add(t.lower())
+                        clean_img = gi.get("image_url", "")
+                        for pfx in ["http://127.0.0.1:8000", "http://localhost:8000"]:
+                            if clean_img.startswith(pfx):
+                                clean_img = clean_img[len(pfx):]
+                        gb_wrapped.append({
+                            "id": f"gb-{gi.get('id')}",
+                            "name": t,
+                            "title": t,
+                            "category": gi.get("category", "General"),
+                            "price": float(gi.get("price", 0)),
+                            "estimated_price": float(gi.get("price", 0)),
+                            "description": gi.get("description", ""),
+                            "image_url": clean_img,
+                            "seller_name": "Bazar Modern Traders",
+                            "vendor_name": "Bazar Modern Traders",
+                            "seller_phone": "+923007654321",
+                            "vendor_phone": "+923007654321",
+                            "seller_city": "Lahore / Chitral",
+                            "stock_quantity": gi.get("stock", 15),
+                            "stock_status": "in_stock",
+                            "contact_mode": "smart_broker"
+                        })
+                all_prods = gb_wrapped + all_prods
+            except Exception as _gb_ssr_err:
+                application.logger.debug(f"SSR GB items merge notice: {_gb_ssr_err}")
+
             return render_template(
                 "store.html",
-                products=prods,
+                products=all_prods,
                 business_name=b_name,
                 currency="PKR",
                 jazzcash_number=jc_num
@@ -1989,6 +2027,130 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     def top_store_checkout():
         from api_v1 import api_store_checkout
         return api_store_checkout()
+
+    @application.route("/static/uploads/<path:filename>")
+    def serve_global_bazar_uploads(filename):
+        """Serves product photos and AI-cataloged images uploaded to Global-Bazar-Core."""
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            from flask import send_from_directory, Response, abort
+            candidate_dirs = [
+                os.path.join(os.path.dirname(GlobalBazarService.get_db_path()), "static", "uploads"),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "static", "uploads")),
+                r"C:\Users\It Hub\Global-Bazar-Core\static\uploads",
+                r"C:\Users\It Hub\AI-Automation-Command-Center\static\uploads",
+                "/root/Global-Bazar-Core/static/uploads",
+                "/root/AI-Automation-Command-Center/static/uploads"
+            ]
+            for folder in candidate_dirs:
+                if folder and os.path.exists(os.path.join(folder, filename)):
+                    return send_from_directory(folder, filename)
+
+            # Proxy fallback to FastAPI server on port 8000
+            try:
+                import urllib.request
+                req = urllib.request.Request(f"http://127.0.0.1:8000/static/uploads/{filename}")
+                with urllib.request.urlopen(req, timeout=3.0) as resp:
+                    return Response(resp.read(), mimetype=resp.headers.get("Content-Type", "image/png"))
+            except Exception:
+                abort(404)
+        except Exception:
+            from flask import abort
+            abort(404)
+
+    # =========================================================================
+    # MOBILE VENDOR PORTAL & MAGIC LINK AUTHENTICATION ROUTES
+    # =========================================================================
+
+    @application.route("/vendor/auth/<token>", methods=["GET"])
+    def vendor_auth_magic_link(token: str):
+        """Authenticates vendor via one-click WhatsApp magic link and redirects to dashboard."""
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            auth_data = GlobalBazarService.verify_vendor_magic_token(token)
+            if not auth_data:
+                return render_template(
+                    "vendor_dashboard.html",
+                    error="Aapka login link expire ho gaya hai ya invalid hai. Baraye meharbani WhatsApp par 'meri dukan' ya 'my shop' bhej kar naya link hasil karein.",
+                    vendor=None,
+                    products=[]
+                ), 401
+
+            vendor = auth_data["vendor"]
+            session["vendor_id"] = vendor["id"]
+            session["vendor_phone"] = vendor.get("phone", "")
+            session["vendor_name"] = vendor.get("name", "Vendor")
+            session.permanent = True
+            return redirect(url_for("vendor_dashboard_view"))
+        except Exception as e:
+            application.logger.error(f"Vendor magic link auth error: {e}", exc_info=True)
+            return render_template(
+                "vendor_dashboard.html",
+                error=f"Authentication error: {e}",
+                vendor=None,
+                products=[]
+            ), 500
+
+    @application.route("/vendor/dashboard", methods=["GET"])
+    def vendor_dashboard_view():
+        """Clean mobile-friendly dashboard showing ONLY the logged-in vendor's inventory and stats."""
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            token = request.args.get("token")
+            if token:
+                auth_data = GlobalBazarService.verify_vendor_magic_token(token)
+                if auth_data:
+                    vendor = auth_data["vendor"]
+                    session["vendor_id"] = vendor["id"]
+                    session["vendor_phone"] = vendor.get("phone", "")
+                    session["vendor_name"] = vendor.get("name", "Vendor")
+                    session.permanent = True
+
+            vendor_id = session.get("vendor_id")
+            if not vendor_id:
+                return render_template(
+                    "vendor_dashboard.html",
+                    error="Vendor login darkaar hai. Baraye meharbani WhatsApp par 'meri dukan' bhej kar apna magic link open karein.",
+                    vendor=None,
+                    products=[]
+                ), 401
+
+            data = GlobalBazarService.get_vendor_dashboard_data(int(vendor_id))
+            if not data or not data.get("vendor"):
+                return render_template(
+                    "vendor_dashboard.html",
+                    error="Vendor profile dastiyaab nahi hai.",
+                    vendor=None,
+                    products=[]
+                ), 404
+
+            return render_template(
+                "vendor_dashboard.html",
+                vendor=data["vendor"],
+                products=data["products"],
+                total_products=data["total_products"],
+                total_stock=data["total_stock"],
+                total_inventory_value=data["total_inventory_value"],
+                total_sales=data["total_sales"],
+                orders=data.get("orders", []),
+                ledger_entries=data.get("ledger_entries", [])
+            )
+        except Exception as e:
+            application.logger.error(f"Vendor dashboard error: {e}", exc_info=True)
+            return render_template(
+                "vendor_dashboard.html",
+                error=f"Dashboard error: {e}",
+                vendor=None,
+                products=[]
+            ), 500
+
+    @application.route("/vendor/logout", methods=["GET"])
+    def vendor_logout():
+        """Clears vendor session and redirects to main public storefront."""
+        session.pop("vendor_id", None)
+        session.pop("vendor_phone", None)
+        session.pop("vendor_name", None)
+        return redirect(url_for("public_storefront"))
 
     @application.route("/api/track/<order_id>/location", methods=["GET", "POST"])
     @application.route("/api/v1/track/<order_id>/location", methods=["GET", "POST"])
@@ -2229,6 +2391,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
 # Global WSGI application instance for Gunicorn (`gunicorn app:app`)
 app = create_app()
+application = app
 socketio = getattr(app, "socketio", None) or app.config.get("SOCKETIO")
 if not socketio:
     try:
