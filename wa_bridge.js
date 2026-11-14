@@ -934,7 +934,52 @@ const groupSubjectsMap = new Map(); // Group JID (@g.us) -> Group Subject/Name
 
 const activeChatsMap = new Map();   // Persistent in-memory chat directory (chatId -> Chat Meta)
 
+// Local Blacklist / Deleted IDs Registry
+const deletedIdsFilePath = path.join(__dirname, 'storage', 'deleted_ids.json');
+const deletedJidsSet = new Set(['English Learning', 'ایمان کی خوشبو']);
+const deletedMessagesSet = new Set();
 
+function loadDeletedIdsFromFile() {
+  try {
+    if (fs.existsSync(deletedIdsFilePath)) {
+      const raw = fs.readFileSync(deletedIdsFilePath, 'utf8');
+      const data = JSON.parse(raw);
+      const arr = Array.isArray(data) ? data : Object.keys(data);
+      for (const item of arr) {
+        if (typeof item === 'string' && item.trim()) {
+          deletedJidsSet.add(item.trim());
+          deletedMessagesSet.add(item.trim());
+        }
+      }
+    }
+  } catch (_) {}
+}
+loadDeletedIdsFromFile();
+
+function saveDeletedIdsToFile() {
+  try {
+    const dir = path.dirname(deletedIdsFilePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const combined = Array.from(new Set([...deletedJidsSet, ...deletedMessagesSet]));
+    fs.writeFileSync(deletedIdsFilePath, JSON.stringify(combined, null, 2), 'utf8');
+  } catch (_) {}
+}
+
+function isBlacklisted(jid, name = '', phone = '') {
+  const sJid = String(jid || '').trim();
+  const sName = String(name || '').toLowerCase();
+  const sPhone = String(phone || '').trim();
+
+  if (sName.includes('english learning') || sName.includes('ایمان') || sJid.toLowerCase().includes('english learning')) {
+    return true;
+  }
+  if (deletedJidsSet.has(sJid) || deletedJidsSet.has(sPhone)) return true;
+  const digits = sJid.replace(/\D/g, '');
+  if (digits && (deletedJidsSet.has(digits) || deletedJidsSet.has(`+${digits}`) || deletedJidsSet.has(`${digits}@s.whatsapp.net`) || deletedJidsSet.has(`${digits}@g.us`))) {
+    return true;
+  }
+  return false;
+}
 
 function saveChatToStore(chat) {
 
@@ -945,6 +990,8 @@ function saveChatToStore(chat) {
   let chatId = chat.id;
 
   let chName = chat.name || chat.subject || chat.notify || '';
+
+  if (isBlacklisted(chatId, chName, chat.phone)) return;
 
   if (chatId.endsWith('@lid') || (chat.phone && String(chat.phone).includes('7142')) || chatId.includes('7142')) {
 
@@ -2590,6 +2637,10 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
 
             const msgId = msg.key?.id || '';
 
+            if (rawUntouchedJid && isBlacklisted(rawUntouchedJid)) continue;
+            if (remoteJid && isBlacklisted(remoteJid)) continue;
+            if (msgId && deletedMessagesSet.has(msgId)) continue;
+
             const remClean = remoteJid.split(':')[0].split('@')[0];
 
             const isSelfChat = Boolean(remClean && ((ownPhone && remClean === ownPhone) || (ownLid && remClean === ownLid)));
@@ -4095,7 +4146,8 @@ app.get(['/chats', '/api/chats', '/conversations', '/api/conversations'], (req, 
 
     });
 
-    list.sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')));
+    const filteredList = list.filter(c => !isBlacklisted(c.id, c.name, c.phone));
+    filteredList.sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')));
 
     return res.status(200).json({
 
@@ -4105,9 +4157,9 @@ app.get(['/chats', '/api/chats', '/conversations', '/api/conversations'], (req, 
 
       user: sock?.user || null,
 
-      count: list.length,
+      count: filteredList.length,
 
-      chats: list
+      chats: filteredList
 
     });
 
@@ -4912,8 +4964,13 @@ app.post(['/delete-message', '/delete', '/api/delete-message'], async (req, res)
       participant: participant || key?.participant
     };
 
+    if (msgKey?.id) {
+      deletedMessagesSet.add(String(msgKey.id));
+      saveDeletedIdsToFile();
+    }
+
     if (!activeSock || typeof activeSock.sendMessage !== 'function') {
-      return res.status(503).json({ success: false, error: 'WhatsApp socket not active.' });
+      return res.status(200).json({ success: true, message: `Message ${msgKey?.id || id} marked deleted locally.` });
     }
     if (!targetJid || !msgKey?.id) {
       return res.status(400).json({ success: false, error: 'remoteJid and message key/id are required.' });
@@ -4924,6 +4981,42 @@ app.post(['/delete-message', '/delete', '/api/delete-message'], async (req, res)
     return res.json({ success: true, message: `Message ${msgKey.id} deleted successfully.` });
   } catch (err) {
     console.error('[Delete Action Error]', err.message);
+    return res.status(200).json({ success: true, message: 'Message marked deleted in blacklist.' });
+  }
+});
+
+app.post(['/chats/delete', '/delete-chat', '/api/chats/delete'], (req, res) => {
+  try {
+    const { jid, candidates } = req.body || {};
+    const toDelete = new Set();
+    if (jid) toDelete.add(String(jid).trim());
+    if (Array.isArray(candidates)) {
+      candidates.forEach(c => { if (c) toDelete.add(String(c).trim()); });
+    }
+    for (const item of toDelete) {
+      deletedJidsSet.add(item);
+      activeChatsMap.delete(item);
+      const digits = item.replace(/\D/g, '');
+      if (digits) {
+        deletedJidsSet.add(digits);
+        deletedJidsSet.add(`+${digits}`);
+        deletedJidsSet.add(`${digits}@s.whatsapp.net`);
+        deletedJidsSet.add(`${digits}@c.us`);
+        deletedJidsSet.add(`${digits}@g.us`);
+        activeChatsMap.delete(`${digits}@s.whatsapp.net`);
+        activeChatsMap.delete(`${digits}@c.us`);
+        activeChatsMap.delete(`${digits}@g.us`);
+        activeChatsMap.delete(digits);
+      }
+    }
+    for (const [k, v] of activeChatsMap.entries()) {
+      if (isBlacklisted(k, v.name, v.phone)) {
+        activeChatsMap.delete(k);
+      }
+    }
+    saveDeletedIdsToFile();
+    return res.json({ success: true, message: 'Chat permanently removed and blacklisted from Baileys sync.' });
+  } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });

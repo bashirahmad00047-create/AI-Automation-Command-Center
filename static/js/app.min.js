@@ -6814,7 +6814,7 @@ async function clearCurrentConversation() {
     const partner = waActiveChatPartner;
     if (!confirm(`Are you sure you want to permanently delete all messages for ${partner}?`)) return;
     try {
-        const norm = normalizeWaPhone(partner) || partner;
+        const norm = String(partner).trim();
         const headers = typeof getAuthHeaders === 'function' ? getAuthHeaders() : { 'Content-Type': 'application/json' };
         const res = await fetch(`/api/v1/whatsapp/conversations/${encodeURIComponent(norm)}`, {
             method: 'DELETE',
@@ -6823,12 +6823,19 @@ async function clearCurrentConversation() {
         const data = await res.json();
         if (res.ok && data.success) {
             showToast(`Conversation permanently deleted (${data.deleted_count || 0} messages removed)`, 'success');
+            const cleanP = partner.replace(/@c\.us|@g\.us|@s\.whatsapp\.net/g, '').trim();
             waAllMessagesCache = (waAllMessagesCache || []).filter(m => {
-                const s = (m.sender || '').replace(/@c\.us|@g\.us/g, '').trim();
-                const r = (m.recipient || '').replace(/@c\.us|@g\.us/g, '').trim();
-                return !isSameWaPhone(s, partner) && !isSameWaPhone(r, partner);
+                const s = (m.sender || '').trim();
+                const r = (m.recipient || '').trim();
+                const sClean = s.replace(/@c\.us|@g\.us|@s\.whatsapp\.net/g, '').trim();
+                const rClean = r.replace(/@c\.us|@g\.us|@s\.whatsapp\.net/g, '').trim();
+                return s !== partner && r !== partner && sClean !== cleanP && rClean !== cleanP && !isSameWaPhone(sClean, cleanP) && !isSameWaPhone(rClean, cleanP);
             });
             waActiveChatPartner = null;
+            const nameEl = document.getElementById('waActiveContactName');
+            if (nameEl) nameEl.textContent = 'Select a Conversation';
+            const phoneEl = document.getElementById('waActiveContactPhone');
+            if (phoneEl) phoneEl.textContent = 'Click any contact from the left list or click ➕ to start';
             renderWhatsAppWebUI(waAllMessagesCache, true);
             await loadWhatsAppMessagesOnly();
         } else {
@@ -14544,13 +14551,10 @@ function updateWhatsAppConnectionUI(isConnected, phone) {
         topbarBtn.onclick = function() { openQrModal(true); };
     }
 
-    // ALWAYS keep the dedicated "QR Re-Link / Sync" button in the active chat header!
+    // Keep single clean QR Re-Link button in the left sidebar; hide duplicate right-hand chat header button
     const relinkBtn = document.getElementById('waHeaderQrRelinkBtn');
     if (relinkBtn) {
-        relinkBtn.innerHTML = '<span>🔄</span> <span>QR Re-Link / Sync</span>';
-        relinkBtn.style.display = 'inline-flex';
-        relinkBtn.style.cursor = 'pointer';
-        relinkBtn.onclick = function() { openQrModal(true); };
+        relinkBtn.style.display = 'none';
     }
 
     const sidebarRelinkBtn = document.getElementById('waHeaderQrRelinkBtnSidebar') || document.getElementById('waHeaderLinkQrBtn');

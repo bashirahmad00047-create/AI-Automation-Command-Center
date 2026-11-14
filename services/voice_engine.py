@@ -162,19 +162,52 @@ def synthesize_edge_tts(
 
     lang_str = str(language or "").lower()
     is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in clean_text)
-    is_urdu = ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script)
+    words = re.findall(r'[a-zA-Z]+', clean_text.lower())
+    roman_urdu_words = {
+        "salam", "assalam", "assalamoalaikum", "assalam-o-alaikum", "assalamualaikum", "walaikum", "walekum",
+        "kya", "kia", "kaise", "kese", "theek", "thik", "bhai", "shukriya", "janab", "sahab", "ji", "jee",
+        "hain", "hoon", "hun", "hai", "nahi", "nhi", "nahin", "mujhe", "mjhe", "humein", "hum", "ap", "aap",
+        "apka", "aapka", "apki", "aapki", "apke", "aapke", "karo", "karein", "karain", "karna", "raha", "rahe",
+        "rahi", "gaya", "gaye", "gayi", "chahiye", "zaroor", "bilkul", "bohot", "boht", "acha", "achha", "achi",
+        "walay", "wale", "wala", "wali", "kitna", "kitne", "kitni", "paisay", "paise", "rupay", "rupaye",
+        "shukria", "meherbani", "sunayein", "sunao", "batayein", "batao", "rabta", "order", "delivery", "kahan",
+        "kidhar", "kab", "tak", "hoga", "hogi", "hogaya", "hogayi", "kuch", "aur", "ye", "yeh", "wo", "woh",
+        "mein", "main", "se", "ko", "par", "pe", "ka", "ke", "ki", "bhi"
+    }
+    is_roman_urdu = sum(1 for w in words if w in roman_urdu_words) >= 2 or any(w in words for w in ["salam", "assalam", "theek", "shukriya", "walaikum", "bilkul"])
+    is_urdu = ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script or is_roman_urdu)
 
-    # Determine optimal neural voice
-    active_voice = voice
-    if not active_voice:
-        if is_urdu:
-            active_voice = "ur-PK-UzmaNeural"
-        elif "pashto" in lang_str or lang_str == "ps":
-            active_voice = "ps-AF-LatifaNeural"
-        elif "arabic" in lang_str or lang_str == "ar":
-            active_voice = "ar-SA-ZariyahNeural"
-        elif "hindi" in lang_str or lang_str == "hi":
-            active_voice = "hi-IN-MadhurNeural"
+    # Read active default voice saved in AI Voice Studio
+    studio_default_voice = None
+    try:
+        from models import SystemSetting
+        studio_default_voice = SystemSetting.get_val("EDGE_TTS_VOICE")
+    except Exception:
+        pass
+    if not studio_default_voice:
+        studio_default_voice = os.environ.get("EDGE_TTS_VOICE", "ur-PK-AsadNeural")
+    studio_default_voice = str(studio_default_voice).strip()
+
+    # Determine optimal neural voice with Auto Language Detection (Urdu vs English)
+    if is_urdu:
+        if "ur-pk" in studio_default_voice.lower() or "asad" in studio_default_voice.lower() or "uzma" in studio_default_voice.lower():
+            active_voice = studio_default_voice
+        elif voice and ("ur-pk" in str(voice).lower() or "asad" in str(voice).lower() or "uzma" in str(voice).lower()):
+            active_voice = str(voice).strip()
+        else:
+            active_voice = "ur-PK-AsadNeural"
+    elif "pashto" in lang_str or lang_str == "ps":
+        active_voice = "ps-AF-LatifaNeural"
+    elif "arabic" in lang_str or lang_str == "ar":
+        active_voice = "ar-SA-ZariyahNeural"
+    elif "hindi" in lang_str or lang_str == "hi":
+        active_voice = "hi-IN-MadhurNeural"
+    else:
+        # English
+        if "en-" in studio_default_voice.lower() or "andrew" in studio_default_voice.lower() or "ava" in studio_default_voice.lower():
+            active_voice = studio_default_voice
+        elif voice and "en-" in str(voice).lower():
+            active_voice = str(voice).strip()
         else:
             active_voice = "en-US-AvaMultilingualNeural"
 

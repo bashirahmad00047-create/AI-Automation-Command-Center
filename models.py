@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import uuid
 from typing import Any, Dict, List, Optional
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -1070,44 +1071,192 @@ class WhatsAppMessage(db.Model):
             return 0
 
     @classmethod
-    def hard_delete_conversation(cls, organization_id: str, contact_phone: str) -> int:
+    def hard_delete_conversation(cls, organization_id: Optional[str], contact_phone: str) -> int:
         """Permanently hard-deletes all messages associated with contact_phone from database records.
-        Matches all phone variants (clean digits, with/without '+', with/without '@c.us', and last 8 digits).
-        Ensures deleted chats never reappear in UI after page refresh.
+        Supports 1-on-1 chats and group JIDs (@g.us).
+        Matches all phone variants (clean digits, with/without '+', with/without '@c.us' / '@g.us', and last 8 digits).
+        Also registers deleted JIDs in WhatsAppDeletedItem registry to prevent Baileys resurrection.
         """
-        clean_contact = str(contact_phone or "").replace("@c.us", "").replace("@g.us", "").strip()
+        raw_contact = str(contact_phone or "").strip()
+        is_grp = raw_contact.endswith("@g.us")
+        clean_contact = raw_contact.replace("@c.us", "").replace("@s.whatsapp.net", "").strip()
         digits_only = "".join(filter(str.isdigit, clean_contact))
         last_digits = digits_only[-8:] if len(digits_only) >= 8 else digits_only
 
-        candidates = {contact_phone, clean_contact}
-        if clean_contact:
-            bare = clean_contact.lstrip("+")
-            candidates.add(bare)
-            candidates.add(f"+{bare}")
-            candidates.add(f"{bare}@c.us")
-            candidates.add(f"+{bare}@c.us")
+        candidates = {raw_contact, contact_phone, clean_contact}
+        if is_grp:
+            candidates.add(raw_contact)
+            if clean_contact:
+                candidates.add(clean_contact)
+                candidates.add(f"{clean_contact}@g.us")
+        else:
+            if clean_contact:
+                bare = clean_contact.lstrip("+")
+                candidates.add(bare)
+                candidates.add(f"+{bare}")
+                candidates.add(f"{bare}@c.us")
+                candidates.add(f"+{bare}@c.us")
+                candidates.add(f"{bare}@s.whatsapp.net")
+                candidates.add(f"+{bare}@s.whatsapp.net")
 
         conditions = [
             cls.sender.in_(list(candidates)),
             cls.recipient.in_(list(candidates))
         ]
-        if last_digits:
+        if last_digits and not is_grp:
             conditions.extend([
                 cls.sender.like(f"%{last_digits}"),
                 cls.sender.like(f"%{last_digits}@c.us"),
+                cls.sender.like(f"%{last_digits}@s.whatsapp.net"),
                 cls.recipient.like(f"%{last_digits}"),
-                cls.recipient.like(f"%{last_digits}@c.us")
+                cls.recipient.like(f"%{last_digits}@c.us"),
+                cls.recipient.like(f"%{last_digits}@s.whatsapp.net")
             ])
 
-        matches = cls.query.filter(
-            cls.organization_id == organization_id,
-            db.or_(*conditions)
-        ).all()
+        query = cls.query.filter(db.or_(*conditions))
+        if organization_id and organization_id != "all":
+            # Check if there are matches in this org, otherwise delete across orgs
+            org_matches = cls.query.filter(cls.organization_id == organization_id, db.or_(*conditions)).all()
+            matches = org_matches if org_matches else query.all()
+        else:
+            matches = query.all()
+
         count = len(matches)
         for m in matches:
+            if m.whatsapp_message_id:
+                WhatsAppDeletedItem.mark_deleted(m.whatsapp_message_id, item_type="message")
+            if m.id:
+                WhatsAppDeletedItem.mark_deleted(m.id, item_type="message")
             db.session.delete(m)
         db.session.commit()
+
+        # Register all candidates in deleted blacklist
+        for c in candidates:
+            if c:
+                WhatsAppDeletedItem.mark_deleted(c, item_type="group" if is_grp else "chat")
+
+        # Direct raw SQLite cleanup on both root and instance database files
+        import sqlite3
+        base_dir = os.path.abspath(os.path.dirname(__file__))
+        target_dbs = [
+            os.path.join(base_dir, "opsflow_saas.db"),
+            os.path.join(base_dir, "instance", "opsflow_saas.db"),
+            os.path.join(base_dir, "instance", "opsflow_saas_online_backup.db")
+        ]
+        cand_list = list(candidates)
+        placeholders = ",".join("?" for _ in cand_list)
+        for db_file in target_dbs:
+            if os.path.exists(db_file):
+                try:
+                    conn = sqlite3.connect(db_file, timeout=5.0)
+                    cur = conn.cursor()
+                    cur.execute(f"DELETE FROM whatsapp_messages WHERE sender IN ({placeholders}) OR recipient IN ({placeholders})", cand_list + cand_list)
+                    if last_digits and not is_grp:
+                        cur.execute("DELETE FROM whatsapp_messages WHERE sender LIKE ? OR recipient LIKE ?", (f"%{last_digits}%", f"%{last_digits}%"))
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
+
         return count
+
+
+class WhatsAppDeletedItem(db.Model):
+    """Local blacklist / deleted registry for WhatsApp chats, group JIDs, and message IDs.
+    Guarantees Baileys sync, dual delivery poller, or reload never puts deleted items back.
+    """
+    __tablename__ = "whatsapp_deleted_items"
+
+    id = db.Column(db.String(128), primary_key=True)
+    item_type = db.Column(db.String(32), nullable=False, default="chat")  # "chat", "group", "message"
+    deleted_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+
+    @classmethod
+    def get_file_cache_path(cls) -> str:
+        base = os.path.abspath(os.path.join(os.path.dirname(__file__), "storage"))
+        os.makedirs(base, exist_ok=True)
+        return os.path.join(base, "deleted_ids.json")
+
+    @classmethod
+    def load_file_cache(cls) -> set:
+        path = cls.get_file_cache_path()
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return set(data)
+                    elif isinstance(data, dict):
+                        return set(data.keys())
+            except Exception:
+                pass
+        return set()
+
+    @classmethod
+    def save_file_cache(cls, ids: set):
+        path = cls.get_file_cache_path()
+        try:
+            existing = cls.load_file_cache()
+            combined = list(existing | set(ids))
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(combined, f)
+        except Exception:
+            pass
+
+    @classmethod
+    def is_deleted(cls, item_id: str) -> bool:
+        if not item_id:
+            return False
+        clean_id = str(item_id).strip()
+        # Fast file-cache check first
+        f_cache = cls.load_file_cache()
+        if clean_id in f_cache:
+            return True
+        digits = "".join(filter(str.isdigit, clean_id))
+        if digits and digits in f_cache:
+            return True
+
+        # Database check
+        try:
+            q_ids = [clean_id]
+            if digits:
+                q_ids.extend([digits, f"+{digits}", f"{digits}@s.whatsapp.net", f"{digits}@c.us"])
+            found = cls.query.filter(cls.id.in_(q_ids)).first()
+            if found:
+                return True
+        except Exception:
+            pass
+        return False
+
+    @classmethod
+    def mark_deleted(cls, item_id: str, item_type: str = "chat"):
+        if not item_id:
+            return
+        clean_id = str(item_id).strip()
+        cls.save_file_cache({clean_id})
+        try:
+            existing = cls.query.filter_by(id=clean_id).first()
+            if not existing:
+                item = cls(id=clean_id, item_type=item_type)
+                db.session.add(item)
+                db.session.commit()
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
+    @classmethod
+    def get_all_deleted_ids(cls) -> set:
+        s = cls.load_file_cache()
+        try:
+            rows = cls.query.with_entities(cls.id).all()
+            for r in rows:
+                if r[0]:
+                    s.add(r[0])
+        except Exception:
+            pass
+        return s
 
 
 class SystemSetting(db.Model):

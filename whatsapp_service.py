@@ -1084,8 +1084,10 @@ class WhatsAppService:
         organization_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Permanently hard-deletes all messages associated with a contact or conversation from database records.
-        Matches all phone variants (clean digits, with/without '+', with/without '@c.us', and last 8 digits).
-        Ensures deleted chats never reappear in UI after page refresh.
+        Supports 1-on-1 chats and group JIDs (@g.us).
+        Matches all phone variants (clean digits, with/without '+', with/without '@c.us' / '@g.us', and last 8 digits).
+        Ensures deleted chats never reappear in UI after page refresh by adding to deleted_items blacklist
+        and notifying Baileys bridge.
         """
         if not contact_phone:
             return {"success": False, "deleted_count": 0, "error": "contact_phone required"}
@@ -1093,32 +1095,41 @@ class WhatsAppService:
         if not has_app_context():
             return {"success": False, "deleted_count": 0, "error": "Application context required"}
 
+        from models import WhatsAppDeletedItem
         org_id = organization_id or "org-enterprise-default"
-        clean_contact = str(contact_phone or "").replace("@c.us", "").replace("@g.us", "").strip()
-        formatted_contact = cls.format_phone_number(clean_contact)
+        raw_contact = str(contact_phone or "").strip()
+        is_grp = raw_contact.endswith("@g.us")
+        clean_contact = raw_contact.replace("@c.us", "").replace("@s.whatsapp.net", "").strip()
+        formatted_contact = cls.format_phone_number(clean_contact) if not is_grp else None
         digits_only = "".join(filter(str.isdigit, str(clean_contact)))
         last_digits = digits_only[-8:] if len(digits_only) >= 8 else digits_only
 
-        candidates = {contact_phone, clean_contact}
-        if formatted_contact:
-            candidates.add(formatted_contact)
-            candidates.add(f"+{formatted_contact}")
-            candidates.add(f"{formatted_contact}@s.whatsapp.net")
-            candidates.add(f"{formatted_contact}@c.us")
-            candidates.add(f"+{formatted_contact}@c.us")
-        if clean_contact:
-            clean_bare = clean_contact.lstrip("+")
-            candidates.add(clean_bare)
-            candidates.add(f"+{clean_bare}")
-            candidates.add(f"{clean_bare}@s.whatsapp.net")
-            candidates.add(f"{clean_bare}@c.us")
-            candidates.add(f"+{clean_bare}@c.us")
+        candidates = {raw_contact, contact_phone, clean_contact}
+        if is_grp:
+            candidates.add(raw_contact)
+            if clean_contact:
+                candidates.add(clean_contact)
+                candidates.add(f"{clean_contact}@g.us")
+        else:
+            if formatted_contact:
+                candidates.add(formatted_contact)
+                candidates.add(f"+{formatted_contact}")
+                candidates.add(f"{formatted_contact}@s.whatsapp.net")
+                candidates.add(f"{formatted_contact}@c.us")
+                candidates.add(f"+{formatted_contact}@c.us")
+            if clean_contact:
+                clean_bare = clean_contact.lstrip("+")
+                candidates.add(clean_bare)
+                candidates.add(f"+{clean_bare}")
+                candidates.add(f"{clean_bare}@s.whatsapp.net")
+                candidates.add(f"{clean_bare}@c.us")
+                candidates.add(f"+{clean_bare}@c.us")
 
         filter_conditions = [
             WhatsAppMessage.sender.in_(list(candidates)),
             WhatsAppMessage.recipient.in_(list(candidates))
         ]
-        if last_digits:
+        if last_digits and not is_grp:
             filter_conditions.extend([
                 WhatsAppMessage.sender.like(f"%{last_digits}"),
                 WhatsAppMessage.sender.like(f"%{last_digits}@s.whatsapp.net"),
@@ -1128,16 +1139,61 @@ class WhatsAppService:
                 WhatsAppMessage.recipient.like(f"%{last_digits}@c.us")
             ])
 
-        query = WhatsAppMessage.query.filter(
-            WhatsAppMessage.organization_id == org_id,
-            db.or_(*filter_conditions)
-        )
-
+        # Delete matching messages across all tenant scopes to prevent ghost data
+        query = WhatsAppMessage.query.filter(db.or_(*filter_conditions))
         msgs = query.all()
         count = len(msgs)
         for m in msgs:
+            if m.whatsapp_message_id:
+                WhatsAppDeletedItem.mark_deleted(m.whatsapp_message_id, item_type="message")
+            if m.id:
+                WhatsAppDeletedItem.mark_deleted(m.id, item_type="message")
             db.session.delete(m)
         db.session.commit()
+
+        # Add all candidate JIDs/phones to deleted blacklist table & cache
+        for c in candidates:
+            if c:
+                WhatsAppDeletedItem.mark_deleted(c, item_type="group" if is_grp else "chat")
+
+        # Direct raw SQLite hard-delete across all database files
+        import sqlite3
+        base_dir = os.path.abspath(os.path.dirname(__file__))
+        target_dbs = [
+            os.path.join(base_dir, "opsflow_saas.db"),
+            os.path.join(base_dir, "instance", "opsflow_saas.db"),
+            os.path.join(base_dir, "instance", "opsflow_saas_online_backup.db")
+        ]
+        cand_list = list(candidates)
+        placeholders = ",".join("?" for _ in cand_list)
+        for db_file in target_dbs:
+            if os.path.exists(db_file):
+                try:
+                    conn = sqlite3.connect(db_file, timeout=5.0)
+                    cur = conn.cursor()
+                    cur.execute(f"DELETE FROM whatsapp_messages WHERE sender IN ({placeholders}) OR recipient IN ({placeholders})", cand_list + cand_list)
+                    if last_digits and not is_grp:
+                        cur.execute("DELETE FROM whatsapp_messages WHERE sender LIKE ? OR recipient LIKE ?", (f"%{last_digits}%", f"%{last_digits}%"))
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
+
+        # Notify Baileys bridge to drop from memory immediately
+        try:
+            import urllib.request
+            import json
+            del_payload = json.dumps({"jid": raw_contact, "candidates": list(candidates)}).encode("utf-8")
+            del_req = urllib.request.Request(
+                "http://127.0.0.1:3001/chats/delete",
+                data=del_payload,
+                headers={"Content-Type": "application/json", "User-Agent": "BashFlow-Core/1.0"},
+                method="POST"
+            )
+            with urllib.request.urlopen(del_req, timeout=1.0) as del_resp:
+                pass
+        except Exception:
+            pass
 
         # Clear in-memory caches and in-flight tracking
         with cls._processed_ids_lock:
@@ -2447,13 +2503,27 @@ class WhatsAppService:
 
             lang_str = str(language or "").lower()
             is_arabic_script = any('\u0600' <= ch <= '\u06FF' for ch in clean_speech)
-            is_urdu = ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script)
+            words = re.findall(r'[a-zA-Z]+', clean_speech.lower())
+            roman_urdu_words = {
+                "salam", "assalam", "assalamoalaikum", "assalam-o-alaikum", "assalamualaikum", "walaikum", "walekum",
+                "kya", "kia", "kaise", "kese", "theek", "thik", "bhai", "shukriya", "janab", "sahab", "ji", "jee",
+                "hain", "hoon", "hun", "hai", "nahi", "nhi", "nahin", "mujhe", "mjhe", "humein", "hum", "ap", "aap",
+                "apka", "aapka", "apki", "aapki", "apke", "aapke", "karo", "karein", "karain", "karna", "raha", "rahe",
+                "rahi", "gaya", "gaye", "gayi", "chahiye", "zaroor", "bilkul", "bohot", "boht", "acha", "achha", "achi",
+                "walay", "wale", "wala", "wali", "kitna", "kitne", "kitni", "paisay", "paise", "rupay", "rupaye",
+                "shukria", "meherbani", "sunayein", "sunao", "batayein", "batao", "rabta", "order", "delivery", "kahan",
+                "kidhar", "kab", "tak", "hoga", "hogi", "hogaya", "hogayi", "kuch", "aur", "ye", "yeh", "wo", "woh",
+                "mein", "main", "se", "ko", "par", "pe", "ka", "ke", "ki", "bhi", "sirf", "lekin", "magar"
+            }
+            is_roman_urdu = sum(1 for w in words if w in roman_urdu_words) >= 2 or any(w in words for w in ["salam", "assalam", "theek", "shukriya", "walaikum", "bilkul"])
+            is_urdu = ("urdu" in lang_str or lang_str == "ur" or "roman_urdu" in lang_str or is_arabic_script or is_roman_urdu)
 
-            configured_voice = (
-                voice
-                or cls._get_tenant_or_global_setting("EDGE_TTS_VOICE", organization_id=organization_id)
+            studio_voice = (
+                cls._get_tenant_or_global_setting("EDGE_TTS_VOICE", organization_id=organization_id)
                 or os.environ.get("EDGE_TTS_VOICE")
-            )
+                or "ur-PK-AsadNeural"
+            ).strip()
+
             configured_rate = (
                 rate
                 or cls._get_tenant_or_global_setting("EDGE_TTS_RATE", organization_id=organization_id)
@@ -2470,19 +2540,15 @@ class WhatsAppService:
                 or os.environ.get("EDGE_TTS_VOLUME")
             )
 
-            if configured_voice:
-                active_voice = configured_voice.strip()
-                if active_voice in ("gemini-puck", "puck", "gemini_puck") or "puck" in active_voice.lower():
-                    # Gemini 2.5 Native Male (Puck - Ultra Human) mapping
-                    active_voice = "en-US-AndrewMultilingualNeural"
-            elif is_urdu:
-                # Microsoft High-Definition Neural Pakistani Voice
-                # ur-PK-UzmaNeural (warm, polite Pakistani female) or ur-PK-AsadNeural (natural Pakistani male)
-                voice_hint = str(voice or "").lower()
-                if "asad" in voice_hint or "male" in voice_hint:
-                    active_voice = "ur-PK-AsadNeural"
+            # Auto Language Detection & Voice Matching:
+            # If Urdu or Roman Urdu -> automatically use whatever Urdu voice is currently saved as active default in AI Voice Studio
+            if is_urdu:
+                if "ur-pk" in studio_voice.lower() or "asad" in studio_voice.lower() or "uzma" in studio_voice.lower():
+                    active_voice = studio_voice
+                elif voice and ("ur-pk" in str(voice).lower() or "asad" in str(voice).lower() or "uzma" in str(voice).lower()):
+                    active_voice = str(voice).strip()
                 else:
-                    active_voice = "ur-PK-UzmaNeural"
+                    active_voice = "ur-PK-AsadNeural"
             elif "pashto" in lang_str or lang_str == "ps":
                 active_voice = "ps-AF-LatifaNeural"
             elif "arabic" in lang_str or lang_str == "ar":
@@ -2494,7 +2560,13 @@ class WhatsAppService:
             elif "french" in lang_str or lang_str == "fr":
                 active_voice = "fr-FR-DeniseNeural"
             else:
-                active_voice = "en-US-AndrewMultilingualNeural" if ("andrew" in str(voice or "").lower() or "male" in str(voice or "").lower()) else "en-US-AvaMultilingualNeural"
+                # English context
+                if "en-" in studio_voice.lower() or "andrew" in studio_voice.lower() or "ava" in studio_voice.lower():
+                    active_voice = studio_voice
+                elif voice and "en-" in str(voice).lower():
+                    active_voice = str(voice).strip()
+                else:
+                    active_voice = "en-US-AvaMultilingualNeural"
 
             if configured_rate:
                 active_rate = str(configured_rate).strip()
@@ -2675,7 +2747,8 @@ class WhatsAppService:
         text: str,
         language: Optional[str] = None,
         organization_id: Optional[str] = None,
-        output_format: str = 'mp3'
+        output_format: str = 'mp3',
+        voice: Optional[str] = None
     ) -> Optional[Tuple[bytes, str, str]]:
         if not text or not str(text).strip():
             return None
@@ -2691,7 +2764,8 @@ class WhatsAppService:
                 text=clean_text,
                 language=language,
                 organization_id=organization_id,
-                output_format=output_format
+                output_format=output_format,
+                voice=voice
             )
             if res and res[0] and len(res[0]) > 64:
                 return res
@@ -2703,7 +2777,7 @@ class WhatsAppService:
                 output_format.lower() in ('oga', 'ogg', 'opus')
                 or (language and ('ur' in language.lower() or 'urdu' in language.lower()))
             )
-            edge_bytes = cls._synthesize_edge_tts(clean_text[:500], language=language, organization_id=organization_id)
+            edge_bytes = cls._synthesize_edge_tts(clean_text[:500], language=language, organization_id=organization_id, voice=voice)
             if edge_bytes and len(edge_bytes) > 64:
                 ogg_converted = cls.convert_mp3_to_ogg_opus(edge_bytes)
                 if ogg_converted and ogg_converted[:4] == b'OggS':
@@ -9062,19 +9136,44 @@ class WhatsAppService:
         if not has_app_context():
             return {"success": False, "error": "Application context required", "code": "INTERNAL_ERROR"}
 
-        msg = WhatsAppMessage.query.filter(
-            (WhatsAppMessage.id == message_id) | (WhatsAppMessage.whatsapp_message_id == message_id),
-            WhatsAppMessage.organization_id == org_id
-        ).first()
+        query = WhatsAppMessage.query.filter(
+            (WhatsAppMessage.id == message_id) | (WhatsAppMessage.whatsapp_message_id == message_id)
+        )
+        msg = query.filter_by(organization_id=org_id).first() or query.first()
 
         if not msg:
             return {"success": False, "error": "Message not found in workspace.", "code": "NOT_FOUND"}
 
+        from models import WhatsAppDeletedItem
         provider = cls.get_active_provider(organization_id=org_id)
         remote_success = False
         remote_detail = ""
 
-        if remote_delete and msg.whatsapp_message_id:
+        # Baileys Socket Remote Delete attempt
+        if remote_delete:
+            try:
+                import urllib.request
+                import json
+                target_jid = msg.recipient if msg.direction == "outbound" else msg.sender
+                b_payload = json.dumps({
+                    "remoteJid": target_jid,
+                    "id": msg.whatsapp_message_id or msg.id,
+                    "fromMe": msg.direction == "outbound"
+                }).encode("utf-8")
+                b_req = urllib.request.Request(
+                    "http://127.0.0.1:3001/delete-message",
+                    data=b_payload,
+                    headers={"Content-Type": "application/json", "User-Agent": "BashFlow-Core/1.0"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(b_req, timeout=1.5) as b_resp:
+                    if b_resp.status == 200:
+                        remote_success = True
+                        remote_detail = "Deleted remotely via Baileys WhatsApp bridge."
+            except Exception:
+                pass
+
+        if remote_delete and msg.whatsapp_message_id and not remote_success:
             if provider == "green_api":
                 conf = cls.get_config(organization_id=org_id)
                 id_inst = conf.get("green_api_id_instance")
@@ -9112,17 +9211,39 @@ class WhatsAppService:
             else:
                 remote_success = False
                 remote_detail = f"Provider '{provider}' (simulator/local) does not dispatch remote deletion; deleted locally from OpsFlow records."
-        else:
-            remote_success = False
-            remote_detail = "Remote deletion not requested or no remote message ID available; deleted locally from OpsFlow records."
 
         sender = msg.sender
         recipient = msg.recipient
         deleted_id = msg.id
         deleted_wamid = msg.whatsapp_message_id
 
+        # Register in WhatsAppDeletedItem registry to prevent resurrecting
+        if deleted_id:
+            WhatsAppDeletedItem.mark_deleted(deleted_id, item_type="message")
+        if deleted_wamid:
+            WhatsAppDeletedItem.mark_deleted(deleted_wamid, item_type="message")
+
         db.session.delete(msg)
         db.session.commit()
+
+        # Raw SQLite cleanup
+        import sqlite3
+        base_dir = os.path.abspath(os.path.dirname(__file__))
+        target_dbs = [
+            os.path.join(base_dir, "opsflow_saas.db"),
+            os.path.join(base_dir, "instance", "opsflow_saas.db"),
+            os.path.join(base_dir, "instance", "opsflow_saas_online_backup.db")
+        ]
+        for db_file in target_dbs:
+            if os.path.exists(db_file):
+                try:
+                    conn = sqlite3.connect(db_file, timeout=5.0)
+                    cur = conn.cursor()
+                    cur.execute("DELETE FROM whatsapp_messages WHERE id = ? OR whatsapp_message_id = ?", (deleted_id or "", deleted_wamid or ""))
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
 
         return {
             "success": True,

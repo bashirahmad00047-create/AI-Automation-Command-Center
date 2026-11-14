@@ -448,10 +448,18 @@ def start_bridge_poll_sync_daemon(app=None, check_interval: float = 5.0):
                             with safe_app_context(app=app):
                                 from whatsapp_service import WhatsAppService
                                 from api_v1 import process_inbound_whatsapp_payload
+                                from models import WhatsAppDeletedItem, WhatsAppMessage
                                 for msg_data in messages:
                                     msg_id = msg_data.get("idMessage")
+                                    sender_jid = msg_data.get("sender") or msg_data.get("chatId") or ""
+                                    chat_name = str(msg_data.get("chatName") or msg_data.get("senderName") or "").lower()
+                                    if "english learning" in chat_name or "ایمان" in chat_name:
+                                        continue
+                                    if msg_id and WhatsAppDeletedItem.is_deleted(msg_id):
+                                        continue
+                                    if sender_jid and WhatsAppDeletedItem.is_deleted(sender_jid):
+                                        continue
                                     if msg_id:
-                                        from models import WhatsAppMessage
                                         committed = WhatsAppMessage.query.filter_by(whatsapp_message_id=msg_id).first()
                                         if committed is not None:
                                             continue
