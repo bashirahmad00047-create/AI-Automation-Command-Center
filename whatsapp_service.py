@@ -7420,8 +7420,12 @@ class WhatsAppService:
         raw_body_str = str(message_body or "").strip()
         cleaned_cmd_lower = raw_body_str.lower().strip()
 
-        # 1. HARDCODED BYPASS: Exactly "meri dukan"
-        if cleaned_cmd_lower in ("meri dukan", "meri dukaan", "my shop", "my store"):
+        # 1. HARDCODED BYPASS: "meri dukan" (or any text matching dukan|shop|store)
+        is_dukan_match = bool(
+            cleaned_cmd_lower in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop")
+            or re.search(r'\b(meri\s*dukaan|meri\s*dukan|dukan|dukaan|my\s*shop|my\s*store|shop|store)\b', cleaned_cmd_lower)
+        )
+        if is_dukan_match:
             logger.info(f"[Strict AI Bypass] 'meri dukan' command in force_dispatch for {clean_phone or sender_phone}. Bypassing AI LLM.")
             token = ""
             portal_url = ""
