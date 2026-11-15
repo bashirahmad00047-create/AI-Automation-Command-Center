@@ -6082,7 +6082,7 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
         if is_img and WhatsAppService.is_inventory_caption(msg_body):
             logger.info(f"[Strict AI Bypass] Early intercept of inventory image before rules/LLM: '{msg_body}'")
             try:
-                WhatsAppService.handle_whatsapp_inventory_image(
+                ai_reply = WhatsAppService.handle_whatsapp_inventory_image(
                     organization_id=org_id,
                     sender_phone=msg.get("from_phone", "unknown"),
                     message_body=msg_body,
@@ -6097,11 +6097,15 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
                 logger.error(f"[Strict AI Bypass Error] {inv_err}")
             continue
 
-        # STRICT HARDCODED BYPASS 1: "meri dukan"
+        # STRICT HARDCODED BYPASS 1: "meri dukan" (or any text matching dukan|shop|store)
         clean_body_str = str(msg_body or "").strip().lower()
-        if clean_body_str in ("meri dukan", "meri dukaan", "my shop", "my store"):
+        is_dukan_body = bool(
+            clean_body_str in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop")
+            or re.search(r'\b(meri\s*dukaan|meri\s*dukan|dukan|dukaan|my\s*shop|my\s*store|shop|store)\b', clean_body_str)
+        )
+        if is_dukan_body:
             try:
-                WhatsAppService.handle_inbound_auto_response(
+                ai_reply = WhatsAppService.handle_inbound_auto_response(
                     organization_id=org_id,
                     sender_phone=msg.get("from_phone", "unknown"),
                     chat_id=msg.get("chat_id") or msg.get("from_phone"),
@@ -6123,7 +6127,7 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
         )
         if not is_img and has_price_kw:
             try:
-                WhatsAppService.handle_inbound_auto_response(
+                ai_reply = WhatsAppService.handle_inbound_auto_response(
                     organization_id=org_id,
                     sender_phone=msg.get("from_phone", "unknown"),
                     chat_id=msg.get("chat_id") or msg.get("from_phone"),
@@ -6287,8 +6291,9 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
         "status": "ok",
         "provider": "green_api",
         "processed": processed_count,
-        "dispatched": bool(ai_reply and ai_reply.get("dispatched")),
+        "dispatched": bool(ai_reply and (ai_reply.get("dispatched") or (isinstance(ai_reply.get("dispatch"), dict) and (ai_reply.get("dispatch", {}).get("success") or ai_reply.get("dispatch", {}).get("messageId"))))),
         "reply": reply_text,
+        "reply_body": reply_text,
         "audio_base64": audio_b64,
         "image_url": image_url_val,
         "image_base64": image_b64_val,

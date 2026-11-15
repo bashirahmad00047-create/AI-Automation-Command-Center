@@ -79,5 +79,59 @@ class TestForceImageBypass(unittest.TestCase):
         self.assertIn("http://66.45.230.232:5000/vendor/auth/", res.get('reply_body', ''))
         print('[CHECK 5 PASS] meri dukan command successfully generated magic link at top level!')
 
+    def test_6_any_number_without_add_or_rs_extracts_price(self):
+        # 6a: Caption is just "1800" without the words "add" or "rs"
+        res_a = WhatsAppService.force_dispatch_auto_responder(
+            organization_id='org-enterprise-default',
+            sender_phone='03129988772',
+            message_body='1800',
+            is_image=True,
+            download_url='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+            sender_name='Artisan Seller'
+        )
+        self.assertIsNotNone(res_a)
+        self.assertEqual(res_a.get('action'), 'ai_catalog_product_added')
+        self.assertEqual(res_a.get('estimated_price'), 1800.0)
+        self.assertIn('*Listed Price:* 1800.0', res_a.get('reply_body', ''))
+
+        # 6b: Caption is "Peshawari Chappal 2400" without "add" or "rs"
+        res_b = WhatsAppService.force_dispatch_auto_responder(
+            organization_id='org-enterprise-default',
+            sender_phone='03129988773',
+            message_body='Peshawari Chappal 2400',
+            is_image=True,
+            download_url='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+            sender_name='Artisan Seller'
+        )
+        self.assertIsNotNone(res_b)
+        self.assertEqual(res_b.get('action'), 'ai_catalog_product_added')
+        self.assertEqual(res_b.get('estimated_price'), 2400.0)
+        print('[CHECK 6 PASS] Any number in image caption treated 100% as inventory price without requiring add or rs!')
+
+    def test_7_consecutive_dukan_and_image_no_batch_drop(self):
+        # 7a: Send "meri dukan"
+        res_dukan = WhatsAppService.force_dispatch_auto_responder(
+            organization_id='org-enterprise-default',
+            sender_phone='03129988774',
+            message_body='meri dukan',
+            sender_name='Consecutive Vendor'
+        )
+        self.assertIsNotNone(res_dukan)
+        self.assertEqual(res_dukan.get('action'), 'vendor_magic_link')
+
+        # 7b: Send image immediately afterwards from same sender phone - must NOT be dropped by in_flight_debounce
+        res_img = WhatsAppService.force_dispatch_auto_responder(
+            organization_id='org-enterprise-default',
+            sender_phone='03129988774',
+            message_body='Woolen Cap 1200',
+            is_image=True,
+            download_url='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+            sender_name='Consecutive Vendor'
+        )
+        self.assertIsNotNone(res_img)
+        self.assertEqual(res_img.get('action'), 'ai_catalog_product_added')
+        self.assertEqual(res_img.get('estimated_price'), 1200.0)
+        print('[CHECK 7 PASS] Consecutive dukan command followed quickly by image processed independently without drop!')
+
 if __name__ == '__main__':
     unittest.main()

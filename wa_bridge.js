@@ -4043,14 +4043,20 @@ if (!text) text = '[Voice note]';
 
           // FIFO Sequential Queue Dispatch (Zero Dropped Questions & Human Shield)
           enqueueContactTask(targetJid, async () => {
+            const isBypassCommand = Boolean(
+              isImage ||
+              (text && (/dukan|shop|store/i.test(text) || /\d+/.test(text)))
+            );
             const aiAbortController = new AbortController();
             let timeoutTimer = null;
 
+            // Generous 90s timeout for bypass/inventory uploads, 25s for normal LLM
+            const timeoutMs = isBypassCommand ? 90000 : 25000;
             const timeoutPromise = new Promise((_, reject) => {
               timeoutTimer = setTimeout(() => {
                 try { aiAbortController.abort(); } catch (_) {}
                 reject(new Error('AI_PIPELINE_TIMEOUT'));
-              }, 15000);
+              }, timeoutMs);
             });
 
             const aiGenerationProcess = async () => {
@@ -4074,7 +4080,9 @@ if (!text) text = '[Voice note]';
                     if (sock && typeof sock.sendPresenceUpdate === 'function') {
                       await sock.sendPresenceUpdate('composing', targetDestJid);
                     }
-                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    if (!isBypassCommand) {
+                      await new Promise(resolve => setTimeout(resolve, 1500));
+                    }
                     const sent = await sock.sendMessage(targetDestJid, { text: String(replyContent) });
                     if (sent?.key?.id) sentAiMessageIds.add(sent.key.id);
                     if (sock && typeof sock.sendPresenceUpdate === 'function') {
@@ -4095,20 +4103,25 @@ if (!text) text = '[Voice note]';
                                 dispatchErr?.name === 'AbortError' ||
                                 aiAbortController.signal.aborted;
               if (isTimeout) {
-                console.warn(`[AI Generation Timeout]: Generation exceeded 15 seconds for ${remoteJid}. Aborted and sending fallback message.`);
-                try {
-                  const fallbackText = "System is experiencing heavy load. Please type your message in text format.";
-                  const cleanFallbackPhone = cleanPhoneNumber(remoteJid) || cleanPhoneNumber(senderPhone);
-                  const fallbackDestJid = (remoteJid && remoteJid.endsWith('@g.us')) ? remoteJid : (cleanFallbackPhone ? `${cleanFallbackPhone}@s.whatsapp.net` : remoteJid);
-                  if (sock && typeof sock.sendMessage === 'function') {
-                    const fallbackSent = await sock.sendMessage(fallbackDestJid, { text: fallbackText });
-                    if (fallbackSent?.key?.id) sentAiMessageIds.add(fallbackSent.key.id);
+                console.warn(`[AI Generation Timeout]: Generation exceeded ${timeoutMs/1000}s for ${remoteJid}.`);
+                // STRICT RULE: NEVER send "heavy load" error on bypass commands (images, prices, dukan)
+                if (!isBypassCommand) {
+                  try {
+                    const fallbackText = "System is experiencing heavy load. Please type your message in text format.";
+                    const cleanFallbackPhone = cleanPhoneNumber(remoteJid) || cleanPhoneNumber(senderPhone);
+                    const fallbackDestJid = (remoteJid && remoteJid.endsWith('@g.us')) ? remoteJid : (cleanFallbackPhone ? `${cleanFallbackPhone}@s.whatsapp.net` : remoteJid);
+                    if (sock && typeof sock.sendMessage === 'function') {
+                      const fallbackSent = await sock.sendMessage(fallbackDestJid, { text: fallbackText });
+                      if (fallbackSent?.key?.id) sentAiMessageIds.add(fallbackSent.key.id);
+                    }
+                    if (sock && typeof sock.sendPresenceUpdate === 'function') {
+                      await sock.sendPresenceUpdate('paused', fallbackDestJid).catch(() => {});
+                    }
+                  } catch (fbErr) {
+                    console.error('[AI Fallback Message Send Error]:', fbErr.message);
                   }
-                  if (sock && typeof sock.sendPresenceUpdate === 'function') {
-                    await sock.sendPresenceUpdate('paused', fallbackDestJid).catch(() => {});
-                  }
-                } catch (fbErr) {
-                  console.error('[AI Fallback Message Send Error]:', fbErr.message);
+                } else {
+                  console.warn(`[Bypass Command Timeout]: Heavy load error suppressed for inventory/dukan command from ${remoteJid}`);
                 }
               } else {
                 console.error('[Queue Task Dispatch Error]:', dispatchErr.message);

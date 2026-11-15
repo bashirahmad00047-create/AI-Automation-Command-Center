@@ -6168,7 +6168,10 @@ class WhatsAppService:
 
     @classmethod
     def is_inventory_caption(cls, caption: Optional[str]) -> bool:
-        """Detects if an image caption is inventory/sales-related (e.g. 'add', 'sell', 'price', 'rs', or numeric value)."""
+        """Detects if an image caption is an inventory upload or contains ANY number.
+        Strict Requirement: If an incoming message has an image and the caption contains
+        ANY number (re.search(r'\d+', caption)), treat it 100% as an inventory upload.
+        """
         if not caption:
             return False
         text = str(caption).strip()
@@ -6178,12 +6181,11 @@ class WhatsAppService:
         if lower in ("[image]", "[image message]", "[photo]", "[picture]", "(no text)", "[audio]", "[voice note]", "📷 photo"):
             return False
 
-        # Numeric value check (e.g., "2500", "2,850", "3500/-", "1500.00")
-        num_clean = re.sub(r'[\s,/\\-]', '', lower)
-        if num_clean.isdigit():
+        # Any number in caption = 100% inventory upload (no 'add' or 'rs' required)
+        if re.search(r'\d+', text):
             return True
 
-        # Keywords check: "add", "sell", "price", "rs", or numeric value
+        # Fallback keyword checks if no digits present
         inventory_keywords = {
             "add", "sell", "price", "rs", "rs.", "pkr", "rate", "cost", "sale",
             "bechna", "becho", "item", "product", "catalog", "suit", "kurta", "shirt",
@@ -6196,22 +6198,22 @@ class WhatsAppService:
         if any(kw in lower for kw in ("rs", "pkr", "price", "sell", "add", "bazar", "store")):
             return True
 
-        if any(c.isdigit() for c in lower) and len(lower) < 120:
-            return True
-
         return False
 
     @classmethod
     def extract_inventory_price(cls, caption: Optional[str]) -> Optional[float]:
-        """Extracts numerical price from an inventory caption string."""
+        """Extracts numerical price from an inventory caption string.
+        Picks the first number as the price without requiring 'add' or 'rs'.
+        """
         if not caption:
             return None
         text = str(caption).strip()
         patterns = [
             r'(?:rs\.?|pkr)\s*[:=]?\s*([\d,]+(?:\.\d+)?)',
             r'([\d,]+(?:\.\d+)?)\s*(?:rs|pkr|/-)',
-            r'(?:price|rate|cost|for)\s*[:=]?\s*([\d,]+(?:\.\d+)?)',
-            r'\b([\d,]{3,7}(?:\.\d+)?)\b'
+            r'(?:price|rate|cost|for|add)\s*[:=]?\s*([\d,]+(?:\.\d+)?)',
+            r'\b(\d+(?:[\.,]\d+)?)\b',
+            r'(\d+)'
         ]
         for pat in patterns:
             m = re.search(pat, text, re.IGNORECASE)
@@ -6365,42 +6367,71 @@ class WhatsAppService:
                 logger.error(f"[AI Catalog Direct Fallback Error] {direct_err}")
                 db_save_error = str(direct_err)
 
-        # Ensure product is also posted to http://127.0.0.1:8000/inventory/products if not already created
-        if not ai_res_json or not ai_res_json.get("saved_product"):
-            title_guess = (ai_res_json or {}).get("title") or clean_cap or "Studio Product"
-            desc_guess = (ai_res_json or {}).get("description") or f"High quality artisan product live on Chitral & Global Bazar. {clean_cap}".strip()
-            price_val = extracted_price or (ai_res_json or {}).get("estimated_price") or 2500.0
-            prod_img = (ai_res_json or {}).get("image_url") or "/static/uploads/default_product.png"
-            product_payload = {
-                "title": title_guess,
-                "description": desc_guess,
-                "category": "Apparel",
-                "price": float(price_val),
-                "cost_price": float(price_val * 0.7),
-                "stock": 10,
-                "image_url": prod_img,
-                "ai_image_url": prod_img,
-                "vendor_id": int(vendor_id)
-            }
-            try:
-                p_resp = requests.post(fastapi_products_url, json=product_payload, timeout=10.0)
-                if p_resp.status_code in (200, 201):
-                    p_data = p_resp.json()
-                    if not ai_res_json:
-                        ai_res_json = {
-                            "title": p_data.get("title", title_guess),
-                            "description": p_data.get("description", desc_guess),
-                            "estimated_price": p_data.get("price", price_val),
-                            "image_url": p_data.get("image_url", prod_img),
-                            "saved_product": p_data
-                        }
-                    else:
-                        ai_res_json["saved_product"] = p_data
-                    db_save_error = None
-                else:
-                    logger.warning(f"[Inventory Products API] Status {p_resp.status_code}: {p_resp.text}")
-            except Exception as p_err:
-                logger.warning(f"[Inventory Products API] Call to {fastapi_products_url} failed: {p_err}")
+        # 3. Direct SQLite Insertion & PostgreSQL API Sync
+        # Insert product directly into SQLite /root/Global-Bazar-Core/global_bazar.db so it shows immediately on /store
+        title_guess = (ai_res_json or {}).get("title") or clean_cap or "Studio Product"
+        if not title_guess or title_guess in ("Studio Product", "Studio Collection Elegance Edition"):
+            clean_t = re.sub(r'(?:rs\.?|pkr)?\s*[\d,]+(?:\.\d+)?', '', clean_cap, flags=re.IGNORECASE)
+            clean_t = re.sub(r'\b(add|sell|price|for|this|item|product)\b', '', clean_t, flags=re.IGNORECASE).strip()
+            if clean_t and len(clean_t) >= 3:
+                title_guess = clean_t.title()
+            else:
+                title_guess = "Artisan Store Product"
+
+        desc_guess = (ai_res_json or {}).get("description") or f"High quality artisan product live on Chitral & Global Bazar. {clean_cap}".strip()
+        price_val = float(extracted_price or (ai_res_json or {}).get("estimated_price") or 2500.0)
+        prod_img = (ai_res_json or {}).get("image_url") or "/static/uploads/default_product.png"
+
+        # Direct SQLite Insert
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            sq_product = GlobalBazarService.add_product(
+                title=title_guess,
+                price=price_val,
+                stock=10,
+                vendor_id=int(vendor_id),
+                category="Apparel",
+                description=desc_guess,
+                image_url=prod_img
+            )
+            logger.info(f"[GlobalBazar Direct SQLite] Product added directly to global_bazar.db: #{sq_product.get('id') if sq_product else 'unknown'}")
+            if not ai_res_json:
+                ai_res_json = {
+                    "title": title_guess,
+                    "description": desc_guess,
+                    "estimated_price": price_val,
+                    "image_url": prod_img,
+                    "saved_product": sq_product
+                }
+            db_save_error = None
+        except Exception as sq_err:
+            logger.error(f"[GlobalBazar SQLite Insert Error] {sq_err}")
+            if not db_save_error:
+                db_save_error = str(sq_err)
+
+        # Sync to PostgreSQL port 8000 API
+        product_payload = {
+            "title": title_guess,
+            "description": desc_guess,
+            "category": "Apparel",
+            "price": float(price_val),
+            "cost_price": float(price_val * 0.7),
+            "stock": 10,
+            "image_url": prod_img,
+            "ai_image_url": prod_img,
+            "vendor_id": int(vendor_id)
+        }
+        try:
+            p_resp = requests.post(fastapi_products_url, json=product_payload, timeout=10.0)
+            if p_resp.status_code in (200, 201):
+                p_data = p_resp.json()
+                if ai_res_json:
+                    ai_res_json["saved_product"] = p_data
+                logger.info(f"[GlobalBazar PostgreSQL API] Synced product #{p_data.get('id')} to port 8000 API")
+            else:
+                logger.warning(f"[Inventory Products API] Status {p_resp.status_code}: {p_resp.text}")
+        except Exception as p_err:
+            logger.warning(f"[Inventory Products API] Call to {fastapi_products_url} failed: {p_err}")
 
         # If both FastAPI and internal database engine completely failed, return clear text error
         if not ai_res_json and db_save_error:
@@ -6428,15 +6459,9 @@ class WhatsAppService:
             }
 
         # 4. Format exact success message
-        title = ai_res_json.get("title") or ai_res_json.get("detected_title") or "Studio Product"
-        if not title or title in ("Studio Product", "Studio Collection Elegance Edition"):
-            clean_t = re.sub(r'(?:rs\.?|pkr)?\s*[\d,]+(?:\.\d+)?', '', clean_cap, flags=re.IGNORECASE)
-            clean_t = re.sub(r'\b(add|sell|price|for|this|item|product)\b', '', clean_t, flags=re.IGNORECASE).strip()
-            if clean_t and len(clean_t) >= 3:
-                title = clean_t.title()
-
-        description = ai_res_json.get("description") or f"High quality artisan product live on Chitral & Global Bazar. {clean_cap}".strip()
-        estimated_price = extracted_price or ai_res_json.get("estimated_price") or ai_res_json.get("detected_price") or 2500.0
+        title = ai_res_json.get("title") or ai_res_json.get("detected_title") or title_guess
+        description = ai_res_json.get("description") or desc_guess
+        estimated_price = extracted_price or ai_res_json.get("estimated_price") or ai_res_json.get("detected_price") or price_val
 
         success_msg = (
             f" *Product Successfully Added to Chitral & Global Bazar!*\n\n"
@@ -6459,6 +6484,14 @@ class WhatsAppService:
         except Exception as send_err:
             logger.warning(f"[AI Catalog WhatsApp Send Error] Could not dispatch to WhatsApp: {send_err}")
 
+        # Immediately clear any in-flight phone locks so subsequent messages/images are never blocked
+        with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
+            clean_sender_lock = cls.format_phone_number(sender_phone)
+            getattr(cls, "_in_flight_phones", set()).discard(clean_sender_lock)
+            if hasattr(cls, "_in_flight_phones_ts"):
+                cls._in_flight_phones_ts.pop(clean_sender_lock, None)
+
+        is_dispatched = bool(dispatch_res and (dispatch_res.get("success") or dispatch_res.get("messageId") or dispatch_res.get("idMessage")))
         return {
             "success": True,
             "action": "ai_catalog_product_added",
@@ -6470,7 +6503,8 @@ class WhatsAppService:
             "message": success_msg,
             "ai_data": ai_res_json,
             "image_url": ai_res_json.get("image_url"),
-            "dispatch": dispatch_res
+            "dispatch": dispatch_res,
+            "dispatched": is_dispatched
         }
 
 
@@ -7092,7 +7126,11 @@ class WhatsAppService:
         chat_id = kwargs.get("chat_id") or kwargs.get("chatId") or (args[11] if len(args) > 11 else None)
 
         raw_cmd = str(message_body or "").strip().lower()
-        if raw_cmd in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop"):
+        is_dukan_cmd = bool(
+            raw_cmd in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop")
+            or re.search(r'\b(meri\s*dukaan|meri\s*dukan|dukan|dukaan|my\s*shop|my\s*store|shop|store)\b', raw_cmd)
+        )
+        if is_dukan_cmd:
             clean_p = cls.format_phone_number(sender_phone)
             target_chat = chat_id or (f"{clean_p}@s.whatsapp.net" if clean_p else sender_phone)
             token = ""
@@ -7116,8 +7154,9 @@ class WhatsAppService:
             except Exception as e:
                 shop_reply = f"⚠️ Could not generate vendor portal link: {e}"
 
+            dispatch_res = None
             try:
-                cls.send_message(
+                dispatch_res = cls.send_message(
                     organization_id=org_id or "org-enterprise-default",
                     to_phone=clean_p or sender_phone,
                     chat_id=target_chat,
@@ -7126,13 +7165,22 @@ class WhatsAppService:
             except Exception as send_err:
                 logger.error(f"[Strict AI Bypass] Failed to send 'meri dukan' reply in force_dispatch: {send_err}")
 
+            # Clear in-flight phone locks immediately so subsequent images/messages are never blocked
+            with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
+                getattr(cls, "_in_flight_phones", set()).discard(clean_p)
+                if hasattr(cls, "_in_flight_phones_ts"):
+                    cls._in_flight_phones_ts.pop(clean_p, None)
+
+            is_sent = bool(dispatch_res and (dispatch_res.get("success") or dispatch_res.get("messageId") or dispatch_res.get("idMessage")))
             return {
                 "success": True,
                 "action": "vendor_magic_link",
                 "token": token,
                 "portal_url": portal_url,
                 "reply_body": shop_reply,
-                "reply": shop_reply
+                "reply": shop_reply,
+                "dispatch": dispatch_res,
+                "dispatched": is_sent
             }
 
         return cls.handle_inbound_auto_response(*args, **kwargs)
@@ -7175,8 +7223,12 @@ class WhatsAppService:
         raw_body_str = str(message_body or "").strip()
         cleaned_cmd_lower = raw_body_str.lower().strip()
 
-        # 1. HARDCODED BYPASS: Exactly "meri dukan" (or "meri dukaan", "my shop", "my store")
-        if cleaned_cmd_lower in ("meri dukan", "meri dukaan", "my shop", "my store"):
+        # 1. HARDCODED BYPASS: "meri dukan" (or any text matching dukan|shop|store)
+        is_dukan_top = bool(
+            cleaned_cmd_lower in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop")
+            or re.search(r'\b(meri\s*dukaan|meri\s*dukan|dukan|dukaan|my\s*shop|my\s*store|shop|store)\b', cleaned_cmd_lower)
+        )
+        if is_dukan_top:
             logger.info(f"[Strict AI Bypass] 'meri dukan' command detected at TOP for {sender_phone}. Bypassing AI LLM.")
             token = ""
             portal_url = ""
@@ -7199,8 +7251,9 @@ class WhatsAppService:
             except Exception as e:
                 shop_reply = f"⚠️ Could not generate vendor portal link: {e}"
 
+            dispatch_res = None
             try:
-                cls.send_message(
+                dispatch_res = cls.send_message(
                     organization_id=org_id_top,
                     to_phone=clean_p_top or sender_phone,
                     chat_id=raw_chat_top,
@@ -7209,13 +7262,22 @@ class WhatsAppService:
             except Exception as send_err:
                 logger.error(f"[Strict AI Bypass] Failed to send 'meri dukan' reply: {send_err}")
 
+            # Clear in-flight phone locks immediately so subsequent images/messages are never blocked
+            with getattr(cls, "_in_flight_phones_lock", threading.Lock()):
+                getattr(cls, "_in_flight_phones", set()).discard(clean_p_top)
+                if hasattr(cls, "_in_flight_phones_ts"):
+                    cls._in_flight_phones_ts.pop(clean_p_top, None)
+
+            is_sent = bool(dispatch_res and (dispatch_res.get("success") or dispatch_res.get("messageId") or dispatch_res.get("idMessage")))
             return {
                 "success": True,
                 "action": "vendor_magic_link",
                 "token": token,
                 "portal_url": portal_url,
                 "reply_body": shop_reply,
-                "reply": shop_reply
+                "reply": shop_reply,
+                "dispatch": dispatch_res,
+                "dispatched": is_sent
             }
 
         # 2. HARDCODED BYPASS: Inbound image with inventory caption

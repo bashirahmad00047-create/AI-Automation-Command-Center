@@ -367,6 +367,18 @@ def parse_green_api_payload(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 or (msg_data.get("fileMessageData") or {}).get("audioBase64")
             ) if not is_image else None
 
+            # Extract inventory price if message is an image and caption contains ANY number
+            extracted_price = None
+            is_inventory_upload = False
+            if is_image and text_content:
+                num_match = re.search(r'(\d+(?:[\.,]\d+)?)', text_content)
+                if num_match:
+                    try:
+                        extracted_price = float(num_match.group(1).replace(",", ""))
+                        is_inventory_upload = True
+                    except Exception:
+                        pass
+
             messages.append({
                 "message_id": message_id,
                 "from_phone": sender_phone,
@@ -381,6 +393,8 @@ def parse_green_api_payload(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "is_voice": is_voice,
                 "is_audio": is_voice,
                 "is_image": is_image,
+                "is_inventory_upload": is_inventory_upload,
+                "extracted_price": extracted_price,
                 "is_group": is_group,
                 "media_url": media_url,
                 "download_url": media_url,
