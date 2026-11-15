@@ -216,17 +216,36 @@ async function loadOrganizationsList() {
         state.organizations = data.organizations || [];
 
         const select = document.getElementById('workspaceSelect');
+        let savedOrgId = null;
+        try { savedOrgId = localStorage.getItem('selectedOrgId'); } catch (_) {}
         if (select && state.organizations.length > 0) {
             select.innerHTML = '';
+            let targetOrg = null;
+            if (savedOrgId) {
+                targetOrg = state.organizations.find(o => o.id === savedOrgId);
+            }
+            if (!targetOrg && window._activeConnectedOrgId) {
+                targetOrg = state.organizations.find(o => o.id === window._activeConnectedOrgId);
+            }
+            if (!targetOrg && state.currentOrg) {
+                targetOrg = state.organizations.find(o => o.id === state.currentOrg.id);
+            }
+            if (!targetOrg) {
+                targetOrg = state.organizations[0];
+            }
             state.organizations.forEach(org => {
                 const opt = document.createElement('option');
                 opt.value = org.id;
                 opt.textContent = org.name;
-                if (state.currentOrg && org.id === state.currentOrg.id) {
+                if (targetOrg && org.id === targetOrg.id) {
                     opt.selected = true;
                 }
                 select.appendChild(opt);
             });
+            if (targetOrg && (!state.currentOrg || state.currentOrg.id !== targetOrg.id)) {
+                state.currentOrg = targetOrg;
+                try { localStorage.setItem('selectedOrgId', targetOrg.id); } catch (_) {}
+            }
         }
     } catch (e) {
         console.error('Failed to load orgs list:', e);
@@ -248,6 +267,7 @@ function updateUserBadgeUI() {
 
 async function handleWorkspaceChange(orgId) {
     try {
+        try { localStorage.setItem('selectedOrgId', orgId); } catch (_) {}
         const res = await fetch('/api/v1/organizations/switch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -8403,12 +8423,17 @@ async function loadWhatsAppDashboard() {
 
         // Check real-time Baileys bridge socket connectivity
         let bridgeIsLive = false;
+        let bridgePhone = null;
         if (activeProvider === 'baileys_bridge') {
             try {
                 const bRes = await fetch('/api/v1/whatsapp/bridge-status');
                 if (bRes.ok) {
                     const bData = await bRes.json();
                     bridgeIsLive = Boolean(bData.connected);
+                    bridgePhone = bData.phone;
+                    if (bData.active_org_id) {
+                        window._activeConnectedOrgId = bData.active_org_id;
+                    }
                 }
             } catch (_) {}
         }
@@ -8429,10 +8454,13 @@ async function loadWhatsAppDashboard() {
             };
             if (activeProvider === 'baileys_bridge') {
                 if (bridgeIsLive) {
-                    sidebarStatus.textContent = '● Live Sync Active';
+                    sidebarStatus.textContent = '● Connected' + (bridgePhone ? ' (+' + String(bridgePhone).replace(/\D/g, '') + ')' : '');
                     sidebarStatus.style.color = '#00a884';
+                    if (typeof updateWhatsAppConnectionUI === 'function') {
+                        updateWhatsAppConnectionUI(true, bridgePhone);
+                    }
                 } else {
-                    sidebarStatus.textContent = '● Awaiting QR Link';
+                    sidebarStatus.textContent = '● Scan QR Code';
                     sidebarStatus.style.color = '#f59e0b';
                 }
             } else if (activeProvider === 'green_api') {

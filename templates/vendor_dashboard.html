@@ -3,64 +3,123 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ vendor.name if vendor else 'Vendor Portal' }}</title>
+    <title>{{ vendor.name if vendor else 'Vendor Portal' }} - Hisab Kitab</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
-        body { background-color: #f8f9fa; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+        body { background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         .product-img { width: 60px; height: 60px; object-fit: cover; border-radius: 8px; }
+        .stat-card {
+            border-radius: 12px;
+            border: 1px solid rgba(0,0,0,0.06);
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.08);
+        }
+        .stat-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+        }
     </style>
 </head>
 <body class="py-4">
-    <div class="container" style="max-width: 600px;">
+    <div class="container" style="max-width: 680px;">
         {% if error %}
-            <div class="alert alert-danger text-center">
-                <h5 class="alert-heading">Authentication Error</h5>
-                <p class="mb-0">{{ error }}</p>
+            <div class="alert alert-danger text-center shadow-sm rounded-4 p-4">
+                <h5 class="alert-heading fw-bold mb-2">Authentication Error</h5>
+                <p class="mb-0 text-muted">{{ error }}</p>
             </div>
             <div class="text-center mt-3">
                 <a href="/store" class="btn btn-outline-primary btn-sm">Go to Storefront</a>
             </div>
         {% elif vendor %}
             <!-- Shop Header -->
-            <div class="card mb-3 shadow-sm border-0">
-                <div class="card-body text-center bg-primary text-white rounded">
-                    <span class="badge bg-warning text-dark mb-2">Verified Merchant</span>
-                    <h3 class="card-title mb-1">🏪 {{ vendor.name }}</h3>
+            <div class="card mb-4 shadow-sm border-0 rounded-4 overflow-hidden">
+                <div class="card-body text-center bg-primary text-white p-4" style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%) !important;">
+                    <span class="badge bg-warning text-dark px-3 py-1 rounded-pill fw-bold mb-2">Verified Merchant</span>
+                    <h2 class="card-title fw-black mb-1">🏪 {{ vendor.name }}</h2>
                     <p class="mb-0 small opacity-75">Phone: {{ vendor.phone }}{% if vendor.address %} | {{ vendor.address }}{% endif %}</p>
                 </div>
             </div>
 
-            <!-- Stats Badge -->
-            <div class="card mb-3 shadow-sm border-0">
-                <div class="card-body d-flex justify-content-between align-items-center">
-                    <div>
-                        <span class="fw-bold text-muted">Total Products:</span>
-                        <span class="badge bg-success fs-6 ms-1">{{ total_products or (products|length) }} Items</span>
+            <!-- 4 Big Summary Cards (Hisab-Kitab Overview) -->
+            <div class="row g-3 mb-4">
+                <!-- Card 1: Total Saman (Inventory) -->
+                <div class="col-6">
+                    <div class="card stat-card shadow-sm h-100 bg-white p-3">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <div class="stat-icon bg-primary bg-opacity-10 text-primary">📦</div>
+                            <span class="text-muted small fw-bold">Total Saman</span>
+                        </div>
+                        <h4 class="fw-bold mb-0 text-dark">{{ total_products or (products|length) }} <span class="fs-6 text-muted font-normal">items</span></h4>
+                        <div class="small text-success fw-bold mt-1">Worth PKR {{ "{:,.0f}".format(total_inventory_value or 0) }}</div>
                     </div>
-                    <div>
-                        <span class="fw-bold text-muted">Inventory Value:</span>
-                        <span class="badge bg-info text-dark fs-6 ms-1">PKR {{ "{:,.0f}".format(total_inventory_value or 0) }}</span>
+                </div>
+
+                <!-- Card 2: Aaj Ki Sale (Daily Sale) -->
+                <div class="col-6">
+                    <div class="card stat-card shadow-sm h-100 bg-white p-3">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <div class="stat-icon bg-success bg-opacity-10 text-success">💰</div>
+                            <span class="text-muted small fw-bold">Aaj Ki Sale</span>
+                        </div>
+                        <h4 class="fw-bold mb-0 text-success">PKR {{ "{:,.0f}".format(today_sales_total or 0) }}</h4>
+                        <div class="small text-muted mt-1">{{ today_orders_count or 0 }} orders today</div>
+                    </div>
+                </div>
+
+                <!-- Card 3: Mahine Ki Sale (Monthly Sale) -->
+                <div class="col-6">
+                    <div class="card stat-card shadow-sm h-100 bg-white p-3">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <div class="stat-icon bg-info bg-opacity-10 text-info">📈</div>
+                            <span class="text-muted small fw-bold">Mahine Ki Sale</span>
+                        </div>
+                        <h4 class="fw-bold mb-0 text-dark">PKR {{ "{:,.0f}".format(month_sales_total or 0) }}</h4>
+                        <div class="small text-muted mt-1">{{ month_orders_count or 0 }} monthly orders</div>
+                    </div>
+                </div>
+
+                <!-- Card 4: Record Sale / Add Expense (Khata Button) -->
+                <div class="col-6">
+                    <div class="card stat-card shadow-sm h-100 bg-white p-3 d-flex flex-column justify-content-center">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <div class="stat-icon bg-warning bg-opacity-10 text-warning">📝</div>
+                            <span class="text-muted small fw-bold">Dukan Khata</span>
+                        </div>
+                        <button type="button" class="btn btn-primary btn-sm fw-bold w-100 py-2 rounded-3" data-bs-toggle="modal" data-bs-target="#khataModal">
+                            + Record Sale / Expense
+                        </button>
                     </div>
                 </div>
             </div>
 
             <!-- Product List -->
-            <div class="card shadow-sm border-0">
-                <div class="card-header bg-white fw-bold">Aap Ka Saman (My Inventory)</div>
+            <div class="card shadow-sm border-0 rounded-4 overflow-hidden mb-4">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center border-0 border-bottom">
+                    <h6 class="mb-0 fw-bold text-dark">📦 Aap Ka Saman (My Inventory - {{ products|length }} Items)</h6>
+                    <span class="badge bg-light text-dark border">WhatsApp Live Sync</span>
+                </div>
                 <div class="list-group list-group-flush">
                     {% if products %}
                         {% for p in products %}
-                        <div class="list-group-item d-flex align-items-center gap-3 py-3">
+                        <div class="list-group-item d-flex align-items-center gap-3 py-3 border-light">
                             <img src="{{ p.image_url or '/static/uploads/default_product.png' }}" 
                                  class="product-img bg-light" 
                                  alt="{{ p.title or p.name }}"
                                  onerror="this.src='https://placehold.co/60x60?text=Item';">
                             <div class="flex-grow-1">
-                                <h6 class="mb-1 fw-bold">{{ p.title or p.name }}</h6>
-                                <span class="badge bg-light text-dark border">{{ p.category or 'General' }}</span>
+                                <h6 class="mb-1 fw-bold text-dark">{{ p.title or p.name }}</h6>
+                                <span class="badge bg-light text-secondary border small">{{ p.category or 'General' }}</span>
                                 <span class="text-success fw-bold ms-2">PKR {{ "{:,.0f}".format(p.price or 0) }}</span>
                             </div>
-                            <span class="badge bg-secondary">Stock: {{ p.stock or p.stock_quantity or 0 }}</span>
+                            <span class="badge bg-secondary-subtle text-secondary border px-3 py-2 rounded-pill">Stock: {{ p.stock or p.stock_quantity or 0 }}</span>
                         </div>
                         {% endfor %}
                     {% else %}
@@ -71,11 +130,48 @@
                 </div>
             </div>
 
-            <div class="text-center mt-4">
-                <a href="/store" class="btn btn-outline-secondary btn-sm me-2">View Public Store</a>
-                <a href="/vendor/logout" class="btn btn-outline-danger btn-sm">Logout</a>
+            <div class="text-center mt-3">
+                <a href="/store" class="btn btn-outline-secondary btn-sm me-2 rounded-pill px-3">View Public Store</a>
+                <a href="/vendor/logout" class="btn btn-outline-danger btn-sm rounded-pill px-3">Logout</a>
+            </div>
+
+            <!-- Modal: Record Sale / Add Expense (Khata) -->
+            <div class="modal fade" id="khataModal" tabindex="-1" aria-labelledby="khataModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content rounded-4 border-0 shadow">
+                        <div class="modal-header border-0 pb-0">
+                            <h5 class="modal-title fw-bold" id="khataModalLabel">📝 Record Sale / Expense (Khata)</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <form method="POST" action="/vendor/khata/record">
+                            <div class="modal-body">
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold small text-muted">Entry Type</label>
+                                    <select class="form-select" name="entry_type" required>
+                                        <option value="sale" selected>💰 Sale (Bikri / Income)</option>
+                                        <option value="expense">💸 Expense (Kharcha / Khata)</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold small text-muted">Amount (PKR) *</label>
+                                    <input type="number" step="0.01" min="1" class="form-input form-control" name="amount" placeholder="e.g. 1500" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold small text-muted">Description (Tafseel)</label>
+                                    <input type="text" class="form-control" name="description" placeholder="e.g. Cash sale at counter, Dry fruits">
+                                </div>
+                            </div>
+                            <div class="modal-footer border-0 pt-0">
+                                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                                <button type="submit" class="btn btn-primary fw-bold px-4">Save Entry</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
             </div>
         {% endif %}
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

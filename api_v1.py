@@ -2769,6 +2769,28 @@ def api_whatsapp_bridge_qr():
 
     # 1. Guard check: if bridge is already live & connected, and not forcing refresh, return immediately
     if not force_refresh:
+        try:
+            aresp = requests.get("http://127.0.0.1:3001/status?all=true", timeout=1.5)
+            if aresp.status_code == 200:
+                adata = aresp.json()
+                for sess in adata.get("sessions", []):
+                    if sess.get("connected") or sess.get("genuinelyConnected"):
+                        return jsonify({
+                            "success": True,
+                            "status": "connected",
+                            "connected": True,
+                            "phone": sess.get("phone"),
+                            "qr": None,
+                            "qr_image": None,
+                            "qrUrl": None,
+                            "message": "WhatsApp is already linked and connected.",
+                            "user": sess.get("user"),
+                            "tenant_id": sess.get("tenant_id"),
+                            "active_org_id": sess.get("tenant_id")
+                        }), 200
+        except Exception:
+            pass
+
         bridge_status_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", f"http://127.0.0.1:3001/status?org_id={current_org_id}")
         try:
             sresp = requests.get(bridge_status_url, timeout=1.5)
@@ -2779,11 +2801,14 @@ def api_whatsapp_bridge_qr():
                         "success": True,
                         "status": "connected",
                         "connected": True,
+                        "phone": sdata.get("phone"),
                         "qr": None,
                         "qr_image": None,
                         "qrUrl": None,
                         "message": "WhatsApp is already linked and connected.",
-                        "user": sdata.get("user")
+                        "user": sdata.get("user"),
+                        "tenant_id": sdata.get("tenant_id"),
+                        "active_org_id": sdata.get("tenant_id")
                     }), 200
         except Exception:
             pass
@@ -3124,10 +3149,7 @@ def api_whatsapp_conversations():
                     if b_is_grp:
                         continue
 
-                    if "7142" in b_key or "7142" in str(b_id) or (b_chat.get("name") and "bashir" in str(b_chat.get("name")).lower()):
-                        b_key = "923471000668"
-                        b_chat["phone"] = "923471000668"
-                        b_chat["name"] = "Bashir khani"
+
                     if b_key not in conv_map:
                         conv_map[b_key] = {
                             "id": b_key,
@@ -3543,6 +3565,24 @@ def api_whatsapp_bridge_status():
         pass
 
     bridge_url = os.environ.get("BAILEYS_BRIDGE_STATUS_URL", "http://127.0.0.1:3001/status")
+    try:
+        aresp = requests.get("http://127.0.0.1:3001/status?all=true", timeout=2.0)
+        if aresp.status_code == 200:
+            adata = aresp.json()
+            for sess in adata.get("sessions", []):
+                if sess.get("connected") or sess.get("genuinelyConnected"):
+                    return jsonify({
+                        "status": "connected",
+                        "connected": True,
+                        "phone": sess.get("phone"),
+                        "user": sess.get("user"),
+                        "tenant_id": sess.get("tenant_id"),
+                        "active_org_id": sess.get("tenant_id"),
+                        "bridge": adata.get("bridge", "WhatsApp Baileys Multi-Tenant Bridge")
+                    }), 200
+    except Exception:
+        pass
+
     try:
         resp = requests.get(bridge_url, timeout=12.0)
         if resp.status_code == 200 and resp.text:

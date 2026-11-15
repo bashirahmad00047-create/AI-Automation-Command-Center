@@ -196,6 +196,23 @@ class SessionPool {
   }
 
   /**
+   * Returns the first actively connected session across any tenant.
+   */
+  getActiveConnectedSession() {
+    for (const session of this.sessions.values()) {
+      if (session && session.isGenuinelyConnected && session.isGenuinelyConnected()) {
+        return session;
+      }
+    }
+    for (const session of this.sessions.values()) {
+      if (session && (session.isConnected || session.sock?.user)) {
+        return session;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Resolves auth dir path for a tenant.
    */
   resolveAuthDir(tenantId) {

@@ -1257,7 +1257,58 @@
             <div class="modal-tabs">
                 <button class="modal-tab-btn active" id="tabBtnProducts" onclick="switchManagerTab('products')">📦 Manage Products</button>
                 <button class="modal-tab-btn" id="tabBtnBranding" onclick="switchManagerTab('branding')">🎨 Store Branding</button>
-                <button class="modal-tab-btn" id="tabBtnMarketplace" onclick="switchManagerTab('marketplace')">&#128081; Multi-Vendor Hub</button>
+                <button class="modal-tab-btn" id="tabBtnMarketplace">&#128081; Multi-Vendor Hub</button>
+            </div>
+
+            <!-- 4 Big Summary Cards (Vendor Hisab-Kitab) -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px;">
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px;">
+                    <div style="font-size: 0.75rem; color: #64748b; font-weight: 700;">📦 Total Saman</div>
+                    <div id="storeStatsTotalItems" style="font-size: 1.05rem; font-weight: 800; color: #0f172a; margin-top: 2px;">-- items</div>
+                    <div id="storeStatsTotalVal" style="font-size: 0.75rem; color: #16a34a; font-weight: 700; margin-top: 1px;">PKR 0</div>
+                </div>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px;">
+                    <div style="font-size: 0.75rem; color: #64748b; font-weight: 700;">💰 Aaj Ki Sale</div>
+                    <div id="storeStatsTodaySale" style="font-size: 1.05rem; font-weight: 800; color: #16a34a; margin-top: 2px;">PKR 0</div>
+                    <div id="storeStatsTodayOrders" style="font-size: 0.75rem; color: #64748b; margin-top: 1px;">0 orders</div>
+                </div>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px;">
+                    <div style="font-size: 0.75rem; color: #64748b; font-weight: 700;">📈 Mahine Ki Sale</div>
+                    <div id="storeStatsMonthSale" style="font-size: 1.05rem; font-weight: 800; color: #0f172a; margin-top: 2px;">PKR 0</div>
+                    <div id="storeStatsMonthOrders" style="font-size: 0.75rem; color: #64748b; margin-top: 1px;">0 orders</div>
+                </div>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; justify-content: center;">
+                    <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">📝 Khata Entry</div>
+                    <button type="button" class="checkout-btn" style="padding: 6px 8px; font-size: 0.78rem; border-radius: 6px; font-weight: 700;" onclick="toggleKhataQuickForm()">
+                        + Record Khata
+                    </button>
+                </div>
+            </div>
+
+            <!-- Quick Khata Form (Collapsible) -->
+            <div id="storeQuickKhataForm" style="display: none; background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; padding: 12px; margin-bottom: 16px;">
+                <h5 style="font-size: 0.9rem; font-weight: 800; margin-bottom: 8px;">Record Sale / Add Expense (Khata)</h5>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                    <div>
+                        <label class="form-label">Type</label>
+                        <select id="quickKhataType" class="form-select" style="padding: 6px;">
+                            <option value="sale" selected>Sale (Bikri)</option>
+                            <option value="expense">Expense (Kharcha)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label">Amount (PKR) *</label>
+                        <input type="number" id="quickKhataAmount" class="form-input" style="padding: 6px;" placeholder="1000" min="1">
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label class="form-label">Description</label>
+                    <input type="text" id="quickKhataDesc" class="form-input" style="padding: 6px;" placeholder="e.g. Counter sale">
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" class="checkout-btn" style="padding: 6px 14px; font-size: 0.82rem;" onclick="submitQuickKhata()">Save Entry</button>
+                    <button type="button" class="add-cart-btn" style="padding: 6px 12px; font-size: 0.82rem;" onclick="toggleKhataQuickForm()">Cancel</button>
+                </div>
             </div>
 
             <!-- Tab 1: Products CRUD -->
@@ -2103,6 +2154,66 @@
         function openStoreManagerModal() {
             document.getElementById('storeManagerOverlay').classList.add('active');
             renderManagementTable();
+            fetchStoreManagerStats();
+        }
+
+        async function fetchStoreManagerStats() {
+            try {
+                const res = await fetch('/api/vendor/stats');
+                if (res.ok) {
+                    const data = await res.json();
+                    const totalItemsEl = document.getElementById('storeStatsTotalItems');
+                    const totalValEl = document.getElementById('storeStatsTotalVal');
+                    const todaySaleEl = document.getElementById('storeStatsTodaySale');
+                    const todayOrdersEl = document.getElementById('storeStatsTodayOrders');
+                    const monthSaleEl = document.getElementById('storeStatsMonthSale');
+                    const monthOrdersEl = document.getElementById('storeStatsMonthOrders');
+
+                    if (totalItemsEl) totalItemsEl.textContent = (data.total_products !== undefined ? data.total_products : catalogProducts.length) + ' items';
+                    if (totalValEl) totalValEl.textContent = 'PKR ' + Number(data.total_inventory_value || 0).toLocaleString();
+                    if (todaySaleEl) todaySaleEl.textContent = 'PKR ' + Number(data.today_sales_total || 0).toLocaleString();
+                    if (todayOrdersEl) todayOrdersEl.textContent = (data.today_orders_count || 0) + ' orders';
+                    if (monthSaleEl) monthSaleEl.textContent = 'PKR ' + Number(data.month_sales_total || 0).toLocaleString();
+                    if (monthOrdersEl) monthOrdersEl.textContent = (data.month_orders_count || 0) + ' orders';
+                }
+            } catch (err) {
+                console.warn('[Store Stats Notice]:', err);
+            }
+        }
+
+        function toggleKhataQuickForm() {
+            const form = document.getElementById('storeQuickKhataForm');
+            if (form) {
+                form.style.display = (form.style.display === 'none' || !form.style.display) ? 'block' : 'none';
+            }
+        }
+
+        async function submitQuickKhata() {
+            const type = document.getElementById('quickKhataType').value;
+            const amount = parseFloat(document.getElementById('quickKhataAmount').value || '0');
+            const desc = document.getElementById('quickKhataDesc').value || 'Storefront Khata Entry';
+            if (!amount || amount <= 0) {
+                alert('Please enter a valid amount');
+                return;
+            }
+            try {
+                const res = await fetch('/vendor/khata/record', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ entry_type: type, amount: amount, description: desc })
+                });
+                if (res.ok) {
+                    alert('Khata entry recorded successfully!');
+                    document.getElementById('quickKhataAmount').value = '';
+                    document.getElementById('quickKhataDesc').value = '';
+                    toggleKhataQuickForm();
+                    fetchStoreManagerStats();
+                } else {
+                    alert('Failed to record khata entry');
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
         }
 
         function closeStoreManagerModal(e) {

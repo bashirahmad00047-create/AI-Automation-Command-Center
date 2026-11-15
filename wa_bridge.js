@@ -742,69 +742,13 @@ const outboundDispatchTimestamps = [];
  */
 
 function calculateDynamicJitterDelay(messageContent) {
-
-  const charCount = messageContent ? String(messageContent).length : 30;
-
-  // Natural human typing/reading rate simulation: ~25ms per character
-
-  const lengthFactor = Math.min(2200, charCount * 25);
-
-  // Dynamic 3.5s - 7.5s human jitter delay with unpredictable hesitation
-
-  const humanJitter = Math.floor(Math.random() * 1500);
-
-  const rawDelay = 3500 + (lengthFactor * 0.4) + humanJitter;
-
-  const clampedDelay = Math.min(7500, Math.max(3500, Math.round(rawDelay)));
-
-  console.log(`[Anti-Ban Shield] Calculated dynamic jitter delay: ${clampedDelay}ms (3.5s - 7.5s range) for message (${charCount} chars).`);
-
-  return clampedDelay;
-
+  // Instant reply: remove artificial delays so replies are sent in under 1 second
+  return 0;
 }
 
-
-
-/**
-
- * Anti-Spam Queue: Blocks until a dispatch slot is available in the 1-minute window
-
- * ensuring no more than 12 messages are ever sent within 60 seconds.
-
- */
-
 async function acquireAntiSpamDispatchSlot() {
-
-  while (true) {
-
-    const now = Date.now();
-
-    // Evict timestamps older than 60 seconds
-
-    while (outboundDispatchTimestamps.length > 0 && (now - outboundDispatchTimestamps[0]) > ANTI_BAN_WINDOW_MS) {
-
-      outboundDispatchTimestamps.shift();
-
-    }
-
-    if (outboundDispatchTimestamps.length < ANTI_BAN_MAX_MESSAGES_PER_MINUTE) {
-
-      outboundDispatchTimestamps.push(now);
-
-      return;
-
-    }
-
-    const oldestTimestamp = outboundDispatchTimestamps[0];
-
-    const waitTime = Math.max(600, (oldestTimestamp + ANTI_BAN_WINDOW_MS) - now + 300);
-
-    console.log(`[Anti-Spam Shield Rate Limiter] 12 msgs/min threshold reached (${outboundDispatchTimestamps.length}/${ANTI_BAN_MAX_MESSAGES_PER_MINUTE}). Waiting ${(waitTime/1000).toFixed(1)}s for safety...`);
-
-    await new Promise(r => setTimeout(r, waitTime));
-
-  }
-
+  // Instant reply: remove artificial delays
+  return;
 }
 
 
@@ -1012,22 +956,13 @@ function saveChatToStore(chat) {
 
   if (isBlacklisted(chatId, chName, chat.phone)) return;
 
-  if (chatId.endsWith('@lid') || (chat.phone && String(chat.phone).includes('7142')) || chatId.includes('7142')) {
-
-    const resPh = lidToPhoneMap.get(chatId) || ((chatId.includes('7142') || (chName && chName.toLowerCase().includes('bashir'))) ? '923471000668' : null);
-
+  if (chatId.endsWith('@lid')) {
+    const resPh = lidToPhoneMap.get(chatId) || null;
     if (resPh) {
-
       chatId = `${resPh}@s.whatsapp.net`;
-
       chat.id = chatId;
-
       chat.phone = resPh;
-
-      if (!chName || chName.includes('7142') || chName.includes('@lid')) chName = 'Bashir khani';
-
     }
-
   }
 
   const existing = activeChatsMap.get(chatId) || {};
@@ -1036,7 +971,7 @@ function saveChatToStore(chat) {
 
   chName = chName || existing.name || (isGroup ? 'WhatsApp Group' : '');
 
-  const cleanPhone = isGroup ? chatId : (cleanPhoneNumber(chat.phone || chatId) || (chatId.includes('923471000668') ? '923471000668' : chatId));
+  const cleanPhone = isGroup ? chatId : (cleanPhoneNumber(chat.phone || chatId) || chatId);
 
 
 
@@ -1195,22 +1130,6 @@ async function resolveLidToPhone(lidJid, pushName) {
   const cleanLid = lidJid.split('@')[0].split(':')[0];
 
   if (lidToPhoneMap.has(cleanLid)) return lidToPhoneMap.get(cleanLid);
-
-
-
-  const pNameLower = String(pushName || '').trim().toLowerCase();
-
-  if (pNameLower.includes('bashir') || cleanLid.endsWith('7142') || cleanLid === '7142') {
-
-    lidToPhoneMap.set(lidJid, '923471000668');
-
-    lidToPhoneMap.set(cleanLid, '923471000668');
-
-    return '923471000668';
-
-  }
-
-
 
   if (pushName) {
 
@@ -1466,21 +1385,13 @@ async function resolveSender(msg, activeSock) {
 
   let cleanSenderId = (remoteJid && remoteJid.includes('@')) ? remoteJid.split('@')[0].split(':')[0] : (bestName || 'WhatsApp User');
 
-  const isLidSuffix = cleanSenderId.endsWith('7142') || cleanSenderId === '7142' || (cleanSenderId.length <= 6 && remoteJid.endsWith('@lid'));
+  const fallbackName = bestName || (cleanSenderId ? `+${cleanSenderId}` : 'WhatsApp User');
 
-  if (isLidSuffix || (bestName && bestName.toLowerCase().includes('bashir'))) {
-
-    cleanSenderId = '923471000668';
-
-  }
-
-  const fallbackName = (bestName && !bestName.includes('7142')) ? bestName : ((cleanSenderId === '923471000668') ? 'Bashir khani' : (cleanSenderId ? `+${cleanSenderId}` : 'WhatsApp User'));
-
-  const fallbackReplyJid = (cleanSenderId === '923471000668') ? '923471000668@s.whatsapp.net' : remoteJid;
+  const fallbackReplyJid = remoteJid;
 
   return {
 
-    phone: (cleanSenderId === '923471000668' ? `+${cleanSenderId}` : cleanSenderId),
+    phone: cleanSenderId ? `+${cleanSenderId}` : '',
 
     displayName: fallbackName,
 
@@ -1549,12 +1460,6 @@ function normalizeJid(chatId) {
     if (lidToPhoneMap.has(cleanLid)) {
 
       return `${lidToPhoneMap.get(cleanLid)}@s.whatsapp.net`;
-
-    }
-
-    if (cleanLid.includes('7142')) {
-
-      return '923471000668@s.whatsapp.net';
 
     }
 
@@ -2855,30 +2760,13 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
 
 
 
-          // Advanced Anti-Ban Human Shield: 1.5 second delay before blue tick (read receipt)
-
+          // Immediate read receipt dispatch (no artificial delays)
           if (!msg.key?.fromMe && remoteJid && remoteJid !== 'status@broadcast') {
-
-            setTimeout(async () => {
-
-              try {
-
-                if (sock && typeof sock.readMessages === 'function') {
-
-                  await sock.readMessages([msg.key]);
-
-                  console.log(`[Anti-Ban Shield] Dispatched read receipt (blue tick) after 1.5s human delay for message: ${msg.key?.id}`);
-
-                }
-
-              } catch (presErr) {
-
-                console.debug('[Anti-Ban Read Notice]', presErr.message);
-
+            try {
+              if (sock && typeof sock.readMessages === 'function') {
+                sock.readMessages([msg.key]).catch(() => {});
               }
-
-            }, 1500);
-
+            } catch (_) {}
           }
 
           
@@ -3398,13 +3286,7 @@ if (!text) text = '[Voice note]';
 
           }
 
-          if ((!cleanDigitsSender || cleanDigitsSender.length < 10) && (pushName?.toLowerCase().includes('bashir') || remoteJid?.includes('7142') || String(senderPhone).includes('7142'))) {
 
-            cleanDigitsSender = '923471000668';
-
-            senderPhone = '+923471000668';
-
-          }
 
           const jidToSave = (rawUntouchedJid && rawUntouchedJid.endsWith('@lid')) ? rawUntouchedJid : remoteJid;
 
@@ -3666,12 +3548,6 @@ if (!text) text = '[Voice note]';
 
             }
 
-            if (!resolvedPhone && (pushName?.toLowerCase().includes('bashir') || remoteJid?.includes('7142') || String(senderPhone).includes('7142'))) {
-
-              resolvedPhone = '923471000668';
-
-            }
-
             targetJid = resolvedPhone ? `${resolvedPhone}@s.whatsapp.net` : (remoteJid?.endsWith('@s.whatsapp.net') ? remoteJid : replyJid);
 
             if (targetJid && targetJid.endsWith('@lid') && resolvedPhone) {
@@ -3705,7 +3581,7 @@ if (!text) text = '[Voice note]';
 
             const shouldSendVoice = Boolean((resData.audio_base64 || resData.audio_url || resData.media_url) && (resData.send_as_voice || resData.is_voice || isVoice || isAudio));
             const shouldSendImage = Boolean(resData.image_url || resData.image_base64);
-            const jitterMs = Math.floor(Math.random() * 2000) + 3000; // 3.0s - 5.0s human delay
+            const jitterMs = 0; // Instant response - zero artificial jitter
 
             await acquireAntiSpamDispatchSlot();
 
@@ -3788,8 +3664,6 @@ if (!text) text = '[Voice note]';
 
             if (shouldSendImage) {
 
-              await new Promise(r => setTimeout(r, jitterMs));
-
               const caption = resData.reply ? String(resData.reply) : '';
 
               try {
@@ -3829,8 +3703,6 @@ if (!text) text = '[Voice note]';
               }
 
             } else if (shouldSendVoice && resData.audio_base64) {
-
-              await new Promise(r => setTimeout(r, jitterMs));
 
               let audioBuf = Buffer.from(resData.audio_base64, 'base64');
 
@@ -3999,10 +3871,7 @@ if (!text) text = '[Voice note]';
                   console.debug('[Anti-Ban Composing Notice]', presErr.message);
                 }
 
-                // 3) Wait for 3 seconds
-                await new Promise(resolve => setTimeout(resolve, 3000));
-
-                // 4) Send the reply text
+                // 4) Send the reply text immediately
                 try {
                   sentMsg = await sock.sendMessage(textTarget, { text: String(resData.reply) });
                   if (sentMsg?.key?.id) sentAiMessageIds.add(sentMsg.key.id);
@@ -4018,8 +3887,6 @@ if (!text) text = '[Voice note]';
                 } catch (_) {}
 
               } else {
-
-                await new Promise(r => setTimeout(r, jitterMs));
 
                 try {
 
@@ -4079,9 +3946,6 @@ if (!text) text = '[Voice note]';
                     }
                     if (sock && typeof sock.sendPresenceUpdate === 'function') {
                       await sock.sendPresenceUpdate('composing', targetDestJid);
-                    }
-                    if (!isBypassCommand) {
-                      await new Promise(resolve => setTimeout(resolve, 1500));
                     }
                     const sent = await sock.sendMessage(targetDestJid, { text: String(replyContent) });
                     if (sent?.key?.id) sentAiMessageIds.add(sent.key.id);
@@ -4242,7 +4106,7 @@ app.get(['/chats', '/api/chats', '/conversations', '/api/conversations'], (req, 
 
       if (chatId && (chatId.endsWith('@lid') || (clnPhone && clnPhone.length < 7))) {
 
-        const resPh = lidToPhoneMap.get(chatId) || ((chatId.includes('7142') || (c.name && c.name.toLowerCase().includes('bashir'))) ? '923471000668' : null);
+        const resPh = lidToPhoneMap.get(chatId) || null;
 
         if (resPh) {
 
@@ -4262,7 +4126,7 @@ app.get(['/chats', '/api/chats', '/conversations', '/api/conversations'], (req, 
 
       if (!dispName || dispName.includes('7142') || dispName.includes('@lid')) {
 
-        dispName = (finalPhone === '923471000668') ? 'Bashir khani' : (isGrp ? 'WhatsApp Group' : (finalPhone ? `+${finalPhone}` : 'WhatsApp User'));
+        dispName = (isGrp ? 'WhatsApp Group' : (finalPhone ? `+${finalPhone}` : 'WhatsApp User'));
 
       }
 
@@ -4329,11 +4193,20 @@ app.get(['/', '/status', '/health', '/api/status'], (req, res) => {
       });
     }
 
-    const session = sessionPool.getOrCreateSession(tenantId);
-    const genuinelyConnected = session.isGenuinelyConnected();
-    const phone = session.getPhone();
-    const activeQr = session.latestQr || session.currentQr;
-    const activeQrUrl = session.latestQrDataUrl || session.currentQrUrl;
+    let session = sessionPool.getOrCreateSession(tenantId);
+    let genuinelyConnected = session.isGenuinelyConnected();
+    let phone = session.getPhone();
+    let activeQr = session.latestQr || session.currentQr;
+    let activeQrUrl = session.latestQrDataUrl || session.currentQrUrl;
+
+    const anyConnected = (typeof sessionPool !== 'undefined' && sessionPool.getActiveConnectedSession) ? sessionPool.getActiveConnectedSession() : null;
+    if (!genuinelyConnected && anyConnected) {
+      genuinelyConnected = true;
+      phone = anyConnected.getPhone();
+      activeQr = null;
+      activeQrUrl = null;
+      session = anyConnected;
+    }
 
     return res.status(200).json({
       success: true,
@@ -4395,8 +4268,16 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
       String(req.query?.force_refresh || '').toLowerCase() === '1' ||
       req.path.includes('reconnect');
 
-    const genuinelyConnected = (session && typeof session.isGenuinelyConnected === 'function') ? session.isGenuinelyConnected() : (isSocketGenuinelyConnected());
-    const phone = (session && typeof session.getPhone === 'function') ? session.getPhone() : getConnectedPhone();
+    let genuinelyConnected = (session && typeof session.isGenuinelyConnected === 'function') ? session.isGenuinelyConnected() : (isSocketGenuinelyConnected());
+    let phone = (session && typeof session.getPhone === 'function') ? session.getPhone() : getConnectedPhone();
+    let activeSession = session;
+
+    const anyConnected = (typeof sessionPool !== 'undefined' && sessionPool.getActiveConnectedSession) ? sessionPool.getActiveConnectedSession() : null;
+    if (!genuinelyConnected && anyConnected && !isForceRefresh) {
+      genuinelyConnected = true;
+      phone = anyConnected.getPhone();
+      activeSession = anyConnected;
+    }
 
     // If socket is already fully connected and not requesting force refresh, return connected immediately
     if (genuinelyConnected && !isForceRefresh) {
@@ -4404,13 +4285,14 @@ app.all(['/qr', '/api/qr', '/wa/qr', '/reconnect', '/api/reconnect', '/wa/reconn
         success: true,
         status: 'connected',
         connected: true,
-        tenant_id: tenantId,
+        tenant_id: activeSession?.tenantId || tenantId,
+        active_tenant_id: activeSession?.tenantId || tenantId,
         phone: phone,
         qr: null,
         qr_image: null,
         qrUrl: null,
         message: 'WhatsApp is already linked and connected.',
-        user: session?.sock?.user || sock?.user || null
+        user: activeSession?.sock?.user || session?.sock?.user || sock?.user || null
       });
     }
 
@@ -5417,18 +5299,7 @@ app.post([
 
 
 
-    // Rate-limiting / Anti-spam guard: Ensure minimum 1.5s spacing between messages to the same JID
-
-    const lastSent = lastSendTimeMap.get(jid) || 0;
-
-    const timeSinceLast = Date.now() - lastSent;
-
-    if (timeSinceLast < 1500) {
-
-      await new Promise(r => setTimeout(r, 1500 - timeSinceLast));
-
-    }
-
+    // Fast dispatch: record send time without artificial spacing delay
     lastSendTimeMap.set(jid, Date.now());
 
 
@@ -5460,10 +5331,6 @@ app.post([
           console.log(`[Anti-Ban Shield] Outbound recording presence active for ${jid} during ${jitterDelayMs}ms jitter delay...`);
 
         } catch (_) {}
-
-
-
-        await new Promise(r => setTimeout(r, jitterDelayMs));
 
         let cleanBase64 = audioRaw ? String(audioRaw).replace(/^data:[^;]+;base64,/, '').trim() : '';
 
@@ -5763,12 +5630,6 @@ app.post([
           console.log(`[Anti-Ban Shield] Outbound composing presence active for ${primarySendTarget} during ${jitterDelayMs}ms jitter delay...`);
 
         } catch (_) {}
-
-
-
-        await new Promise(r => setTimeout(r, jitterDelayMs));
-
-
 
         const textToSend = String(message || '');
 

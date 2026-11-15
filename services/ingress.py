@@ -271,23 +271,27 @@ def parse_green_api_payload(data: Dict[str, Any]) -> List[Dict[str, Any]]:
             instance_data = data.get("instanceData") or {}
 
             raw_chat_id = (
-                sender_data.get("chatId")
+                data.get("remoteJid")
+                or sender_data.get("chatId")
+                or data.get("replyJid")
                 or data.get("chatId")
                 or data.get("jid")
-                or data.get("replyJid")
                 or ""
             )
             chat_id = clean_jid(raw_chat_id)
             is_group = bool(chat_id and ("@g.us" in chat_id or "-" in chat_id.split("@")[0]))
 
             raw_sender = (
-                sender_data.get("sender")
-                or sender_data.get("chatId")
+                data.get("from_phone")
                 or data.get("from")
+                or sender_data.get("sender")
+                or sender_data.get("chatId")
                 or data.get("sender")
-                or (chat_id.split("@")[0] if chat_id else "")
+                or (chat_id.split("@")[0] if (chat_id and not chat_id.endswith("@lid")) else "")
             )
             sender_phone = clean_phone_number(raw_sender)
+            if not sender_phone and raw_chat_id and not raw_chat_id.endswith("@lid") and not is_group:
+                sender_phone = clean_phone_number(raw_chat_id.split("@")[0])
             sender_name = (
                 sender_data.get("senderName")
                 or sender_data.get("chatName")

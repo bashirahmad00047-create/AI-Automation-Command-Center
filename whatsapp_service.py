@@ -6668,10 +6668,12 @@ class WhatsAppService:
                 "reply": vendor_inv_msg
             }
 
-        # 1c. VENDOR MOBILE PORTAL MAGIC LINK ("meri dukan", "my shop")
+        # 1c. VENDOR MOBILE PORTAL MAGIC LINK & HISAAB ("meri dukan", "hisab", "sale", "inventory")
         shop_triggers = (
             "meri dukan", "meri dukaan", "my shop", "my store",
-            "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop"
+            "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop",
+            "hisab", "hisaab", "!hisab", "!hisaab", "/hisab", "/hisaab",
+            "sale", "sales", "!sale", "/sale", "inventory", "saman", "khata"
         )
         if any(cmd_lower == trig or cmd_lower.startswith(trig) for trig in shop_triggers):
             token = ""
@@ -6689,10 +6691,7 @@ class WhatsAppService:
                 base_domain = os.environ.get("VENDOR_PORTAL_BASE_URL", "http://66.45.230.232:5000")
                 portal_url = f"{base_domain}/vendor/auth/{token}"
 
-                shop_reply = (
-                    "🏪 *Aapki Online Dukaan Tayyar Hai!*\n\n"
-                    f"🔗 http://66.45.230.232:5000/vendor/auth/{token}"
-                )
+                shop_reply = GlobalBazarService.format_vendor_hisab_summary(v_id, token)
             except Exception as e:
                 shop_reply = f"⚠️ Could not generate vendor portal link: {e}"
 
@@ -7129,8 +7128,8 @@ class WhatsAppService:
 
         raw_cmd = str(message_body or "").strip().lower()
         is_dukan_cmd = bool(
-            raw_cmd in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop")
-            or re.search(r'\b(meri\s*dukaan|meri\s*dukan|dukan|dukaan|my\s*shop|my\s*store|shop|store)\b', raw_cmd)
+            raw_cmd in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop", "hisab", "hisaab", "sale", "sales", "inventory", "saman", "khata", "!hisab", "/hisab")
+            or re.search(r'\b(meri\s*dukaan|meri\s*dukan|dukan|dukaan|my\s*shop|my\s*store|shop|store|hisab|hisaab|sale|sales|inventory|saman|khata)\b', raw_cmd)
         )
         if is_dukan_cmd:
             clean_p = cls.format_phone_number(sender_phone)
@@ -7149,10 +7148,7 @@ class WhatsAppService:
                 token = GlobalBazarService.generate_vendor_magic_token(v_id, clean_p or sender_phone)
                 base_domain = os.environ.get("VENDOR_PORTAL_BASE_URL", "http://66.45.230.232:5000")
                 portal_url = f"{base_domain}/vendor/auth/{token}"
-                shop_reply = (
-                    "🏪 *Aapki Online Dukaan Tayyar Hai!*\n\n"
-                    f"🔗 http://66.45.230.232:5000/vendor/auth/{token}"
-                )
+                shop_reply = GlobalBazarService.format_vendor_hisab_summary(v_id, token)
             except Exception as e:
                 shop_reply = f"⚠️ Could not generate vendor portal link: {e}"
 
@@ -7225,10 +7221,10 @@ class WhatsAppService:
         raw_body_str = str(message_body or "").strip()
         cleaned_cmd_lower = raw_body_str.lower().strip()
 
-        # 1. HARDCODED BYPASS: "meri dukan" (or any text matching dukan|shop|store)
+        # 1. HARDCODED BYPASS: "meri dukan" (or any text matching dukan|shop|store|hisab|sale|inventory)
         is_dukan_top = bool(
-            cleaned_cmd_lower in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop")
-            or re.search(r'\b(meri\s*dukaan|meri\s*dukan|dukan|dukaan|my\s*shop|my\s*store|shop|store)\b', cleaned_cmd_lower)
+            cleaned_cmd_lower in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop", "hisab", "hisaab", "sale", "sales", "inventory", "saman", "khata", "!hisab", "/hisab")
+            or re.search(r'\b(meri\s*dukaan|meri\s*dukan|dukan|dukaan|my\s*shop|my\s*store|shop|store|hisab|hisaab|sale|sales|inventory|saman|khata)\b', cleaned_cmd_lower)
         )
         if is_dukan_top:
             logger.info(f"[Strict AI Bypass] 'meri dukan' command detected at TOP for {sender_phone}. Bypassing AI LLM.")
@@ -7246,10 +7242,7 @@ class WhatsAppService:
                 token = GlobalBazarService.generate_vendor_magic_token(v_id, clean_p_top or sender_phone)
                 base_domain = os.environ.get("VENDOR_PORTAL_BASE_URL", "http://66.45.230.232:5000")
                 portal_url = f"{base_domain}/vendor/auth/{token}"
-                shop_reply = (
-                    "🏪 *Aapki Online Dukaan Tayyar Hai!*\n\n"
-                    f"🔗 http://66.45.230.232:5000/vendor/auth/{token}"
-                )
+                shop_reply = GlobalBazarService.format_vendor_hisab_summary(v_id, token)
             except Exception as e:
                 shop_reply = f"⚠️ Could not generate vendor portal link: {e}"
 
@@ -7406,7 +7399,7 @@ class WhatsAppService:
             if resolved_lid_phone and resolved_lid_phone.isdigit() and 10 <= len(resolved_lid_phone) <= 13:
                 real_chat_id = f"{resolved_lid_phone}@s.whatsapp.net"
             else:
-                real_chat_id = "923471000668@s.whatsapp.net" if ("7142" in raw_chat or "bashir" in str(sender_name).lower()) else raw_chat
+                real_chat_id = raw_chat
         elif raw_chat and "@" in raw_chat:
             clean_target = cls.format_phone_number(raw_chat.split("@")[0].split(":")[0])
             real_chat_id = f"{clean_target}@s.whatsapp.net"
@@ -7420,10 +7413,10 @@ class WhatsAppService:
         raw_body_str = str(message_body or "").strip()
         cleaned_cmd_lower = raw_body_str.lower().strip()
 
-        # 1. HARDCODED BYPASS: "meri dukan" (or any text matching dukan|shop|store)
+        # 1. HARDCODED BYPASS: "meri dukan" (or any text matching dukan|shop|store|hisab|sale|inventory)
         is_dukan_match = bool(
-            cleaned_cmd_lower in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop")
-            or re.search(r'\b(meri\s*dukaan|meri\s*dukan|dukan|dukaan|my\s*shop|my\s*store|shop|store)\b', cleaned_cmd_lower)
+            cleaned_cmd_lower in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop", "hisab", "hisaab", "sale", "sales", "inventory", "saman", "khata", "!hisab", "/hisab")
+            or re.search(r'\b(meri\s*dukaan|meri\s*dukan|dukan|dukaan|my\s*shop|my\s*store|shop|store|hisab|hisaab|sale|sales|inventory|saman|khata)\b', cleaned_cmd_lower)
         )
         if is_dukan_match:
             logger.info(f"[Strict AI Bypass] 'meri dukan' command in force_dispatch for {clean_phone or sender_phone}. Bypassing AI LLM.")
@@ -7441,10 +7434,7 @@ class WhatsAppService:
                 token = GlobalBazarService.generate_vendor_magic_token(v_id, clean_phone or sender_phone)
                 base_domain = os.environ.get("VENDOR_PORTAL_BASE_URL", "http://66.45.230.232:5000")
                 portal_url = f"{base_domain}/vendor/auth/{token}"
-                shop_reply = (
-                    "🏪 *Aapki Online Dukaan Tayyar Hai!*\n\n"
-                    f"🔗 http://66.45.230.232:5000/vendor/auth/{token}"
-                )
+                shop_reply = GlobalBazarService.format_vendor_hisab_summary(v_id, token)
             except Exception as e:
                 shop_reply = f"⚠️ Could not generate vendor portal link: {e}"
 
@@ -8693,15 +8683,9 @@ class WhatsAppService:
 
     @classmethod
     def resolve_contact_phone(cls, raw_phone: str, sender_name: Optional[str] = None) -> str:
-        """Resolves phone number for incoming messages, mapping LIDs or short numbers (e.g. 7142)
-        to the actual contact's real phone (e.g. 923471000668).
-        """
+        """Resolves phone number for incoming messages, strictly preserving the sender's actual phone number."""
         raw = str(raw_phone or "").strip()
         name_clean = str(sender_name or "").strip().lower()
-
-        # Direct known mapping for Bashir khani and WhatsApp LID 7142
-        if raw in ("7142", "7142@lid") or raw.endswith("7142@lid") or raw.startswith("7142@") or "bashir" in name_clean or "bashir" in raw.lower():
-            return "923471000668"
 
         clean = cls.format_phone_number(raw)
         if clean and clean.isdigit() and 10 <= len(clean) <= 13:
@@ -8744,20 +8728,14 @@ class WhatsAppService:
         raw = str(phone or "").strip()
         if raw.endswith("@g.us"):
             return raw
-        if raw in ("7142", "7142@lid") or raw.endswith("7142@lid") or raw.startswith("7142@"):
-            return "923471000668"
         if raw.lower().endswith("@lid"):
             lid_user = raw.split("@")[0].split(":")[0]
-            if lid_user == "7142" or lid_user.endswith("7142"):
-                return "923471000668"
             return lid_user
         for suf in ("@s.whatsapp.net", "@c.us"):
             if raw.lower().endswith(suf):
                 raw = raw[:-len(suf)]
         raw = raw.split(":")[0]
         clean = "".join(filter(str.isdigit, raw))
-        if clean in ("7142",):
-            return "923471000668"
         if len(clean) > 13:
             return raw
         # Handle Pakistani local formats like 03001234567 -> 923001234567
@@ -11315,9 +11293,6 @@ class WhatsAppService:
                 real_chat_id = f"{clean_to}@s.whatsapp.net"
         else:
             clean_to = cls.format_phone_number(raw_target)
-            raw_s = str(raw_target).strip()
-            if raw_s in ("7142", "7142@lid") or raw_s.endswith("7142@lid") or clean_to == "7142":
-                clean_to = "923471000668"
             if len(clean_to) > 13:
                 resolved_ph = cls.resolve_contact_phone(clean_to)
                 if resolved_ph and len(resolved_ph) <= 13:

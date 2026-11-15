@@ -142,7 +142,15 @@ class GlobalBazarService:
         products = cls.get_products(vendor_id=vendor_id)
         total_products = len(products)
         total_stock = sum(int(p.get("stock") or 0) for p in products)
-        total_inventory_value = sum(float(p.get("price") or 0.0) * int(p.get("stock") or 0) for p in products)
+        total_inventory_value = sum(
+            float(p.get("price") or 0.0) * (int(p.get("stock") or 1) if int(p.get("stock") or 0) > 0 else 1)
+            for p in products
+        )
+
+        today_str = datetime.date.today().isoformat()
+        today_slash = today_str.replace("-", "/")
+        month_str = datetime.date.today().strftime("%Y-%m")
+        month_slash = month_str.replace("-", "/")
 
         with cls.get_db_connection() as conn:
             c = conn.cursor()
@@ -151,6 +159,30 @@ class GlobalBazarService:
                 (vendor_id,)
             ).fetchone()
             total_sales = float(sales_row["total_sales"]) if sales_row else 0.0
+
+            # Daily sales & orders (today)
+            today_orders_row = c.execute(
+                "SELECT COUNT(*) as count, COALESCE(SUM(total_amount), 0.0) as total FROM orders WHERE vendor_id = ? AND (created_at LIKE ? OR created_at LIKE ?)",
+                (vendor_id, f"{today_str}%", f"{today_slash}%")
+            ).fetchone()
+            today_ledger_row = c.execute(
+                "SELECT COUNT(*) as count, COALESCE(SUM(amount), 0.0) as total FROM ledger WHERE vendor_id = ? AND entry_type = 'sale' AND (entry_date = ? OR created_at LIKE ?)",
+                (vendor_id, today_str, f"{today_str}%")
+            ).fetchone()
+            today_orders_count = int(today_orders_row["count"] or 0)
+            today_sales_total = float(max(float(today_orders_row["total"] or 0.0), float(today_ledger_row["total"] or 0.0)))
+
+            # Monthly sales & orders (current month)
+            month_orders_row = c.execute(
+                "SELECT COUNT(*) as count, COALESCE(SUM(total_amount), 0.0) as total FROM orders WHERE vendor_id = ? AND (created_at LIKE ? OR created_at LIKE ?)",
+                (vendor_id, f"{month_str}%", f"{month_slash}%")
+            ).fetchone()
+            month_ledger_row = c.execute(
+                "SELECT COUNT(*) as count, COALESCE(SUM(amount), 0.0) as total FROM ledger WHERE vendor_id = ? AND entry_type = 'sale' AND (entry_date LIKE ? OR created_at LIKE ?)",
+                (vendor_id, f"{month_str}%", f"{month_str}%")
+            ).fetchone()
+            month_orders_count = int(month_orders_row["count"] or 0)
+            month_sales_total = float(max(float(month_orders_row["total"] or 0.0), float(month_ledger_row["total"] or 0.0)))
 
             orders_rows = c.execute(
                 "SELECT * FROM orders WHERE vendor_id = ? ORDER BY id DESC LIMIT 25",
@@ -171,9 +203,37 @@ class GlobalBazarService:
             "total_stock": total_stock,
             "total_inventory_value": total_inventory_value,
             "total_sales": total_sales,
+            "today_sales_total": today_sales_total,
+            "today_orders_count": today_orders_count,
+            "month_sales_total": month_sales_total,
+            "month_orders_count": month_orders_count,
             "orders": orders,
             "ledger_entries": ledger_entries
         }
+
+    @classmethod
+    def format_vendor_hisab_summary(cls, vendor_id: int, token: str) -> str:
+        """Formats real-time shop hisab-kitab summary for WhatsApp reply."""
+        data = cls.get_vendor_dashboard_data(vendor_id)
+        vendor = data.get("vendor") or {}
+        shop_name = vendor.get("name") or "Chitral Shahi Bazar"
+        total_items = data.get("total_products", 0)
+        inv_val = data.get("total_inventory_value", 0.0)
+        today_sales = data.get("today_sales_total", 0.0)
+        today_orders = data.get("today_orders_count", 0)
+        month_sales = data.get("month_sales_total", 0.0)
+        month_orders = data.get("month_orders_count", 0)
+        base_domain = os.environ.get("VENDOR_PORTAL_BASE_URL", "http://66.45.230.232:5000")
+        portal_url = f"{base_domain}/vendor/auth/{token}"
+
+        return (
+            f"🏪 *Dukan:* {shop_name}\n"
+            f"📦 *Total Saman (Inventory):* {total_items} items (Worth PKR {inv_val:,.0f})\n"
+            f"💰 *Aaj Ki Sale (Daily Sale):* PKR {today_sales:,.0f} ({today_orders} orders)\n"
+            f"📈 *Mahine Ki Sale (Monthly Sale):* PKR {month_sales:,.0f} ({month_orders} orders)\n"
+            f"🏪 *Aapki Online Dukaan Tayyar Hai!*\n"
+            f"🔗 *Dukan & Khata Dashboard Link:* {portal_url}"
+        )
 
     MAGIC_TOKEN_SECRET = os.environ.get("VENDOR_TOKEN_SECRET", "bashflow-vendor-magic-portal-secret-key-2026")
 
@@ -579,6 +639,37 @@ class GlobalBazarService:
                 return dict(row) if row else None
         except Exception as e:
             logger.error(f"[GlobalBazar] Failed to record ledger sale: {e}")
+            return None
+
+    @classmethod
+    def record_ledger_entry(
+        cls,
+        vendor_id: Optional[int],
+        entry_type: str,
+        amount: float,
+        description: str,
+        category: str = "manual_khata",
+        entry_date: Optional[datetime.date] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Records a sale or expense into the vendor's ledger."""
+        try:
+            v_id = vendor_id or cls.get_default_vendor_id()
+            t_date = (entry_date or datetime.date.today()).isoformat()
+            now_iso = datetime.datetime.utcnow().isoformat()
+            e_type = 'sale' if entry_type in ('sale', 'credit', 'income') else 'expense'
+            with cls.get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute("""
+                    INSERT INTO ledger (vendor_id, entry_type, amount, category, description, entry_date, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (v_id, e_type, float(amount), category, description.strip(), t_date, now_iso))
+                conn.commit()
+                ledger_id = c.lastrowid
+                row = c.execute("SELECT * FROM ledger WHERE id = ?", (ledger_id,)).fetchone()
+                logger.info(f"[GlobalBazar] Ledger entry recorded #{ledger_id}: {e_type} of {amount} PKR ({description})")
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"[GlobalBazar] Failed to record ledger entry: {e}")
             return None
 
     @classmethod

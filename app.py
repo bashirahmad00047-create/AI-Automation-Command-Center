@@ -2178,6 +2178,10 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 total_stock=data["total_stock"],
                 total_inventory_value=data["total_inventory_value"],
                 total_sales=data["total_sales"],
+                today_sales_total=data.get("today_sales_total", 0.0),
+                today_orders_count=data.get("today_orders_count", 0),
+                month_sales_total=data.get("month_sales_total", 0.0),
+                month_orders_count=data.get("month_orders_count", 0),
                 orders=data.get("orders", []),
                 ledger_entries=data.get("ledger_entries", [])
             )
@@ -2189,6 +2193,66 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 vendor=None,
                 products=[]
             ), 500
+
+    @application.route("/vendor/khata/record", methods=["POST"])
+    def vendor_record_khata():
+        """Records a sale or expense into the vendor's ledger from dashboard or API."""
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            payload = request.get_json(silent=True) or request.form or {}
+            vendor_id = session.get("vendor_id") or payload.get("vendor_id")
+            token = payload.get("token") or request.args.get("token")
+            if token and not vendor_id:
+                auth_data = GlobalBazarService.verify_vendor_magic_token(token)
+                if auth_data:
+                    vendor_id = auth_data["vendor"]["id"]
+            if not vendor_id:
+                vendor_id = GlobalBazarService.get_default_vendor_id()
+
+            entry_type = (payload.get("entry_type") or "sale").strip().lower()
+            amount = float(payload.get("amount") or 0.0)
+            description = (payload.get("description") or "Sale recorded via Vendor Dashboard").strip()
+
+            entry = GlobalBazarService.record_ledger_entry(
+                vendor_id=int(vendor_id),
+                entry_type=entry_type,
+                amount=amount,
+                description=description
+            )
+            if request.is_json or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return jsonify({"success": True, "entry": entry}), 200
+
+            return redirect(url_for("vendor_dashboard_view"))
+        except Exception as e:
+            application.logger.error(f"Failed to record vendor khata: {e}", exc_info=True)
+            if request.is_json:
+                return jsonify({"success": False, "error": str(e)}), 400
+            return redirect(url_for("vendor_dashboard_view"))
+
+    @application.route("/api/vendor/stats", methods=["GET"])
+    def api_vendor_stats():
+        """Returns 4 summary cards stats: Total Saman, Aaj Ki Sale, Mahine Ki Sale."""
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            vendor_id = request.args.get("vendor_id") or session.get("vendor_id")
+            if vendor_id:
+                vendor_id = int(vendor_id)
+            else:
+                vendor_id = GlobalBazarService.get_default_vendor_id()
+            data = GlobalBazarService.get_vendor_dashboard_data(vendor_id)
+            return jsonify({
+                "success": True,
+                "vendor_id": vendor_id,
+                "vendor": data.get("vendor"),
+                "total_products": data.get("total_products", 0),
+                "total_inventory_value": data.get("total_inventory_value", 0.0),
+                "today_sales_total": data.get("today_sales_total", 0.0),
+                "today_orders_count": data.get("today_orders_count", 0),
+                "month_sales_total": data.get("month_sales_total", 0.0),
+                "month_orders_count": data.get("month_orders_count", 0)
+            }), 200
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
 
     @application.route("/vendor/logout", methods=["GET"])
     def vendor_logout():
