@@ -6144,7 +6144,9 @@ class WhatsAppService:
                 return True
             raw_msg = raw_p.get("raw") or raw_p.get("rawMessage") or {}
             if isinstance(raw_msg, dict):
-                if raw_msg.get("imageMessage") or (raw_msg.get("message") or {}).get("imageMessage"):
+                inner_msg = raw_msg.get("message")
+                img_msg = raw_msg.get("imageMessage") or (inner_msg.get("imageMessage") if isinstance(inner_msg, dict) else None)
+                if img_msg:
                     return True
         t_clean = str(text or "").strip().lower()
         if t_clean in ("[image]", "[image message]", "[photo]", "[picture]", "📷 photo"):
@@ -6168,7 +6170,7 @@ class WhatsAppService:
 
     @classmethod
     def is_inventory_caption(cls, caption: Optional[str]) -> bool:
-        """Detects if an image caption is an inventory upload or contains ANY number.
+        r"""Detects if an image caption is an inventory upload or contains ANY number.
         Strict Requirement: If an incoming message has an image and the caption contains
         ANY number (re.search(r'\d+', caption)), treat it 100% as an inventory upload.
         """
@@ -7442,8 +7444,9 @@ class WhatsAppService:
             except Exception as e:
                 shop_reply = f"⚠️ Could not generate vendor portal link: {e}"
 
+            dispatch_res = None
             try:
-                cls.send_message(
+                dispatch_res = cls.send_message(
                     organization_id=org_id,
                     to_phone=clean_phone or sender_phone,
                     chat_id=real_chat_id,
@@ -7458,7 +7461,9 @@ class WhatsAppService:
                 "token": token,
                 "portal_url": portal_url,
                 "reply_body": shop_reply,
-                "reply": shop_reply
+                "reply": shop_reply,
+                "dispatch": dispatch_res,
+                "dispatched": bool(dispatch_res and (dispatch_res.get("success") or dispatch_res.get("whatsapp_message_id")))
             }
 
         is_image_top = False if kwargs.get("is_image") is False else bool(
@@ -7488,8 +7493,9 @@ class WhatsAppService:
         if not is_image_top and has_price_keywords:
             logger.info(f"[Strict AI Bypass] Text with price keywords but NO image: '{raw_body_str}'. Bypassing AI LLM.")
             warning_msg = "⚠️ Item add karne ke liye tasveer attach karna lazmi hai. Kripya tasveer ke caption mein 'Add Rs [price]' likh kar bhejein."
+            dispatch_res = None
             try:
-                cls.send_message(
+                dispatch_res = cls.send_message(
                     organization_id=org_id,
                     to_phone=clean_phone or sender_phone,
                     chat_id=real_chat_id,
@@ -7502,7 +7508,9 @@ class WhatsAppService:
                 "success": True,
                 "action": "missing_image_warning",
                 "reply_body": warning_msg,
-                "reply": warning_msg
+                "reply": warning_msg,
+                "dispatch": dispatch_res,
+                "dispatched": bool(dispatch_res and (dispatch_res.get("success") or dispatch_res.get("whatsapp_message_id")))
             }
 
         # Timestamp logging (Zero-drop guarantee: incoming messages are never ignored or dropped based on age)
