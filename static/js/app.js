@@ -5660,6 +5660,16 @@ function formatWaListTime(ts) {
     }
 }
 
+function isRealImageUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    const u = url.trim();
+    if (!u || u === 'undefined' || u === 'null' || u === 'none' || u.startsWith('[') || u.endsWith(']')) return false;
+    if (u.startsWith('data:image/')) return u.length > 60;
+    if (u.startsWith('http://') || u.startsWith('https://')) return u.length > 10;
+    if (u.startsWith('/static/') || u.startsWith('/uploads/') || u.startsWith('./static/')) return u.length > 8;
+    return false;
+}
+
 function groupWhatsAppConversations(messages) {
     const map = {};
     (messages || []).forEach(m => {
@@ -7799,19 +7809,23 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
 
                 let imgSrc = '';
                 if (isImage) {
-                    if (rawMedia && (rawMedia.startsWith('data:image') || rawMedia.startsWith('http') || rawMedia.startsWith('/'))) {
+                    if (isRealImageUrl(rawMedia)) {
                         imgSrc = rawMedia;
-                    } else if (rawMedia && rawMedia.length > 50 && !rawMedia.startsWith('data:') && !rawMedia.startsWith('http')) {
+                    } else if (rawMedia && typeof rawMedia === 'string' && rawMedia.length > 50 && !rawMedia.startsWith('data:') && !rawMedia.startsWith('http')) {
                         imgSrc = `data:image/jpeg;base64,${rawMedia}`;
-                    } else if (m.image_base64) {
+                    } else if (isRealImageUrl(m.image_base64)) {
                         imgSrc = m.image_base64.startsWith('data:') ? m.image_base64 : `data:image/jpeg;base64,${m.image_base64}`;
-                    } else if (m.raw_payload && (m.raw_payload.image_base64 || m.raw_payload.imageBase64)) {
+                    } else if (m.raw_payload && isRealImageUrl(m.raw_payload.image_base64 || m.raw_payload.imageBase64)) {
                         const b64 = m.raw_payload.image_base64 || m.raw_payload.imageBase64;
                         imgSrc = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
-                    } else if (m.media_url) {
+                    } else if (isRealImageUrl(m.media_url)) {
                         imgSrc = m.media_url;
-                    } else if (m.id) {
-                        imgSrc = `/api/whatsapp/media/${encodeURIComponent(m.id)}`;
+                    } else if (isRealImageUrl(m.mediaUrl)) {
+                        imgSrc = m.mediaUrl;
+                    } else if (isRealImageUrl(m.download_url)) {
+                        imgSrc = m.download_url;
+                    } else if (isRealImageUrl(m.downloadUrl)) {
+                        imgSrc = m.downloadUrl;
                     }
                 }
 
@@ -7839,25 +7853,27 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                 let bodyHtml = '';
                 if (isImage) {
                     const rawImgBody = (m.body || m.message || '').trim();
+                    const validImg = isRealImageUrl(imgSrc) ? imgSrc : (isRealImageUrl(m.media_url) ? m.media_url : (isRealImageUrl(m.mediaUrl) ? m.mediaUrl : ''));
                     let imgCaption = rawImgBody.replace(/^(📷\s*photo|\[photo\]|\[image\]|\[image message\])\s*/i, '').trim();
                     if (imgCaption.toLowerCase() === 'photo' || imgCaption.toLowerCase() === '(no text)' || imgCaption.toLowerCase() === 'image') {
                         imgCaption = '';
                     }
-                    bodyHtml = `
-                        <div class="wa-image-bubble" style="max-width: 280px; border-radius: 8px; overflow: hidden; margin-bottom: 4px;">
-                            ${imgSrc ? `
-                                <div style="position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: rgba(0,0,0,0.3);" onclick="openWaImageModal(event, '${escapeHtml(imgSrc)}', '${escapeHtml(imgCaption || 'WhatsApp Photo')}')">
-                                    <img src="${escapeHtml(imgSrc)}" alt="WhatsApp Photo" class="max-w-xs rounded shadow-sm wa-chat-img" style="width: 100%; max-height: 260px; object-fit: cover; display: block; border-radius: 8px; transition: transform 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" onerror="this.onerror=null; this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'100\\' height=\\'100\\' fill=\\'%23888\\' viewBox=\\'0 0 16 16\\'><path d=\\'M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z\\'/><path d=\\'M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z\\'/></svg>';">
+
+                    if (validImg) {
+                        bodyHtml = `
+                            <div class="wa-image-bubble" style="max-width: 280px; border-radius: 8px; overflow: hidden; margin-bottom: 4px;">
+                                <div style="position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: rgba(0,0,0,0.3);" onclick="openWaImageModal(event, '${escapeHtml(validImg)}', '${escapeHtml(imgCaption || 'WhatsApp Photo')}')">
+                                    <img src="${escapeHtml(validImg)}" alt="WhatsApp Photo" class="max-w-xs rounded shadow-sm wa-chat-img" data-caption="${escapeHtml(imgCaption || rawImgBody || '📷 Photo')}" style="width: 100%; max-height: 260px; object-fit: cover; display: block; border-radius: 8px; transition: transform 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" onerror="const p = this.closest('.wa-image-bubble'); if (p) { p.innerHTML = '<div style=\\'word-break: break-word;\\'>' + (this.getAttribute('data-caption') || '📷 Photo') + '</div>'; }" />
                                     <div style="position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.65); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; pointer-events: none;">🔍 Click to zoom</div>
                                 </div>
-                            ` : `
-                                <div style="padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px; font-size: 0.88em; color: #aebac1; display: flex; align-items: center; gap: 6px;">
-                                    <span>📷</span> <em>Photo (Image preview unavailable)</em>
-                                </div>
-                            `}
-                            ${imgCaption ? `<div class="wa-image-caption" style="margin-top: 6px; word-break: break-word; font-size: 0.9em; color: #e9edef;">${escapeHtml(imgCaption)}</div>` : ''}
-                        </div>
-                    `;
+                                ${imgCaption ? `<div class="wa-image-caption" style="margin-top: 6px; word-break: break-word; font-size: 0.9em; color: #e9edef;">${escapeHtml(imgCaption)}</div>` : ''}
+                            </div>
+                        `;
+                    } else {
+                        // Strict fallback: If media_url is invalid, do NOT render a broken <img> tag; fallback to text
+                        const fallbackText = imgCaption || rawImgBody || '📷 Photo';
+                        bodyHtml = `<div style="word-break: break-word;">${escapeHtml(fallbackText)}</div>`;
+                    }
                 } else if (isVoice) {
                     const fallbackBlob = hasPlayableAudio ? getAudioBlobUrl(safeMediaUrl) : '';
                     let audioSrc = '';
@@ -7975,18 +7991,18 @@ function renderWhatsAppWebUI(messages, shouldScrollToBottom = false, forceRender
                         rawBody.toLowerCase() === '📷 photo' ||
                         (Boolean(rawMedia || m.media_url || m.download_url) && (rawBody.toLowerCase().includes('photo') || rawBody.toLowerCase().includes('image')))
                     ) {
-                        const fallbackImg = rawMedia || m.media_url || m.download_url || (m.id ? `/api/whatsapp/media/${encodeURIComponent(m.id)}` : '');
-                        if (fallbackImg) {
+                        const fallbackImgCandidate = rawMedia || m.media_url || m.download_url || '';
+                        if (isRealImageUrl(fallbackImgCandidate)) {
                             bodyHtml = `
                                 <div class="wa-image-bubble" style="max-width: 280px; border-radius: 8px; overflow: hidden; margin-bottom: 4px;">
-                                    <div style="position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: rgba(0,0,0,0.3);" onclick="openWaImageModal(event, '${escapeHtml(fallbackImg)}', 'WhatsApp Photo')">
-                                        <img src="${escapeHtml(fallbackImg)}" alt="Uploaded Photo" class="max-w-xs rounded shadow-sm wa-chat-img" style="width: 100%; max-height: 260px; object-fit: cover; display: block; border-radius: 8px; transition: transform 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" />
+                                    <div style="position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: rgba(0,0,0,0.3);" onclick="openWaImageModal(event, '${escapeHtml(fallbackImgCandidate)}', 'WhatsApp Photo')">
+                                        <img src="${escapeHtml(fallbackImgCandidate)}" alt="Uploaded Photo" class="max-w-xs rounded shadow-sm wa-chat-img" data-caption="${escapeHtml(rawBody || '📷 Photo')}" style="width: 100%; max-height: 260px; object-fit: cover; display: block; border-radius: 8px; transition: transform 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" onerror="const p = this.closest('.wa-image-bubble'); if (p) { p.innerHTML = '<div style=\\'word-break: break-word;\\'>' + (this.getAttribute('data-caption') || '📷 Photo') + '</div>'; }" />
                                         <div style="position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.65); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; pointer-events: none;">🔍 Click to zoom</div>
                                     </div>
                                 </div>
                             `;
                         } else {
-                            bodyHtml = `<div style="word-break: break-word;">${escapeHtml(rawBody)}</div>`;
+                            bodyHtml = `<div style="word-break: break-word;">${escapeHtml(rawBody || '📷 Photo')}</div>`;
                         }
                     } else {
                         const cleanBody = rawBody.replace(/\[quotedMessage\]/gi, 'Quoted message');

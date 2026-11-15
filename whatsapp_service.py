@@ -6319,9 +6319,11 @@ class WhatsAppService:
         except Exception as v_err:
             logger.warning(f"[AI Catalog] Vendor identification notice: {v_err}")
 
-        # 3. Call local FastAPI inventory engine at http://127.0.0.1:8000/inventory/ai-catalog
-        fastapi_url = os.environ.get("GLOBAL_BAZAR_CATALOG_URL", "http://127.0.0.1:8000/inventory/ai-catalog")
+        # 3. Call local FastAPI inventory engine at http://127.0.0.1:8000/inventory/products and /inventory/ai-catalog
+        fastapi_catalog_url = os.environ.get("GLOBAL_BAZAR_CATALOG_URL", "http://127.0.0.1:8000/inventory/ai-catalog")
+        fastapi_products_url = os.environ.get("GLOBAL_BAZAR_PRODUCTS_URL", "http://127.0.0.1:8000/inventory/products")
         ai_res_json = None
+        db_save_error = None
 
         try:
             files = {
@@ -6337,14 +6339,15 @@ class WhatsAppService:
             if extracted_price:
                 form_data["price"] = str(extracted_price)
 
-            resp = requests.post(fastapi_url, files=files, data=form_data, timeout=30.0)
+            resp = requests.post(fastapi_catalog_url, files=files, data=form_data, timeout=30.0)
             if resp.status_code == 200:
                 ai_res_json = resp.json()
                 logger.info(f"[AI Catalog API] Successfully processed image via FastAPI: {ai_res_json.get('title')}")
             else:
                 logger.warning(f"[AI Catalog API] FastAPI returned status {resp.status_code}: {resp.text}")
         except Exception as req_err:
-            logger.warning(f"[AI Catalog API Warning] FastAPI call to {fastapi_url} failed: {req_err}. Falling back to internal engine.")
+            logger.warning(f"[AI Catalog API Warning] FastAPI call to {fastapi_catalog_url} failed: {req_err}. Falling back to internal engine.")
+            db_save_error = str(req_err)
 
         # Local fallback if FastAPI service is stopped or port 8000 unreachable
         if not ai_res_json:
@@ -6360,13 +6363,69 @@ class WhatsAppService:
                 )
             except Exception as direct_err:
                 logger.error(f"[AI Catalog Direct Fallback Error] {direct_err}")
-                title_guess = clean_cap if clean_cap and not clean_cap.isdigit() else "Studio Product"
-                ai_res_json = {
-                    "title": title_guess,
-                    "description": f"High quality artisan product live on Chitral & Global Bazar. {clean_cap}".strip(),
-                    "estimated_price": extracted_price or 2500.0,
-                    "image_url": "/static/uploads/default_product.png"
-                }
+                db_save_error = str(direct_err)
+
+        # Ensure product is also posted to http://127.0.0.1:8000/inventory/products if not already created
+        if not ai_res_json or not ai_res_json.get("saved_product"):
+            title_guess = (ai_res_json or {}).get("title") or clean_cap or "Studio Product"
+            desc_guess = (ai_res_json or {}).get("description") or f"High quality artisan product live on Chitral & Global Bazar. {clean_cap}".strip()
+            price_val = extracted_price or (ai_res_json or {}).get("estimated_price") or 2500.0
+            prod_img = (ai_res_json or {}).get("image_url") or "/static/uploads/default_product.png"
+            product_payload = {
+                "title": title_guess,
+                "description": desc_guess,
+                "category": "Apparel",
+                "price": float(price_val),
+                "cost_price": float(price_val * 0.7),
+                "stock": 10,
+                "image_url": prod_img,
+                "ai_image_url": prod_img,
+                "vendor_id": int(vendor_id)
+            }
+            try:
+                p_resp = requests.post(fastapi_products_url, json=product_payload, timeout=10.0)
+                if p_resp.status_code in (200, 201):
+                    p_data = p_resp.json()
+                    if not ai_res_json:
+                        ai_res_json = {
+                            "title": p_data.get("title", title_guess),
+                            "description": p_data.get("description", desc_guess),
+                            "estimated_price": p_data.get("price", price_val),
+                            "image_url": p_data.get("image_url", prod_img),
+                            "saved_product": p_data
+                        }
+                    else:
+                        ai_res_json["saved_product"] = p_data
+                    db_save_error = None
+                else:
+                    logger.warning(f"[Inventory Products API] Status {p_resp.status_code}: {p_resp.text}")
+            except Exception as p_err:
+                logger.warning(f"[Inventory Products API] Call to {fastapi_products_url} failed: {p_err}")
+
+        # If both FastAPI and internal database engine completely failed, return clear text error
+        if not ai_res_json and db_save_error:
+            error_reply = (
+                f"⚠️ *Product Save Error*\n\n"
+                f"Aapki product add karte waqt masla pesh aaya:\n"
+                f"{db_save_error[:150]}\n\n"
+                f"Kripya tasveer ke caption mein 'Add Rs [price]' dobara likh kar bhejein."
+            )
+            try:
+                cls.send_message(
+                    organization_id=org_id,
+                    to_phone=sender_phone,
+                    chat_id=target_chat,
+                    message_text=error_reply
+                )
+            except Exception as send_fail:
+                logger.error(f"[AI Catalog Error Dispatch Failed] {send_fail}")
+
+            return {
+                "success": False,
+                "error": db_save_error,
+                "reply_body": error_reply,
+                "reply": error_reply
+            }
 
         # 4. Format exact success message
         title = ai_res_json.get("title") or ai_res_json.get("detected_title") or "Studio Product"
@@ -7023,6 +7082,59 @@ class WhatsAppService:
     @classmethod
     def force_dispatch_auto_responder(cls, *args, **kwargs):
         """Forces immediate inbound auto-response evaluation with strict image bypass."""
+        # =========================================================================
+        # VERY START: "Meri dukan" Magic Link Command (OUTSIDE of any image logic)
+        # =========================================================================
+        org_id = kwargs.get("organization_id") if "organization_id" in kwargs else (args[0] if len(args) > 0 else "org-enterprise-default")
+        sender_phone = kwargs.get("sender_phone") if "sender_phone" in kwargs else (args[1] if len(args) > 1 else "")
+        message_body = kwargs.get("message_body") if "message_body" in kwargs else (args[2] if len(args) > 2 else "")
+        sender_name = kwargs.get("sender_name") if "sender_name" in kwargs else (args[3] if len(args) > 3 else None)
+        chat_id = kwargs.get("chat_id") or kwargs.get("chatId") or (args[11] if len(args) > 11 else None)
+
+        raw_cmd = str(message_body or "").strip().lower()
+        if raw_cmd in ("meri dukan", "meri dukaan", "my shop", "my store", "!dukan", "!dukaan", "!shop", "!myshop", "/dukan", "/myshop"):
+            clean_p = cls.format_phone_number(sender_phone)
+            target_chat = chat_id or (f"{clean_p}@s.whatsapp.net" if clean_p else sender_phone)
+            token = ""
+            portal_url = ""
+            try:
+                from services.global_bazar_service import GlobalBazarService
+                v_name = sender_name or (kwargs.get("raw_payload") or {}).get("pushName")
+                vendor_obj = GlobalBazarService.find_or_create_vendor(
+                    name=v_name or f"Shop {clean_p[-4:] if clean_p else 'Vendor'}",
+                    phone=clean_p or sender_phone,
+                    owner_name=v_name or "Vendor"
+                )
+                v_id = vendor_obj.get("id") or 1
+                token = GlobalBazarService.generate_vendor_magic_token(v_id, clean_p or sender_phone)
+                base_domain = os.environ.get("VENDOR_PORTAL_BASE_URL", "http://66.45.230.232:5000")
+                portal_url = f"{base_domain}/vendor/auth/{token}"
+                shop_reply = (
+                    "🏪 *Aapki Online Dukaan Tayyar Hai!*\n\n"
+                    f"🔗 http://66.45.230.232:5000/vendor/auth/{token}"
+                )
+            except Exception as e:
+                shop_reply = f"⚠️ Could not generate vendor portal link: {e}"
+
+            try:
+                cls.send_message(
+                    organization_id=org_id or "org-enterprise-default",
+                    to_phone=clean_p or sender_phone,
+                    chat_id=target_chat,
+                    message_text=shop_reply
+                )
+            except Exception as send_err:
+                logger.error(f"[Strict AI Bypass] Failed to send 'meri dukan' reply in force_dispatch: {send_err}")
+
+            return {
+                "success": True,
+                "action": "vendor_magic_link",
+                "token": token,
+                "portal_url": portal_url,
+                "reply_body": shop_reply,
+                "reply": shop_reply
+            }
+
         return cls.handle_inbound_auto_response(*args, **kwargs)
 
     @classmethod

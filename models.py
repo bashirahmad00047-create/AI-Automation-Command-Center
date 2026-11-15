@@ -907,7 +907,13 @@ class WhatsAppMessage(db.Model):
                     sender_name = raw.get("senderName") or raw.get("sender_name") or raw.get("senderContactName") or raw.get("pushName") or raw.get("push_name") or raw.get("name")
                     resolved_pn = raw.get("senderPn") or raw.get("sender_pn") or raw.get("senderPhone") or raw.get("phone") or raw.get("remoteJidAlt")
                     chat_name = raw.get("chatName") or raw.get("chat_name") or raw.get("groupSubject")
-                    # Robust media URL and audio base64 resolution
+                    # Robust media URL, image base64, and audio base64 resolution
+                    image_b64 = (
+                        raw.get("image_base64") or
+                        raw.get("imageBase64") or
+                        (raw.get("fileMessageData", {}).get("imageBase64") if isinstance(raw.get("fileMessageData"), dict) else None) or
+                        (raw.get("raw", {}).get("image_base64") if isinstance(raw.get("raw"), dict) else None)
+                    )
                     audio_b64 = (
                         raw.get("audio_base64") or
                         raw.get("audioBase64") or
@@ -918,25 +924,34 @@ class WhatsAppMessage(db.Model):
                         (raw.get("fileMessageData", {}).get("mimeType") if isinstance(raw.get("fileMessageData"), dict) else None) or
                         raw.get("mimetype") or
                         raw.get("mime_type") or
-                        "audio/ogg; codecs=opus"
+                        ("image/jpeg" if (image_b64 or str(self.message_type or "").lower() in ("image", "imagemessage")) else "audio/ogg; codecs=opus")
                     )
 
                     media_url = (
+                        media_url or
                         raw.get("mediaUrl") or
-                        raw.get("audioUrl") or
                         raw.get("media_url") or
+                        raw.get("imageUrl") or
+                        raw.get("image_url") or
+                        raw.get("audioUrl") or
                         raw.get("audio_url") or
                         raw.get("download_url") or
                         raw.get("downloadUrl") or
                         raw.get("urlFile") or
                         (raw.get("fileMessageData", {}).get("downloadUrl") if isinstance(raw.get("fileMessageData"), dict) else None) or
                         (raw.get("fileMessageData", {}).get("mediaUrl") if isinstance(raw.get("fileMessageData"), dict) else None) or
+                        (raw.get("fileData", {}).get("downloadUrl") if isinstance(raw.get("fileData"), dict) else None) or
+                        (raw.get("fileData", {}).get("mediaUrl") if isinstance(raw.get("fileData"), dict) else None) or
                         (raw.get("fileMessageData", {}).get("audioUrl") if isinstance(raw.get("fileMessageData"), dict) else None) or
                         (raw.get("audioMessageData", {}).get("downloadUrl") if isinstance(raw.get("audioMessageData"), dict) else None) or
                         (raw.get("raw", {}).get("messageData", {}).get("fileMessageData", {}).get("downloadUrl") if isinstance(raw.get("raw"), dict) and isinstance(raw.get("raw", {}).get("messageData"), dict) else None) or
                         (raw.get("raw", {}).get("downloadUrl") if isinstance(raw.get("raw"), dict) else None)
                     )
-                    if not media_url and audio_b64:
+                    if not media_url and image_b64:
+                        clean_b64 = str(image_b64).split(",")[-1].strip()
+                        clean_mime = str(mime_type).split(";")[0].strip() if "image" in str(mime_type) else "image/jpeg"
+                        media_url = f"data:{clean_mime};base64,{clean_b64}"
+                    elif not media_url and audio_b64:
                         clean_b64 = str(audio_b64).split(",")[-1].strip()
                         clean_mime = str(mime_type).split(";")[0].strip() or "audio/ogg"
                         media_url = f"data:{clean_mime};base64,{clean_b64}"
@@ -956,22 +971,44 @@ class WhatsAppMessage(db.Model):
             except Exception:
                 pass
 
-        has_playable_audio = bool(media_url and (
+        # Strict Image vs Audio Classification
+        image_b64_val = locals().get("image_b64")
+        is_image = (
+            str(self.message_type or "").lower() in ("imagemessage", "photo", "image", "photomessage") or
+            bool(image_b64_val) or
+            bool(self.body and any(tag in str(self.body).lower() for tag in ("[photo]", "📷 photo", "[image]", "[image message]"))) or
+            bool(media_url and (
+                str(media_url).startswith("data:image") or
+                any(str(media_url).lower().split("?")[0].endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"))
+            ))
+        )
+
+        has_playable_audio = bool(not is_image and media_url and (
             str(media_url).startswith("data:audio") or
             any(str(media_url).lower().split("?")[0].endswith(ext) for ext in (".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aac", ".opus")) or
-            "/api/v1/whatsapp/media/" in str(media_url) or
-            "download" in str(media_url).lower()
+            ("/api/v1/whatsapp/media/" in str(media_url) and not is_image) or
+            ("/api/whatsapp/media/" in str(media_url) and not is_image) or
+            ("download" in str(media_url).lower() and not is_image)
         ))
 
-        is_audio = has_playable_audio and (
+        is_audio = bool(not is_image and has_playable_audio and (
             self.message_type in ("audioMessage", "voiceMessage", "audio", "voice", "ptt") or
-            bool(self.body and any(tag in self.body.lower() for tag in ("[audiomessage]", "[voicemessage]", "[voice note]", "voice message"))) or
+            bool(self.body and any(tag in str(self.body or "").lower() for tag in ("[audiomessage]", "[voicemessage]", "[voice note]", "voice message"))) or
             bool(media_url)
-        )
+        ))
+
+        if is_image:
+            msg_type = "image"
+        elif is_audio:
+            msg_type = "audio"
+        else:
+            msg_type = self.message_type or "text"
 
         msg_body = self.body
         if is_audio and (not msg_body or msg_body.strip() in ("", "(no text)", "[Voice note]", "[Audio message]")):
             msg_body = "🎤 Voice message"
+        elif is_image and (not msg_body or msg_body.strip() in ("", "(no text)", "[Photo]", "[photo]", "📷 Photo")):
+            msg_body = "📷 Photo"
 
         def _clean_phone(v: str) -> str:
             if not v:
@@ -1027,15 +1064,18 @@ class WhatsAppMessage(db.Model):
             "resolved_phone": _clean_phone(resolved_pn) if resolved_pn else None,
             "chat_name": chat_name or ("WhatsApp Group" if (clean_sender.endswith("@g.us") or clean_recipient.endswith("@g.us")) else None),
             "duration": duration,
-            "message_type": "audio" if is_audio else self.message_type,
-            "type": "audio" if is_audio else self.message_type,
+            "message_type": msg_type,
+            "type": msg_type,
             "body": msg_body,
             "media_url": media_url,
             "mediaUrl": media_url,
-            "audioUrl": media_url,
-            "audio_url": media_url,
+            "audioUrl": media_url if is_audio else None,
+            "audio_url": media_url if is_audio else None,
+            "imageUrl": media_url if is_image else None,
+            "image_url": media_url if is_image else None,
             "is_audio": is_audio,
-            "audio_duration": duration,
+            "is_image": is_image,
+            "audio_duration": duration if is_audio else None,
             "is_ai_response": is_ai_response,
             "is_ai_generated": is_ai_generated,
             "response_source": response_source,

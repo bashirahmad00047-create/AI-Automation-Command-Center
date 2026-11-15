@@ -999,58 +999,104 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                         raw_media = (
                             payload.get("media_url")
                             or payload.get("mediaUrl")
+                            or payload.get("image_url")
+                            or payload.get("imageUrl")
+                            or payload.get("download_url")
+                            or payload.get("downloadUrl")
                             or payload.get("audio_url")
                             or payload.get("audioUrl")
+                            or payload.get("image_base64")
+                            or payload.get("imageBase64")
                             or payload.get("audio_base64")
                             or payload.get("audioBase64")
+                            or (payload.get("fileMessageData", {}).get("imageBase64") if isinstance(payload.get("fileMessageData"), dict) else None)
+                            or (payload.get("fileMessageData", {}).get("audioBase64") if isinstance(payload.get("fileMessageData"), dict) else None)
+                            or (payload.get("fileMessageData", {}).get("downloadUrl") if isinstance(payload.get("fileMessageData"), dict) else None)
+                            or (payload.get("fileMessageData", {}).get("mediaUrl") if isinstance(payload.get("fileMessageData"), dict) else None)
                         )
                 except Exception:
                     pass
 
-            if not raw_media:
+            if not raw_media and not audio_bytes:
                 return jsonify({"error": "No media content associated with message"}), 404
 
-            raw_media_str = str(raw_media).strip()
-            if raw_media_str.startswith("http://") or raw_media_str.startswith("https://"):
+            raw_media_str = str(raw_media or "").strip()
+            if raw_media_str.startswith("http://") or raw_media_str.startswith("https://") or raw_media_str.startswith("/static/"):
                 return redirect(raw_media_str)
 
-            import base64
-            clean_b64 = raw_media_str
-            mime_type = "audio/ogg"
-            if "," in clean_b64:
-                header, clean_b64 = clean_b64.split(",", 1)
-                if ";" in header and ":" in header:
-                    mime_type = header.split(";")[0].split(":")[1].strip()
-                elif ":" in header:
-                    mime_type = header.split(":")[1].strip()
+            if audio_bytes:
+                media_bytes = audio_bytes
+                mime_type = "audio/ogg"
+            else:
+                import base64
+                clean_b64 = raw_media_str
+                mime_type = "image/jpeg" if (getattr(msg, "is_image", False) or str(getattr(msg, "message_type", "")).lower() in ("image", "imagemessage")) else "audio/ogg"
+                if "," in clean_b64:
+                    header, clean_b64 = clean_b64.split(",", 1)
+                    if ";" in header and ":" in header:
+                        mime_type = header.split(";")[0].split(":")[1].strip()
+                    elif ":" in header:
+                        mime_type = header.split(":")[1].strip()
 
-            try:
-                audio_bytes = base64.b64decode(clean_b64)
-            except Exception as e:
-                application.logger.error(f"Failed to decode base64 audio for msg {message_id}: {e}")
-                return jsonify({"error": "Failed to decode media"}), 500
+                try:
+                    media_bytes = base64.b64decode(clean_b64)
+                except Exception as e:
+                    application.logger.error(f"Failed to decode base64 media for msg {message_id}: {e}")
+                    return jsonify({"error": "Failed to decode media"}), 500
 
-            total_length = len(audio_bytes)
+            total_length = len(media_bytes)
             if total_length == 0:
                 return jsonify({"error": "Empty media buffer"}), 404
 
-            # Magic bytes & MIME type detection (audio/ogg, audio/mp3, audio/wav, audio/mp4)
+            # Magic bytes & MIME type detection (images and audio)
+            is_image = False
             file_ext = "ogg"
-            if audio_bytes.startswith(b"ID3") or audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2") or audio_bytes.startswith(b"\xff\xe0"):
+            if media_bytes.startswith(b"\xff\xd8\xff"):
+                mime_type = "image/jpeg"
+                file_ext = "jpg"
+                is_image = True
+            elif media_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+                mime_type = "image/png"
+                file_ext = "png"
+                is_image = True
+            elif media_bytes.startswith(b"GIF87a") or media_bytes.startswith(b"GIF89a"):
+                mime_type = "image/gif"
+                file_ext = "gif"
+                is_image = True
+            elif media_bytes.startswith(b"RIFF") and len(media_bytes) > 12 and media_bytes[8:12] == b"WEBP":
+                mime_type = "image/webp"
+                file_ext = "webp"
+                is_image = True
+            elif media_bytes.startswith(b"ID3") or media_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2") or media_bytes.startswith(b"\xff\xe0"):
                 mime_type = "audio/mp3"
                 file_ext = "mp3"
-            elif audio_bytes.startswith(b"OggS"):
+            elif media_bytes.startswith(b"OggS"):
                 mime_type = "audio/ogg"
                 file_ext = "ogg"
-            elif b"ftyp" in audio_bytes[:16]:
+            elif b"ftyp" in media_bytes[:16]:
                 mime_type = "audio/mp4"
                 file_ext = "m4a"
-            elif audio_bytes.startswith(b"RIFF") and b"WAVE" in audio_bytes[:12]:
+            elif media_bytes.startswith(b"RIFF") and b"WAVE" in media_bytes[:12]:
                 mime_type = "audio/wav"
                 file_ext = "wav"
             else:
-                mime_type = "audio/ogg"
-                file_ext = "ogg"
+                if str(getattr(msg, "message_type", "")).lower() in ("image", "imagemessage") or getattr(msg, "is_image", False):
+                    mime_type = "image/jpeg"
+                    file_ext = "jpg"
+                    is_image = True
+                else:
+                    mime_type = "audio/ogg"
+                    file_ext = "ogg"
+
+            if is_image:
+                resp = Response(media_bytes, status=200, mimetype=mime_type)
+                resp.headers["Content-Type"] = mime_type
+                resp.headers["Content-Length"] = str(total_length)
+                resp.headers["Content-Disposition"] = f'inline; filename="whatsapp_image.{file_ext}"'
+                resp.headers["Cache-Control"] = "public, max-age=86400"
+                return resp
+
+            audio_bytes = media_bytes
 
             # Always ensure duration is valid and non-zero
             duration = None

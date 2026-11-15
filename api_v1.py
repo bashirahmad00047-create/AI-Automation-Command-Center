@@ -5943,10 +5943,20 @@ def process_inbound_whatsapp_payload(payload: dict, target_org_id: str = None, d
         media_candidate = (
             msg.get("media_url")
             or msg.get("download_url")
+            or msg.get("image_url")
+            or msg.get("imageUrl")
             or msg.get("audio_url")
             or msg.get("mediaUrl")
             or msg.get("downloadUrl")
+            or msg.get("image_base64")
+            or msg.get("imageBase64")
+            or (msg.get("raw") or {}).get("media_url")
+            or (msg.get("raw") or {}).get("download_url")
+            or (msg.get("raw") or {}).get("image_base64")
+            or (msg.get("raw") or {}).get("imageBase64")
         )
+        if msg.get("is_image") and media_candidate and not str(media_candidate).startswith("data:") and not str(media_candidate).startswith("http"):
+            media_candidate = f"data:image/jpeg;base64,{media_candidate}"
         msg_body = (
             msg.get("body")
             or msg.get("message")
@@ -6387,10 +6397,20 @@ def whatsapp_webhook_ingress():
             media_candidate = (
                 msg.get("media_url")
                 or msg.get("download_url")
+                or msg.get("image_url")
+                or msg.get("imageUrl")
                 or msg.get("audio_url")
                 or msg.get("mediaUrl")
                 or msg.get("downloadUrl")
+                or msg.get("image_base64")
+                or msg.get("imageBase64")
+                or (msg.get("raw") or {}).get("media_url")
+                or (msg.get("raw") or {}).get("download_url")
+                or (msg.get("raw") or {}).get("image_base64")
+                or (msg.get("raw") or {}).get("imageBase64")
             )
+            if msg.get("is_image") and media_candidate and not str(media_candidate).startswith("data:") and not str(media_candidate).startswith("http"):
+                media_candidate = f"data:image/jpeg;base64,{media_candidate}"
             record = WhatsAppService.record_message(
                 organization_id=target_org_id,
                 sender=msg.get("from_phone", "unknown"),

@@ -341,8 +341,12 @@ def parse_green_api_payload(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 or data.get("media_url")
                 or data.get("downloadUrl")
                 or data.get("download_url")
+                or data.get("imageUrl")
+                or data.get("image_url")
                 or (msg_data.get("fileMessageData") or {}).get("downloadUrl")
                 or (msg_data.get("fileMessageData") or {}).get("mediaUrl")
+                or (msg_data.get("fileData") or {}).get("downloadUrl")
+                or (msg_data.get("fileData") or {}).get("mediaUrl")
                 or (msg_data.get("imageMessage") or {}).get("url")
                 or (msg_data.get("audioMessage") or {}).get("url")
                 or None
@@ -354,6 +358,9 @@ def parse_green_api_payload(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 or (msg_data.get("fileMessageData") or {}).get("imageBase64")
                 or (data.get("audio_base64") if is_image else None)
             )
+            if is_image and img_b64 and not media_url:
+                clean_img_b64 = str(img_b64).strip()
+                media_url = clean_img_b64 if clean_img_b64.startswith("data:image") else f"data:image/jpeg;base64,{clean_img_b64}"
             aud_b64 = (
                 data.get("audio_base64")
                 or data.get("audioBase64")
