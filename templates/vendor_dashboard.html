@@ -392,6 +392,15 @@
             transform: scale(1.02);
         }
 
+        /* STRICT SINGLE TAB CONTENT ISOLATION (ONLY ONE SECTION VISIBLE AT A TIME) */
+        #vendorTabContent > .tab-pane {
+            display: none !important;
+        }
+
+        #vendorTabContent > .tab-pane.active {
+            display: block !important;
+        }
+
         /* 5. INVENTORY ACTION BAR */
         .inventory-action-grid {
             display: grid;
@@ -1311,17 +1320,17 @@
             <!-- ========================================================================= -->
             <div class="segmented-tabs-bar" id="vendorTabs" role="tablist">
                 <!-- Tab 1: Mera Saman (Inventory) - Active by default -->
-                <button class="segmented-tab-btn active" id="tab-inventory-btn" type="button" role="tab" onclick="showTab('tab-inventory')">
+                <button class="segmented-tab-btn active" id="tab-inventory-btn" type="button" role="tab" onclick="switchTab('tab-inventory')">
                     <span>📦</span> Mera Saman (Inventory)
                 </button>
 
                 <!-- Tab 2: Rozana Khata & Munafa -->
-                <button class="segmented-tab-btn" id="tab-hisab-btn" type="button" role="tab" onclick="showTab('tab-khata')">
+                <button class="segmented-tab-btn" id="tab-hisab-btn" type="button" role="tab" onclick="switchTab('tab-khata')">
                     <span>💰</span> Rozana Khata &amp; Munafa
                 </button>
 
                 <!-- Tab 3: Orders & Rider Delivery -->
-                <button class="segmented-tab-btn" id="tab-orders-btn" type="button" role="tab" onclick="showTab('tab-orders')">
+                <button class="segmented-tab-btn" id="tab-orders-btn" type="button" role="tab" onclick="switchTab('tab-orders')">
                     <span>🛵</span> Orders &amp; Rider Delivery
                     {% if orders %}
                         <span class="badge bg-danger rounded-pill ms-1">{{ orders|length }}</span>
@@ -1329,7 +1338,7 @@
                 </button>
 
                 <!-- Tab 4: Share Dukaan Link -->
-                <button class="segmented-tab-btn" id="tab-store-btn" type="button" role="tab" onclick="showTab('tab-share')">
+                <button class="segmented-tab-btn" id="tab-store-btn" type="button" role="tab" onclick="switchTab('tab-share')">
                     <span>🔗</span> Share Dukaan Link
                 </button>
             </div>
@@ -2069,45 +2078,82 @@
             }, 3000);
         }
 
-        // 1. STRICT SINGLE TAB SWITCHER (GUARANTEES 100% ISOLATION, NO STACKING)
-        function showTab(targetId) {
-            const tabs = [
-                { id: 'tab-inventory', btnId: 'tab-inventory-btn' },
-                { id: 'tab-khata', btnId: 'tab-hisab-btn' },
-                { id: 'tab-orders', btnId: 'tab-orders-btn' },
-                { id: 'tab-share', btnId: 'tab-store-btn' }
-            ];
+        // =========================================================================
+        // 1. JAVASCRIPT TAB CONTROLLER (switchTab)
+        // =========================================================================
+        function switchTab(tabId) {
+            // Support tab-hisab / tab-store aliases for backwards compatibility
+            if (tabId === 'tab-hisab') tabId = 'tab-khata';
+            if (tabId === 'tab-store') tabId = 'tab-share';
 
-            // Normalize targetId (support aliases)
-            let actualId = targetId;
-            if (targetId === 'tab-hisab') actualId = 'tab-khata';
-            if (targetId === 'tab-store') actualId = 'tab-share';
+            // Select the 4 corresponding section containers
+            const tabContainers = {
+                'tab-inventory': document.getElementById('tab-inventory'),
+                'tab-khata': document.getElementById('tab-khata'),
+                'tab-orders': document.getElementById('tab-orders'),
+                'tab-share': document.getElementById('tab-share')
+            };
 
-            try {
-                sessionStorage.setItem('vendor_active_tab', actualId);
-                if (window.location.hash !== '#' + actualId) {
-                    history.replaceState(null, null, '#' + actualId);
-                }
-            } catch (e) {}
+            // Select the 4 navigation pill buttons
+            const tabButtons = {
+                'tab-inventory': document.getElementById('tab-inventory-btn'),
+                'tab-khata': document.getElementById('tab-hisab-btn'),
+                'tab-orders': document.getElementById('tab-orders-btn'),
+                'tab-share': document.getElementById('tab-store-btn')
+            };
 
-            tabs.forEach(item => {
-                const pane = document.getElementById(item.id);
-                const btn = document.getElementById(item.btnId);
-                if (item.id === actualId) {
-                    if (pane) {
-                        pane.style.display = 'block';
-                        pane.classList.add('active');
-                    }
-                    if (btn) btn.classList.add('active');
-                } else {
-                    if (pane) {
-                        pane.style.display = 'none';
-                        pane.classList.remove('active');
-                    }
-                    if (btn) btn.classList.remove('active');
+            // a) Hide all 4 section containers (display: none)
+            Object.values(tabContainers).forEach(pane => {
+                if (pane) {
+                    pane.style.setProperty('display', 'none', 'important');
+                    pane.classList.remove('active');
                 }
             });
+
+            // b) Remove active/emerald styling from all 4 pill buttons (revert to default inactive state)
+            Object.values(tabButtons).forEach(btn => {
+                if (btn) {
+                    btn.classList.remove('active');
+                    btn.style.setProperty('background', 'transparent', 'important');
+                    btn.style.setProperty('color', '#64748b', 'important');
+                    btn.style.setProperty('box-shadow', 'none', 'important');
+                    btn.setAttribute('aria-selected', 'false');
+                }
+            });
+
+            // Fallback to tab-inventory if target not found
+            if (!tabContainers[tabId]) {
+                tabId = 'tab-inventory';
+            }
+
+            // c) Show the target container (display: block)
+            const targetContainer = tabContainers[tabId];
+            if (targetContainer) {
+                targetContainer.style.setProperty('display', 'block', 'important');
+                targetContainer.classList.add('active');
+            }
+
+            // d) Apply the active styling (emerald green background #10b981, white text) to the clicked button
+            const targetBtn = tabButtons[tabId];
+            if (targetBtn) {
+                targetBtn.classList.add('active');
+                targetBtn.style.setProperty('background', '#10b981', 'important');
+                targetBtn.style.setProperty('color', '#ffffff', 'important');
+                targetBtn.style.setProperty('box-shadow', '0 4px 12px rgba(16, 185, 129, 0.35)', 'important');
+                targetBtn.setAttribute('aria-selected', 'true');
+            }
+
+            // Persist tab state to sessionStorage & URL hash
+            try {
+                sessionStorage.setItem('vendor_active_tab', tabId);
+                if (window.location.hash !== '#' + tabId) {
+                    history.replaceState(null, null, '#' + tabId);
+                }
+            } catch (e) {}
         }
+
+        // Backward compatibility alias
+        window.showTab = switchTab;
 
         // 3. TOGGLE "ADD PRODUCT" FORM AND PRODUCT GRID (SMOOTH & RESPONSIVE)
         function toggleAddProduct(show) {
@@ -2123,17 +2169,36 @@
             }
         }
 
-        // Initialize active tab from URL hash or sessionStorage on DOM load
+        // 2. Default State: on page load, switchTab('tab-inventory') is called automatically
         document.addEventListener('DOMContentLoaded', function() {
+            // Bind explicit click event listeners to segmented tab buttons
+            document.querySelectorAll('.segmented-tabs-bar .segmented-tab-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const target = this.getAttribute('data-tab-target') || this.id.replace('-btn', '');
+                    switchTab(target);
+                });
+            });
+
+            // Check if specific tab was requested via URL hash or saved tab
             const hash = window.location.hash ? window.location.hash.substring(1) : '';
             let savedTab = '';
             try {
                 savedTab = sessionStorage.getItem('vendor_active_tab') || '';
             } catch (e) {}
-            
-            const target = hash || savedTab;
-            if (target && ['tab-inventory', 'tab-khata', 'tab-hisab', 'tab-orders', 'tab-share', 'tab-store'].includes(target)) {
-                showTab(target);
+
+            const initialTab = hash || savedTab || 'tab-inventory';
+            switchTab(initialTab);
+        });
+
+        // Immediate default invocation on load
+        switchTab('tab-inventory');
+
+        // Listen for browser Back/Forward hash changes
+        window.addEventListener('hashchange', function() {
+            const hash = window.location.hash ? window.location.hash.substring(1) : '';
+            if (hash) {
+                switchTab(hash);
             }
         });
 
