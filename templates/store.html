@@ -941,26 +941,36 @@
 
     <!-- Announcement Bar -->
     <div class="announcement-bar" id="announcementBar">
-        🏔️ Pure Chitrali Handicrafts, Dry Fruits &amp; Global Essentials • Fast Courier Dispatch Across Pakistan!
+        {% if is_single_shop and isolated_vendor %}
+            🏪 Welcome to {{ isolated_vendor.name }} • 100% Guaranteed Fresh &amp; Direct Delivery Across Pakistan!
+        {% else %}
+            🏔️ Pure Chitrali Handicrafts, Dry Fruits &amp; Global Essentials • Fast Courier Dispatch Across Pakistan!
+        {% endif %}
     </div>
 
     <!-- Store Header -->
     <header class="store-header">
         <div class="nav-container">
-            <a href="/store" class="brand-logo">
+            <a href="{% if is_single_shop and isolated_vendor %}/store?shop={{ isolated_vendor.id }}{% else %}/store{% endif %}" class="brand-logo">
                 <span class="brand-icon">🏔️</span>
                 <div class="brand-text">
-                    <h1 id="storeBrandTitle">Chitral &amp; Global Bazar</h1>
-                    <span id="storeBadgeSubtitle">Official Online Store</span>
+                    <h1 id="storeBrandTitle">{% if is_single_shop and isolated_vendor %}{{ isolated_vendor.name }}{% else %}Chitral &amp; Global Bazar{% endif %}</h1>
+                    <span id="storeBadgeSubtitle">{% if is_single_shop and isolated_vendor %}{{ isolated_vendor.address or 'Verified Merchant' }} • Official Online Store{% else %}Official Online Store{% endif %}</span>
                 </div>
             </a>
             <div class="header-actions">
+                {% if not is_single_shop %}
                 <button type="button" class="seller-cta-btn" onclick="openSellerListingModal()" title="Muft Saman Lagayein (Free Seller Listing)">
                     <span>&#127978; + Sell Your Item (Muft Saman Lagayein)</span>
                 </button>
                 <button type="button" class="admin-trigger-btn" onclick="openStoreManagerModal()" title="Admin: Add / Edit Store Products & Customize Branding">
                     <span>⚙️ Admin: + Add Product / Edit Store</span>
                 </button>
+                {% else %}
+                <a href="/vendor/portal?shop={{ isolated_vendor.id if isolated_vendor else '' }}" class="admin-trigger-btn" title="Open {{ isolated_vendor.name if isolated_vendor else 'Dukan' }} Private ERP Portal" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                    <span>⚙️ Dukan Admin (ERP)</span>
+                </a>
+                {% endif %}
                 <button type="button" class="cart-trigger-btn" onclick="openCartDrawer()">
                     <span>🛒 Cart</span>
                     <span class="cart-badge" id="cartCountBadge">0</span>
@@ -971,13 +981,14 @@
 
     <!-- Hero Section -->
     <section class="hero-section">
-        <h2 class="hero-title" id="heroStoreTitle">Chitral Food &amp; Bazar</h2>
+        <h2 class="hero-title" id="heroStoreTitle">{% if is_single_shop and isolated_vendor %}{{ isolated_vendor.name }}{% else %}Chitral Food &amp; Bazar{% endif %}</h2>
         <div class="foodpanda-delivery-badges">
-            <span class="foodpanda-badge">⚡ 25-35 min Free Delivery</span>
+            <span class="foodpanda-badge">⚡ 25-35 min Fast Delivery</span>
             <span class="foodpanda-badge blue">📍 Live Bike Rider GPS Tracking</span>
-            <span class="foodpanda-badge amber">🛡️ 100% Authentic Restaurants &amp; Bazar</span>
+            <span class="foodpanda-badge amber">🛡️ 100% Authentic &amp; COD Available</span>
         </div>
 
+        {% if not is_single_shop %}
         <!-- Foodpanda Restaurants & Chitral Local Bazar Dual Experience Switcher -->
         <div class="store-experience-tabs" style="display:flex; justify-content:center; gap:10px; margin: 0 auto 16px; flex-wrap:wrap; max-width:680px;">
             <button type="button" id="tabFoodpanda" class="exp-tab-btn" onclick="switchExperience('foodpanda')" style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:9999px; font-weight:800; font-size:0.92rem; cursor:pointer; border:2px solid #059669; background:#059669; color:#fff; transition:all 0.2s; box-shadow:0 4px 12px rgba(5,150,105,0.25);">
@@ -987,23 +998,26 @@
                 <span>🏔️ Chitral Local Bazar</span>
             </button>
         </div>
+        {% endif %}
 
-        <p class="hero-subtitle" id="heroStoreSubtitle">Order delicious Biryani, Shinwari Karahi, Burgers, Pizza, pure Sidr Honey, Walnuts &amp; authentic Chitrali treasures delivered straight to your door.</p>
+        <p class="hero-subtitle" id="heroStoreSubtitle">{% if is_single_shop and isolated_vendor %}Order authentic products directly from {{ isolated_vendor.name }} with instant WhatsApp dispatch &amp; Cash on Delivery.{% else %}Order delicious Biryani, Shinwari Karahi, Burgers, Pizza, pure Sidr Honey, Walnuts &amp; authentic Chitrali treasures delivered straight to your door.{% endif %}</p>
         <div class="search-wrapper">
             <span class="search-icon">🔍</span>
-            <input type="text" id="searchInput" class="search-input" placeholder="Search biryani, karahi, burger, honey, shawls, walnuts..." oninput="handleSearch(this.value)">
+            <input type="text" id="searchInput" class="search-input" placeholder="{% if is_single_shop and isolated_vendor %}Search in {{ isolated_vendor.name }}...{% else %}Search biryani, karahi, burger, honey, shawls, walnuts...{% endif %}" oninput="handleSearch(this.value)">
         </div>
     </section>
 
     <!-- Category Nav Pills -->
     <div class="category-nav" id="categoryNav">
         <button class="category-pill active" onclick="filterCategory('All')">🌟 All</button>
+        {% if not is_single_shop %}
         <button class="category-pill" onclick="filterCategory('Fast Food & Burgers')">🍔 Fast Food &amp; Burgers</button>
         <button class="category-pill" onclick="filterCategory('Desi & Biryani')">🍲 Desi &amp; Biryani</button>
         <button class="category-pill" onclick="filterCategory('Pizza & Bakery')">🍕 Pizza &amp; Bakery</button>
         <button class="category-pill" onclick="filterCategory('Mountain Honey')">🍯 Mountain Honey</button>
         <button class="category-pill" onclick="filterCategory('Chitrali Crafts')">🧣 Chitrali Crafts</button>
         <button class="category-pill" onclick="filterCategory('Dry Fruits')">🥜 Dry Fruits</button>
+        {% endif %}
     </div>
 
     {% if is_single_shop and isolated_vendor %}
@@ -1570,7 +1584,7 @@
 
     <!-- Storefront Logic -->
     <script>
-        let catalogProducts = [];
+        let catalogProducts = {{ products|tojson|safe if products else '[]' }};
         let currentFilter = 'All';
         let searchQuery = '';
         let cart = [];
@@ -1686,7 +1700,7 @@
             const uniqueVendors = Object.keys(vendorCounts).sort();
             let opts = `<option value="All">All Shops (${catalogProducts.length} items)</option>`;
             uniqueVendors.forEach(vName => {
-                const isSel = (currentVendorFilter === vName) ? 'selected' : '';
+                const isSel = (currentVendorFilter.toLowerCase() === vName.toLowerCase()) ? 'selected' : '';
                 const safeOpt = vName.replace(/"/g, '&quot;');
                 opts += `<option value="${safeOpt}" ${isSel}>🏪 ${vName} (${vendorCounts[vName]} item${vendorCounts[vName] === 1 ? '' : 's'})</option>`;
             });
@@ -1710,10 +1724,34 @@
         }
 
         function filterByVendor(vendorName) {
-            currentVendorFilter = vendorName || 'All';
+            currentVendorFilter = (vendorName || 'All').trim();
             const select = document.getElementById('vendorSelectFilter');
             if (select) select.value = currentVendorFilter;
-            renderVendorFilterDropdown();
+
+            const activeTag = document.getElementById('activeVendorTag');
+            const activeName = document.getElementById('activeVendorName');
+            if (activeTag && activeName) {
+                if (currentVendorFilter !== 'All') {
+                    activeName.textContent = `Shop: ${currentVendorFilter}`;
+                    activeTag.style.display = 'inline-flex';
+                } else {
+                    activeTag.style.display = 'none';
+                }
+            }
+
+            try {
+                const url = new URL(window.location);
+                if (currentVendorFilter !== 'All') {
+                    url.searchParams.set('shop', currentVendorFilter);
+                } else {
+                    url.searchParams.delete('shop');
+                    url.searchParams.delete('vendor_id');
+                }
+                window.history.replaceState({}, '', url);
+            } catch (e) {}
+
+            currentFilter = 'All';
+            renderCategoryNav();
             renderProducts();
         }
 
@@ -1738,6 +1776,10 @@
                     } else if (shopTarget) {
                         catalogProducts = [];
                     }
+                }
+
+                if (!IS_SINGLE_SHOP && shopTarget && currentVendorFilter === 'All') {
+                    currentVendorFilter = shopTarget;
                 }
             } catch (e) {
                 console.debug('Store API fallback:', e);
@@ -1768,8 +1810,35 @@
         // Dynamically build category pills from active loaded products in strict requested order
         function renderCategoryNav() {
             const nav = document.getElementById('categoryNav');
+            if (!nav) return;
             let pool = catalogProducts;
-            if (activeExperience === 'foodpanda') {
+
+            if (IS_SINGLE_SHOP || currentVendorFilter !== 'All') {
+                const targetV = (currentVendorFilter || '').trim().toLowerCase();
+                if (!IS_SINGLE_SHOP && targetV && targetV !== 'all') {
+                    pool = pool.filter(p => {
+                        const sName = (p.seller_name || '').trim().toLowerCase();
+                        const vName = (p.vendor_name || '').trim().toLowerCase();
+                        const vId = String(p.vendor_id || '').trim();
+                        return sName === targetV || vName === targetV || sName.includes(targetV) || targetV.includes(sName) || (vId && vId === targetV);
+                    });
+                }
+                // For a single vendor or filtered shop, show ONLY categories this shop actually has!
+                let html = `<button class="category-pill ${currentFilter === 'All' ? 'active' : ''}" onclick="filterCategory('All')">🌟 All (${pool.length})</button>`;
+                const shopCategories = new Set();
+                pool.forEach(p => {
+                    const c = (p.category || 'General').trim();
+                    if (c && !shopCategories.has(c.toLowerCase())) {
+                        shopCategories.add(c.toLowerCase());
+                        const isActive = (currentFilter.toLowerCase() === c.toLowerCase()) ? 'active' : '';
+                        const icon = getCategoryIcon(c);
+                        const safeCat = c.replace(/'/g, "\\'");
+                        html += `<button class="category-pill ${isActive}" onclick="filterCategory('${safeCat}')">${icon} ${c}</button>`;
+                    }
+                });
+                nav.innerHTML = html;
+                return;
+            } else if (activeExperience === 'foodpanda') {
                 pool = pool.filter(p => {
                     const c = (p.category || '').toLowerCase();
                     return c.includes('food') || c.includes('burger') || c.includes('biryani') || c.includes('karahi') || c.includes('pizza') || c.includes('bakery') || c.includes('desi') || c.includes('kabab');
@@ -1824,22 +1893,31 @@
             let filtered = catalogProducts.filter(p => {
                 const cat = (p.category || '').toLowerCase();
                 let matchesExp = true;
-                if (activeExperience === 'foodpanda') {
-                    matchesExp = cat.includes('food') || cat.includes('burger') || cat.includes('biryani') || cat.includes('karahi') || cat.includes('pizza') || cat.includes('bakery') || cat.includes('cafe') || cat.includes('desi');
-                } else if (activeExperience === 'bazar') {
-                    matchesExp = cat.includes('honey') || cat.includes('craft') || cat.includes('shawl') || cat.includes('pakol') || cat.includes('pattu') || cat.includes('fruit') || cat.includes('nut') || cat.includes('dry') || cat.includes('shilajit') || cat.includes('gem') || cat.includes('mineral') || cat.includes('apparel') || cat.includes('cloth') || cat.includes('footwear') || cat.includes('fashion') || cat.includes('bazar');
+                if (!IS_SINGLE_SHOP && currentVendorFilter === 'All') {
+                    if (activeExperience === 'foodpanda') {
+                        matchesExp = cat.includes('food') || cat.includes('burger') || cat.includes('biryani') || cat.includes('karahi') || cat.includes('pizza') || cat.includes('bakery') || cat.includes('cafe') || cat.includes('desi');
+                    } else if (activeExperience === 'bazar') {
+                        matchesExp = cat.includes('honey') || cat.includes('craft') || cat.includes('shawl') || cat.includes('pakol') || cat.includes('pattu') || cat.includes('fruit') || cat.includes('nut') || cat.includes('dry') || cat.includes('shilajit') || cat.includes('gem') || cat.includes('mineral') || cat.includes('apparel') || cat.includes('cloth') || cat.includes('footwear') || cat.includes('fashion') || cat.includes('bazar');
+                    }
                 }
 
                 const matchesCat = (currentFilter === 'All') || (p.category && p.category.toLowerCase().includes(currentFilter.toLowerCase()));
                 const matchesSearch = !searchQuery || (
-                    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (p.name && p.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
                     (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
                     (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()))
                 );
-                const matchesVendor = (currentVendorFilter === 'All') || (
-                    (p.seller_name || '').toLowerCase() === currentVendorFilter.toLowerCase() ||
-                    (p.vendor_name || '').toLowerCase() === currentVendorFilter.toLowerCase()
-                );
+
+                const targetV = (currentVendorFilter || 'All').trim().toLowerCase();
+                let matchesVendor = (targetV === 'all');
+                if (!matchesVendor) {
+                    const sName = (p.seller_name || '').trim().toLowerCase();
+                    const vName = (p.vendor_name || '').trim().toLowerCase();
+                    const vId = String(p.vendor_id || '').trim();
+                    matchesVendor = (sName === targetV || vName === targetV ||
+                                     sName.includes(targetV) || targetV.includes(sName) ||
+                                     (vId && vId === targetV));
+                }
                 return matchesExp && matchesCat && matchesSearch && matchesVendor;
             });
 

@@ -154,6 +154,64 @@ class GlobalBazarService:
             return {"id": 1, "name": "Dukan Owner", "phone": phone}
 
     @classmethod
+    def resolve_vendor_by_target(cls, target: Any) -> Optional[Dict[str, Any]]:
+        """
+        Flexibly resolves a vendor by:
+        1. Integer/Numeric Vendor ID
+        2. Phone number (exact or last 10 digits)
+        3. Shop name or slug (e.g. 'Bashir Store (Chitral Bazar)', 'bashir-store', 'bashir')
+        Returns vendor dict or None without creating dummy vendors.
+        """
+        if not target:
+            return None
+        target_str = str(target).strip()
+        if not target_str:
+            return None
+
+        # 1. Try numeric ID
+        try:
+            v_id = int(target_str)
+            v = cls.get_vendor_by_id(v_id)
+            if v:
+                return v
+        except ValueError:
+            pass
+
+        # 2. Try phone number
+        digits = "".join(filter(str.isdigit, target_str))
+        try:
+            with cls.get_db_connection() as conn:
+                c = conn.cursor()
+                if len(digits) >= 7:
+                    row = c.execute(
+                        "SELECT * FROM vendors WHERE phone = ? OR phone LIKE ?",
+                        (target_str, f"%{digits[-10:]}%")
+                    ).fetchone()
+                    if row:
+                        return dict(row)
+
+                # 3. Try shop name or slug match
+                clean_name = target_str.replace("-", " ").replace("_", " ").strip().lower()
+                if clean_name:
+                    row = c.execute(
+                        "SELECT * FROM vendors WHERE LOWER(name) = ?",
+                        (clean_name,)
+                    ).fetchone()
+                    if row:
+                        return dict(row)
+
+                    row = c.execute(
+                        "SELECT * FROM vendors WHERE LOWER(name) LIKE ?",
+                        (f"%{clean_name}%",)
+                    ).fetchone()
+                    if row:
+                        return dict(row)
+        except Exception as e:
+            logger.error(f"[GlobalBazar] Error in resolve_vendor_by_target({target}): {e}")
+
+        return None
+
+    @classmethod
     def get_vendor_dashboard_data(cls, vendor_id: int) -> Dict[str, Any]:
         """Fetches complete profile, inventory, and stats for a specific vendor's mobile portal."""
         vendor = cls.get_vendor_by_id(vendor_id)

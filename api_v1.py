@@ -10674,12 +10674,7 @@ def api_store_products():
         from services.global_bazar_service import GlobalBazarService
         shop_param = request.args.get("shop") or request.args.get("vendor_id")
         if shop_param:
-            v_obj = None
-            try:
-                v_obj = GlobalBazarService.get_vendor_by_id(int(shop_param))
-            except ValueError:
-                v_obj = GlobalBazarService.get_vendor_by_phone(str(shop_param))
-
+            v_obj = GlobalBazarService.resolve_vendor_by_target(shop_param)
             if v_obj:
                 v_id = v_obj["id"]
                 v_phone = v_obj.get("phone") or "+923471000668"
@@ -10719,6 +10714,14 @@ def api_store_products():
                     "total": len(single_vendor_results),
                     "shop": v_name,
                     "vendor_id": v_id,
+                    "is_single_shop": True
+                }), 200
+            else:
+                return jsonify({
+                    "success": True,
+                    "products": [],
+                    "total": 0,
+                    "shop": str(shop_param),
                     "is_single_shop": True
                 }), 200
 

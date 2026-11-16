@@ -494,6 +494,11 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Session Inactivity & Master Admin Enterprise Bypass Logic
     @application.before_request
     def check_master_admin_entitlements():
+        # Complete bypass for mobile vendor portal, isolated storefronts, and store APIs:
+        # Never redirect vendors or storefront customers to admin login or /dashboard
+        if request.path.startswith(("/vendor", "/store", "/dukan", "/dukaan", "/api/store")):
+            return None
+
         now_ts = time.time()
         timeout_seconds = int(os.environ.get("SESSION_INACTIVITY_TIMEOUT", "3600"))
         last_active = session.get("last_activity")
@@ -1998,8 +2003,11 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # =========================================================================
 
     @application.route("/store", methods=["GET", "HEAD", "OPTIONS"])
-    @application.route("/dukan/<int:dukan_id>", methods=["GET", "HEAD", "OPTIONS"])
-    def public_storefront(dukan_id: Optional[int] = None):
+    @application.route("/dukan", methods=["GET", "HEAD", "OPTIONS"])
+    @application.route("/dukaan", methods=["GET", "HEAD", "OPTIONS"])
+    @application.route("/dukan/<path:dukan_id>", methods=["GET", "HEAD", "OPTIONS"])
+    @application.route("/dukaan/<path:dukan_id>", methods=["GET", "HEAD", "OPTIONS"])
+    def public_storefront(dukan_id: Optional[str] = None):
         if request.method == "OPTIONS":
             resp = application.make_response("")
             resp.headers["Allow"] = "GET, HEAD, OPTIONS"
@@ -2016,11 +2024,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
             isolated_vendor = None
             if target_shop:
-                try:
-                    v_int = int(target_shop)
-                    isolated_vendor = GlobalBazarService.get_vendor_by_id(v_int)
-                except ValueError:
-                    isolated_vendor = GlobalBazarService.get_vendor_by_phone(str(target_shop))
+                isolated_vendor = GlobalBazarService.resolve_vendor_by_target(target_shop)
 
             jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
 
@@ -2065,6 +2069,18 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     currency="PKR",
                     jazzcash_number=jc_num,
                     isolated_vendor=isolated_vendor,
+                    is_single_shop=True
+                )
+            elif target_shop:
+                # Target shop parameter was specified but vendor not found:
+                # Strictly return isolated empty store. NEVER fall through to global multi-shop items!
+                return render_template(
+                    "store.html",
+                    products=[],
+                    business_name=f"Shop {target_shop}",
+                    currency="PKR",
+                    jazzcash_number=jc_num,
+                    isolated_vendor={"id": target_shop, "name": f"Shop {target_shop}", "phone": ""},
                     is_single_shop=True
                 )
 
@@ -2166,10 +2182,22 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # MOBILE VENDOR PORTAL & MAGIC LINK AUTHENTICATION ROUTES
     # =========================================================================
 
+    @application.route("/vendor", methods=["GET"])
+    @application.route("/vendor/", methods=["GET"])
+    def vendor_index_redirect():
+        token = request.args.get("token")
+        if token:
+            return redirect(f"/vendor/auth/{token}")
+        shop = request.args.get("shop") or request.args.get("vendor_id") or request.args.get("phone")
+        if shop:
+            return redirect(f"/vendor/portal?shop={shop}")
+        return redirect("/vendor/portal")
+
     @application.route("/vendor/auth/<token>", methods=["GET"])
+    @application.route("/vendor/auth", methods=["GET"])
     @application.route("/vendor/portal", methods=["GET"])
     def vendor_auth_magic_link(token: Optional[str] = None):
-        """Authenticates vendor via one-click WhatsApp magic link and renders ERP dashboard directly."""
+        """Authenticates vendor via one-click WhatsApp magic link or vendor ID/shop query param."""
         try:
             from services.global_bazar_service import GlobalBazarService
             token_val = token or request.args.get("token")
@@ -2180,17 +2208,23 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             vendor = None
             if auth_data:
                 vendor = auth_data["vendor"]
+            else:
+                param_target = request.args.get("shop") or request.args.get("vendor_id") or request.args.get("phone")
+                if param_target:
+                    vendor = GlobalBazarService.resolve_vendor_by_target(param_target)
+
+            if not vendor and session.get("vendor_id"):
+                vendor = GlobalBazarService.get_vendor_by_id(int(session["vendor_id"]))
+            elif not vendor and not token_val and not request.args.get("shop") and not request.args.get("vendor_id"):
+                # If accessed without token or shop param, fallback to default vendor ID
+                vendor = GlobalBazarService.get_vendor_by_id(GlobalBazarService.get_default_vendor_id())
+
+            if vendor:
                 session["vendor_id"] = vendor["id"]
                 session["vendor_phone"] = vendor.get("phone", "")
                 session["vendor_name"] = vendor.get("name", "Vendor")
                 session.permanent = True
-            elif session.get("vendor_id"):
-                vendor = GlobalBazarService.get_vendor_by_id(int(session["vendor_id"]))
-            elif not token_val:
-                # If accessed without token, fallback to default vendor ID
-                vendor = GlobalBazarService.get_vendor_by_id(GlobalBazarService.get_default_vendor_id())
-
-            if not vendor:
+            else:
                 return render_template(
                     "vendor_dashboard.html",
                     error="Aapka login link expire ho gaya hai ya invalid hai. Baraye meharbani WhatsApp par 'meri dukan' ya 'my shop' bhej kar naya link hasil karein.",
@@ -2235,21 +2269,37 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         try:
             from services.global_bazar_service import GlobalBazarService
             token = request.args.get("token")
+            vendor = None
             if token:
                 auth_data = GlobalBazarService.verify_vendor_magic_token(token)
                 if auth_data:
                     vendor = auth_data["vendor"]
-                    session["vendor_id"] = vendor["id"]
-                    session["vendor_phone"] = vendor.get("phone", "")
-                    session["vendor_name"] = vendor.get("name", "Vendor")
-                    session.permanent = True
 
-            vendor_id = session.get("vendor_id")
-            if not vendor_id:
-                # If accessed without session, try default vendor or show error
-                vendor_id = GlobalBazarService.get_default_vendor_id()
+            if not vendor:
+                param_target = request.args.get("shop") or request.args.get("vendor_id") or request.args.get("phone")
+                if param_target:
+                    vendor = GlobalBazarService.resolve_vendor_by_target(param_target)
 
-            data = GlobalBazarService.get_vendor_dashboard_data(int(vendor_id))
+            if not vendor and session.get("vendor_id"):
+                vendor = GlobalBazarService.get_vendor_by_id(int(session["vendor_id"]))
+
+            if not vendor:
+                vendor = GlobalBazarService.get_vendor_by_id(GlobalBazarService.get_default_vendor_id())
+
+            if not vendor:
+                return render_template(
+                    "vendor_dashboard.html",
+                    error="Vendor profile dastiyaab nahi hai.",
+                    vendor=None,
+                    products=[]
+                ), 404
+
+            session["vendor_id"] = vendor["id"]
+            session["vendor_phone"] = vendor.get("phone", "")
+            session["vendor_name"] = vendor.get("name", "Vendor")
+            session.permanent = True
+
+            data = GlobalBazarService.get_vendor_dashboard_data(int(vendor["id"]))
             if not data or not data.get("vendor"):
                 return render_template(
                     "vendor_dashboard.html",
@@ -2412,13 +2462,13 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             if request.is_json:
                 return jsonify(res), 200
             flash(f"Bijak Successfully Processed: {res.get('total_items', 0)} items added/updated into inventory!", "success")
-            return redirect(request.referrer or url_for("vendor_portal_view"))
+            return redirect(request.referrer or url_for("vendor_dashboard_view"))
         except Exception as e:
             application.logger.error(f"Bijak upload error: {e}")
             if request.is_json:
                 return jsonify({"success": False, "error": str(e)}), 400
             flash(f"Error processing bijak: {e}", "danger")
-            return redirect(request.referrer or url_for("vendor_portal_view"))
+            return redirect(request.referrer or url_for("vendor_dashboard_view"))
 
     @application.route("/vendor/khata/record", methods=["POST"])
     def vendor_record_khata():
