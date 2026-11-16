@@ -1177,6 +1177,59 @@
             from { transform: translateY(20px); opacity: 0; }
             to { transform: translateY(0); opacity: 1; }
         }
+
+        /* ========================================================================= */
+        /* TRUE MODAL OVERLAY SYSTEM (HIDDEN BY DEFAULT, ACTIVATED VIA openModal) */
+        /* ========================================================================= */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            overflow-y: auto;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .modal-overlay.active {
+            display: flex !important;
+        }
+
+        .modal-overlay .modal-content,
+        .modal-content {
+            width: 100% !important;
+            max-width: 600px !important;
+            background: #ffffff !important;
+            border-radius: 16px !important;
+            padding: 32px !important;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+            position: relative !important;
+            max-height: 90vh !important;
+            overflow-y: auto !important;
+            border: 1px solid #e2e8f0 !important;
+            box-sizing: border-box !important;
+            margin: 0 !important;
+            animation: modalFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes modalFadeIn {
+            from {
+                opacity: 0;
+                transform: scale(0.96) translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
     </style>
 </head>
 <body>
@@ -1226,7 +1279,7 @@
                         </a>
 
                         <!-- Gold/Purple Gradient Pro Button -->
-                        <button type="button" class="hero-btn hero-btn-pro" data-bs-toggle="modal" data-bs-target="#proUpgradeModal">
+                        <button type="button" class="hero-btn hero-btn-pro" onclick="openModal('modal-pro-upgrade')">
                             <span>🚀</span> Pro WhatsApp Bot &amp; CRM
                         </button>
 
@@ -1355,83 +1408,20 @@
 
                     <!-- 5. ULTRA-CLEAN INVENTORY ACTION BAR (SIDE-BY-SIDE BUTTONS) -->
                     <div class="inventory-action-grid">
-                        <!-- Blue Button: + Naya Saman Daalein (Toggles Add Product Form Card) -->
-                        <button type="button" class="btn-action-hero btn-action-indigo" id="btnAddProductToggle" onclick="toggleAddProduct(true)">
+                        <!-- Blue Button: + Naya Saman Daalein (Opens Add Product Modal) -->
+                        <button type="button" class="btn-action-hero btn-action-indigo" id="btnAddProductToggle" onclick="openModal('modal-add-product')">
                             <span class="fs-4">+</span>
                             <span>+ Naya Saman Daalein (Add Item)</span>
                         </button>
 
                         <!-- Green Button: Bijak / Parchi Upload -->
-                        <button type="button" class="btn-action-hero btn-action-emerald" data-bs-toggle="modal" data-bs-target="#uploadBijakModal">
+                        <button type="button" class="btn-action-hero btn-action-emerald" onclick="openModal('modal-upload-bijak')">
                             <span class="fs-4">📄</span>
                             <span>📄 Bijak / Parchi Upload Karein (AI Auto-Scan)</span>
                         </button>
                     </div>
 
-                    <!-- 1. PREMIUM SAAS ADD PRODUCT FORM (CENTERED WHITE SURFACE CARD) -->
-                    <div id="addProductCardWrapper" style="display: none;">
-                        <div class="saas-card-surface">
-                            <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
-                                <div>
-                                    <h4 class="fw-black text-dark mb-1">📦 + Naya Saman Daalein</h4>
-                                    <p class="text-muted small mb-0">Product details enter karein taake live dukaan aur inventory mein shamil ho sake</p>
-                                </div>
-                                <button type="button" class="btn-close" onclick="toggleAddProduct(false)" aria-label="Cancel"></button>
-                            </div>
-                            <form method="POST" action="/vendor/product/add" id="addProductForm" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
-                                <div>
-                                    <label class="saas-form-label">Saman Ka Naam (Product Title) *</label>
-                                    <input type="text" class="saas-form-input" name="title" id="saasProdTitle" placeholder="e.g. Heavy Duty Brass Security Padlock" required>
-                                </div>
-                                <div class="row g-2">
-                                    <div class="col-md-6">
-                                        <label class="saas-form-label">Bikri Rate / Price (PKR) *</label>
-                                        <input type="number" step="0.01" min="1" class="saas-form-input fw-bold text-success" name="price" id="saasProdPrice" placeholder="450" required>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="saas-form-label">Kharid Rate / Cost (PKR)</label>
-                                        <input type="number" step="0.01" min="0" class="saas-form-input text-muted" name="cost_price" id="saasProdCost" placeholder="320">
-                                    </div>
-                                </div>
-                                <div class="row g-2">
-                                    <div class="col-md-6">
-                                        <label class="saas-form-label">Category *</label>
-                                        <select class="saas-form-input" name="category" id="saasProdCat">
-                                            <option value="Hardware & Tools" selected>Hardware &amp; Tools</option>
-                                            <option value="General">General Store</option>
-                                            <option value="Electronics">Electronics</option>
-                                            <option value="Apparel & Accessories">Apparel &amp; Accessories</option>
-                                            <option value="Chitrali Crafts">Chitrali Crafts</option>
-                                            <option value="Dry Fruits">Dry Fruits</option>
-                                            <option value="Home & Kitchen">Home &amp; Kitchen</option>
-                                            <option value="Fast Food & Burgers">Fast Food &amp; Burgers</option>
-                                            <option value="Desi & Biryani">Desi &amp; Biryani</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="saas-form-label">Initial Stock Quantity *</label>
-                                        <input type="number" min="0" class="saas-form-input fw-bold" name="stock" id="saasProdStock" value="15" required>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label class="saas-form-label">Image URL (Optional)</label>
-                                    <input type="url" class="saas-form-input" name="image_url" id="saasProdImage" placeholder="https://... (or leave empty for default)">
-                                </div>
-                                <div>
-                                    <label class="saas-form-label">Tafseel (Description)</label>
-                                    <textarea class="saas-form-input" name="description" id="saasProdDesc" rows="3" placeholder="Brief quality, size, and material description for online customers..."></textarea>
-                                </div>
-                                <div class="d-flex justify-content-end align-items-center gap-3 pt-3 border-top">
-                                    <button type="button" class="btn btn-light rounded-pill px-4 fw-bold" onclick="toggleAddProduct(false)">Cancel</button>
-                                    <button type="submit" class="btn-luxury-pill">
-                                        <span>📦</span> + Save &amp; Add Product
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-
-                    <!-- PRODUCT GRID SECTION (Smoothly toggled when Add Product is opened/closed) -->
+                    <!-- PRODUCT GRID SECTION -->
                     <div id="productGridWrapper">
 
                     <!-- Search & Filter Controls -->
@@ -1530,60 +1520,32 @@
                     <!-- Anchor for test compatibility -->
                     <span id="tab-hisab" style="display:none;"></span>
 
-                    <!-- Quick Sale & Khata Entry Bar (Modern Horizontal Card) -->
+                    <!-- Quick Sale & Khata Entry Action Bar (Opens Pop-up Modal) -->
                     <div class="content-panel-box mb-4">
-                        <div class="panel-header-luxury">
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
                             <div>
                                 <div class="d-flex align-items-center gap-2 mb-1">
                                     <span class="fs-4">⚡</span>
-                                    <h4 class="fw-black text-dark mb-0">Quick Sale &amp; Khata Entry</h4>
+                                    <h4 class="fw-black text-dark mb-0">Rozana Khata &amp; Hisab Kitab</h4>
                                     <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fw-bold rounded-pill px-3 py-1">
                                         ● Real-Time Ledger Sync
                                     </span>
                                 </div>
                                 <small class="text-muted">Instant entry updates both Daily Cash Balance and Udhaar Ledger</small>
                             </div>
-                            <div class="d-flex flex-wrap align-items-center gap-2">
-                                <span class="small text-muted fw-bold">Parchi Shortcuts:</span>
-                                <span class="quick-chip" onclick="setKhataShortcut('sale', 'Counter Cash Bikri')">💰 Cash Bikri</span>
-                                <span class="quick-chip" onclick="setKhataShortcut('credit', 'Gahak Udhaar')">📒 Udhaar</span>
-                                <span class="quick-chip" onclick="setKhataShortcut('expense', 'Dukan Kharcha')">🧾 Kharcha</span>
+                            <div>
+                                <button type="button" class="btn-action-hero btn-action-emerald" onclick="openModal('modal-add-khata')" style="padding: 12px 24px; font-size: 0.95rem;">
+                                    <span class="fs-5">⚡</span>
+                                    <span>+ Nayi Khata Entry Daalein</span>
+                                </button>
                             </div>
                         </div>
-                        <form method="POST" action="/vendor/khata/record" id="khataRecordForm" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-khata');">
-                            <div class="khata-grid-refined">
-                                <div>
-                                    <label class="saas-form-label">Entry Type *</label>
-                                    <select class="saas-form-input fw-bold" name="entry_type" id="khataEntryTypeSelect" required>
-                                        <option value="sale" selected>💰 Cash Bikri</option>
-                                        <option value="credit">📒 Udhaar</option>
-                                        <option value="expense">🧾 Dukan Kharcha</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="saas-form-label">Amount (PKR) *</label>
-                                    <input type="number" step="0.01" min="1" class="saas-form-input fw-black" name="amount" id="khataAmountInput" placeholder="e.g. 1500" required>
-                                </div>
-                                <div>
-                                    <label class="saas-form-label">Tafseel (Description / Customer Name)</label>
-                                    <input type="text" class="saas-form-input" name="description" id="khataDescInput" placeholder="e.g. Counter Bikri, Chai/Nashta, Kiraya">
-                                </div>
-                                <div>
-                                    <button type="submit" class="btn-luxury-pill w-100" style="height: 48px;">
-                                        <span>✓</span> Save Khata Entry
-                                    </button>
-                                </div>
-                            </div>
-                            <!-- Quick description tags for fast counter entries -->
-                            <div class="d-flex flex-wrap align-items-center gap-2 mt-3 pt-2 border-top border-light">
-                                <small class="text-muted fw-bold me-1">Fast fill description:</small>
-                                <span class="quick-chip" onclick="fillDesc('Counter Cash Bikri')">⚡ Counter Cash</span>
-                                <span class="quick-chip" onclick="fillDesc('Chai / Refreshment')">☕ Chai/Nashta</span>
-                                <span class="quick-chip" onclick="fillDesc('Dukan Kiraya / Rent')">🏠 Dukan Kiraya</span>
-                                <span class="quick-chip" onclick="fillDesc('Bijli / Utility Bill')">💡 Bijli Bill</span>
-                                <span class="quick-chip" onclick="fillDesc('Delivery Rider Charges')">🛵 Delivery Fee</span>
-                            </div>
-                        </form>
+                        <div class="d-flex flex-wrap align-items-center gap-2 mt-3 pt-3 border-top border-light">
+                            <span class="small text-muted fw-bold">Parchi Shortcuts:</span>
+                            <span class="quick-chip" onclick="setKhataShortcut('sale', 'Counter Cash Bikri')">💰 Cash Bikri</span>
+                            <span class="quick-chip" onclick="setKhataShortcut('credit', 'Gahak Udhaar')">📒 Udhaar</span>
+                            <span class="quick-chip" onclick="setKhataShortcut('expense', 'Dukan Kharcha')">🧾 Kharcha</span>
+                        </div>
                     </div>
 
                     <!-- Khata & Financial Breakdown -->
@@ -1873,189 +1835,300 @@
             </div>
 
             <!-- ========================================================================= -->
-            <!-- MODALS (PROFESSIONAL ENTERPRISE SAAS SYSTEM) -->
+            <!-- MODALS (TRUE INTERACTIVE POP-UP MODAL OVERLAYS - HIDDEN BY DEFAULT) -->
             <!-- ========================================================================= -->
 
-            <!-- Modal 1: Edit Product -->
-            <div class="modal fade" id="editProductModal" tabindex="-1" aria-labelledby="editProductModalLabel" aria-hidden="true">
-                <div class="modal-dialog modal-dialog-centered" style="max-width: 600px; margin: 2rem auto;">
-                    <div class="modal-content border-0" style="background: #ffffff; border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); padding: 32px; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0;">
-                        <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
-                            <div class="d-flex align-items-center gap-3">
-                                <div style="width: 44px; height: 44px; font-size: 1.35rem; background: #eff6ff; color: #2563eb; border: 1.5px solid #bfdbfe; border-radius: 12px; display: flex; align-items: center; justify-content: center;">
-                                    ✏️
-                                </div>
-                                <div>
-                                    <h5 class="fw-black text-dark mb-0" id="editProductModalLabel">Edit Product Details</h5>
-                                    <small class="text-muted">Update live price, wholesale cost, category, and inventory stock</small>
-                                </div>
+            <!-- Modal 1: Edit Product (Interactive Pop-up Modal) -->
+            <div id="modal-edit-product" class="modal-overlay" onclick="if(event.target===this) closeModal('modal-edit-product')">
+                <div class="modal-content" id="editProductModal">
+                    <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+                        <div class="d-flex align-items-center gap-3">
+                            <div style="width: 44px; height: 44px; font-size: 1.35rem; background: #eff6ff; color: #2563eb; border: 1.5px solid #bfdbfe; border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                                ✏️
                             </div>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            <div>
+                                <h5 class="fw-black text-dark mb-0" id="editProductModalLabel">Edit Product Details</h5>
+                                <small class="text-muted">Update live price, wholesale cost, category, and inventory stock</small>
+                            </div>
                         </div>
-                        <form method="POST" action="/vendor/product/edit" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
-                            <input type="hidden" name="product_id" id="editProdId">
-                            <div class="mb-3">
-                                <label class="saas-form-label">Saman Ka Naam (Product Title) *</label>
-                                <input type="text" class="saas-form-input" name="title" id="editProdTitle" required>
+                        <button type="button" class="btn-close" onclick="closeModal('modal-edit-product')" aria-label="Close"></button>
+                    </div>
+                    <form method="POST" action="/vendor/product/edit" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
+                        <input type="hidden" name="product_id" id="editProdId">
+                        <div class="mb-3">
+                            <label class="saas-form-label">Saman Ka Naam (Product Title) *</label>
+                            <input type="text" class="saas-form-input" name="title" id="editProdTitle" required>
+                        </div>
+                        <div class="row g-3 mb-1">
+                            <div class="col-md-6">
+                                <label class="saas-form-label">Bikri Rate / Price (PKR) *</label>
+                                <input type="number" step="0.01" min="1" class="saas-form-input fw-bold text-success" name="price" id="editProdPrice" required>
                             </div>
-                            <div class="row g-3 mb-1">
-                                <div class="col-md-6">
-                                    <label class="saas-form-label">Bikri Rate / Price (PKR) *</label>
-                                    <input type="number" step="0.01" min="1" class="saas-form-input fw-bold text-success" name="price" id="editProdPrice" required>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="saas-form-label">Kharid Rate / Cost (PKR)</label>
-                                    <input type="number" step="0.01" min="0" class="saas-form-input text-muted" name="cost_price" id="editProdCostPrice">
-                                </div>
+                            <div class="col-md-6">
+                                <label class="saas-form-label">Kharid Rate / Cost (PKR)</label>
+                                <input type="number" step="0.01" min="0" class="saas-form-input text-muted" name="cost_price" id="editProdCostPrice">
                             </div>
-                            <div class="row g-3 mb-4">
-                                <div class="col-md-6">
-                                    <label class="saas-form-label">Category</label>
-                                    <input type="text" class="saas-form-input mb-0" name="category" id="editProdCategory">
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="saas-form-label">Stock Quantity</label>
-                                    <input type="number" min="0" class="saas-form-input fw-bold mb-0" name="stock" id="editProdStock">
-                                </div>
+                        </div>
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-6">
+                                <label class="saas-form-label">Category</label>
+                                <input type="text" class="saas-form-input mb-0" name="category" id="editProdCategory">
                             </div>
-                            <div class="d-flex justify-content-between align-items-center pt-3 border-top">
-                                <span class="small text-muted fw-bold">✓ Updates immediately live on customer storefront</span>
+                            <div class="col-md-6">
+                                <label class="saas-form-label">Stock Quantity</label>
+                                <input type="number" min="0" class="saas-form-input fw-bold mb-0" name="stock" id="editProdStock">
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center pt-3 border-top">
+                            <span class="small text-muted fw-bold">✓ Updates immediately live on customer storefront</span>
+                            <div class="d-flex align-items-center gap-2">
+                                <button type="button" class="btn btn-light rounded-pill px-4 fw-bold" onclick="closeModal('modal-edit-product')">Cancel</button>
+                                <button type="submit" class="btn-luxury-pill">
+                                    <span>✓</span> Update Product
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Modal 2: Upload Bijak / Wholesale Bill (Interactive Pop-up Modal) -->
+            <div id="modal-upload-bijak" class="modal-overlay" onclick="if(event.target===this) closeModal('modal-upload-bijak')">
+                <div class="modal-content" id="uploadBijakModal">
+                    <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+                        <div class="d-flex align-items-center gap-3">
+                            <div style="width: 44px; height: 44px; font-size: 1.35rem; background: #ecfdf5; color: #059669; border: 1.5px solid #a7f3d0; border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                                📄
+                            </div>
+                            <div>
                                 <div class="d-flex align-items-center gap-2">
-                                    <button type="button" class="btn btn-light rounded-pill px-4 fw-bold" data-bs-dismiss="modal">Cancel</button>
-                                    <button type="submit" class="btn-luxury-pill">
-                                        <span>✓</span> Update Product
-                                    </button>
+                                    <h5 class="fw-black text-dark mb-0" id="uploadBijakModalLabel">Upload Wholesale Bijak / Bill</h5>
+                                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 rounded-pill px-2 py-0 small fw-bold">AI Vision</span>
                                 </div>
+                                <small class="text-muted">Auto-parse handwritten parchi or printed invoice to add items</small>
                             </div>
-                        </form>
+                        </div>
+                        <button type="button" class="btn-close" onclick="closeModal('modal-upload-bijak')" aria-label="Close"></button>
+                    </div>
+                    <form method="POST" action="/vendor/upload-bijak" enctype="multipart/form-data" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
+                        <div class="p-3 mb-4 rounded-3 d-flex align-items-start gap-3" style="background: #f0fdf4; border: 1px solid #bbf7d0;">
+                            <span class="fs-4">💡</span>
+                            <div class="small text-dark">
+                                <strong>Smart Gemini Vision AI:</strong> Apni dukan ka wholesale bill, handwritten parchi ya invoice ki photo upload karein. Vision AI parchi ke tamam items, quantities, aur kharid/bikri rates parh kar seedha aapki inventory mein shamil kar dega!
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="saas-form-label">Bill / Bijak Photo ya Document *</label>
+                            <div class="bijak-dropzone position-relative" style="border: 2px dashed #10b981; background: #f8fafc; border-radius: 14px; padding: 28px 20px; text-align: center; cursor: pointer; transition: all 0.2s ease;">
+                                <input type="file" name="bijak_file" id="bijakFileInput" accept="image/*,.pdf" required style="position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 10;" onchange="updateBijakFileName(this)">
+                                <div style="width: 52px; height: 52px; margin: 0 auto 12px; background: #ecfdf5; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; color: #059669; border: 1.5px solid #a7f3d0;">
+                                    📸
+                                </div>
+                                <h6 class="fw-bold text-dark mb-1" id="bijakUploadTitle">Click or Drag &amp; Drop Wholesale Bill / Parchi</h6>
+                                <p class="text-muted small mb-3" id="bijakUploadDesc">Supported: JPG, PNG, WebP or PDF invoices</p>
+                                <span class="btn btn-sm btn-white border shadow-sm rounded-pill px-4 py-1.5 fw-bold text-dark" style="pointer-events: none; background: #ffffff;">
+                                    📁 Choose File
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="saas-form-label">Optional Notes / Distributor Name</label>
+                            <input type="text" class="saas-form-input mb-0" name="notes" placeholder="e.g. Shahi Bazar Wholesale Market, 10 items batch">
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center pt-3 border-top">
+                            <span class="small text-muted fw-bold">✓ Powered by Google Gemini 1.5 Vision</span>
+                            <div class="d-flex align-items-center gap-2">
+                                <button type="button" class="btn btn-light rounded-pill px-4 fw-bold" onclick="closeModal('modal-upload-bijak')">Cancel</button>
+                                <button type="submit" class="btn-luxury-pill">
+                                    <span>⚡</span> Scan &amp; Auto-Add to Inventory
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Modal 3: Pro Upgrade: Connect Own WhatsApp Number & CRM (Interactive Pop-up Modal) -->
+            <div id="modal-pro-upgrade" class="modal-overlay" onclick="if(event.target===this) closeModal('modal-pro-upgrade')">
+                <div class="modal-content" id="proUpgradeModal" style="background: linear-gradient(135deg, #f8fafc, #e2e8f0); border: 1px solid #cbd5e1;">
+                    <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom" style="border-color: #cbd5e1 !important;">
+                        <div class="d-flex align-items-center gap-3">
+                            <div style="width: 44px; height: 44px; font-size: 1.35rem; background: #ffffff; color: #0f172a; border: 1.5px solid #cbd5e1; border-radius: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                                ⚡
+                            </div>
+                            <div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <h5 class="modal-title fw-black text-dark mb-0" id="proUpgradeModalLabel">Pro Upgrade: Own WhatsApp QR</h5>
+                                    <span class="badge rounded-pill px-2.5 py-1 small fw-bold" style="background: #0f172a; color: #ffffff; font-size: 0.72rem; letter-spacing: 0.05em;">ENTERPRISE</span>
+                                </div>
+                                <small class="text-secondary fw-semibold">Connect your personal or shop WhatsApp number for 24/7 AI sales</small>
+                            </div>
+                        </div>
+                        <button type="button" class="btn-close" onclick="closeModal('modal-pro-upgrade')" aria-label="Close"></button>
+                    </div>
+                    <div class="text-center mb-4">
+                        <h5 class="fw-black text-dark mb-2" style="font-size: 1.15rem; letter-spacing: -0.02em;">Autonomous 24/7 AI Sales Bot &amp; Full CRM Workspace</h5>
+                        <p class="text-muted small mb-0" style="max-width: 500px; margin: 0 auto; line-height: 1.5;">
+                            Aapki dukan ka apna WhatsApp number connect karein. Customer jab bhi message karega, AI khud Urdu aur Khowar voice notes mein jawab dega, orders book karega aur inventory update karega.
+                        </p>
+                    </div>
+
+                    <div class="d-flex flex-column gap-2.5 mb-4">
+                        <div class="p-3 rounded-3 d-flex align-items-center gap-3" style="background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+                            <div class="fs-5 text-success fw-bold" style="width: 24px;">✓</div>
+                            <div class="small">
+                                <strong class="text-dark">Apna Dedicated QR Code:</strong> Kisi central bot number ki zaroorat nahi, seedha aapke WhatsApp par sync hoga.
+                            </div>
+                        </div>
+                        <div class="p-3 rounded-3 d-flex align-items-center gap-3" style="background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+                            <div class="fs-5 text-success fw-bold" style="width: 24px;">✓</div>
+                            <div class="small">
+                                <strong class="text-dark">BashFlow CRM Inbox:</strong> Sab gahakon ke messages, khata, aur orders ek centralised screen par manage karein.
+                            </div>
+                        </div>
+                        <div class="p-3 rounded-3 d-flex align-items-center gap-3" style="background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+                            <div class="fs-5 text-success fw-bold" style="width: 24px;">✓</div>
+                            <div class="small">
+                                <strong class="text-dark">Urdu &amp; Khowar Voice AI:</strong> Bol kar customer ko catalog dikhayein aur voice note se orders confirm karein.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex flex-column gap-2.5">
+                        <a href="https://wa.me/923209350856?text={{ ('Assalam-o-Alaikum! Mujhe meri dukan (' ~ vendor.name ~ ') ke liye Pro WhatsApp QR Connect & CRM upgrade chahiye.')|urlencode }}" 
+                           target="_blank" 
+                           class="btn-luxury-pill text-center w-100 py-3 shadow-md" 
+                           style="font-size: 1rem; text-decoration: none;">
+                            <span>💬</span> Contact Enterprise Support
+                        </a>
+                        <a href="/whatsapp/connect" 
+                           class="btn btn-outline-dark fw-bold py-2.5 rounded-pill text-center d-flex align-items-center justify-content-center gap-2" 
+                           style="background: #ffffff; border-color: #cbd5e1; color: #1e293b; text-decoration: none;">
+                            <span>📲</span> Open WhatsApp QR Scanner
+                        </a>
+                        <button type="button" class="btn btn-light rounded-pill fw-bold py-2 text-muted" onclick="closeModal('modal-pro-upgrade')">
+                            Close
+                        </button>
                     </div>
                 </div>
             </div>
 
-            <!-- Modal 2: Upload Bijak / Wholesale Bill -->
-            <div class="modal fade" id="uploadBijakModal" tabindex="-1" aria-labelledby="uploadBijakModalLabel" aria-hidden="true">
-                <div class="modal-dialog modal-dialog-centered" style="max-width: 600px; margin: 2rem auto;">
-                    <div class="modal-content border-0" style="background: #ffffff; border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); padding: 32px; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0;">
-                        <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
-                            <div class="d-flex align-items-center gap-3">
-                                <div style="width: 44px; height: 44px; font-size: 1.35rem; background: #ecfdf5; color: #059669; border: 1.5px solid #a7f3d0; border-radius: 12px; display: flex; align-items: center; justify-content: center;">
-                                    📄
-                                </div>
-                                <div>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <h5 class="fw-black text-dark mb-0" id="uploadBijakModalLabel">Upload Wholesale Bijak / Bill</h5>
-                                        <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 rounded-pill px-2 py-0 small fw-bold">AI Vision</span>
-                                    </div>
-                                    <small class="text-muted">Auto-parse handwritten parchi or printed invoice to add items</small>
-                                </div>
+            <!-- Modal 4: Add New Product (Interactive Pop-up Modal) -->
+            <div id="modal-add-product" class="modal-overlay" onclick="if(event.target===this) closeModal('modal-add-product')">
+                <div class="modal-content" id="addProductModal">
+                    <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+                        <div class="d-flex align-items-center gap-3">
+                            <div style="width: 44px; height: 44px; font-size: 1.35rem; background: #eff6ff; color: #2563eb; border: 1.5px solid #bfdbfe; border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                                📦
                             </div>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            <div>
+                                <h5 class="fw-black text-dark mb-0" id="addProductModalLabel">+ Naya Saman Daalein</h5>
+                                <small class="text-muted">Product details enter karein taake live dukaan aur inventory mein shamil ho sake</small>
+                            </div>
                         </div>
-                        <form method="POST" action="/vendor/upload-bijak" enctype="multipart/form-data" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
-                            <div class="p-3 mb-4 rounded-3 d-flex align-items-start gap-3" style="background: #f0fdf4; border: 1px solid #bbf7d0;">
-                                <span class="fs-4">💡</span>
-                                <div class="small text-dark">
-                                    <strong>Smart Gemini Vision AI:</strong> Apni dukan ka wholesale bill, handwritten parchi ya invoice ki photo upload karein. Vision AI parchi ke tamam items, quantities, aur kharid/bikri rates parh kar seedha aapki inventory mein shamil kar dega!
-                                </div>
-                            </div>
-
-                            <div class="mb-4">
-                                <label class="saas-form-label">Bill / Bijak Photo ya Document *</label>
-                                <div class="bijak-dropzone position-relative" style="border: 2px dashed #10b981; background: #f8fafc; border-radius: 14px; padding: 28px 20px; text-align: center; cursor: pointer; transition: all 0.2s ease;">
-                                    <input type="file" name="bijak_file" id="bijakFileInput" accept="image/*,.pdf" required style="position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 10;" onchange="updateBijakFileName(this)">
-                                    <div style="width: 52px; height: 52px; margin: 0 auto 12px; background: #ecfdf5; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; color: #059669; border: 1.5px solid #a7f3d0;">
-                                        📸
-                                    </div>
-                                    <h6 class="fw-bold text-dark mb-1" id="bijakUploadTitle">Click or Drag &amp; Drop Wholesale Bill / Parchi</h6>
-                                    <p class="text-muted small mb-3" id="bijakUploadDesc">Supported: JPG, PNG, WebP or PDF invoices</p>
-                                    <span class="btn btn-sm btn-white border shadow-sm rounded-pill px-4 py-1.5 fw-bold text-dark" style="pointer-events: none; background: #ffffff;">
-                                        📁 Choose File
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div class="mb-4">
-                                <label class="saas-form-label">Optional Notes / Distributor Name</label>
-                                <input type="text" class="saas-form-input mb-0" name="notes" placeholder="e.g. Shahi Bazar Wholesale Market, 10 items batch">
-                            </div>
-
-                            <div class="d-flex justify-content-between align-items-center pt-3 border-top">
-                                <span class="small text-muted fw-bold">✓ Powered by Google Gemini 1.5 Vision</span>
-                                <div class="d-flex align-items-center gap-2">
-                                    <button type="button" class="btn btn-light rounded-pill px-4 fw-bold" data-bs-dismiss="modal">Cancel</button>
-                                    <button type="submit" class="btn-luxury-pill">
-                                        <span>⚡</span> Scan &amp; Auto-Add to Inventory
-                                    </button>
-                                </div>
-                            </div>
-                        </form>
+                        <button type="button" class="btn-close" onclick="closeModal('modal-add-product')" aria-label="Close"></button>
                     </div>
+                    <form method="POST" action="/vendor/product/add" id="addProductForm" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
+                        <div class="mb-3">
+                            <label class="saas-form-label">Saman Ka Naam (Product Title) *</label>
+                            <input type="text" class="saas-form-input" name="title" id="saasProdTitle" placeholder="e.g. Heavy Duty Brass Security Padlock" required>
+                        </div>
+                        <div class="row g-2 mb-1">
+                            <div class="col-md-6">
+                                <label class="saas-form-label">Bikri Rate / Price (PKR) *</label>
+                                <input type="number" step="0.01" min="1" class="saas-form-input fw-bold text-success" name="price" id="saasProdPrice" placeholder="450" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="saas-form-label">Kharid Rate / Cost (PKR)</label>
+                                <input type="number" step="0.01" min="0" class="saas-form-input text-muted" name="cost_price" id="saasProdCost" placeholder="320">
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-1">
+                            <div class="col-md-6">
+                                <label class="saas-form-label">Category *</label>
+                                <select class="saas-form-input" name="category" id="saasProdCat">
+                                    <option value="Hardware & Tools" selected>Hardware &amp; Tools</option>
+                                    <option value="General">General Store</option>
+                                    <option value="Electronics">Electronics</option>
+                                    <option value="Apparel & Accessories">Apparel &amp; Accessories</option>
+                                    <option value="Chitrali Crafts">Chitrali Crafts</option>
+                                    <option value="Dry Fruits">Dry Fruits</option>
+                                    <option value="Home & Kitchen">Home &amp; Kitchen</option>
+                                    <option value="Fast Food & Burgers">Fast Food &amp; Burgers</option>
+                                    <option value="Desi & Biryani">Desi &amp; Biryani</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="saas-form-label">Initial Stock Quantity *</label>
+                                <input type="number" min="0" class="saas-form-input fw-bold" name="stock" id="saasProdStock" value="15" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="saas-form-label">Image URL (Optional)</label>
+                            <input type="url" class="saas-form-input" name="image_url" id="saasProdImage" placeholder="https://... (or leave empty for default)">
+                        </div>
+                        <div class="mb-4">
+                            <label class="saas-form-label">Tafseel (Description)</label>
+                            <textarea class="saas-form-input mb-0" name="description" id="saasProdDesc" rows="3" placeholder="Brief quality, size, and material description for online customers..."></textarea>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center pt-3 border-top">
+                            <button type="button" class="btn btn-light rounded-pill px-4 fw-bold" onclick="closeModal('modal-add-product')">Cancel</button>
+                            <button type="submit" class="btn-luxury-pill">
+                                <span>📦</span> + Save &amp; Add Product
+                            </button>
+                        </div>
+                    </form>
                 </div>
             </div>
 
-            <!-- Modal 3: Pro Upgrade: Connect Own WhatsApp Number & CRM -->
-            <div class="modal fade" id="proUpgradeModal" tabindex="-1" aria-labelledby="proUpgradeModalLabel" aria-hidden="true">
-                <div class="modal-dialog modal-dialog-centered" style="max-width: 600px; margin: 2rem auto;">
-                    <div class="modal-content border-0" style="background: linear-gradient(135deg, #f8fafc, #e2e8f0); border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); padding: 32px; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1;">
-                        <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom" style="border-color: #cbd5e1 !important;">
-                            <div class="d-flex align-items-center gap-3">
-                                <div style="width: 44px; height: 44px; font-size: 1.35rem; background: #ffffff; color: #0f172a; border: 1.5px solid #cbd5e1; border-radius: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                                    ⚡
-                                </div>
-                                <div>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <h5 class="modal-title fw-black text-dark mb-0" id="proUpgradeModalLabel">Pro Upgrade: Own WhatsApp QR</h5>
-                                        <span class="badge rounded-pill px-2.5 py-1 small fw-bold" style="background: #0f172a; color: #ffffff; font-size: 0.72rem; letter-spacing: 0.05em;">ENTERPRISE</span>
-                                    </div>
-                                    <small class="text-secondary fw-semibold">Connect your personal or shop WhatsApp number for 24/7 AI sales</small>
-                                </div>
+            <!-- Modal 5: Quick Sale & Khata Entry (Interactive Pop-up Modal) -->
+            <div id="modal-add-khata" class="modal-overlay" onclick="if(event.target===this) closeModal('modal-add-khata')">
+                <div class="modal-content" id="addKhataModal">
+                    <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+                        <div class="d-flex align-items-center gap-3">
+                            <div style="width: 44px; height: 44px; font-size: 1.35rem; background: #ecfdf5; color: #059669; border: 1.5px solid #a7f3d0; border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                                ⚡
                             </div>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                        </div>
-                        <div class="text-center mb-4">
-                            <h5 class="fw-black text-dark mb-2" style="font-size: 1.15rem; letter-spacing: -0.02em;">Autonomous 24/7 AI Sales Bot &amp; Full CRM Workspace</h5>
-                            <p class="text-muted small mb-0" style="max-width: 500px; margin: 0 auto; line-height: 1.5;">
-                                Aapki dukan ka apna WhatsApp number connect karein. Customer jab bhi message karega, AI khud Urdu aur Khowar voice notes mein jawab dega, orders book karega aur inventory update karega.
-                            </p>
-                        </div>
-
-                        <div class="d-flex flex-column gap-2.5 mb-4">
-                            <div class="p-3 rounded-3 d-flex align-items-center gap-3" style="background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
-                                <div class="fs-5 text-success fw-bold" style="width: 24px;">✓</div>
-                                <div class="small">
-                                    <strong class="text-dark">Apna Dedicated QR Code:</strong> Kisi central bot number ki zaroorat nahi, seedha aapke WhatsApp par sync hoga.
-                                </div>
-                            </div>
-                            <div class="p-3 rounded-3 d-flex align-items-center gap-3" style="background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
-                                <div class="fs-5 text-success fw-bold" style="width: 24px;">✓</div>
-                                <div class="small">
-                                    <strong class="text-dark">BashFlow CRM Inbox:</strong> Sab gahakon ke messages, khata, aur orders ek centralised screen par manage karein.
-                                </div>
-                            </div>
-                            <div class="p-3 rounded-3 d-flex align-items-center gap-3" style="background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
-                                <div class="fs-5 text-success fw-bold" style="width: 24px;">✓</div>
-                                <div class="small">
-                                    <strong class="text-dark">Urdu &amp; Khowar Voice AI:</strong> Bol kar customer ko catalog dikhayein aur voice note se orders confirm karein.
-                                </div>
+                            <div>
+                                <h5 class="fw-black text-dark mb-0" id="addKhataModalLabel">Quick Sale &amp; Khata Entry</h5>
+                                <small class="text-muted">Instant entry updates both Daily Cash Balance and Udhaar Ledger</small>
                             </div>
                         </div>
-
-                        <div class="d-flex flex-column gap-3">
-                            <!-- Prominent Contact Enterprise Support Button -->
-                            <a href="https://wa.me/923209350856?text={{ ('Assalam-o-Alaikum! Mujhe meri dukan (' ~ vendor.name ~ ') ke liye Pro WhatsApp QR Connect & CRM upgrade chahiye.')|urlencode }}" 
-                               target="_blank" 
-                               class="btn-luxury-pill text-center w-100 py-3 shadow-md" 
-                               style="font-size: 1rem; text-decoration: none;">
-                                <span>💬</span> Contact Enterprise Support
-                            </a>
-                            <!-- Secondary Option -->
-                            <a href="/whatsapp/connect" 
-                               class="btn btn-outline-dark fw-bold py-2.5 rounded-pill text-center d-flex align-items-center justify-content-center gap-2" 
-                               style="background: #ffffff; border-color: #cbd5e1; color: #1e293b; text-decoration: none;">
-                                <span>📲</span> Open WhatsApp QR Scanner
-                            </a>
-                        </div>
+                        <button type="button" class="btn-close" onclick="closeModal('modal-add-khata')" aria-label="Close"></button>
                     </div>
+                    <form method="POST" action="/vendor/khata/record" id="khataRecordForm" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-khata');">
+                        <div class="mb-3">
+                            <label class="saas-form-label">Entry Type *</label>
+                            <select class="saas-form-input fw-bold" name="entry_type" id="khataEntryTypeSelect" required>
+                                <option value="sale" selected>💰 Cash Bikri (Counter Sale)</option>
+                                <option value="credit">📒 Udhaar (Customer Receivable)</option>
+                                <option value="expense">🧾 Dukan Kharcha (Daily Expense)</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="saas-form-label">Amount (PKR) *</label>
+                            <input type="number" step="0.01" min="1" class="saas-form-input fw-black fs-5" name="amount" id="khataAmountInput" placeholder="e.g. 1500" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="saas-form-label">Tafseel (Description / Customer Name)</label>
+                            <input type="text" class="saas-form-input mb-1" name="description" id="khataDescInput" placeholder="e.g. Counter Bikri, Chai/Nashta, Kiraya">
+                            <div class="d-flex flex-wrap align-items-center gap-1.5 mt-2">
+                                <small class="text-muted fw-bold me-1">Fast fill:</small>
+                                <span class="quick-chip" onclick="fillDesc('Counter Cash Bikri')">⚡ Counter Cash</span>
+                                <span class="quick-chip" onclick="fillDesc('Chai/Nashta Kharcha')">☕ Chai/Nashta</span>
+                                <span class="quick-chip" onclick="fillDesc('Dukan Kiraya')">🏢 Kiraya</span>
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center pt-3 border-top mt-4">
+                            <button type="button" class="btn btn-light rounded-pill px-4 fw-bold" onclick="closeModal('modal-add-khata')">Cancel</button>
+                            <button type="submit" class="btn-luxury-pill">
+                                <span>✓</span> Save Khata Entry
+                            </button>
+                        </div>
+                    </form>
                 </div>
             </div>
 
@@ -2081,7 +2154,7 @@
         // =========================================================================
         // 1. JAVASCRIPT TAB CONTROLLER (switchTab)
         // =========================================================================
-        function switchTab(tabId) {
+        function switchTab(tabId, userInitiated = false) {
             // Support tab-hisab / tab-store aliases for backwards compatibility
             if (tabId === 'tab-hisab') tabId = 'tab-khata';
             if (tabId === 'tab-store') tabId = 'tab-share';
@@ -2143,10 +2216,10 @@
                 targetBtn.setAttribute('aria-selected', 'true');
             }
 
-            // Persist tab state to sessionStorage & URL hash
+            // Persist tab state to sessionStorage (and URL hash only on user click to prevent jump-scrolling on load)
             try {
                 sessionStorage.setItem('vendor_active_tab', tabId);
-                if (window.location.hash !== '#' + tabId) {
+                if (userInitiated && window.location.hash !== '#' + tabId) {
                     history.replaceState(null, null, '#' + tabId);
                 }
             } catch (e) {}
@@ -2155,18 +2228,40 @@
         // Backward compatibility alias
         window.showTab = switchTab;
 
-        // 3. TOGGLE "ADD PRODUCT" FORM AND PRODUCT GRID (SMOOTH & RESPONSIVE)
-        function toggleAddProduct(show) {
-            const addWrapper = document.getElementById('addProductCardWrapper');
-            const gridWrapper = document.getElementById('productGridWrapper');
-            if (show) {
-                if (addWrapper) addWrapper.style.display = 'block';
-                if (gridWrapper) gridWrapper.style.display = 'none';
-                if (addWrapper) addWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            } else {
-                if (addWrapper) addWrapper.style.display = 'none';
-                if (gridWrapper) gridWrapper.style.display = 'block';
+        // =========================================================================
+        // 2. JAVASCRIPT MODAL CONTROLLER (openModal, closeModal)
+        // =========================================================================
+        function openModal(id) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.classList.add('active');
+                document.body.style.overflow = 'hidden';
             }
+        }
+
+        function closeModal(id) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.classList.remove('active');
+                if (!document.querySelector('.modal-overlay.active')) {
+                    document.body.style.overflow = '';
+                }
+            }
+        }
+
+        // Close any active modal when pressing ESC key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.active').forEach(modal => {
+                    closeModal(modal.id);
+                });
+            }
+        });
+
+        // 3. TOGGLE "ADD PRODUCT" MODAL (SMOOTH & RESPONSIVE)
+        function toggleAddProduct(show) {
+            if (show) openModal('modal-add-product');
+            else closeModal('modal-add-product');
         }
 
         // 2. Default State: on page load, switchTab('tab-inventory') is called automatically
@@ -2176,7 +2271,7 @@
                 btn.addEventListener('click', function(e) {
                     e.preventDefault();
                     const target = this.getAttribute('data-tab-target') || this.id.replace('-btn', '');
-                    switchTab(target);
+                    switchTab(target, true);
                 });
             });
 
@@ -2245,8 +2340,7 @@
             document.getElementById('editProdCostPrice').value = prod.cost_price || Math.round((prod.price || 0) * 0.75);
             document.getElementById('editProdCategory').value = prod.category || 'General';
             document.getElementById('editProdStock').value = prod.stock || 0;
-            const modal = new bootstrap.Modal(document.getElementById('editProductModal'));
-            modal.show();
+            openModal('modal-edit-product');
         }
 
         async function cleanupDuplicates() {
@@ -2291,8 +2385,9 @@
             const sel = document.getElementById('khataEntryTypeSelect');
             if (sel) sel.value = type;
             const descInput = document.getElementById('khataDescInput');
-            if (descInput && !descInput.value) descInput.value = desc;
-            document.getElementById('khataAmountInput')?.focus();
+            if (descInput) descInput.value = desc;
+            openModal('modal-add-khata');
+            setTimeout(() => { document.getElementById('khataAmountInput')?.focus(); }, 150);
         }
 
         function fillDesc(text) {
