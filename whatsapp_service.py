@@ -6440,7 +6440,10 @@ class WhatsAppService:
         desc_guess = (ai_res_json or {}).get("description") or "Quality product live on Chitral & Global Bazar."
         desc_guess = re.sub(r'(?i)\b(?:rs\.?|pkr|price|rate|cost)\s*[:=]?\s*[\d,]+(?:\.\d+)?|\b[\d,]+(?:\.\d+)?\s*(?:rs|pkr|rupees|rupay)\b', '', desc_guess).strip()
         price_val = float(extracted_price or (ai_res_json or {}).get("estimated_price") or 2500.0)
-        prod_img = (ai_res_json or {}).get("image_url") or "/static/uploads/default_product.png"
+        prod_img = (ai_res_json or {}).get("image_url") or ""
+        if not prod_img or prod_img == "/static/uploads/default_product.png":
+            import urllib.parse
+            prod_img = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(title_guess + ' product photography, high quality, e-commerce, isolated on pure white background')}?width=512&height=512&nologo=true"
         prod_cat = (ai_res_json or {}).get("category") or "General"
 
         # Direct SQLite Insert only if missing

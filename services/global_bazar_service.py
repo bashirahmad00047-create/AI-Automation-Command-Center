@@ -702,6 +702,7 @@ class GlobalBazarService:
         import json
         import base64
         import requests
+        import urllib.parse
 
         vendor = cls.get_vendor_by_id(vendor_id) or {}
         shop_name = vendor.get("name") or "Bashir Store (Chitral Bazar)"
@@ -725,13 +726,14 @@ class GlobalBazarService:
             "You are an expert wholesale bill, handwritten receipt, and Bijak parser.\n"
             "Analyze the image of the wholesale invoice / handwritten parchi / itemized bill.\n"
             f"Optional vendor caption: '{clean_cap}'\n\n"
+            "STRICT INSTRUCTION TO AI: You must extract the EXACT specific product name from the receipt in Urdu/English (e.g., 'Finger Cutter', 'Nail Clipper', 'Red Bull'). NEVER use generic fallback titles like 'Store Inventory Item'. If the text is messy, infer the most logical specific product name.\n\n"
             "Extract EVERY line item on this bill into a strict JSON object with this exact structure:\n"
             "{\n"
             '  "is_bijak": true,\n'
             '  "vendor_shop_name": "<shop or distributor name from the bill, if visible>",\n'
             '  "items": [\n'
             "    {\n"
-            '      "title": "<exact item name, e.g. Heavy Duty Padlock, Metallic Tea Kettle, Woolen Shawl, etc.>",\n'
+            '      "title": "<exact specific product name, e.g. Finger Cutter, Nail Clipper, Red Bull, Heavy Duty Padlock, Metallic Tea Kettle, Woolen Shawl, etc.>",\n'
             '      "quantity": <integer quantity, default 10 if not specified>,\n'
             '      "cost_price": <unit cost price or wholesale purchase rate in PKR as float>,\n'
             '      "selling_price": <suggested retail selling price in PKR, defaulting to cost_price * 1.25 if not specified>,\n'
@@ -825,10 +827,18 @@ class GlobalBazarService:
         existing_by_title = {p["title"].strip().lower(): p for p in existing_products}
 
         for item in bijak_data.get("items", []):
-            raw_title = str(item.get("title") or "Stock Item").strip()
-            # Guard against purely numeric titles
-            if len(re.sub(r'[\d\s.,\-:+=_#RsPkRpkr/]+', '', raw_title).strip()) == 0:
-                raw_title = "Wholesale Inventory Item"
+            raw_title = str(item.get("title") or "").strip()
+            # Strict rejection of generic fallback titles or numeric values
+            if (
+                not raw_title
+                or len(re.sub(r'[\d\s.,\-:+=_#RsPkRpkr/]+', '', raw_title).strip()) == 0
+                or raw_title.lower() in ("store inventory item", "wholesale inventory item", "stock item", "parchi item", "item")
+            ):
+                cap_inferred = re.sub(r'(?i)\b(?:rs\.?|pkr|bill|bijak|parchi|receipt|invoice|saman|items|parcha|purji)\b|\b\d+\b', '', clean_cap).strip()
+                if cap_inferred and len(cap_inferred) >= 3 and len(re.sub(r'[\d\s.,\-:+=_#RsPkRpkr/]+', '', cap_inferred).strip()) > 0:
+                    raw_title = cap_inferred.title()
+                else:
+                    raw_title = "Essential Wholesale Goods"
             title = raw_title.title()
             qty = max(1, int(item.get("quantity") or 10))
             cost_p = float(item.get("cost_price") or 0.0)
@@ -840,13 +850,18 @@ class GlobalBazarService:
             line_cost = cost_p * qty
             total_bill_amount += line_cost
 
+            # Automated AI Image Generation for Bijak Items via zero-config Pollinations text-to-image endpoint
+            item_image_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(title + ' product photography, high quality, e-commerce, isolated on pure white background')}?width=512&height=512&nologo=true"
+
             t_lower = title.lower()
             if t_lower in existing_by_title:
                 existing_p = existing_by_title[t_lower]
                 p_id = existing_p["id"]
                 new_stk = existing_p.get("stock", 0) + qty
                 cls.update_product_stock(product_id=p_id, new_stock=new_stk)
-                if cost_p > 0 or sell_p > 0:
+                cur_img = existing_p.get("image_url") or existing_p.get("ai_image_url")
+                target_img = cur_img if cur_img else item_image_url
+                if cost_p > 0 or sell_p > 0 or not cur_img:
                     cls.update_product(
                         product_id=p_id,
                         vendor_id=vendor_id,
@@ -854,7 +869,8 @@ class GlobalBazarService:
                         price=sell_p if sell_p > 0 else existing_p.get("price", 500.0),
                         cost_price=cost_p if cost_p > 0 else existing_p.get("cost_price", 400.0),
                         stock=new_stk,
-                        category=cat or existing_p.get("category", "General")
+                        category=cat or existing_p.get("category", "General"),
+                        image_url=target_img
                     )
                 added_items.append({
                     "id": p_id,
@@ -864,6 +880,7 @@ class GlobalBazarService:
                     "cost_price": cost_p,
                     "selling_price": sell_p,
                     "category": cat,
+                    "image_url": target_img,
                     "is_update": True
                 })
             else:
@@ -874,7 +891,8 @@ class GlobalBazarService:
                     cost_price=cost_p,
                     stock=qty,
                     category=cat,
-                    description=f"Fresh stock added via Bijak / Wholesale Bill for {shop_name}."
+                    description=f"Fresh stock added via Bijak / Wholesale Bill for {shop_name}.",
+                    image_url=item_image_url
                 )
                 added_items.append({
                     "id": new_prod.get("id") if new_prod else None,
@@ -884,6 +902,7 @@ class GlobalBazarService:
                     "cost_price": cost_p,
                     "selling_price": sell_p,
                     "category": cat,
+                    "image_url": item_image_url,
                     "is_update": False
                 })
 
@@ -1060,17 +1079,25 @@ class GlobalBazarService:
         price: float,
         cost_price: float,
         stock: int,
-        category: str
+        category: str,
+        image_url: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Updates product details."""
         try:
             with cls.get_db_connection() as conn:
                 c = conn.cursor()
-                c.execute("""
-                    UPDATE products
-                    SET title = ?, price = ?, cost_price = ?, stock = ?, category = ?
-                    WHERE id = ? AND (vendor_id = ? OR vendor_id IS NULL)
-                """, (title.strip(), float(price), float(cost_price), int(stock), category.strip(), product_id, vendor_id))
+                if image_url:
+                    c.execute("""
+                        UPDATE products
+                        SET title = ?, price = ?, cost_price = ?, stock = ?, category = ?, image_url = COALESCE(image_url, ?), ai_image_url = COALESCE(ai_image_url, ?)
+                        WHERE id = ? AND (vendor_id = ? OR vendor_id IS NULL)
+                    """, (title.strip(), float(price), float(cost_price), int(stock), category.strip(), image_url, image_url, product_id, vendor_id))
+                else:
+                    c.execute("""
+                        UPDATE products
+                        SET title = ?, price = ?, cost_price = ?, stock = ?, category = ?
+                        WHERE id = ? AND (vendor_id = ? OR vendor_id IS NULL)
+                    """, (title.strip(), float(price), float(cost_price), int(stock), category.strip(), product_id, vendor_id))
                 conn.commit()
                 row = c.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
                 return dict(row) if row else None

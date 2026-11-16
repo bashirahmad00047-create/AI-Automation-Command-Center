@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import io
+import urllib.parse
 import pytest
 from unittest.mock import patch, MagicMock
 from PIL import Image
@@ -389,6 +390,27 @@ def test_process_vendor_bijak_multi_item_scanner():
         # Must include both Admin View and Shareable Storefront links
         assert "/vendor/auth/" in res.get("whatsapp_message", "")
         assert f"/store?shop={v_id}" in res.get("whatsapp_message", "")
+
+        # Verify automated AI image generation for every bijak item
+        items = res.get("items", [])
+        assert len(items) >= 2
+        for it in items:
+            img = it.get("image_url", "")
+            assert "image.pollinations.ai" in img
+            assert "product%20photography" in img or "product photography" in urllib.parse.unquote(img)
+
+
+def test_bijak_strict_title_and_ai_photography():
+    """Verify Gemini prompt contains strict specific product name instructions and pollinations AI photo URLs."""
+    import inspect
+    import urllib.parse
+    src = inspect.getsource(GlobalBazarService.process_vendor_bijak_image)
+    assert "STRICT INSTRUCTION TO AI" in src
+    assert "Finger Cutter" in src
+    assert "Nail Clipper" in src
+    assert "Red Bull" in src
+    assert "NEVER use generic fallback titles like 'Store Inventory Item'" in src
+    assert "image.pollinations.ai" in src
 
 
 def test_numeric_title_rejection_for_550_and_kettle_naming():
