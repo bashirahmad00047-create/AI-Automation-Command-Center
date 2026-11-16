@@ -882,6 +882,27 @@
             color: var(--brand-slate-900);
         }
 
+        /* Modal Inputs & Controls Luxury Styling */
+        .modal-input-luxury {
+            padding: 12px 16px !important;
+            border-radius: 12px !important;
+            border: 1.5px solid #cbd5e1 !important;
+            font-size: 0.95rem !important;
+            background: #f8fafc !important;
+            color: #0f172a !important;
+            outline: none !important;
+            transition: all 0.2s ease !important;
+            width: 100% !important;
+            display: block !important;
+            font-family: inherit !important;
+        }
+
+        .modal-input-luxury:focus {
+            border-color: #10b981 !important;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15) !important;
+            background: #ffffff !important;
+        }
+
         /* Toast Feedback */
         .toast-popup-notice {
             position: fixed;
@@ -1200,7 +1221,7 @@
                                 ● Real-Time Ledger Sync
                             </span>
                         </div>
-                        <form method="POST" action="/vendor/khata/record">
+                        <form method="POST" action="/vendor/khata/record" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-khata');">
                             <div class="khata-form-grid">
                                 <div>
                                     <label class="small text-muted fw-bold mb-1 d-block">Entry Type</label>
@@ -1462,11 +1483,14 @@
                         {% set store_link = current_host ~ "/store?shop=" ~ vendor.id %}
                         {% set share_text = "Assalam-o-Alaikum! 🏔️ Meri dukan *" ~ vendor.name ~ "* online ho chuki hai. Ghar bethay taza saman aur Cash on Delivery hasil karne ke liye is link par click karein:\n" ~ store_link %}
 
-                        <div class="p-4 mb-4 mx-auto" style="max-width: 640px; background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: var(--radius-lg);">
-                            <label class="small text-muted fw-bold mb-2 d-block">Aapki Dedicated Store Link:</label>
-                            <div class="input-group">
-                                <input type="text" class="form-control fw-bold text-primary rounded-start-pill py-2 px-3" id="storeLinkInput" value="{{ store_link }}" readonly>
-                                <button class="btn btn-primary fw-bold px-4 rounded-end-pill" type="button" onclick="copyStoreLink()">
+                        <div class="p-4 mb-4 mx-auto" style="max-width: 680px; background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border: 1.5px solid #cbd5e1; border-radius: var(--radius-xl); box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <label class="small text-muted fw-bold mb-0">🔗 Aapki Dedicated Store Link (Customer Direct)</label>
+                                <span class="badge bg-success-subtle text-success border border-success fw-bold rounded-pill px-2 py-1 small">● Direct Isolated Route</span>
+                            </div>
+                            <div class="d-flex align-items-center gap-2 p-2 bg-white rounded-3 border" style="border-color: #cbd5e1;">
+                                <input type="text" class="form-control border-0 bg-transparent fw-bold text-dark px-2" style="font-size: 0.95rem; outline: none; box-shadow: none;" id="storeLinkInput" value="{{ store_link }}" readonly>
+                                <button class="btn-card-sell-one px-4 py-2" type="button" onclick="copyStoreLink()" style="border-radius: var(--radius-pill); white-space: nowrap;">
                                     📋 Copy Link
                                 </button>
                             </div>
@@ -1476,15 +1500,16 @@
                             <!-- Big WhatsApp Status / Share Button -->
                             <a href="https://api.whatsapp.com/send?text={{ share_text|urlencode }}" 
                                target="_blank" 
-                               class="btn btn-success fw-bold px-4 py-3 rounded-pill shadow-sm d-inline-flex align-items-center gap-2"
-                               style="font-size: 1rem; background: #25D366; border-color: #25D366; box-shadow: 0 4px 15px rgba(37, 211, 102, 0.35);">
+                               class="btn-rider-whatsapp-direct px-4 py-3"
+                               style="font-size: 1rem; border-radius: var(--radius-pill);">
                                 <span style="font-size: 1.3rem;">💬</span> Share on WhatsApp Status
                             </a>
 
                             <!-- Open Storefront in New Tab -->
                             <a href="/store?shop={{ vendor.id }}" 
                                target="_blank" 
-                               class="btn btn-outline-primary fw-bold px-4 py-3 rounded-pill d-inline-flex align-items-center gap-2">
+                               class="btn-action-hero btn-action-indigo px-4 py-3"
+                               style="border-radius: var(--radius-pill); font-size: 0.98rem;">
                                 <span>🌐</span> Customer Store Preview
                             </a>
                         </div>
@@ -1493,10 +1518,20 @@
 
             </div><!-- /vendorTabContent -->
 
-            <!-- Bottom Navigation Bar -->
-            <div class="d-flex justify-content-center gap-3 mt-4 mb-5">
-                <a href="/store" class="btn btn-outline-secondary btn-sm rounded-pill px-4 fw-semibold">View Global Marketplace</a>
-                <a href="/vendor/logout" class="btn btn-outline-danger btn-sm rounded-pill px-4 fw-semibold">Logout Portal</a>
+            <!-- Luxury Bottom Footer Bar -->
+            <div class="content-panel-box d-flex flex-wrap justify-content-between align-items-center gap-3 mt-4 mb-5 py-3 px-4" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #ffffff; border: 1px solid rgba(255, 255, 255, 0.1);">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="live-pulse-dot"></span>
+                    <span class="small fw-bold text-white-50">OpsFlow AI Commerce OS &bull; <strong class="text-white">{{ vendor.name }}</strong> Dukan ERP</span>
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <a href="/store" class="hero-btn hero-btn-glass py-2 px-3 small" style="font-size: 0.84rem;">
+                        🌐 View Global Marketplace
+                    </a>
+                    <a href="/vendor/logout" class="hero-btn hero-btn-glass py-2 px-3 small text-danger" style="font-size: 0.84rem; border-color: rgba(244, 63, 94, 0.4); color: #fecdd3 !important;">
+                        🚪 Logout Portal
+                    </a>
+                </div>
             </div>
 
             <!-- ========================================================================= -->
@@ -1511,26 +1546,26 @@
                             <h5 class="modal-title fw-black" id="addProductModalLabel">📦 + Add Naya Saman to Store</h5>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
-                        <form method="POST" action="/vendor/product/add">
+                        <form method="POST" action="/vendor/product/add" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
                             <div class="modal-body p-4">
                                 <div class="mb-3">
                                     <label class="form-label fw-bold small text-muted">Saman Ka Naam (Product Title) *</label>
-                                    <input type="text" class="form-control rounded-3" name="title" placeholder="e.g. Heavy Duty Brass Security Padlock" required>
+                                    <input type="text" class="modal-input-luxury" name="title" placeholder="e.g. Heavy Duty Brass Security Padlock" required>
                                 </div>
                                 <div class="row g-2 mb-3">
                                     <div class="col-6">
                                         <label class="form-label fw-bold small text-muted">Bikri Rate / Price (PKR) *</label>
-                                        <input type="number" step="0.01" min="1" class="form-control rounded-3 fw-bold" name="price" placeholder="450" required>
+                                        <input type="number" step="0.01" min="1" class="modal-input-luxury fw-bold" name="price" placeholder="450" required>
                                     </div>
                                     <div class="col-6">
                                         <label class="form-label fw-bold small text-muted">Kharid Rate / Cost (PKR)</label>
-                                        <input type="number" step="0.01" min="0" class="form-control rounded-3" name="cost_price" placeholder="320">
+                                        <input type="number" step="0.01" min="0" class="modal-input-luxury" name="cost_price" placeholder="320">
                                     </div>
                                 </div>
                                 <div class="row g-2 mb-3">
                                     <div class="col-6">
                                         <label class="form-label fw-bold small text-muted">Category</label>
-                                        <select class="form-select rounded-3" name="category">
+                                        <select class="modal-input-luxury" name="category">
                                             <option value="Hardware & Tools" selected>Hardware &amp; Tools</option>
                                             <option value="General">General Store</option>
                                             <option value="Electronics">Electronics</option>
@@ -1544,21 +1579,21 @@
                                     </div>
                                     <div class="col-6">
                                         <label class="form-label fw-bold small text-muted">Initial Stock</label>
-                                        <input type="number" min="0" class="form-control rounded-3" name="stock" value="15">
+                                        <input type="number" min="0" class="modal-input-luxury" name="stock" value="15">
                                     </div>
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label fw-bold small text-muted">Image URL (Optional)</label>
-                                    <input type="url" class="form-control rounded-3" name="image_url" placeholder="https://... (or leave empty)">
+                                    <input type="url" class="modal-input-luxury" name="image_url" placeholder="https://... (or leave empty)">
                                 </div>
                                 <div class="mb-2">
                                     <label class="form-label fw-bold small text-muted">Tafseel (Description)</label>
-                                    <textarea class="form-control rounded-3" name="description" rows="2" placeholder="Brief quality and utility description..."></textarea>
+                                    <textarea class="modal-input-luxury" name="description" rows="2" placeholder="Brief quality and utility description..."></textarea>
                                 </div>
                             </div>
-                            <div class="modal-footer border-0 p-4 pt-0">
+                            <div class="modal-footer border-0 p-4 pt-0 d-flex justify-content-end gap-2">
                                 <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Cancel</button>
-                                <button type="submit" class="btn btn-primary fw-bold rounded-pill px-4 shadow-sm">+ Save &amp; Add Product</button>
+                                <button type="submit" class="hero-btn hero-btn-store px-4 py-2">+ Save &amp; Add Product</button>
                             </div>
                         </form>
                     </div>
@@ -1573,37 +1608,37 @@
                             <h5 class="modal-title fw-black">✏️ Edit Product Details</h5>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
-                        <form method="POST" action="/vendor/product/edit">
+                        <form method="POST" action="/vendor/product/edit" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
                             <input type="hidden" name="product_id" id="editProdId">
                             <div class="modal-body p-4">
                                 <div class="mb-3">
                                     <label class="form-label fw-bold small text-muted">Product Title *</label>
-                                    <input type="text" class="form-control rounded-3" name="title" id="editProdTitle" required>
+                                    <input type="text" class="modal-input-luxury" name="title" id="editProdTitle" required>
                                 </div>
                                 <div class="row g-2 mb-3">
                                     <div class="col-6">
                                         <label class="form-label fw-bold small text-muted">Bikri Rate / Price (PKR) *</label>
-                                        <input type="number" step="0.01" min="1" class="form-control rounded-3 fw-bold" name="price" id="editProdPrice" required>
+                                        <input type="number" step="0.01" min="1" class="modal-input-luxury fw-bold" name="price" id="editProdPrice" required>
                                     </div>
                                     <div class="col-6">
                                         <label class="form-label fw-bold small text-muted">Kharid Rate / Cost (PKR)</label>
-                                        <input type="number" step="0.01" min="0" class="form-control rounded-3" name="cost_price" id="editProdCostPrice">
+                                        <input type="number" step="0.01" min="0" class="modal-input-luxury" name="cost_price" id="editProdCostPrice">
                                     </div>
                                 </div>
                                 <div class="row g-2 mb-2">
                                     <div class="col-6">
                                         <label class="form-label fw-bold small text-muted">Category</label>
-                                        <input type="text" class="form-control rounded-3" name="category" id="editProdCategory">
+                                        <input type="text" class="modal-input-luxury" name="category" id="editProdCategory">
                                     </div>
                                     <div class="col-6">
                                         <label class="form-label fw-bold small text-muted">Stock Quantity</label>
-                                        <input type="number" min="0" class="form-control rounded-3" name="stock" id="editProdStock">
+                                        <input type="number" min="0" class="modal-input-luxury" name="stock" id="editProdStock">
                                     </div>
                                 </div>
                             </div>
-                            <div class="modal-footer border-0 p-4 pt-0">
+                            <div class="modal-footer border-0 p-4 pt-0 d-flex justify-content-end gap-2">
                                 <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Cancel</button>
-                                <button type="submit" class="btn btn-primary fw-bold rounded-pill px-4 shadow-sm">Update Product</button>
+                                <button type="submit" class="hero-btn hero-btn-store px-4 py-2">Update Product</button>
                             </div>
                         </form>
                     </div>
@@ -1618,23 +1653,23 @@
                             <h5 class="modal-title fw-black">📄 Upload Wholesale Bijak / Bill (Auto-Add Saman)</h5>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
-                        <form method="POST" action="/vendor/upload-bijak" enctype="multipart/form-data">
+                        <form method="POST" action="/vendor/upload-bijak" enctype="multipart/form-data" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
                             <div class="modal-body p-4">
                                 <div class="alert alert-info py-2 small mb-3 rounded-3">
                                     💡 <strong>Smart AI Scanner:</strong> Apni dukan ka wholesale bill, handwritten parchi, ya invoice ki photo upload karein. Gemini Vision bill ke tamam items, quantities, aur kharid/bikri rates parh kar seedha aapki inventory mein shamil kar dega!
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label fw-bold small text-muted">Bill / Bijak Photo ya Document *</label>
-                                    <input type="file" class="form-control rounded-3" name="bijak_file" accept="image/*,.pdf" required>
+                                    <input type="file" class="modal-input-luxury" name="bijak_file" accept="image/*,.pdf" required>
                                 </div>
                                 <div class="mb-2">
                                     <label class="form-label fw-bold small text-muted">Optional Notes / Distributor Name</label>
-                                    <input type="text" class="form-control rounded-3" name="notes" placeholder="e.g. Shahi Bazar Wholesale Market, 10 items">
+                                    <input type="text" class="modal-input-luxury" name="notes" placeholder="e.g. Shahi Bazar Wholesale Market, 10 items">
                                 </div>
                             </div>
-                            <div class="modal-footer border-0 p-4 pt-0">
+                            <div class="modal-footer border-0 p-4 pt-0 d-flex justify-content-end gap-2">
                                 <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Cancel</button>
-                                <button type="submit" class="btn btn-primary fw-bold rounded-pill px-4 shadow-sm" style="background: #10b981; border-color: #10b981;">⚡ Scan &amp; Auto-Add to Inventory</button>
+                                <button type="submit" class="hero-btn hero-btn-store px-4 py-2">⚡ Scan &amp; Auto-Add to Inventory</button>
                             </div>
                         </form>
                     </div>
@@ -1724,6 +1759,13 @@
             if (targetId === 'tab-hisab') actualId = 'tab-khata';
             if (targetId === 'tab-store') actualId = 'tab-share';
 
+            try {
+                sessionStorage.setItem('vendor_active_tab', actualId);
+                if (window.location.hash !== '#' + actualId) {
+                    history.replaceState(null, null, '#' + actualId);
+                }
+            } catch (e) {}
+
             tabs.forEach(item => {
                 const pane = document.getElementById(item.id);
                 const btn = document.getElementById(item.btnId);
@@ -1742,6 +1784,20 @@
                 }
             });
         }
+
+        // Initialize active tab from URL hash or sessionStorage on DOM load
+        document.addEventListener('DOMContentLoaded', function() {
+            const hash = window.location.hash ? window.location.hash.substring(1) : '';
+            let savedTab = '';
+            try {
+                savedTab = sessionStorage.getItem('vendor_active_tab') || '';
+            } catch (e) {}
+            
+            const target = hash || savedTab;
+            if (target && ['tab-inventory', 'tab-khata', 'tab-hisab', 'tab-orders', 'tab-share', 'tab-store'].includes(target)) {
+                showTab(target);
+            }
+        });
 
         async function sellOneProduct(productId) {
             if (!confirm("Confirm counter sale for 1 unit of this item? (Stock will decrease by 1 and today's sale will update)")) return;
