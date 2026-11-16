@@ -90,6 +90,7 @@ class WhatsAppService:
     _tenant_queue_lock = threading.Lock()
     _tenant_queue_stats: Dict[str, Dict[str, int]] = {}
     _customer_window_cache: Dict[Tuple[str, str], datetime.datetime] = {}
+    _inventory_idempotency_cache: Dict[str, Any] = {}
 
     @classmethod
     def enqueue_tenant_message(
@@ -6248,6 +6249,21 @@ class WhatsAppService:
         clean_p = cls.format_phone_number(sender_phone)
         target_chat = chat_id or (f"{clean_p}@s.whatsapp.net" if clean_p else sender_phone)
 
+        # 0. Strict Idempotency Deduplication by message_id or image hash
+        if not hasattr(cls, "_inventory_idempotency_cache"):
+            cls._inventory_idempotency_cache = {}
+        import hashlib
+        idempotency_key = None
+        if message_id:
+            idempotency_key = f"{clean_p}_{message_id}"
+
+        if idempotency_key and idempotency_key in cls._inventory_idempotency_cache:
+            logger.info(f"[Inventory Idempotency Guard] Skipping duplicate insertion for message_id: {idempotency_key}")
+            cached = dict(cls._inventory_idempotency_cache[idempotency_key])
+            cached["duplicate"] = True
+            cached["message"] = "Already processed (idempotent)"
+            return cached
+
         # 1. Extract image bytes
         img_bytes = image_bytes or kwargs.get("image_bytes")
         if not img_bytes and kwargs.get("file"):
@@ -6369,47 +6385,54 @@ class WhatsAppService:
                 logger.error(f"[AI Catalog Direct Fallback Error] {direct_err}")
                 db_save_error = str(direct_err)
 
-        # 3. Direct SQLite Insertion & PostgreSQL API Sync
-        # Insert product directly into SQLite /root/Global-Bazar-Core/global_bazar.db so it shows immediately on /store
-        title_guess = (ai_res_json or {}).get("title") or clean_cap or "Studio Product"
-        if not title_guess or title_guess in ("Studio Product", "Studio Collection Elegance Edition"):
+        # 3. Direct SQLite Insertion ONLY if NOT ALREADY SAVED by process_ai_catalog_direct or FastAPI
+        sq_product = (ai_res_json or {}).get("saved_product")
+        title_guess = (ai_res_json or {}).get("title") or (ai_res_json or {}).get("detected_title")
+        if not title_guess or title_guess in ("Studio Product", "Studio Collection Elegance Edition", "Artisan Store Product"):
             clean_t = re.sub(r'(?:rs\.?|pkr)?\s*[\d,]+(?:\.\d+)?', '', clean_cap, flags=re.IGNORECASE)
             clean_t = re.sub(r'\b(add|sell|price|for|this|item|product)\b', '', clean_t, flags=re.IGNORECASE).strip()
             if clean_t and len(clean_t) >= 3:
                 title_guess = clean_t.title()
             else:
-                title_guess = "Artisan Store Product"
+                title_guess = "Store Inventory Item"
 
-        desc_guess = (ai_res_json or {}).get("description") or f"High quality artisan product live on Chitral & Global Bazar. {clean_cap}".strip()
+        desc_guess = (ai_res_json or {}).get("description") or "Quality product live on Chitral & Global Bazar."
+        desc_guess = re.sub(r'(?i)\b(?:rs\.?|pkr|price|rate|cost)\s*[:=]?\s*[\d,]+(?:\.\d+)?|\b[\d,]+(?:\.\d+)?\s*(?:rs|pkr|rupees|rupay)\b', '', desc_guess).strip()
         price_val = float(extracted_price or (ai_res_json or {}).get("estimated_price") or 2500.0)
         prod_img = (ai_res_json or {}).get("image_url") or "/static/uploads/default_product.png"
+        prod_cat = (ai_res_json or {}).get("category") or "General"
 
-        # Direct SQLite Insert
-        try:
-            from services.global_bazar_service import GlobalBazarService
-            sq_product = GlobalBazarService.add_product(
-                title=title_guess,
-                price=price_val,
-                stock=10,
-                vendor_id=int(vendor_id),
-                category="Apparel",
-                description=desc_guess,
-                image_url=prod_img
-            )
-            logger.info(f"[GlobalBazar Direct SQLite] Product added directly to global_bazar.db: #{sq_product.get('id') if sq_product else 'unknown'}")
-            if not ai_res_json:
-                ai_res_json = {
-                    "title": title_guess,
-                    "description": desc_guess,
-                    "estimated_price": price_val,
-                    "image_url": prod_img,
-                    "saved_product": sq_product
-                }
-            db_save_error = None
-        except Exception as sq_err:
-            logger.error(f"[GlobalBazar SQLite Insert Error] {sq_err}")
-            if not db_save_error:
-                db_save_error = str(sq_err)
+        # Direct SQLite Insert only if missing
+        if not sq_product:
+            try:
+                from services.global_bazar_service import GlobalBazarService
+                sq_product = GlobalBazarService.add_product(
+                    title=title_guess,
+                    price=price_val,
+                    stock=10,
+                    vendor_id=int(vendor_id),
+                    category=prod_cat,
+                    description=desc_guess,
+                    image_url=prod_img,
+                    cost_price=float(price_val * 0.75)
+                )
+                logger.info(f"[GlobalBazar Direct SQLite] Product added directly to global_bazar.db: #{sq_product.get('id') if sq_product else 'unknown'}")
+                if not ai_res_json:
+                    ai_res_json = {
+                        "title": title_guess,
+                        "description": desc_guess,
+                        "estimated_price": price_val,
+                        "image_url": prod_img,
+                        "category": prod_cat,
+                        "saved_product": sq_product
+                    }
+                else:
+                    ai_res_json["saved_product"] = sq_product
+                db_save_error = None
+            except Exception as sq_err:
+                logger.error(f"[GlobalBazar SQLite Insert Error] {sq_err}")
+                if not db_save_error:
+                    db_save_error = str(sq_err)
 
         # Sync to PostgreSQL port 8000 API
         product_payload = {
@@ -6494,7 +6517,7 @@ class WhatsAppService:
                 cls._in_flight_phones_ts.pop(clean_sender_lock, None)
 
         is_dispatched = bool(dispatch_res and (dispatch_res.get("success") or dispatch_res.get("messageId") or dispatch_res.get("idMessage")))
-        return {
+        ret_val = {
             "success": True,
             "action": "ai_catalog_product_added",
             "title": title,
@@ -6508,6 +6531,11 @@ class WhatsAppService:
             "dispatch": dispatch_res,
             "dispatched": is_dispatched
         }
+        if idempotency_key:
+            if not hasattr(cls, "_inventory_idempotency_cache"):
+                cls._inventory_idempotency_cache = {}
+            cls._inventory_idempotency_cache[idempotency_key] = ret_val
+        return ret_val
 
 
 

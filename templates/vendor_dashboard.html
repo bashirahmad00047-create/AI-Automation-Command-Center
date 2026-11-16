@@ -3,167 +3,398 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ vendor.name if vendor else 'Vendor Portal' }} - Hisab Kitab</title>
+    <title>{{ vendor.name if vendor else 'Vendor Portal' }} - Dukan & Inventory ERP</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
-        body { background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .product-img { width: 60px; height: 60px; object-fit: cover; border-radius: 8px; }
-        .stat-card {
-            border-radius: 12px;
-            border: 1px solid rgba(0,0,0,0.06);
-            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        :root {
+            --primary-blue: #1e3a8a;
+            --accent-blue: #2563eb;
+            --emerald-green: #059669;
+            --card-border: rgba(226, 232, 240, 0.9);
         }
-        .stat-card:hover {
+        body { background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #0f172a; }
+        .product-img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0; }
+        .kpi-card {
+            background: #ffffff;
+            border-radius: 14px;
+            border: 1px solid var(--card-border);
+            padding: 16px;
+            transition: all 0.18s ease-in-out;
+            height: 100%;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .kpi-card:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 16px rgba(0,0,0,0.08);
+            box-shadow: 0 8px 18px rgba(0,0,0,0.06);
         }
-        .stat-icon {
-            width: 42px;
-            height: 42px;
+        .kpi-icon {
+            width: 40px;
+            height: 40px;
             border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.3rem;
+            font-size: 1.25rem;
         }
+        .khata-bar {
+            background: #ffffff;
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .inventory-card {
+            background: #ffffff;
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .table-responsive { max-height: 480px; overflow-y: auto; }
+        .btn-sell-one {
+            background: #ecfdf5;
+            color: #059669;
+            border: 1px solid #a7f3d0;
+            font-weight: 700;
+            font-size: 0.78rem;
+            padding: 4px 10px;
+            border-radius: 6px;
+            transition: background 0.15s ease;
+        }
+        .btn-sell-one:hover { background: #10b981; color: #ffffff; }
     </style>
 </head>
 <body class="py-4">
-    <div class="container" style="max-width: 680px;">
+    <div class="container" style="max-width: 900px;">
         {% if error %}
-            <div class="alert alert-danger text-center shadow-sm rounded-4 p-4">
+            <div class="alert alert-danger text-center shadow-sm rounded-4 p-4 my-4">
                 <h5 class="alert-heading fw-bold mb-2">Authentication Error</h5>
-                <p class="mb-0 text-muted">{{ error }}</p>
-            </div>
-            <div class="text-center mt-3">
-                <a href="/store" class="btn btn-outline-primary btn-sm">Go to Storefront</a>
+                <p class="mb-3 text-muted">{{ error }}</p>
+                <a href="/store" class="btn btn-outline-primary btn-sm px-4 rounded-pill">Go to Public Storefront</a>
             </div>
         {% elif vendor %}
-            <!-- Shop Header -->
+            <!-- 1. Shop Header -->
             <div class="card mb-4 shadow-sm border-0 rounded-4 overflow-hidden">
-                <div class="card-body text-center bg-primary text-white p-4" style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%) !important;">
-                    <span class="badge bg-warning text-dark px-3 py-1 rounded-pill fw-bold mb-2">Verified Merchant</span>
-                    <h2 class="card-title fw-black mb-1">🏪 {{ vendor.name }}</h2>
-                    <p class="mb-0 small opacity-75">Phone: {{ vendor.phone }}{% if vendor.address %} | {{ vendor.address }}{% endif %}</p>
+                <div class="card-body p-4 text-white" style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%) !important;">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+                        <div>
+                            <span class="badge bg-warning text-dark px-3 py-1 rounded-pill fw-bold mb-2">Verified Merchant • ERP Live</span>
+                            <h2 class="card-title fw-black mb-1">🏪 {{ vendor.name }}</h2>
+                            <p class="mb-0 small opacity-90">📱 Owner: <strong>{{ vendor.phone }}</strong> {% if vendor.address %}| 📍 {{ vendor.address }}{% endif %}</p>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                            <a href="/store" class="btn btn-light btn-sm fw-bold px-3 py-2 rounded-3 shadow-sm" target="_blank">
+                                🌐 Live Store
+                            </a>
+                            <button type="button" class="btn btn-warning text-dark btn-sm fw-bold px-3 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#addProductModal">
+                                + Add Product
+                            </button>
+                            <button type="button" class="btn btn-outline-light btn-sm px-3 py-2 rounded-3" onclick="cleanupDuplicates()">
+                                🧹 Merge Duplicates
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- 4 Big Summary Cards (Hisab-Kitab Overview) -->
+            <!-- 2. 6 Real-Time Financial & Inventory KPI Cards -->
             <div class="row g-3 mb-4">
-                <!-- Card 1: Total Saman (Inventory) -->
-                <div class="col-6">
-                    <div class="card stat-card shadow-sm h-100 bg-white p-3">
+                <!-- Card 1: Total Maal (Inventory) -->
+                <div class="col-6 col-md-4">
+                    <div class="kpi-card">
                         <div class="d-flex align-items-center gap-2 mb-2">
-                            <div class="stat-icon bg-primary bg-opacity-10 text-primary">📦</div>
-                            <span class="text-muted small fw-bold">Total Saman</span>
+                            <div class="kpi-icon bg-primary bg-opacity-10 text-primary">📦</div>
+                            <span class="text-muted small fw-bold">Total Maal (Inventory)</span>
                         </div>
-                        <h4 class="fw-bold mb-0 text-dark">{{ total_products or (products|length) }} <span class="fs-6 text-muted font-normal">items</span></h4>
+                        <h3 class="fw-bold mb-0 text-dark">{{ total_products or (products|length) }} <span class="fs-6 text-muted font-normal">items</span></h3>
                         <div class="small text-success fw-bold mt-1">Worth PKR {{ "{:,.0f}".format(total_inventory_value or 0) }}</div>
                     </div>
                 </div>
 
                 <!-- Card 2: Aaj Ki Sale (Daily Sale) -->
-                <div class="col-6">
-                    <div class="card stat-card shadow-sm h-100 bg-white p-3">
+                <div class="col-6 col-md-4">
+                    <div class="kpi-card">
                         <div class="d-flex align-items-center gap-2 mb-2">
-                            <div class="stat-icon bg-success bg-opacity-10 text-success">💰</div>
-                            <span class="text-muted small fw-bold">Aaj Ki Sale</span>
+                            <div class="kpi-icon bg-success bg-opacity-10 text-success">💰</div>
+                            <span class="text-muted small fw-bold">Aaj Ki Sale (Daily)</span>
                         </div>
-                        <h4 class="fw-bold mb-0 text-success">PKR {{ "{:,.0f}".format(today_sales_total or 0) }}</h4>
-                        <div class="small text-muted mt-1">{{ today_orders_count or 0 }} orders today</div>
+                        <h3 class="fw-bold mb-0 text-success">PKR {{ "{:,.0f}".format(today_sales_total or 0) }}</h3>
+                        <div class="small text-muted mt-1">{{ today_orders_count or 0 }} orders recorded today</div>
                     </div>
                 </div>
 
                 <!-- Card 3: Mahine Ki Sale (Monthly Sale) -->
-                <div class="col-6">
-                    <div class="card stat-card shadow-sm h-100 bg-white p-3">
+                <div class="col-6 col-md-4">
+                    <div class="kpi-card">
                         <div class="d-flex align-items-center gap-2 mb-2">
-                            <div class="stat-icon bg-info bg-opacity-10 text-info">📈</div>
+                            <div class="kpi-icon bg-info bg-opacity-10 text-info">📅</div>
                             <span class="text-muted small fw-bold">Mahine Ki Sale</span>
                         </div>
-                        <h4 class="fw-bold mb-0 text-dark">PKR {{ "{:,.0f}".format(month_sales_total or 0) }}</h4>
-                        <div class="small text-muted mt-1">{{ month_orders_count or 0 }} monthly orders</div>
+                        <h3 class="fw-bold mb-0 text-dark">PKR {{ "{:,.0f}".format(month_sales_total or 0) }}</h3>
+                        <div class="small text-muted mt-1">{{ month_orders_count or 0 }} monthly transactions</div>
                     </div>
                 </div>
 
-                <!-- Card 4: Record Sale / Add Expense (Khata Button) -->
-                <div class="col-6">
-                    <div class="card stat-card shadow-sm h-100 bg-white p-3 d-flex flex-column justify-content-center">
+                <!-- Card 4: Kul Munafa (Total Profit / Net Earnings) -->
+                <div class="col-6 col-md-4">
+                    <div class="kpi-card">
                         <div class="d-flex align-items-center gap-2 mb-2">
-                            <div class="stat-icon bg-warning bg-opacity-10 text-warning">📝</div>
-                            <span class="text-muted small fw-bold">Dukan Khata</span>
+                            <div class="kpi-icon bg-warning bg-opacity-10 text-warning">📈</div>
+                            <span class="text-muted small fw-bold">Kul Munafa (Net Profit)</span>
                         </div>
-                        <button type="button" class="btn btn-primary btn-sm fw-bold w-100 py-2 rounded-3" data-bs-toggle="modal" data-bs-target="#khataModal">
-                            + Record Sale / Expense
-                        </button>
+                        <h3 class="fw-bold mb-0 text-primary">PKR {{ "{:,.0f}".format(total_profit or (month_sales_total * 0.25)) }}</h3>
+                        <div class="small text-muted mt-1">25% margin on sales - expenses</div>
+                    </div>
+                </div>
+
+                <!-- Card 5: Aaj Ka Kharcha (Expenses) -->
+                <div class="col-6 col-md-4">
+                    <div class="kpi-card">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <div class="kpi-icon bg-danger bg-opacity-10 text-danger">🧾</div>
+                            <span class="text-muted small fw-bold">Aaj Ka Kharcha (Expense)</span>
+                        </div>
+                        <h3 class="fw-bold mb-0 text-danger">PKR {{ "{:,.0f}".format(today_expenses_total or 0) }}</h3>
+                        <div class="small text-muted mt-1">Total: PKR {{ "{:,.0f}".format(total_expenses_total or 0) }}</div>
+                    </div>
+                </div>
+
+                <!-- Card 6: Kam Stock (Low Stock Alert) -->
+                <div class="col-6 col-md-4">
+                    <div class="kpi-card">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <div class="kpi-icon bg-secondary bg-opacity-10 text-secondary">⚠️</div>
+                            <span class="text-muted small fw-bold">Kam Stock (Low Alert)</span>
+                        </div>
+                        <h3 class="fw-bold mb-0 {% if low_stock_count > 0 %}text-danger{% else %}text-muted{% endif %}">
+                            {{ low_stock_count or 0 }} <span class="fs-6 text-muted font-normal">items</span>
+                        </h3>
+                        <div class="small text-muted mt-1">Products with stock &le; 3 units</div>
                     </div>
                 </div>
             </div>
 
-            <!-- Product List -->
-            <div class="card shadow-sm border-0 rounded-4 overflow-hidden mb-4">
-                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center border-0 border-bottom">
-                    <h6 class="mb-0 fw-bold text-dark">📦 Aap Ka Saman (My Inventory - {{ products|length }} Items)</h6>
-                    <span class="badge bg-light text-dark border">WhatsApp Live Sync</span>
+            <!-- 3. Quick Sale & Khata Entry Bar -->
+            <div class="khata-bar mb-4">
+                <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+                    <h6 class="fw-bold text-dark mb-0">⚡ Quick Sale &amp; Khata Entry Bar (Dukan Hisab)</h6>
+                    <span class="badge bg-light text-secondary border">Real-Time Ledger Sync</span>
                 </div>
-                <div class="list-group list-group-flush">
-                    {% if products %}
-                        {% for p in products %}
-                        <div class="list-group-item d-flex align-items-center gap-3 py-3 border-light">
-                            <img src="{{ p.image_url or '/static/uploads/default_product.png' }}" 
-                                 class="product-img bg-light" 
-                                 alt="{{ p.title or p.name }}"
-                                 onerror="this.src='https://placehold.co/60x60?text=Item';">
-                            <div class="flex-grow-1">
-                                <h6 class="mb-1 fw-bold text-dark">{{ p.title or p.name }}</h6>
-                                <span class="badge bg-light text-secondary border small">{{ p.category or 'General' }}</span>
-                                <span class="text-success fw-bold ms-2">PKR {{ "{:,.0f}".format(p.price or 0) }}</span>
-                            </div>
-                            <span class="badge bg-secondary-subtle text-secondary border px-3 py-2 rounded-pill">Stock: {{ p.stock or p.stock_quantity or 0 }}</span>
-                        </div>
-                        {% endfor %}
-                    {% else %}
-                        <div class="list-group-item text-center text-muted py-4">
-                            Koi product nahi mila. WhatsApp par photo bhej kar add karein.
-                        </div>
-                    {% endif %}
+                <form class="row g-2 align-items-center" method="POST" action="/vendor/khata/record">
+                    <div class="col-12 col-md-3">
+                        <select class="form-select form-select-sm fw-bold" name="entry_type" required>
+                            <option value="sale" selected>💰 Cash Sale (Bikri)</option>
+                            <option value="credit">🤝 Udhaar (Customer Credit)</option>
+                            <option value="expense">💸 Dukan Kharcha (Expense)</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <input type="number" step="0.01" min="1" class="form-control form-control-sm" name="amount" placeholder="Amount (PKR) *" required>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <input type="text" class="form-control form-control-sm" name="description" placeholder="Tafseel (e.g. Counter sale, Chai/nashta, Honey)">
+                    </div>
+                    <div class="col-12 col-md-2">
+                        <button type="submit" class="btn btn-primary btn-sm w-100 fw-bold py-1">Save Khata</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 4. Complete Inventory Management Table / Grid -->
+            <div class="inventory-card mb-4">
+                <div class="card-header bg-white py-3 px-4 d-flex justify-content-between align-items-center border-0 border-bottom">
+                    <div>
+                        <h5 class="mb-0 fw-bold text-dark">📦 Dukan Inventory Management ({{ products|length }} Products)</h5>
+                        <small class="text-muted">Live sync with WhatsApp Photo Catalog and Chitral Storefront</small>
+                    </div>
+                    <button type="button" class="btn btn-outline-primary btn-sm fw-bold px-3 py-1 rounded-3" data-bs-toggle="modal" data-bs-target="#addProductModal">
+                        + Add Product
+                    </button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light small text-muted text-uppercase">
+                            <tr>
+                                <th style="width: 70px;">Item</th>
+                                <th>Product Details</th>
+                                <th>Category</th>
+                                <th>Sell Price</th>
+                                <th>Cost Price</th>
+                                <th>Stock</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if products %}
+                                {% for p in products %}
+                                <tr>
+                                    <td>
+                                        <img src="{{ p.image_url or '/static/uploads/default_product.png' }}" 
+                                             class="product-img" 
+                                             alt="{{ p.title }}"
+                                             onerror="this.src='https://placehold.co/60x60?text=Item';">
+                                    </td>
+                                    <td>
+                                        <div class="fw-bold text-dark">{{ p.title }}</div>
+                                        <small class="text-muted d-block text-truncate" style="max-width: 220px;" title="{{ p.description }}">
+                                            {{ p.description or 'Artisan product live on store' }}
+                                        </small>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-light text-secondary border small">{{ p.category or 'General' }}</span>
+                                    </td>
+                                    <td>
+                                        <span class="text-success fw-bold">PKR {{ "{:,.0f}".format(p.price or 0) }}</span>
+                                    </td>
+                                    <td>
+                                        <span class="text-muted small">PKR {{ "{:,.0f}".format(p.cost_price or (p.price * 0.75) or 0) }}</span>
+                                    </td>
+                                    <td>
+                                        {% if (p.stock or 0) <= 3 %}
+                                            <span class="badge bg-danger-subtle text-danger border border-danger px-2 py-1 rounded-pill fw-bold">
+                                                Low: {{ p.stock or 0 }}
+                                            </span>
+                                        {% else %}
+                                            <span class="badge bg-success-subtle text-success border border-success px-2 py-1 rounded-pill fw-bold">
+                                                {{ p.stock or 0 }} in stock
+                                            </span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <div class="d-inline-flex gap-1">
+                                            <!-- Sell 1 Quick Action Button -->
+                                            <button type="button" class="btn-sell-one" title="Sell 1 unit at counter and add to today's sale" onclick="sellOneProduct({{ p.id }})">
+                                                Sell 1 (+Sale)
+                                            </button>
+                                            <!-- Edit Button -->
+                                            <button type="button" class="btn btn-light btn-sm text-secondary border" title="Edit Product" onclick='openEditModal({{ p|tojson }})'>
+                                                ✏️
+                                            </button>
+                                            <!-- Delete Button -->
+                                            <button type="button" class="btn btn-light btn-sm text-danger border" title="Delete Product" onclick="deleteProduct({{ p.id }})">
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted py-5">
+                                        Koi product nahi mila. WhatsApp par photo + price bhej kar add karein ya upar "+ Add Product" button dabayein.
+                                    </td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
-            <div class="text-center mt-3">
+            <div class="text-center mt-3 mb-5">
                 <a href="/store" class="btn btn-outline-secondary btn-sm me-2 rounded-pill px-3">View Public Store</a>
                 <a href="/vendor/logout" class="btn btn-outline-danger btn-sm rounded-pill px-3">Logout</a>
             </div>
 
-            <!-- Modal: Record Sale / Add Expense (Khata) -->
-            <div class="modal fade" id="khataModal" tabindex="-1" aria-labelledby="khataModalLabel" aria-hidden="true">
+            <!-- Modal: Add Product -->
+            <div class="modal fade" id="addProductModal" tabindex="-1" aria-labelledby="addProductModalLabel" aria-hidden="true">
                 <div class="modal-dialog modal-dialog-centered">
                     <div class="modal-content rounded-4 border-0 shadow">
                         <div class="modal-header border-0 pb-0">
-                            <h5 class="modal-title fw-bold" id="khataModalLabel">📝 Record Sale / Expense (Khata)</h5>
+                            <h5 class="modal-title fw-bold" id="addProductModalLabel">📦 + Add New Product to Store</h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
-                        <form method="POST" action="/vendor/khata/record">
+                        <form method="POST" action="/vendor/product/add">
                             <div class="modal-body">
                                 <div class="mb-3">
-                                    <label class="form-label fw-bold small text-muted">Entry Type</label>
-                                    <select class="form-select" name="entry_type" required>
-                                        <option value="sale" selected>💰 Sale (Bikri / Income)</option>
-                                        <option value="expense">💸 Expense (Kharcha / Khata)</option>
-                                    </select>
+                                    <label class="form-label fw-bold small text-muted">Product Title *</label>
+                                    <input type="text" class="form-control" name="title" placeholder="e.g. Heavy Duty Brass Security Padlock" required>
+                                </div>
+                                <div class="row g-2 mb-3">
+                                    <div class="col-6">
+                                        <label class="form-label fw-bold small text-muted">Selling Price (PKR) *</label>
+                                        <input type="number" step="0.01" min="1" class="form-control" name="price" placeholder="450" required>
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label fw-bold small text-muted">Cost Price (PKR)</label>
+                                        <input type="number" step="0.01" min="0" class="form-control" name="cost_price" placeholder="320">
+                                    </div>
+                                </div>
+                                <div class="row g-2 mb-3">
+                                    <div class="col-6">
+                                        <label class="form-label fw-bold small text-muted">Category</label>
+                                        <select class="form-select" name="category">
+                                            <option value="Hardware & Tools" selected>Hardware &amp; Tools</option>
+                                            <option value="Electronics">Electronics</option>
+                                            <option value="Apparel & Accessories">Apparel &amp; Accessories</option>
+                                            <option value="Chitrali Crafts">Chitrali Crafts</option>
+                                            <option value="Dry Fruits">Dry Fruits</option>
+                                            <option value="Home & Kitchen">Home &amp; Kitchen</option>
+                                            <option value="Fast Food & Burgers">Fast Food &amp; Burgers</option>
+                                            <option value="Desi & Biryani">Desi &amp; Biryani</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label fw-bold small text-muted">Initial Stock</label>
+                                        <input type="number" min="0" class="form-control" name="stock" value="15">
+                                    </div>
                                 </div>
                                 <div class="mb-3">
-                                    <label class="form-label fw-bold small text-muted">Amount (PKR) *</label>
-                                    <input type="number" step="0.01" min="1" class="form-input form-control" name="amount" placeholder="e.g. 1500" required>
+                                    <label class="form-label fw-bold small text-muted">Image URL (Optional)</label>
+                                    <input type="url" class="form-control" name="image_url" placeholder="https://... (or leave empty)">
                                 </div>
                                 <div class="mb-3">
-                                    <label class="form-label fw-bold small text-muted">Description (Tafseel)</label>
-                                    <input type="text" class="form-control" name="description" placeholder="e.g. Cash sale at counter, Dry fruits">
+                                    <label class="form-label fw-bold small text-muted">Description</label>
+                                    <textarea class="form-control" name="description" rows="2" placeholder="Brief quality and utility description..."></textarea>
                                 </div>
                             </div>
                             <div class="modal-footer border-0 pt-0">
                                 <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
-                                <button type="submit" class="btn btn-primary fw-bold px-4">Save Entry</button>
+                                <button type="submit" class="btn btn-primary fw-bold px-4">Save Product</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal: Edit Product -->
+            <div class="modal fade" id="editProductModal" tabindex="-1" aria-labelledby="editProductModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content rounded-4 border-0 shadow">
+                        <div class="modal-header border-0 pb-0">
+                            <h5 class="modal-title fw-bold" id="editProductModalLabel">✏️ Edit Product</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <form method="POST" action="/vendor/product/edit" id="editProductForm">
+                            <input type="hidden" name="product_id" id="editProdId">
+                            <div class="modal-body">
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold small text-muted">Product Title *</label>
+                                    <input type="text" class="form-control" name="title" id="editProdTitle" required>
+                                </div>
+                                <div class="row g-2 mb-3">
+                                    <div class="col-6">
+                                        <label class="form-label fw-bold small text-muted">Selling Price (PKR) *</label>
+                                        <input type="number" step="0.01" min="1" class="form-control" name="price" id="editProdPrice" required>
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label fw-bold small text-muted">Cost Price (PKR)</label>
+                                        <input type="number" step="0.01" min="0" class="form-control" name="cost_price" id="editProdCostPrice">
+                                    </div>
+                                </div>
+                                <div class="row g-2 mb-3">
+                                    <div class="col-6">
+                                        <label class="form-label fw-bold small text-muted">Category</label>
+                                        <input type="text" class="form-control" name="category" id="editProdCategory">
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label fw-bold small text-muted">Stock Quantity</label>
+                                        <input type="number" min="0" class="form-control" name="stock" id="editProdStock">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer border-0 pt-0">
+                                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                                <button type="submit" class="btn btn-primary fw-bold px-4">Update Product</button>
                             </div>
                         </form>
                     </div>
@@ -173,5 +404,66 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        async function sellOneProduct(productId) {
+            if (!confirm("Confirm counter sale for 1 unit of this item? (Stock will decrease by 1 and today's sale will update)")) return;
+            try {
+                const res = await fetch('/vendor/product/sell-one', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_id: productId })
+                });
+                if (res.ok) {
+                    window.location.reload();
+                } else {
+                    alert('Sale could not be recorded.');
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function deleteProduct(productId) {
+            if (!confirm("Are you sure you want to delete this product?")) return;
+            try {
+                const res = await fetch('/vendor/product/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_id: productId })
+                });
+                if (res.ok) {
+                    window.location.reload();
+                } else {
+                    alert('Could not delete product.');
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        function openEditModal(prod) {
+            document.getElementById('editProdId').value = prod.id || '';
+            document.getElementById('editProdTitle').value = prod.title || '';
+            document.getElementById('editProdPrice').value = prod.price || 0;
+            document.getElementById('editProdCostPrice').value = prod.cost_price || Math.round((prod.price || 0) * 0.75);
+            document.getElementById('editProdCategory').value = prod.category || 'General';
+            document.getElementById('editProdStock').value = prod.stock || 0;
+            const modal = new bootstrap.Modal(document.getElementById('editProductModal'));
+            modal.show();
+        }
+
+        async function cleanupDuplicates() {
+            try {
+                const res = await fetch('/vendor/cleanup-duplicates', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    alert(`Cleaned up ${data.cleaned_duplicates_count} duplicate items.`);
+                    window.location.reload();
+                }
+            } catch (e) {
+                alert('Error cleaning duplicates: ' + e.message);
+            }
+        }
+    </script>
 </body>
 </html>

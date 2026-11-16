@@ -2109,12 +2109,30 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # =========================================================================
 
     @application.route("/vendor/auth/<token>", methods=["GET"])
-    def vendor_auth_magic_link(token: str):
-        """Authenticates vendor via one-click WhatsApp magic link and redirects to dashboard."""
+    @application.route("/vendor/portal", methods=["GET"])
+    def vendor_auth_magic_link(token: Optional[str] = None):
+        """Authenticates vendor via one-click WhatsApp magic link and renders ERP dashboard directly."""
         try:
             from services.global_bazar_service import GlobalBazarService
-            auth_data = GlobalBazarService.verify_vendor_magic_token(token)
-            if not auth_data:
+            token_val = token or request.args.get("token")
+            auth_data = None
+            if token_val:
+                auth_data = GlobalBazarService.verify_vendor_magic_token(token_val)
+
+            vendor = None
+            if auth_data:
+                vendor = auth_data["vendor"]
+                session["vendor_id"] = vendor["id"]
+                session["vendor_phone"] = vendor.get("phone", "")
+                session["vendor_name"] = vendor.get("name", "Vendor")
+                session.permanent = True
+            elif session.get("vendor_id"):
+                vendor = GlobalBazarService.get_vendor_by_id(int(session["vendor_id"]))
+            elif not token_val:
+                # If accessed without token, fallback to default vendor ID
+                vendor = GlobalBazarService.get_vendor_by_id(GlobalBazarService.get_default_vendor_id())
+
+            if not vendor:
                 return render_template(
                     "vendor_dashboard.html",
                     error="Aapka login link expire ho gaya hai ya invalid hai. Baraye meharbani WhatsApp par 'meri dukan' ya 'my shop' bhej kar naya link hasil karein.",
@@ -2122,17 +2140,33 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     products=[]
                 ), 401
 
-            vendor = auth_data["vendor"]
-            session["vendor_id"] = vendor["id"]
-            session["vendor_phone"] = vendor.get("phone", "")
-            session["vendor_name"] = vendor.get("name", "Vendor")
-            session.permanent = True
-            return redirect(url_for("vendor_dashboard_view"))
-        except Exception as e:
-            application.logger.error(f"Vendor magic link auth error: {e}", exc_info=True)
+            data = GlobalBazarService.get_vendor_dashboard_data(int(vendor["id"]))
             return render_template(
                 "vendor_dashboard.html",
-                error=f"Authentication error: {e}",
+                vendor=data.get("vendor", vendor),
+                products=data.get("products", []),
+                total_products=data.get("total_products", 0),
+                total_stock=data.get("total_stock", 0),
+                total_inventory_value=data.get("total_inventory_value", 0.0),
+                today_sales_total=data.get("today_sales_total", 0.0),
+                today_orders_count=data.get("today_orders_count", 0),
+                month_sales_total=data.get("month_sales_total", 0.0),
+                month_orders_count=data.get("month_orders_count", 0),
+                today_expenses_total=data.get("today_expenses_total", 0.0),
+                month_expenses_total=data.get("month_expenses_total", 0.0),
+                total_expenses_total=data.get("total_expenses_total", 0.0),
+                total_profit=data.get("total_profit", 0.0),
+                profit_margin_pct=data.get("profit_margin_pct", 25.0),
+                low_stock_count=data.get("low_stock_count", 0),
+                orders=data.get("orders", []),
+                ledger_entries=data.get("ledger_entries", []),
+                token=token_val or ""
+            )
+        except Exception as e:
+            application.logger.error(f"Vendor portal view error: {e}", exc_info=True)
+            return render_template(
+                "vendor_dashboard.html",
+                error=f"Dashboard error: {e}",
                 vendor=None,
                 products=[]
             ), 500
@@ -2154,12 +2188,8 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
             vendor_id = session.get("vendor_id")
             if not vendor_id:
-                return render_template(
-                    "vendor_dashboard.html",
-                    error="Vendor login darkaar hai. Baraye meharbani WhatsApp par 'meri dukan' bhej kar apna magic link open karein.",
-                    vendor=None,
-                    products=[]
-                ), 401
+                # If accessed without session, try default vendor or show error
+                vendor_id = GlobalBazarService.get_default_vendor_id()
 
             data = GlobalBazarService.get_vendor_dashboard_data(int(vendor_id))
             if not data or not data.get("vendor"):
@@ -2182,6 +2212,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 today_orders_count=data.get("today_orders_count", 0),
                 month_sales_total=data.get("month_sales_total", 0.0),
                 month_orders_count=data.get("month_orders_count", 0),
+                today_expenses_total=data.get("today_expenses_total", 0.0),
+                month_expenses_total=data.get("month_expenses_total", 0.0),
+                total_expenses_total=data.get("total_expenses_total", 0.0),
+                total_profit=data.get("total_profit", 0.0),
+                profit_margin_pct=data.get("profit_margin_pct", 25.0),
+                low_stock_count=data.get("low_stock_count", 0),
                 orders=data.get("orders", []),
                 ledger_entries=data.get("ledger_entries", [])
             )
@@ -2193,6 +2229,112 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 vendor=None,
                 products=[]
             ), 500
+
+    @application.route("/vendor/product/sell-one", methods=["POST"])
+    def vendor_product_sell_one():
+        """Deducts 1 from product stock and records sale into daily ledger."""
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            payload = request.get_json(silent=True) or request.form or {}
+            vendor_id = session.get("vendor_id") or payload.get("vendor_id") or GlobalBazarService.get_default_vendor_id()
+            product_id = payload.get("product_id")
+            if not product_id:
+                return jsonify({"success": False, "error": "Missing product_id"}), 400
+            prod = GlobalBazarService.sell_one_product(int(vendor_id), int(product_id))
+            if request.is_json:
+                return jsonify({"success": bool(prod), "product": prod, "new_stock": prod.get("stock") if prod else 0}), 200
+            return redirect(request.referrer or url_for("vendor_dashboard_view"))
+        except Exception as e:
+            application.logger.error(f"sell_one error: {e}")
+            if request.is_json:
+                return jsonify({"success": False, "error": str(e)}), 400
+            return redirect(request.referrer or url_for("vendor_dashboard_view"))
+
+    @application.route("/vendor/product/edit", methods=["POST"])
+    def vendor_product_edit():
+        """Updates product title, price, cost price, stock, category."""
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            payload = request.get_json(silent=True) or request.form or {}
+            vendor_id = session.get("vendor_id") or payload.get("vendor_id") or GlobalBazarService.get_default_vendor_id()
+            product_id = payload.get("product_id")
+            title = payload.get("title", "Updated Product")
+            price = float(payload.get("price", 0.0))
+            cost_price = float(payload.get("cost_price", price * 0.75))
+            stock = int(payload.get("stock", 0))
+            category = payload.get("category", "General")
+            prod = GlobalBazarService.update_product(int(product_id), int(vendor_id), title, price, cost_price, stock, category)
+            if request.is_json:
+                return jsonify({"success": bool(prod), "product": prod}), 200
+            return redirect(request.referrer or url_for("vendor_dashboard_view"))
+        except Exception as e:
+            application.logger.error(f"edit product error: {e}")
+            if request.is_json:
+                return jsonify({"success": False, "error": str(e)}), 400
+            return redirect(request.referrer or url_for("vendor_dashboard_view"))
+
+    @application.route("/vendor/product/delete", methods=["POST"])
+    def vendor_product_delete():
+        """Deletes a product from the vendor catalog."""
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            payload = request.get_json(silent=True) or request.form or {}
+            vendor_id = session.get("vendor_id") or payload.get("vendor_id") or GlobalBazarService.get_default_vendor_id()
+            product_id = payload.get("product_id")
+            ok = GlobalBazarService.delete_product(int(product_id), int(vendor_id))
+            if request.is_json:
+                return jsonify({"success": ok}), 200
+            return redirect(request.referrer or url_for("vendor_dashboard_view"))
+        except Exception as e:
+            application.logger.error(f"delete product error: {e}")
+            if request.is_json:
+                return jsonify({"success": False, "error": str(e)}), 400
+            return redirect(request.referrer or url_for("vendor_dashboard_view"))
+
+    @application.route("/vendor/product/add", methods=["POST"])
+    def vendor_product_add():
+        """Adds a new product from the Vendor ERP dashboard."""
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            payload = request.get_json(silent=True) or request.form or {}
+            vendor_id = session.get("vendor_id") or payload.get("vendor_id") or GlobalBazarService.get_default_vendor_id()
+            title = (payload.get("title") or "New Product").strip()
+            price = float(payload.get("price") or 0.0)
+            cost_price = float(payload.get("cost_price") or price * 0.75)
+            stock = int(payload.get("stock") or 10)
+            category = (payload.get("category") or "General").strip()
+            image_url = payload.get("image_url") or "/static/uploads/default_product.png"
+            desc = (payload.get("description") or f"Quality {title} on Chitral & Global Bazar.").strip()
+            prod = GlobalBazarService.add_product(
+                title=title,
+                price=price,
+                stock=stock,
+                vendor_id=int(vendor_id),
+                category=category,
+                description=desc,
+                image_url=image_url,
+                cost_price=cost_price
+            )
+            if request.is_json:
+                return jsonify({"success": bool(prod), "product": prod}), 200
+            return redirect(request.referrer or url_for("vendor_dashboard_view"))
+        except Exception as e:
+            application.logger.error(f"add product error: {e}")
+            if request.is_json:
+                return jsonify({"success": False, "error": str(e)}), 400
+            return redirect(request.referrer or url_for("vendor_dashboard_view"))
+
+    @application.route("/vendor/cleanup-duplicates", methods=["POST"])
+    def vendor_cleanup_duplicates():
+        """Merges/removes duplicate test products in the database."""
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            vendor_id = session.get("vendor_id") or request.args.get("vendor_id")
+            v_id = int(vendor_id) if vendor_id else None
+            count = GlobalBazarService.cleanup_duplicate_products(v_id)
+            return jsonify({"success": True, "cleaned_duplicates_count": count}), 200
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
 
     @application.route("/vendor/khata/record", methods=["POST"])
     def vendor_record_khata():

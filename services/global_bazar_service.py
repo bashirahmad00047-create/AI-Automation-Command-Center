@@ -6,6 +6,8 @@ Operates seamlessly in dual-mode (REST API with instant SQLite fallback).
 """
 
 import os
+import re
+import json
 import sqlite3
 import logging
 import datetime
@@ -133,6 +135,25 @@ class GlobalBazarService:
             return None
 
     @classmethod
+    def get_vendor_by_phone(cls, phone: str) -> Optional[Dict[str, Any]]:
+        """Retrieves an existing vendor profile by phone number or creates default if not found."""
+        try:
+            clean_p = str(phone or "").strip()
+            digits = "".join(filter(str.isdigit, clean_p))[-10:]
+            with cls.get_db_connection() as conn:
+                c = conn.cursor()
+                if digits:
+                    row = c.execute("SELECT * FROM vendors WHERE phone = ? OR phone LIKE ?", (clean_p, f"%{digits}%")).fetchone()
+                else:
+                    row = c.execute("SELECT * FROM vendors WHERE phone = ?", (clean_p,)).fetchone()
+                if row:
+                    return dict(row)
+            return cls.find_or_create_vendor(name="Dukan Owner", phone=phone)
+        except Exception as e:
+            logger.error(f"[GlobalBazar] Error in get_vendor_by_phone: {e}")
+            return {"id": 1, "name": "Dukan Owner", "phone": phone}
+
+    @classmethod
     def get_vendor_dashboard_data(cls, vendor_id: int) -> Dict[str, Any]:
         """Fetches complete profile, inventory, and stats for a specific vendor's mobile portal."""
         vendor = cls.get_vendor_by_id(vendor_id)
@@ -169,7 +190,7 @@ class GlobalBazarService:
                 "SELECT COUNT(*) as count, COALESCE(SUM(amount), 0.0) as total FROM ledger WHERE vendor_id = ? AND entry_type = 'sale' AND (entry_date = ? OR created_at LIKE ?)",
                 (vendor_id, today_str, f"{today_str}%")
             ).fetchone()
-            today_orders_count = int(today_orders_row["count"] or 0)
+            today_orders_count = int(today_orders_row["count"] or 0) + int(today_ledger_row["count"] or 0)
             today_sales_total = float(max(float(today_orders_row["total"] or 0.0), float(today_ledger_row["total"] or 0.0)))
 
             # Monthly sales & orders (current month)
@@ -181,8 +202,35 @@ class GlobalBazarService:
                 "SELECT COUNT(*) as count, COALESCE(SUM(amount), 0.0) as total FROM ledger WHERE vendor_id = ? AND entry_type = 'sale' AND (entry_date LIKE ? OR created_at LIKE ?)",
                 (vendor_id, f"{month_str}%", f"{month_str}%")
             ).fetchone()
-            month_orders_count = int(month_orders_row["count"] or 0)
+            month_orders_count = int(month_orders_row["count"] or 0) + int(month_ledger_row["count"] or 0)
             month_sales_total = float(max(float(month_orders_row["total"] or 0.0), float(month_ledger_row["total"] or 0.0)))
+
+            # Expenses (today, monthly, total)
+            today_exp_row = c.execute(
+                "SELECT COALESCE(SUM(amount), 0.0) as total FROM ledger WHERE vendor_id = ? AND entry_type in ('expense', 'debit') AND (entry_date = ? OR created_at LIKE ?)",
+                (vendor_id, today_str, f"{today_str}%")
+            ).fetchone()
+            today_expenses_total = float(today_exp_row["total"] or 0.0)
+
+            month_exp_row = c.execute(
+                "SELECT COALESCE(SUM(amount), 0.0) as total FROM ledger WHERE vendor_id = ? AND entry_type in ('expense', 'debit') AND (entry_date LIKE ? OR created_at LIKE ?)",
+                (vendor_id, f"{month_str}%", f"{month_str}%")
+            ).fetchone()
+            month_expenses_total = float(month_exp_row["total"] or 0.0)
+
+            total_exp_row = c.execute(
+                "SELECT COALESCE(SUM(amount), 0.0) as total FROM ledger WHERE vendor_id = ? AND entry_type in ('expense', 'debit')",
+                (vendor_id,)
+            ).fetchone()
+            total_expenses_total = float(total_exp_row["total"] or 0.0)
+
+            # Low stock count (stock <= 3)
+            low_stock_count = sum(1 for p in products if int(p.get("stock") or 0) <= 3)
+
+            # Total profit calculation:
+            # Margin of 25% on recorded sales minus monthly expenses
+            gross_profit = month_sales_total * 0.25
+            total_profit = max(0.0, gross_profit - month_expenses_total)
 
             orders_rows = c.execute(
                 "SELECT * FROM orders WHERE vendor_id = ? ORDER BY id DESC LIMIT 25",
@@ -207,6 +255,18 @@ class GlobalBazarService:
             "today_orders_count": today_orders_count,
             "month_sales_total": month_sales_total,
             "month_orders_count": month_orders_count,
+            "today_expenses_total": today_expenses_total,
+            "month_expenses_total": month_expenses_total,
+            "total_expenses_total": total_expenses_total,
+            "expenses": total_expenses_total,
+            "today_expenses": today_expenses_total,
+            "today_sales": today_sales_total,
+            "today_orders": today_orders_count,
+            "month_sales": month_sales_total,
+            "month_orders": month_orders_count,
+            "total_profit": total_profit,
+            "profit_margin_pct": 25.0,
+            "low_stock_count": low_stock_count,
             "orders": orders,
             "ledger_entries": ledger_entries
         }
@@ -238,11 +298,15 @@ class GlobalBazarService:
     MAGIC_TOKEN_SECRET = os.environ.get("VENDOR_TOKEN_SECRET", "bashflow-vendor-magic-portal-secret-key-2026")
 
     @classmethod
-    def generate_vendor_magic_token(cls, vendor_id: int, phone: str, expires_in_seconds: int = 86400 * 7) -> str:
+    def generate_vendor_magic_token(cls, vendor_id: int, phone: Optional[str] = None, expires_in_seconds: int = 86400 * 7) -> str:
         """Generates a secure, short-lived magic link token for vendor authentication."""
         from itsdangerous import URLSafeTimedSerializer
+        clean_phone = str(phone or "").strip()
+        if not clean_phone:
+            v = cls.get_vendor_by_id(vendor_id) or {}
+            clean_phone = str(v.get("phone") or "923471000668").strip()
         s = URLSafeTimedSerializer(cls.MAGIC_TOKEN_SECRET, salt="vendor-magic-link")
-        return s.dumps({"vendor_id": int(vendor_id), "phone": str(phone).strip()})
+        return s.dumps({"vendor_id": int(vendor_id), "phone": clean_phone})
 
     @classmethod
     def verify_vendor_magic_token(cls, token: str, max_age_seconds: int = 86400 * 7) -> Optional[Dict[str, Any]]:
@@ -376,6 +440,175 @@ class GlobalBazarService:
             return None
 
     @classmethod
+    def enhance_product_image_studio(cls, image_bytes: bytes) -> bytes:
+        """Applies PIL studio enhancement: square frame, sharpness, contrast, brightness, auto-leveling."""
+        try:
+            from PIL import Image, ImageEnhance, ImageOps
+            import io
+
+            if not image_bytes or len(image_bytes) < 32:
+                return image_bytes
+
+            orig = Image.open(io.BytesIO(image_bytes))
+            try:
+                orig = ImageOps.exif_transpose(orig)
+            except Exception:
+                pass
+
+            if orig.mode in ("RGBA", "LA", "P"):
+                rgb_canvas = Image.new("RGB", orig.size, (255, 255, 255))
+                if orig.mode == "P":
+                    orig = orig.convert("RGBA")
+                rgb_canvas.paste(orig, mask=orig.split()[-1] if orig.mode in ("RGBA", "LA") else None)
+                orig = rgb_canvas
+            elif orig.mode != "RGB":
+                orig = orig.convert("RGB")
+
+            # 1. Auto-level lighting
+            try:
+                orig = ImageOps.autocontrast(orig, cutoff=1)
+            except Exception:
+                pass
+
+            # 2. Enhancements: Brightness 1.08, Contrast 1.15, Sharpness 1.4
+            orig = ImageEnhance.Brightness(orig).enhance(1.08)
+            orig = ImageEnhance.Contrast(orig).enhance(1.15)
+            orig = ImageEnhance.Sharpness(orig).enhance(1.4)
+
+            # 3. Auto-crop/pad to clean square studio frame with subtle background
+            w, h = orig.size
+            max_side = max(w, h)
+            target_side = max(max_side, 640)
+            studio_bg = Image.new("RGB", (target_side, target_side), (248, 249, 250))
+            paste_x = (target_side - w) // 2
+            paste_y = (target_side - h) // 2
+            studio_bg.paste(orig, (paste_x, paste_y))
+
+            out_buf = io.BytesIO()
+            studio_bg.save(out_buf, format="JPEG", quality=92, optimize=True)
+            enhanced = out_buf.getvalue()
+            return enhanced if len(enhanced) > 32 else image_bytes
+        except Exception as e:
+            logger.warning(f"[Studio Enhancement Notice]: {e}")
+            return image_bytes
+
+    @classmethod
+    def analyze_product_vision(
+        cls,
+        image_bytes: Optional[bytes],
+        caption: Optional[str] = None
+    ) -> Optional[Dict[str, str]]:
+        """Passes image bytes + vendor caption to Gemini Vision to recognize actual product item, category and description."""
+        if not image_bytes or len(image_bytes) < 32:
+            return None
+
+        clean_cap = str(caption or "").strip()
+        cap_no_price = re.sub(r'(?i)\b(?:rs\.?|pkr|price|rate|cost)\s*[:=]?\s*[\d,]+(?:\.\d+)?|\b[\d,]+(?:\.\d+)?\s*(?:rs|pkr|rupees|rupay)\b', '', clean_cap).strip()
+
+        api_key = (
+            os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GOOGLE_API_KEY")
+            or os.environ.get("GOOGLE_GENAI_API_KEY")
+        )
+        if not api_key:
+            try:
+                from dotenv import load_dotenv
+                load_dotenv()
+                api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+            except Exception:
+                pass
+
+        if not api_key:
+            return None
+
+        prompt = (
+            "You are an expert e-commerce cataloger. Inspect the actual product object in the image and the optional vendor caption.\n"
+            f"Vendor caption: '{cap_no_price}'\n\n"
+            "Respond ONLY with a valid JSON object with these exact keys:\n"
+            "{\n"
+            '  "title": "<specific product name in English/Roman Urdu, e.g. Heavy Duty Brass Security Padlock>",\n'
+            '  "category": "<accurate category choosing strictly from: Electronics | Hardware & Tools | Apparel & Accessories | Desi & Biryani | Fast Food & Burgers | Chitrali Crafts | Dry Fruits | Home & Kitchen>",\n'
+            '  "description": "<2 crisp sentences describing the exact item visible in the photo, its quality, and practical use without mentioning any price>"\n'
+            "}\n"
+            "Do not include markdown code fences (```json), just the raw JSON object."
+        )
+
+        for model_name in ("gemini-2.5-flash", "gemini-1.5-flash"):
+            try:
+                from google import genai
+                from google.genai import types
+                client = genai.Client(api_key=api_key)
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[
+                        types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                        prompt
+                    ],
+                    config={"response_mime_type": "application/json"}
+                )
+                if response and response.text:
+                    clean_txt = response.text.strip().replace("```json", "").replace("```", "").strip()
+                    parsed = json.loads(clean_txt)
+                    if isinstance(parsed, dict) and parsed.get("title"):
+                        desc = str(parsed.get("description") or "").strip()
+                        desc = re.sub(r'(?i)\b(?:rs\.?|pkr|price|rate|cost)\s*[:=]?\s*[\d,]+(?:\.\d+)?|\b[\d,]+(?:\.\d+)?\s*(?:rs|pkr|rupees|rupay)\b', '', desc).strip()
+                        parsed["description"] = desc
+                        return parsed
+            except Exception as e1:
+                logger.debug(f"[Vision AI {model_name} google-genai]: {e1}")
+
+            try:
+                import google.generativeai as genai_legacy
+                genai_legacy.configure(api_key=api_key)
+                m = genai_legacy.GenerativeModel(model_name)
+                res = m.generate_content(
+                    [{'mime_type': 'image/jpeg', 'data': image_bytes}, prompt],
+                    request_options={"timeout": 8.0}
+                )
+                if res and res.text:
+                    clean_txt = res.text.strip().replace("```json", "").replace("```", "").strip()
+                    parsed = json.loads(clean_txt)
+                    if isinstance(parsed, dict) and parsed.get("title"):
+                        desc = str(parsed.get("description") or "").strip()
+                        desc = re.sub(r'(?i)\b(?:rs\.?|pkr|price|rate|cost)\s*[:=]?\s*[\d,]+(?:\.\d+)?|\b[\d,]+(?:\.\d+)?\s*(?:rs|pkr|rupees|rupay)\b', '', desc).strip()
+                        parsed["description"] = desc
+                        return parsed
+            except Exception as e2:
+                logger.debug(f"[Vision AI {model_name} google.generativeai]: {e2}")
+
+            try:
+                import base64
+                import requests
+                b64_img = base64.b64encode(image_bytes).decode("utf-8")
+                rest_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+                body = {
+                    "contents": [{
+                        "parts": [
+                            {"inline_data": {"mime_type": "image/jpeg", "data": b64_img}},
+                            {"text": prompt}
+                        ]
+                    }],
+                    "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
+                }
+                r = requests.post(rest_url, json=body, timeout=8.0)
+                if r.status_code == 200:
+                    data = r.json()
+                    candidates = data.get("candidates") or []
+                    if candidates:
+                        text_part = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                        clean_txt = text_part.strip().replace("```json", "").replace("```", "").strip()
+                        parsed = json.loads(clean_txt)
+                        if isinstance(parsed, dict) and parsed.get("title"):
+                            desc = str(parsed.get("description") or "").strip()
+                            desc = re.sub(r'(?i)\b(?:rs\.?|pkr|price|rate|cost)\s*[:=]?\s*[\d,]+(?:\.\d+)?|\b[\d,]+(?:\.\d+)?\s*(?:rs|pkr|rupees|rupay)\b', '', desc).strip()
+                            parsed["description"] = desc
+                            return parsed
+            except Exception as e3:
+                logger.debug(f"[Vision AI {model_name} REST]: {e3}")
+
+        return None
+
+    @classmethod
     def add_product(
         cls,
         title: str,
@@ -384,18 +617,20 @@ class GlobalBazarService:
         vendor_id: Optional[int] = None,
         category: str = "General",
         description: str = "",
-        image_url: Optional[str] = None
+        image_url: Optional[str] = None,
+        cost_price: Optional[float] = None
     ) -> Optional[Dict[str, Any]]:
         """Creates a new product in Global-Bazar-Core inventory."""
         try:
             v_id = vendor_id or cls.get_default_vendor_id()
             now_iso = datetime.datetime.utcnow().isoformat()
+            c_price = float(cost_price) if cost_price is not None else float(price * 0.75)
             with cls.get_db_connection() as conn:
                 c = conn.cursor()
                 c.execute("""
                     INSERT INTO products (vendor_id, title, description, category, price, cost_price, stock, image_url, ai_image_url, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (v_id, title.strip(), description.strip(), category.strip(), float(price), float(price * 0.7), int(stock), image_url, image_url, now_iso))
+                """, (v_id, title.strip(), description.strip(), category.strip(), float(price), c_price, int(stock), image_url, image_url, now_iso))
                 conn.commit()
                 new_id = c.lastrowid
                 row = c.execute("SELECT * FROM products WHERE id = ?", (new_id,)).fetchone()
@@ -403,6 +638,111 @@ class GlobalBazarService:
         except Exception as e:
             logger.error(f"[GlobalBazar] Failed to add product: {e}")
             return None
+
+    @classmethod
+    def sell_one_product(cls, vendor_id: int, product_id: int) -> Optional[Dict[str, Any]]:
+        """Deducts 1 stock from product and records sale into ledger and daily sale immediately."""
+        try:
+            with cls.get_db_connection() as conn:
+                c = conn.cursor()
+                prod_row = c.execute("SELECT * FROM products WHERE id = ? AND (vendor_id = ? OR vendor_id IS NULL)", (product_id, vendor_id)).fetchone()
+                if not prod_row:
+                    return None
+                prod = dict(prod_row)
+                current_stock = max(0, int(prod.get("stock") or 0))
+                new_stock = max(0, current_stock - 1)
+                c.execute("UPDATE products SET stock = ? WHERE id = ?", (new_stock, product_id))
+
+                sale_price = float(prod.get("price") or 0.0)
+                t_date = datetime.date.today().isoformat()
+                now_iso = datetime.datetime.utcnow().isoformat()
+                c.execute("""
+                    INSERT INTO ledger (vendor_id, entry_type, amount, category, description, entry_date, created_at)
+                    VALUES (?, 'sale', ?, 'quick_sell', ?, ?, ?)
+                """, (vendor_id, sale_price, f"Sell 1 Counter: {prod.get('title')}", t_date, now_iso))
+                conn.commit()
+                prod["stock"] = new_stock
+                return prod
+        except Exception as e:
+            logger.error(f"[GlobalBazar] sell_one_product failed: {e}")
+            return None
+
+    @classmethod
+    def update_product(
+        cls,
+        product_id: int,
+        vendor_id: int,
+        title: str,
+        price: float,
+        cost_price: float,
+        stock: int,
+        category: str
+    ) -> Optional[Dict[str, Any]]:
+        """Updates product details."""
+        try:
+            with cls.get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute("""
+                    UPDATE products
+                    SET title = ?, price = ?, cost_price = ?, stock = ?, category = ?
+                    WHERE id = ? AND (vendor_id = ? OR vendor_id IS NULL)
+                """, (title.strip(), float(price), float(cost_price), int(stock), category.strip(), product_id, vendor_id))
+                conn.commit()
+                row = c.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"[GlobalBazar] update_product failed: {e}")
+            return None
+
+    @classmethod
+    def delete_product(cls, product_id: int, vendor_id: int) -> bool:
+        """Deletes a product."""
+        try:
+            with cls.get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute("DELETE FROM products WHERE id = ? AND (vendor_id = ? OR vendor_id IS NULL)", (product_id, vendor_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"[GlobalBazar] delete_product failed: {e}")
+            return False
+
+    @classmethod
+    def cleanup_duplicate_products(cls, vendor_id: Optional[int] = None) -> int:
+        """Cleans up duplicate products (e.g. duplicate padlock/artisan/studio items)."""
+        try:
+            with cls.get_db_connection() as conn:
+                c = conn.cursor()
+                sql = "SELECT id, title, price, category, created_at, vendor_id FROM products"
+                params = []
+                if vendor_id:
+                    sql += " WHERE vendor_id = ?"
+                    params.append(vendor_id)
+                sql += " ORDER BY id ASC"
+                rows = [dict(r) for r in c.execute(sql, params).fetchall()]
+
+                deleted_ids = []
+                seen_keys = {}
+                for r in rows:
+                    t_clean = r["title"].strip().lower()
+                    if t_clean in ("artisan store product", "studio collection elegance edition"):
+                        key = (r["vendor_id"], r["price"], "dummy")
+                    else:
+                        key = (r["vendor_id"], r["price"], t_clean)
+
+                    if key in seen_keys:
+                        deleted_ids.append(r["id"])
+                    else:
+                        seen_keys[key] = r["id"]
+
+                if deleted_ids:
+                    c.execute(f"DELETE FROM products WHERE id IN ({','.join(['?']*len(deleted_ids))})", deleted_ids)
+                    conn.commit()
+                    logger.info(f"[GlobalBazar] Cleaned up {len(deleted_ids)} duplicate products: {deleted_ids}")
+                return len(deleted_ids)
+        except Exception as e:
+            logger.error(f"[GlobalBazar] cleanup_duplicate_products error: {e}")
+            return 0
 
     @classmethod
     def process_ai_catalog_direct(
@@ -415,11 +755,12 @@ class GlobalBazarService:
         vendor_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Direct offline/in-process engine for AI cataloging when FastAPI HTTP port is offline.
-        Saves image to static uploads, detects title/price, and persists product to database.
+        Direct offline/in-process engine for AI cataloging with Studio Enhancement and Real Vision AI.
+        Saves enhanced image to static uploads, recognizes product item, and persists ONCE to database.
         """
         import uuid
         import re
+        import json
 
         clean_cap = str(caption or "").strip()
         extracted_price = price
@@ -433,16 +774,31 @@ class GlobalBazarService:
 
         final_price = float(extracted_price) if extracted_price else 2500.0
 
-        # Title resolution
-        title = "Studio Collection Elegance Edition"
-        if clean_cap:
-            t_cand = re.sub(r'(?:rs\.?|pkr)?\s*[\d,]+(?:\.\d+)?', '', clean_cap, flags=re.IGNORECASE)
-            t_cand = re.sub(r'\b(add|sell|price|for|this|product|item)\b', '', t_cand, flags=re.IGNORECASE).strip()
-            if t_cand and len(t_cand) >= 3:
-                title = t_cand.title()
+        # Step A: Studio Image Enhancement (PIL auto-contrast, brightness, sharpness, studio square frame)
+        enhanced_bytes = cls.enhance_product_image_studio(image_bytes) if image_bytes else None
+        final_image_bytes = enhanced_bytes or image_bytes
 
-        description = f"High-quality artisan product crafted for modern aesthetics and daily style. {clean_cap}".strip()
-        category = "Apparel & Accessories"
+        # Step B: Real Vision AI Title, Category & Description
+        vision_res = cls.analyze_product_vision(final_image_bytes, caption=clean_cap) if final_image_bytes else None
+        if vision_res and vision_res.get("title"):
+            title = str(vision_res["title"]).strip()
+            category = str(vision_res.get("category") or "Hardware & Tools").strip()
+            description = str(vision_res.get("description") or "Quality product available on Chitral & Global Bazar.").strip()
+        else:
+            # Fallback title if vision AI is unreachable - extract meaningful title from caption without prices
+            clean_title = re.sub(r'(?i)\b(?:rs\.?|pkr|price|rate|cost)\s*[:=]?\s*[\d,]+(?:\.\d+)?|\b[\d,]+(?:\.\d+)?\s*(?:rs|pkr|rupees|rupay)\b', '', clean_cap).strip()
+            clean_title = re.sub(r'(?i)\b(add|sell|price|for|this|product|item)\b', '', clean_title).strip()
+            if clean_title and len(clean_title) >= 3:
+                title = clean_title.title()
+            else:
+                title = "Store Inventory Item"
+            category = "General"
+            description = f"Quality product available on Chitral & Global Bazar."
+
+        # Strip price string out of description so it doesn't repeat
+        description = re.sub(r'(?i)\b(?:rs\.?|pkr|price|rate|cost)\s*[:=]?\s*[\d,]+(?:\.\d+)?|\b[\d,]+(?:\.\d+)?\s*(?:rs|pkr|rupees|rupay)\b', '', description).strip()
+        if not description:
+            description = f"Quality {title} available for immediate order on Chitral & Global Bazar."
 
         # Multi-vendor resolution if vendor_id not given
         target_vendor_id = vendor_id
@@ -456,23 +812,24 @@ class GlobalBazarService:
             target_vendor_id = v_obj.get("id")
             resolved_vendor = v_obj
 
-        # Save image file to static/uploads
+        # Save enhanced image file to static/uploads
         unique_id = uuid.uuid4().hex
-        filename = f"catalog_{unique_id}.png"
+        filename = f"catalog_{unique_id}.jpg"
         uploads_dir = os.path.abspath(os.path.join(os.path.dirname(cls.get_db_path()), "static", "uploads"))
         os.makedirs(uploads_dir, exist_ok=True)
         filepath = os.path.join(uploads_dir, filename)
 
-        if image_bytes:
+        if final_image_bytes:
             with open(filepath, "wb") as f:
-                f.write(image_bytes)
+                f.write(final_image_bytes)
         else:
             with open(filepath, "wb") as f:
                 f.write(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82")
 
         image_url = f"/static/uploads/{filename}"
 
-        # Persist to database
+        # Persist to database ONCE
+        cost_price = float(final_price * 0.75)
         saved_prod = cls.add_product(
             title=title,
             price=final_price,
@@ -480,7 +837,8 @@ class GlobalBazarService:
             vendor_id=target_vendor_id,
             category=category,
             description=description,
-            image_url=image_url
+            image_url=image_url,
+            cost_price=cost_price
         )
 
         return {

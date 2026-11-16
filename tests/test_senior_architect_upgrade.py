@@ -1,0 +1,287 @@
+import os
+import sys
+import json
+import io
+import pytest
+from unittest.mock import patch, MagicMock
+from PIL import Image
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+from app import create_app
+from services.global_bazar_service import GlobalBazarService
+from whatsapp_service import WhatsAppService
+
+
+@pytest.fixture(scope="module")
+def test_app():
+    app = create_app()
+    app.config["TESTING"] = True
+    yield app
+
+
+@pytest.fixture
+def client(test_app):
+    return test_app.test_client()
+
+
+# =============================================================================
+# UPGRADE 1: Duplicate Product Insertion & Idempotency
+# =============================================================================
+def test_idempotency_prevents_duplicate_product():
+    """Verify handle_whatsapp_inventory_image rejects duplicate message_ids."""
+    WhatsAppService._inventory_idempotency_cache.clear()
+
+    # Generate small valid JPEG bytes
+    img = Image.new("RGB", (60, 60), color="blue")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    fake_img_bytes = buf.getvalue()
+
+    mock_product = {
+        "id": 9991,
+        "title": "Heavy Duty Brass Security Padlock",
+        "price": 450.0,
+        "category": "Hardware & Tools"
+    }
+
+    with patch("requests.get") as mock_get, \
+         patch.object(GlobalBazarService, "process_ai_catalog_direct") as mock_direct, \
+         patch.object(GlobalBazarService, "add_product") as mock_add_product, \
+         patch.object(WhatsAppService, "send_message") as mock_send_msg:
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = fake_img_bytes
+        mock_get.return_value = mock_resp
+        mock_send_msg.return_value = {"success": True}
+
+        mock_direct.return_value = {
+            "success": True,
+            "title": "Heavy Duty Brass Security Padlock",
+            "price": 450.0,
+            "category": "Hardware & Tools",
+            "saved_product": mock_product
+        }
+
+        # First Call
+        res1 = WhatsAppService.handle_whatsapp_inventory_image(
+            organization_id="org-enterprise-default",
+            sender_phone="923471000668",
+            message_body="RS 450",
+            download_url="http://mock.image/padlock.jpg",
+            message_id="msg_test_idemp_101"
+        )
+        assert res1.get("success") is True
+        assert res1.get("duplicate") is not True
+
+        # Second Call with identical message_id
+        res2 = WhatsAppService.handle_whatsapp_inventory_image(
+            organization_id="org-enterprise-default",
+            sender_phone="923471000668",
+            message_body="RS 450",
+            download_url="http://mock.image/padlock.jpg",
+            message_id="msg_test_idemp_101"
+        )
+        assert res2.get("success") is True
+        assert res2.get("duplicate") is True
+        assert "already processed" in res2.get("message", "").lower()
+
+        # Ensure mock_direct was only called once, and mock_add_product was NOT called a second time
+        assert mock_direct.call_count == 1
+        assert mock_add_product.call_count == 0
+
+
+def test_single_pipeline_insertion_when_saved_product_returned():
+    """Verify that when direct/FastAPI pipeline saves the product, secondary fallback insertion is bypassed."""
+    WhatsAppService._inventory_idempotency_cache.clear()
+
+    img = Image.new("RGB", (60, 60), color="green")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    fake_img_bytes = buf.getvalue()
+
+    with patch("requests.get") as mock_get, \
+         patch.object(GlobalBazarService, "process_ai_catalog_direct") as mock_direct, \
+         patch.object(GlobalBazarService, "add_product") as mock_add_product, \
+         patch.object(WhatsAppService, "send_message") as mock_send_msg:
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = fake_img_bytes
+        mock_get.return_value = mock_resp
+        mock_send_msg.return_value = {"success": True}
+
+        mock_direct.return_value = {
+            "success": True,
+            "title": "Handmade Woolen Shawl",
+            "price": 2500.0,
+            "category": "Apparel & Accessories",
+            "saved_product": {"id": 8881, "title": "Handmade Woolen Shawl"}
+        }
+
+        res = WhatsAppService.handle_whatsapp_inventory_image(
+            organization_id="org-enterprise-default",
+            sender_phone="923471000668",
+            message_body="RS 2500",
+            download_url="http://mock.image/shawl.jpg",
+            message_id="msg_test_single_pipeline_202"
+        )
+        assert res.get("success") is True
+        # GlobalBazarService.add_product should NOT be called directly since process_ai_catalog_direct already saved it
+        assert mock_add_product.call_count == 0
+
+
+# =============================================================================
+# UPGRADE 2: Studio Image Enhancement & Real Vision AI
+# =============================================================================
+def test_studio_image_enhancement():
+    """Verify enhance_product_image_studio processes raw bytes into a square enhanced studio photo."""
+    raw_img = Image.new("RGB", (300, 200), color=(120, 80, 60))
+    buf = io.BytesIO()
+    raw_img.save(buf, format="JPEG")
+    raw_bytes = buf.getvalue()
+
+    enhanced_bytes = GlobalBazarService.enhance_product_image_studio(raw_bytes)
+    assert isinstance(enhanced_bytes, bytes)
+    assert len(enhanced_bytes) > 0
+
+    # Read back enhanced image and check dimensions
+    out_img = Image.open(io.BytesIO(enhanced_bytes))
+    # It must be perfectly square
+    assert out_img.size[0] == out_img.size[1]
+    assert out_img.size[0] >= 640
+    assert out_img.format in ("JPEG", "PNG")
+
+
+def test_real_vision_ai_parsing_and_price_stripping():
+    """Verify analyze_product_vision parses Gemini JSON response and strips out repetitive price tags."""
+    raw_img = Image.new("RGB", (100, 100), color=(200, 200, 200))
+    buf = io.BytesIO()
+    raw_img.save(buf, format="JPEG")
+    raw_bytes = buf.getvalue()
+
+    mock_ai_json = json.dumps({
+        "title": "Heavy Duty Brass Security Padlock",
+        "category": "Hardware & Tools",
+        "description": "High quality hardened brass padlock with anti-drill cylinder. Ideal for shop shutters and gates. RS 450"
+    })
+
+    mock_client = MagicMock()
+    mock_model = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.text = mock_ai_json
+    mock_model.generate_content.return_value = mock_resp
+    mock_client.models = mock_model
+
+    with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_test_key_123"}), \
+         patch("google.genai.Client", return_value=mock_client):
+
+        vision_result = GlobalBazarService.analyze_product_vision(raw_bytes, caption="RS 450")
+        assert vision_result is not None
+        assert vision_result["title"] == "Heavy Duty Brass Security Padlock"
+        assert vision_result["category"] == "Hardware & Tools"
+        # Verify "RS 450" was cleanly stripped from description
+        assert "RS 450" not in vision_result["description"]
+        assert "brass padlock" in vision_result["description"].lower()
+
+
+# =============================================================================
+# UPGRADE 3: Direct Vendor Auth & Magic Link (Never Redirects to Admin Dashboard)
+# =============================================================================
+def test_vendor_auth_renders_portal_directly_no_redirect(client):
+    """Verify /vendor/auth/<token> returns HTTP 200 and directly renders vendor_dashboard.html, NOT 302 to /dashboard."""
+    vendor = GlobalBazarService.get_vendor_by_phone("923471000668")
+    token = GlobalBazarService.generate_vendor_magic_token(vendor["id"], phone=vendor["phone"])
+
+    res = client.get(f"/vendor/auth/{token}", follow_redirects=False)
+    # MUST be 200 OK directly, NOT 302 redirect
+    assert res.status_code == 200
+    html = res.data.decode("utf-8")
+
+    # Verify Vendor ERP header & 6 KPI Cards are present
+    assert "ERP" in html and "Dukan" in html
+    assert "Total Maal" in html
+    assert "Aaj Ki Sale" in html
+    assert "Mahine Ki Sale" in html
+    assert "Kul Munafa" in html
+    assert "Aaj Ka Kharcha" in html
+    assert "Kam Stock" in html
+
+    # Verify no Admin BashFlow UI leak
+    assert "WhatsApp Cloud Admin" not in html
+    assert "Acme Global Enterprise" not in html
+
+
+def test_vendor_portal_renders_directly(client):
+    """Verify /vendor/portal with session or phone returns HTTP 200 with vendor ERP."""
+    with client.session_transaction() as sess:
+        sess["vendor_phone"] = "923471000668"
+
+    res = client.get("/vendor/portal", follow_redirects=False)
+    assert res.status_code == 200
+    html = res.data.decode("utf-8")
+    assert "Total Maal" in html
+    assert "Sell 1 (+Sale)" in html
+
+
+# =============================================================================
+# UPGRADE 4: Customer-Ready Vendor ERP, Khata, & "Sell 1 (+Sale)"
+# =============================================================================
+def test_sell_one_product_flow(client):
+    """Verify sell_one_product decrements stock by 1 and records sale in ledger."""
+    vendor = GlobalBazarService.get_vendor_by_phone("923471000668")
+    vendor_id = vendor["id"]
+
+    # Add a dedicated test product
+    prod = GlobalBazarService.add_product(
+        vendor_id=vendor_id,
+        title="Test Hardware Lock For ERP",
+        price=500.0,
+        cost_price=350.0,
+        stock=10,
+        category="Hardware & Tools"
+    )
+    prod_id = prod["id"]
+    initial_stock = prod["stock"]
+
+    # Sell 1 via API
+    with client.session_transaction() as sess:
+        sess["vendor_id"] = vendor_id
+        sess["vendor_phone"] = "923471000668"
+
+    res = client.post("/vendor/product/sell-one", json={"product_id": prod_id})
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data.get("success") is True
+    assert data.get("new_stock") == initial_stock - 1
+
+    # Verify stats
+    stats = GlobalBazarService.get_vendor_dashboard_data(vendor_id)
+    assert stats["today_sales"] >= 500.0
+    assert stats["today_orders"] >= 1
+    assert stats["total_products"] >= 1
+
+
+def test_vendor_khata_record(client):
+    """Verify recording an expense or cash sale via quick khata updates stats."""
+    vendor = GlobalBazarService.get_vendor_by_phone("923471000668")
+    vendor_id = vendor["id"]
+
+    with client.session_transaction() as sess:
+        sess["vendor_id"] = vendor_id
+        sess["vendor_phone"] = "923471000668"
+
+    # Record expense
+    res = client.post("/vendor/khata/record", data={
+        "entry_type": "expense",
+        "amount": "150",
+        "description": "Tea and snacks for shop",
+        "customer_name": ""
+    }, follow_redirects=True)
+    assert res.status_code == 200
+
+    stats = GlobalBazarService.get_vendor_dashboard_data(vendor_id)
+    assert stats["expenses"] >= 150.0
