@@ -285,3 +285,152 @@ def test_vendor_khata_record(client):
 
     stats = GlobalBazarService.get_vendor_dashboard_data(vendor_id)
     assert stats["expenses"] >= 150.0
+
+
+# =============================================================================
+# CORE ARCHITECTURAL REQUIREMENTS: 
+# 1. Strict Single-Vendor Isolation
+# 2. Automated Bijak / Wholesale Bill Scanner
+# 3. Numeric Title Rejection & Gemini Vision Setup
+# =============================================================================
+
+def test_single_vendor_isolation_storefront(client):
+    """Verify /store?shop=<vendor_id> and /dukan/<vendor_id> show ONLY this vendor and hide others."""
+    vendor = GlobalBazarService.get_vendor_by_phone("923471000668")
+    v_id = vendor["id"]
+
+    res = client.get(f"/store?shop={v_id}")
+    assert res.status_code == 200
+    html = res.data.decode("utf-8")
+
+    # Must contain Bashir Store and its product
+    assert "Bashir Store" in html
+    assert "Traditional Metallic Spout Kettle" in html or "Hardware Lock" in html
+
+    # NEVER contain other vendors' products like Biryani or Pizza
+    assert "Special Chicken Dum Biryani" not in html
+    assert "Italiano Stone Crust Pizza" not in html
+    assert "Shahi Dastarkhwan Restaurant" not in html
+
+    # Multi-shop filter bar must be hidden
+    assert "Filter by Shop:" not in html
+
+
+def test_single_vendor_isolation_api(client):
+    """Verify /api/store/products?shop=<vendor_id> returns ONLY this vendor's items."""
+    vendor = GlobalBazarService.get_vendor_by_phone("923471000668")
+    v_id = vendor["id"]
+
+    res = client.get(f"/api/store/products?shop={v_id}")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data.get("success") is True
+    assert data.get("is_single_shop") is True
+    assert len(data.get("products", [])) > 0
+    for p in data["products"]:
+        assert p.get("vendor_id") == v_id or "Bashir Store" in p.get("seller_name", "")
+        assert "Biryani" not in p.get("title", "")
+
+
+def test_process_vendor_bijak_multi_item_scanner():
+    """Verify process_vendor_bijak_image extracts items, updates stock/ledger, and formats links."""
+    vendor = GlobalBazarService.get_vendor_by_phone("923471000668")
+    v_id = vendor["id"]
+
+    fake_bijak_json = {
+        "is_bijak": True,
+        "vendor_shop_name": "Lahore Wholesale Market",
+        "items": [
+            {
+                "title": "Brass Security Padlock 50mm",
+                "quantity": 15,
+                "cost_price": 380.0,
+                "selling_price": 500.0,
+                "category": "Hardware & Tools"
+            },
+            {
+                "title": "Chitrali Woolen Muffler",
+                "quantity": 8,
+                "cost_price": 600.0,
+                "selling_price": 900.0,
+                "category": "Apparel & Accessories"
+            }
+        ]
+    }
+
+    raw_img = Image.new("RGB", (200, 200), color="white")
+    buf = io.BytesIO()
+    raw_img.save(buf, format="JPEG")
+    fake_img = buf.getvalue()
+
+    with patch.object(GlobalBazarService, "analyze_product_vision", return_value=None), \
+         patch("requests.post") as mock_post:
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": json.dumps(fake_bijak_json)}]
+                }
+            }]
+        }
+        mock_post.return_value = mock_resp
+
+        res = GlobalBazarService.process_vendor_bijak_image(
+            vendor_id=v_id,
+            image_bytes=fake_img,
+            caption="bijak wholesale market list"
+        )
+        assert res.get("success") is True
+        assert res.get("is_bijak") is True
+        assert res.get("total_items") >= 2
+        assert "Brass Security Padlock" in res.get("whatsapp_message", "")
+        # Must include both Admin View and Shareable Storefront links
+        assert "/vendor/auth/" in res.get("whatsapp_message", "")
+        assert f"/store?shop={v_id}" in res.get("whatsapp_message", "")
+
+
+def test_numeric_title_rejection_for_550_and_kettle_naming():
+    """Verify caption with only '550' or 'Rs 550' is treated strictly as price, never title."""
+    WhatsAppService._inventory_idempotency_cache.clear()
+
+    raw_img = Image.new("RGB", (80, 80), color="silver")
+    buf = io.BytesIO()
+    raw_img.save(buf, format="JPEG")
+    fake_img = buf.getvalue()
+
+    with patch("requests.get") as mock_get, \
+         patch.object(GlobalBazarService, "analyze_product_vision", return_value=None), \
+         patch.object(WhatsAppService, "send_message") as mock_send_msg:
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = fake_img
+        mock_get.return_value = mock_resp
+        mock_send_msg.return_value = {"success": True}
+
+        res = WhatsAppService.handle_whatsapp_inventory_image(
+            organization_id="org-enterprise-default",
+            sender_phone="923471000668",
+            message_body="550",
+            download_url="http://mock.image/kettle.jpg",
+            message_id="msg_test_numeric_title_550"
+        )
+        assert res.get("success") is True
+        # Title must NEVER be purely "550"
+        assert res.get("title") != "550"
+        assert res.get("title") != "Rs 550"
+        assert "Kettle" in res.get("title") or "Lota" in res.get("title") or "Store" in res.get("title")
+        # WhatsApp reply must include both links
+        assert "/vendor/auth/" in res.get("reply_body", "")
+        assert "/store?shop=" in res.get("reply_body", "")
+
+
+def test_cleanup_duplicates_and_fix_numeric_titles():
+    """Verify cleanup_vendor_duplicates_and_fix_numeric_titles removes old duplicate test items."""
+    res = GlobalBazarService.cleanup_vendor_duplicates_and_fix_numeric_titles()
+    assert isinstance(res, dict)
+    assert "cleaned_duplicates" in res
+    assert "fixed_numeric_titles" in res
+

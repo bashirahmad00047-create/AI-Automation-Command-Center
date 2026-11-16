@@ -1998,28 +1998,85 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # =========================================================================
 
     @application.route("/store", methods=["GET", "HEAD", "OPTIONS"])
-    def public_storefront():
+    @application.route("/dukan/<int:dukan_id>", methods=["GET", "HEAD", "OPTIONS"])
+    def public_storefront(dukan_id: Optional[int] = None):
         if request.method == "OPTIONS":
             resp = application.make_response("")
             resp.headers["Allow"] = "GET, HEAD, OPTIONS"
             return resp, 204
-        """Public mobile-first e-commerce shopping storefront ('Chitral & Global Bazar'). No login required."""
+        """Public mobile-first e-commerce shopping storefront with Strict Single-Vendor Isolation when ?shop= or /dukan/<id> is used."""
         try:
             try:
                 db.session.rollback()
             except Exception:
                 pass
+
+            target_shop = dukan_id or request.args.get("shop") or request.args.get("vendor_id")
+            from services.global_bazar_service import GlobalBazarService
+
+            isolated_vendor = None
+            if target_shop:
+                try:
+                    v_int = int(target_shop)
+                    isolated_vendor = GlobalBazarService.get_vendor_by_id(v_int)
+                except ValueError:
+                    isolated_vendor = GlobalBazarService.get_vendor_by_phone(str(target_shop))
+
+            jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
+
+            # 1. STRICT SINGLE-VENDOR ISOLATION MODE:
+            # If a shop is specified, ONLY display this vendor's items. Never leak any other vendor's items.
+            if isolated_vendor:
+                v_id = isolated_vendor["id"]
+                gb_items = GlobalBazarService.get_products(vendor_id=v_id)
+                isolated_prods = []
+                for gi in gb_items:
+                    t = gi.get("title", "").strip()
+                    if not t:
+                        continue
+                    clean_img = str(gi.get("image_url") or "")
+                    for pfx in ["http://127.0.0.1:8000", "http://localhost:8000"]:
+                        if clean_img.startswith(pfx):
+                            clean_img = clean_img[len(pfx):]
+                    isolated_prods.append({
+                        "id": f"gb-{gi.get('id')}",
+                        "name": t,
+                        "title": t,
+                        "category": gi.get("category", "General"),
+                        "price": float(gi.get("price", 0)),
+                        "estimated_price": float(gi.get("price", 0)),
+                        "description": gi.get("description", ""),
+                        "image_url": clean_img,
+                        "seller_name": isolated_vendor.get("name") or "Bashir Store (Chitral Bazar)",
+                        "vendor_name": isolated_vendor.get("name") or "Bashir Store (Chitral Bazar)",
+                        "seller_phone": isolated_vendor.get("phone") or "+923471000668",
+                        "vendor_phone": isolated_vendor.get("phone") or "+923471000668",
+                        "seller_city": isolated_vendor.get("address") or "Chitral Bazar",
+                        "stock_quantity": gi.get("stock", 15),
+                        "stock_status": "in_stock" if int(gi.get("stock", 15)) > 0 else "out_of_stock",
+                        "contact_mode": "smart_broker"
+                    })
+
+                b_name = isolated_vendor.get("name") or "Bashir Store (Chitral Bazar)"
+                return render_template(
+                    "store.html",
+                    products=isolated_prods,
+                    business_name=b_name,
+                    currency="PKR",
+                    jazzcash_number=jc_num,
+                    isolated_vendor=isolated_vendor,
+                    is_single_shop=True
+                )
+
+            # 2. GLOBAL MULTI-VENDOR MARKETPLACE MODE (Default):
             from api_v1 import ensure_seed_products
             ensure_seed_products()
             from models import Product
             prods = Product.query.filter_by(is_active=True).order_by(Product.category, Product.name).all()
-            jc_num = os.environ.get("JAZZCASH_NUMBER", "03209350858")
             b_name = os.environ.get("BUSINESS_NAME", "Chitral & Global Bazar")
 
-            # Fetch Global-Bazar live items so SSR also displays newly cataloged items at the top
             all_prods = list(prods)
             try:
-                from services.global_bazar_service import GlobalBazarService
                 gb_items = GlobalBazarService.get_products()
                 existing_names = {p.name.strip().lower() for p in all_prods if hasattr(p, 'name')}
                 gb_wrapped = []
@@ -2027,7 +2084,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                     t = gi.get("title", "").strip()
                     if t and t.lower() not in existing_names:
                         existing_names.add(t.lower())
-                        clean_img = gi.get("image_url", "")
+                        clean_img = str(gi.get("image_url") or "")
                         for pfx in ["http://127.0.0.1:8000", "http://localhost:8000"]:
                             if clean_img.startswith(pfx):
                                 clean_img = clean_img[len(pfx):]
@@ -2058,11 +2115,12 @@ def create_app(config_name: Optional[str] = None) -> Flask:
                 products=all_prods,
                 business_name=b_name,
                 currency="PKR",
-                jazzcash_number=jc_num
+                jazzcash_number=jc_num,
+                is_single_shop=False
             )
         except Exception as e:
             application.logger.error(f"Error rendering /store: {e}", exc_info=True)
-            return render_template("store.html", products=[], business_name="Chitral & Global Bazar", currency="PKR", jazzcash_number="03209350858")
+            return render_template("store.html", products=[], business_name="Chitral & Global Bazar", currency="PKR", jazzcash_number="03209350858", is_single_shop=False)
 
     @application.route("/api/store/products", methods=["GET"])
     def top_store_products():
@@ -2326,15 +2384,41 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     @application.route("/vendor/cleanup-duplicates", methods=["POST"])
     def vendor_cleanup_duplicates():
-        """Merges/removes duplicate test products in the database."""
+        """Merges/removes duplicate test products and fixes numeric titles."""
         try:
             from services.global_bazar_service import GlobalBazarService
             vendor_id = session.get("vendor_id") or request.args.get("vendor_id")
             v_id = int(vendor_id) if vendor_id else None
-            count = GlobalBazarService.cleanup_duplicate_products(v_id)
-            return jsonify({"success": True, "cleaned_duplicates_count": count}), 200
+            res = GlobalBazarService.cleanup_vendor_duplicates_and_fix_numeric_titles(v_id)
+            return jsonify({"success": True, **res}), 200
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
+
+    @application.route("/vendor/upload-bijak", methods=["POST"])
+    def vendor_upload_bijak():
+        """Handles upload and OCR auto-extraction of Wholesale Bill / Handwritten Parchi / Bijak."""
+        try:
+            from services.global_bazar_service import GlobalBazarService
+            vendor_id = session.get("vendor_id") or request.form.get("vendor_id") or GlobalBazarService.get_default_vendor_id()
+            notes = request.form.get("notes") or request.form.get("caption") or "Wholesale Bill Bijak"
+            file = request.files.get("bijak_file") or request.files.get("file") or request.files.get("image")
+            img_bytes = file.read() if file else None
+
+            res = GlobalBazarService.process_vendor_bijak_image(
+                vendor_id=int(vendor_id),
+                image_bytes=img_bytes,
+                caption=notes
+            )
+            if request.is_json:
+                return jsonify(res), 200
+            flash(f"Bijak Successfully Processed: {res.get('total_items', 0)} items added/updated into inventory!", "success")
+            return redirect(request.referrer or url_for("vendor_portal_view"))
+        except Exception as e:
+            application.logger.error(f"Bijak upload error: {e}")
+            if request.is_json:
+                return jsonify({"success": False, "error": str(e)}), 400
+            flash(f"Error processing bijak: {e}", "danger")
+            return redirect(request.referrer or url_for("vendor_portal_view"))
 
     @application.route("/vendor/khata/record", methods=["POST"])
     def vendor_record_khata():

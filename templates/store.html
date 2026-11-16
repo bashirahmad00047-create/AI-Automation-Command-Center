@@ -1006,13 +1006,38 @@
         <button class="category-pill" onclick="filterCategory('Dry Fruits')">🥜 Dry Fruits</button>
     </div>
 
+    {% if is_single_shop and isolated_vendor %}
+    <!-- Dedicated Single-Vendor Shop Banner -->
+    <div class="main-container" style="margin-top: 16px; margin-bottom: 20px;">
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%); color: #fff; border-radius: 16px; padding: 24px; box-shadow: 0 10px 25px rgba(15, 23, 42, 0.15);">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+                <div>
+                    <span style="background:#fbbf24; color:#0f172a; padding:4px 12px; border-radius:20px; font-size:0.75rem; font-weight:800; display:inline-block; margin-bottom:8px;">
+                        ⭐ OFFICIAL MERCHANT STOREFRONT
+                    </span>
+                    <h1 style="font-size:1.6rem; font-weight:900; margin:0 0 6px 0; color:#fff;">🏪 {{ isolated_vendor.name }}</h1>
+                    <p style="margin:0; font-size:0.85rem; color:#cbd5e1;">
+                        📱 Direct WhatsApp: <strong>{{ isolated_vendor.phone }}</strong> | 📍 {{ isolated_vendor.address or 'Chitral Bazar' }}
+                    </p>
+                </div>
+                <div>
+                    <a href="https://wa.me/{{ isolated_vendor.phone|replace('+', '')|replace(' ', '') }}" target="_blank" style="background:#25d366; color:#fff; text-decoration:none; padding:10px 20px; border-radius:24px; font-weight:700; font-size:0.88rem; display:inline-flex; align-items:center; gap:8px; box-shadow:0 4px 12px rgba(37,211,102,0.3);">
+                        <span>💬</span> Chat With Dukaandar
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Main Products Grid -->
     <main class="main-container">
         <div class="grid-header">
-            <h3 class="grid-title" id="gridSectionTitle">Featured Products</h3>
+            <h3 class="grid-title" id="gridSectionTitle">{% if is_single_shop and isolated_vendor %}{{ isolated_vendor.name }} Products{% else %}Featured Products{% endif %}</h3>
             <span id="productCounter" style="font-size: 0.88rem; color: var(--gray-500); font-weight: 600;">Loading items...</span>
         </div>
 
+        {% if not is_single_shop %}
         <!-- Vendor / Multi-Shop Filter Bar -->
         <div id="vendorFilterBar" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:14px; background:#f8fafc; border:1px solid var(--gray-200); border-radius:var(--radius-md); padding:8px 12px;">
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -1029,9 +1054,17 @@
             </div>
             <div id="vendorCountInfo" style="font-size:0.75rem; color:#64748b; font-weight:600;"></div>
         </div>
+        {% endif %}
 
         <div class="products-grid" id="productsGrid">
-            <!-- Dynamically populated items with zero broken images -->
+            {% for p in products %}
+            <div class="product-card" data-product-id="{{ p.id }}" style="background:#fff; border-radius:12px; border:1px solid #e2e8f0; overflow:hidden; padding:12px;">
+                <span class="product-badge" style="background:#f1f5f9; color:#475569; font-size:0.75rem; font-weight:700; padding:2px 8px; border-radius:6px;">{{ p.category or 'General' }}</span>
+                <h4 class="product-title" style="font-size:1rem; font-weight:800; margin:8px 0 4px 0; color:#0f172a;">{{ p.name or p.title }}</h4>
+                <div class="product-vendor" style="font-size:0.8rem; color:#64748b; margin-bottom:6px;">🏪 {{ p.seller_name or p.vendor_name or business_name }}</div>
+                <div class="product-price" style="font-size:1.1rem; font-weight:800; color:#059669;">PKR {{ "{:,.0f}".format(p.price or 0) }}</div>
+            </div>
+            {% endfor %}
         </div>
 
         <div class="empty-grid-msg" id="emptyState" style="display:none; text-align: center; padding: 40px 20px;">
@@ -1684,25 +1717,34 @@
             renderProducts();
         }
 
+        const IS_SINGLE_SHOP = {{ 'true' if is_single_shop else 'false' }};
+        const SINGLE_SHOP_ID = "{{ isolated_vendor.id if isolated_vendor else '' }}";
+
         // Load Products from Backend API
         async function fetchProducts() {
             try {
-                let res = await fetch('/api/v1/store/products');
+                const urlParams = new URLSearchParams(window.location.search);
+                const shopTarget = SINGLE_SHOP_ID || urlParams.get('shop') || urlParams.get('vendor_id');
+                let apiPath = '/api/store/products' + (shopTarget ? '?shop=' + encodeURIComponent(shopTarget) : '');
+                let res = await fetch(apiPath);
                 if (!res.ok) {
-                    res = await fetch('/api/store/products');
+                    apiPath = '/api/v1/store/products' + (shopTarget ? '?shop=' + encodeURIComponent(shopTarget) : '');
+                    res = await fetch(apiPath);
                 }
                 if (res.ok) {
                     const data = await res.json();
                     if (data.products && Array.isArray(data.products) && data.products.length > 0) {
                         catalogProducts = data.products;
-                    } else {
+                    } else if (shopTarget) {
                         catalogProducts = [];
                     }
                 }
             } catch (e) {
                 console.debug('Store API fallback:', e);
             }
-            renderVendorFilterDropdown();
+            if (!IS_SINGLE_SHOP) {
+                renderVendorFilterDropdown();
+            }
             renderCategoryNav();
             renderProducts();
             renderManagementTable();

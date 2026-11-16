@@ -10669,8 +10669,59 @@ def ensure_seed_products():
 
 @api_v1.route("/store/products", methods=["GET"])
 def api_store_products():
-    """Returns active products catalog for public shopping storefront."""
+    """Returns active products catalog for public shopping storefront with Strict Single-Vendor Isolation when ?shop= is supplied."""
     try:
+        from services.global_bazar_service import GlobalBazarService
+        shop_param = request.args.get("shop") or request.args.get("vendor_id")
+        if shop_param:
+            v_obj = None
+            try:
+                v_obj = GlobalBazarService.get_vendor_by_id(int(shop_param))
+            except ValueError:
+                v_obj = GlobalBazarService.get_vendor_by_phone(str(shop_param))
+
+            if v_obj:
+                v_id = v_obj["id"]
+                v_phone = v_obj.get("phone") or "+923471000668"
+                v_name = v_obj.get("name") or "Bashir Store (Chitral Bazar)"
+                gb_items = GlobalBazarService.get_products(vendor_id=v_id)
+                single_vendor_results = []
+                for gi in gb_items:
+                    t = gi.get("title", "").strip()
+                    if not t:
+                        continue
+                    clean_img = str(gi.get("image_url") or "")
+                    for pfx in ["http://127.0.0.1:8000", "http://localhost:8000"]:
+                        if clean_img.startswith(pfx):
+                            clean_img = clean_img[len(pfx):]
+                    single_vendor_results.append({
+                        "id": f"gb-{gi.get('id')}",
+                        "name": t,
+                        "title": t,
+                        "category": gi.get("category", "General"),
+                        "price": float(gi.get("price", 0)),
+                        "estimated_price": float(gi.get("price", 0)),
+                        "description": gi.get("description", ""),
+                        "image_url": clean_img,
+                        "cleaned_image_url": clean_img,
+                        "seller_name": v_name,
+                        "vendor_name": v_name,
+                        "seller_phone": v_phone,
+                        "vendor_phone": v_phone,
+                        "stock_quantity": int(gi.get("stock", 15)),
+                        "stock_status": "in_stock" if int(gi.get("stock", 15)) > 0 else "out_of_stock",
+                        "vendor_id": v_id,
+                        "source": "global_bazar"
+                    })
+                return jsonify({
+                    "success": True,
+                    "products": single_vendor_results,
+                    "total": len(single_vendor_results),
+                    "shop": v_name,
+                    "vendor_id": v_id,
+                    "is_single_shop": True
+                }), 200
+
         from models import Product
         ensure_seed_products()
         org_id = request.args.get("org_id")

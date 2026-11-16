@@ -83,9 +83,12 @@
                             <p class="mb-0 small opacity-90">📱 Owner: <strong>{{ vendor.phone }}</strong> {% if vendor.address %}| 📍 {{ vendor.address }}{% endif %}</p>
                         </div>
                         <div class="d-flex flex-wrap gap-2">
-                            <a href="/store" class="btn btn-light btn-sm fw-bold px-3 py-2 rounded-3 shadow-sm" target="_blank">
-                                🌐 Live Store
+                            <a href="/store?shop={{ vendor.id }}" class="btn btn-light btn-sm fw-bold px-3 py-2 rounded-3 shadow-sm" target="_blank" title="Share with customers to view your single-vendor storefront">
+                                🌐 Meri Customer Dukaan Link
                             </a>
+                            <button type="button" class="btn btn-info text-dark btn-sm fw-bold px-3 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#uploadBijakModal">
+                                📄 Upload Bijak / Bill (Auto-Add Saman)
+                            </button>
                             <button type="button" class="btn btn-warning text-dark btn-sm fw-bold px-3 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#addProductModal">
                                 + Add Product
                             </button>
@@ -395,6 +398,38 @@
                             <div class="modal-footer border-0 pt-0">
                                 <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
                                 <button type="submit" class="btn btn-primary fw-bold px-4">Update Product</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal: Upload Bijak / Wholesale Bill -->
+            <div class="modal fade" id="uploadBijakModal" tabindex="-1" aria-labelledby="uploadBijakModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content rounded-4 border-0 shadow">
+                        <div class="modal-header border-0 pb-0">
+                            <h5 class="modal-title fw-bold" id="uploadBijakModalLabel">📄 Upload Bijak / Wholesale Bill (Auto-Add Saman)</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <form method="POST" action="/vendor/upload-bijak" enctype="multipart/form-data">
+                            <input type="hidden" name="vendor_id" value="{{ vendor.id }}">
+                            <div class="modal-body">
+                                <div class="alert alert-info py-2 small mb-3">
+                                    💡 <strong>Smart AI Scanner:</strong> Apni dukan ka wholesale bill, handwritten parchi, ya invoice ki photo upload karein. Gemini Vision bill ke tamam items, quantities, aur kharid/bikri rates parh kar seedha aapki inventory mein shamil kar dega!
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold small text-muted">Bill / Bijak Photo ya Document *</label>
+                                    <input type="file" class="form-control" name="bijak_file" accept="image/*,.pdf" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold small text-muted">Optional Notes / Distributor Name</label>
+                                    <input type="text" class="form-control" name="notes" placeholder="e.g. Shahi Bazar Wholesale Market, 10 items">
+                                </div>
+                            </div>
+                            <div class="modal-footer border-0 pt-0">
+                                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                                <button type="submit" class="btn btn-primary fw-bold px-4">⚡ Scan & Auto-Add to Inventory</button>
                             </div>
                         </form>
                     </div>
