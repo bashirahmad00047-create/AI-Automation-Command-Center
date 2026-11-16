@@ -651,6 +651,267 @@
             border-bottom: 1px solid var(--brand-slate-200);
         }
 
+        /* ========================================================================= */
+        /* PREMIUM SAAS FORM SYSTEM (STRIPE / TAILWIND UI SPECIFICATION) */
+        /* ========================================================================= */
+        .saas-card-surface {
+            background: #ffffff !important;
+            border-radius: 16px !important;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+            padding: 32px !important;
+            max-width: 600px !important;
+            margin: 2rem auto !important;
+            border: 1px solid #e2e8f0 !important;
+            box-sizing: border-box !important;
+        }
+
+        .saas-form-label {
+            display: block !important;
+            font-weight: 600 !important;
+            color: #334155 !important;
+            margin-bottom: 6px !important;
+            font-size: 0.875rem !important;
+            letter-spacing: -0.01em;
+        }
+
+        .saas-form-input {
+            width: 100% !important;
+            padding: 12px 16px !important;
+            margin-bottom: 16px !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 8px !important;
+            font-size: 0.95rem !important;
+            background-color: #f8fafc !important;
+            transition: all 0.2s ease !important;
+            color: #0f172a !important;
+            outline: none !important;
+            font-family: inherit !important;
+            display: block !important;
+            box-sizing: border-box !important;
+        }
+
+        .saas-form-input:focus {
+            outline: none !important;
+            border-color: #10b981 !important;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2) !important;
+            background-color: #ffffff !important;
+        }
+
+        select.saas-form-input {
+            appearance: none !important;
+            -webkit-appearance: none !important;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E") !important;
+            background-repeat: no-repeat !important;
+            background-position: right 14px center !important;
+            background-size: 16px 16px !important;
+            padding-right: 40px !important;
+            cursor: pointer !important;
+        }
+
+        .btn-luxury-pill {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+            color: white !important;
+            padding: 12px 24px !important;
+            border-radius: 9999px !important;
+            font-weight: 600 !important;
+            border: none !important;
+            box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.3) !important;
+            cursor: pointer !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 8px !important;
+            transition: all 0.2s ease !important;
+            text-decoration: none !important;
+            font-size: 0.95rem !important;
+        }
+
+        .btn-luxury-pill:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 8px 15px -3px rgba(16, 185, 129, 0.4) !important;
+            color: white !important;
+        }
+
+        /* 2. Quick Khata CSS Grid */
+        .khata-grid-refined {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            align-items: flex-end;
+        }
+
+        .khata-grid-refined .saas-form-input {
+            margin-bottom: 0 !important;
+        }
+
+        /* ========================================================================= */
+        /* ENTERPRISE FORM CONTROLS & LUXURY INPUT SYSTEM */
+        /* ========================================================================= */
+        .form-label-luxury {
+            font-size: 0.82rem;
+            font-weight: 800;
+            color: var(--brand-slate-700);
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            letter-spacing: -0.01em;
+        }
+
+        .form-label-luxury .required-dot {
+            color: var(--rose-500);
+            font-size: 0.95rem;
+            font-weight: 900;
+        }
+
+        .input-group-luxury {
+            position: relative;
+            display: flex;
+            align-items: stretch;
+            width: 100%;
+            border-radius: var(--radius-md);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .input-prefix-badge {
+            background: #f1f5f9;
+            color: var(--brand-slate-700);
+            border: 1.5px solid #cbd5e1;
+            border-right: none;
+            border-radius: var(--radius-md) 0 0 var(--radius-md);
+            padding: 10px 14px;
+            font-size: 0.88rem;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            letter-spacing: 0.02em;
+            user-select: none;
+        }
+
+        .input-suffix-badge {
+            background: #f1f5f9;
+            color: var(--brand-slate-700);
+            border: 1.5px solid #cbd5e1;
+            border-left: none;
+            border-radius: 0 var(--radius-md) var(--radius-md) 0;
+            padding: 10px 14px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+
+        .input-luxury, .khata-input-styled, .modal-input-luxury {
+            width: 100% !important;
+            padding: 12px 16px !important;
+            border-radius: var(--radius-md) !important;
+            border: 1.5px solid #cbd5e1 !important;
+            font-size: 0.95rem !important;
+            font-weight: 600 !important;
+            color: var(--brand-slate-900) !important;
+            background: #f8fafc !important;
+            outline: none !important;
+            font-family: inherit !important;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+            box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.03) !important;
+            display: block !important;
+        }
+
+        .input-luxury:hover, .khata-input-styled:hover, .modal-input-luxury:hover {
+            border-color: #94a3b8 !important;
+            background: #ffffff !important;
+        }
+
+        .input-luxury:focus, .khata-input-styled:focus, .modal-input-luxury:focus {
+            border-color: var(--brand-emerald) !important;
+            box-shadow: 0 0 0 3.5px rgba(16, 185, 129, 0.18), inset 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+            background: #ffffff !important;
+        }
+
+        .input-luxury-prefix {
+            border-top-left-radius: 0 !important;
+            border-bottom-left-radius: 0 !important;
+        }
+
+        .input-luxury-suffix {
+            border-top-right-radius: 0 !important;
+            border-bottom-right-radius: 0 !important;
+        }
+
+        /* Custom SVG Dropdown Arrow for Enterprise Selects */
+        .select-luxury, select.khata-input-styled, select.modal-input-luxury {
+            appearance: none !important;
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            background-color: #f8fafc !important;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E") !important;
+            background-repeat: no-repeat !important;
+            background-position: right 14px center !important;
+            background-size: 16px 16px !important;
+            padding-right: 40px !important;
+            cursor: pointer !important;
+        }
+
+        select.select-luxury:focus, select.khata-input-styled:focus, select.modal-input-luxury:focus {
+            background-color: #ffffff !important;
+        }
+
+        /* Quick helper chips */
+        .quick-chip {
+            font-size: 0.76rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: var(--radius-pill);
+            background: #f1f5f9;
+            color: var(--brand-slate-700);
+            border: 1px solid #e2e8f0;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            user-select: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .quick-chip:hover {
+            background: #e2e8f0;
+            color: var(--brand-slate-900);
+            transform: translateY(-1px);
+        }
+
+        .quick-chip:active {
+            transform: scale(0.96);
+        }
+
+        /* Enhanced Enterprise Modal Container */
+        .modal-enterprise {
+            border-radius: 20px !important;
+            border: 1px solid rgba(255, 255, 255, 0.4) !important;
+            box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.35) !important;
+            overflow: hidden;
+            background: #ffffff;
+        }
+
+        .modal-enterprise-header {
+            padding: 24px 28px !important;
+            position: relative;
+        }
+
+        .modal-enterprise-body {
+            padding: 24px 28px !important;
+            background: #ffffff;
+        }
+
+        .modal-enterprise-footer {
+            padding: 16px 28px 22px !important;
+            background: #f8fafc;
+            border-top: 1px solid var(--brand-slate-200) !important;
+        }
+
         /* 4-Column Responsive Grid for Khata Entry */
         .khata-form-grid {
             display: grid;
@@ -669,25 +930,6 @@
             .khata-form-grid {
                 grid-template-columns: 1fr;
             }
-        }
-
-        .khata-input-styled {
-            padding: 12px 16px !important;
-            border-radius: 12px !important;
-            border: 1px solid #cbd5e1 !important;
-            font-size: 0.95rem !important;
-            background: #f8fafc !important;
-            width: 100% !important;
-            color: #0f172a !important;
-            font-family: inherit !important;
-            outline: none !important;
-            transition: all 0.2s ease !important;
-        }
-
-        .khata-input-styled:focus {
-            border-color: #10b981 !important;
-            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15) !important;
-            background: #ffffff !important;
         }
 
         .khata-btn-submit {
@@ -1102,8 +1344,8 @@
 
                     <!-- 5. ULTRA-CLEAN INVENTORY ACTION BAR (SIDE-BY-SIDE BUTTONS) -->
                     <div class="inventory-action-grid">
-                        <!-- Blue Button: + Naya Saman Daalein -->
-                        <button type="button" class="btn-action-hero btn-action-indigo" data-bs-toggle="modal" data-bs-target="#addProductModal">
+                        <!-- Blue Button: + Naya Saman Daalein (Toggles Add Product Form Card) -->
+                        <button type="button" class="btn-action-hero btn-action-indigo" id="btnAddProductToggle" onclick="toggleAddProduct(true)">
                             <span class="fs-4">+</span>
                             <span>+ Naya Saman Daalein (Add Item)</span>
                         </button>
@@ -1114,6 +1356,72 @@
                             <span>📄 Bijak / Parchi Upload Karein (AI Auto-Scan)</span>
                         </button>
                     </div>
+
+                    <!-- 1. PREMIUM SAAS ADD PRODUCT FORM (CENTERED WHITE SURFACE CARD) -->
+                    <div id="addProductCardWrapper" style="display: none;">
+                        <div class="saas-card-surface">
+                            <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+                                <div>
+                                    <h4 class="fw-black text-dark mb-1">📦 + Naya Saman Daalein</h4>
+                                    <p class="text-muted small mb-0">Product details enter karein taake live dukaan aur inventory mein shamil ho sake</p>
+                                </div>
+                                <button type="button" class="btn-close" onclick="toggleAddProduct(false)" aria-label="Cancel"></button>
+                            </div>
+                            <form method="POST" action="/vendor/product/add" id="addProductForm" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
+                                <div>
+                                    <label class="saas-form-label">Saman Ka Naam (Product Title) *</label>
+                                    <input type="text" class="saas-form-input" name="title" id="saasProdTitle" placeholder="e.g. Heavy Duty Brass Security Padlock" required>
+                                </div>
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <label class="saas-form-label">Bikri Rate / Price (PKR) *</label>
+                                        <input type="number" step="0.01" min="1" class="saas-form-input fw-bold text-success" name="price" id="saasProdPrice" placeholder="450" required>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="saas-form-label">Kharid Rate / Cost (PKR)</label>
+                                        <input type="number" step="0.01" min="0" class="saas-form-input text-muted" name="cost_price" id="saasProdCost" placeholder="320">
+                                    </div>
+                                </div>
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <label class="saas-form-label">Category *</label>
+                                        <select class="saas-form-input" name="category" id="saasProdCat">
+                                            <option value="Hardware & Tools" selected>Hardware &amp; Tools</option>
+                                            <option value="General">General Store</option>
+                                            <option value="Electronics">Electronics</option>
+                                            <option value="Apparel & Accessories">Apparel &amp; Accessories</option>
+                                            <option value="Chitrali Crafts">Chitrali Crafts</option>
+                                            <option value="Dry Fruits">Dry Fruits</option>
+                                            <option value="Home & Kitchen">Home &amp; Kitchen</option>
+                                            <option value="Fast Food & Burgers">Fast Food &amp; Burgers</option>
+                                            <option value="Desi & Biryani">Desi &amp; Biryani</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="saas-form-label">Initial Stock Quantity *</label>
+                                        <input type="number" min="0" class="saas-form-input fw-bold" name="stock" id="saasProdStock" value="15" required>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="saas-form-label">Image URL (Optional)</label>
+                                    <input type="url" class="saas-form-input" name="image_url" id="saasProdImage" placeholder="https://... (or leave empty for default)">
+                                </div>
+                                <div>
+                                    <label class="saas-form-label">Tafseel (Description)</label>
+                                    <textarea class="saas-form-input" name="description" id="saasProdDesc" rows="3" placeholder="Brief quality, size, and material description for online customers..."></textarea>
+                                </div>
+                                <div class="d-flex justify-content-end align-items-center gap-3 pt-3 border-top">
+                                    <button type="button" class="btn btn-light rounded-pill px-4 fw-bold" onclick="toggleAddProduct(false)">Cancel</button>
+                                    <button type="submit" class="btn-luxury-pill">
+                                        <span>📦</span> + Save &amp; Add Product
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- PRODUCT GRID SECTION (Smoothly toggled when Add Product is opened/closed) -->
+                    <div id="productGridWrapper">
 
                     <!-- Search & Filter Controls -->
                     <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
@@ -1195,12 +1503,13 @@
                             <p class="text-muted small mb-4" style="max-width: 460px; margin: 0 auto;">
                                 WhatsApp par saman ki photo + price bhej kar add karein ya upar <strong>"+ Naya Saman Daalein"</strong> ya <strong>"📄 Bijak / Parchi Upload"</strong> button dabayein.
                             </p>
-                            <button type="button" class="btn btn-primary rounded-pill px-4 fw-bold" data-bs-toggle="modal" data-bs-target="#addProductModal">
+                            <button type="button" class="btn-luxury-pill" onclick="toggleAddProduct(true)">
                                 + Add Pehla Saman
                             </button>
                         </div>
                     {% endif %}
 
+                    </div><!-- /productGridWrapper -->
                 </div>
 
                 <!-- ========================================================================= -->
@@ -1214,36 +1523,54 @@
                     <div class="content-panel-box mb-4">
                         <div class="panel-header-luxury">
                             <div>
-                                <h4 class="fw-black text-dark mb-1">⚡ Quick Sale &amp; Khata Entry</h4>
+                                <div class="d-flex align-items-center gap-2 mb-1">
+                                    <span class="fs-4">⚡</span>
+                                    <h4 class="fw-black text-dark mb-0">Quick Sale &amp; Khata Entry</h4>
+                                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fw-bold rounded-pill px-3 py-1">
+                                        ● Real-Time Ledger Sync
+                                    </span>
+                                </div>
                                 <small class="text-muted">Instant entry updates both Daily Cash Balance and Udhaar Ledger</small>
                             </div>
-                            <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fw-bold rounded-pill px-3 py-2">
-                                ● Real-Time Ledger Sync
-                            </span>
+                            <div class="d-flex flex-wrap align-items-center gap-2">
+                                <span class="small text-muted fw-bold">Parchi Shortcuts:</span>
+                                <span class="quick-chip" onclick="setKhataShortcut('sale', 'Counter Cash Bikri')">💰 Cash Bikri</span>
+                                <span class="quick-chip" onclick="setKhataShortcut('credit', 'Gahak Udhaar')">📒 Udhaar</span>
+                                <span class="quick-chip" onclick="setKhataShortcut('expense', 'Dukan Kharcha')">🧾 Kharcha</span>
+                            </div>
                         </div>
-                        <form method="POST" action="/vendor/khata/record" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-khata');">
-                            <div class="khata-form-grid">
+                        <form method="POST" action="/vendor/khata/record" id="khataRecordForm" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-khata');">
+                            <div class="khata-grid-refined">
                                 <div>
-                                    <label class="small text-muted fw-bold mb-1 d-block">Entry Type</label>
-                                    <select class="khata-input-styled fw-bold" name="entry_type" required>
+                                    <label class="saas-form-label">Entry Type *</label>
+                                    <select class="saas-form-input fw-bold" name="entry_type" id="khataEntryTypeSelect" required>
                                         <option value="sale" selected>💰 Cash Bikri</option>
                                         <option value="credit">📒 Udhaar</option>
                                         <option value="expense">🧾 Dukan Kharcha</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="small text-muted fw-bold mb-1 d-block">Amount (PKR) *</label>
-                                    <input type="number" step="0.01" min="1" class="khata-input-styled fw-black" name="amount" placeholder="e.g. 1500" required>
+                                    <label class="saas-form-label">Amount (PKR) *</label>
+                                    <input type="number" step="0.01" min="1" class="saas-form-input fw-black" name="amount" id="khataAmountInput" placeholder="e.g. 1500" required>
                                 </div>
                                 <div>
-                                    <label class="small text-muted fw-bold mb-1 d-block">Tafseel (Description / Customer Name)</label>
-                                    <input type="text" class="khata-input-styled" name="description" placeholder="e.g. Counter Bikri, Chai/Nashta, Kiraya">
+                                    <label class="saas-form-label">Tafseel (Description / Customer Name)</label>
+                                    <input type="text" class="saas-form-input" name="description" id="khataDescInput" placeholder="e.g. Counter Bikri, Chai/Nashta, Kiraya">
                                 </div>
                                 <div>
-                                    <button type="submit" class="khata-btn-submit">
+                                    <button type="submit" class="btn-luxury-pill w-100" style="height: 48px;">
                                         <span>✓</span> Save Khata Entry
                                     </button>
                                 </div>
+                            </div>
+                            <!-- Quick description tags for fast counter entries -->
+                            <div class="d-flex flex-wrap align-items-center gap-2 mt-3 pt-2 border-top border-light">
+                                <small class="text-muted fw-bold me-1">Fast fill description:</small>
+                                <span class="quick-chip" onclick="fillDesc('Counter Cash Bikri')">⚡ Counter Cash</span>
+                                <span class="quick-chip" onclick="fillDesc('Chai / Refreshment')">☕ Chai/Nashta</span>
+                                <span class="quick-chip" onclick="fillDesc('Dukan Kiraya / Rent')">🏠 Dukan Kiraya</span>
+                                <span class="quick-chip" onclick="fillDesc('Bijli / Utility Bill')">💡 Bijli Bill</span>
+                                <span class="quick-chip" onclick="fillDesc('Delivery Rider Charges')">🛵 Delivery Fee</span>
                             </div>
                         </form>
                     </div>
@@ -1538,138 +1865,84 @@
             <!-- MODALS -->
             <!-- ========================================================================= -->
 
-            <!-- Modal 1: + Add Product -->
-            <div class="modal fade" id="addProductModal" tabindex="-1" aria-labelledby="addProductModalLabel" aria-hidden="true">
-                <div class="modal-dialog modal-dialog-centered">
-                    <div class="modal-content rounded-4 border-0 shadow-lg overflow-hidden">
-                        <div class="modal-header border-0 text-white p-4" style="background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);">
-                            <h5 class="modal-title fw-black" id="addProductModalLabel">📦 + Add Naya Saman to Store</h5>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-                        </div>
-                        <form method="POST" action="/vendor/product/add" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
-                            <div class="modal-body p-4">
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold small text-muted">Saman Ka Naam (Product Title) *</label>
-                                    <input type="text" class="modal-input-luxury" name="title" placeholder="e.g. Heavy Duty Brass Security Padlock" required>
-                                </div>
-                                <div class="row g-2 mb-3">
-                                    <div class="col-6">
-                                        <label class="form-label fw-bold small text-muted">Bikri Rate / Price (PKR) *</label>
-                                        <input type="number" step="0.01" min="1" class="modal-input-luxury fw-bold" name="price" placeholder="450" required>
-                                    </div>
-                                    <div class="col-6">
-                                        <label class="form-label fw-bold small text-muted">Kharid Rate / Cost (PKR)</label>
-                                        <input type="number" step="0.01" min="0" class="modal-input-luxury" name="cost_price" placeholder="320">
-                                    </div>
-                                </div>
-                                <div class="row g-2 mb-3">
-                                    <div class="col-6">
-                                        <label class="form-label fw-bold small text-muted">Category</label>
-                                        <select class="modal-input-luxury" name="category">
-                                            <option value="Hardware & Tools" selected>Hardware &amp; Tools</option>
-                                            <option value="General">General Store</option>
-                                            <option value="Electronics">Electronics</option>
-                                            <option value="Apparel & Accessories">Apparel &amp; Accessories</option>
-                                            <option value="Chitrali Crafts">Chitrali Crafts</option>
-                                            <option value="Dry Fruits">Dry Fruits</option>
-                                            <option value="Home & Kitchen">Home &amp; Kitchen</option>
-                                            <option value="Fast Food & Burgers">Fast Food &amp; Burgers</option>
-                                            <option value="Desi & Biryani">Desi &amp; Biryani</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-6">
-                                        <label class="form-label fw-bold small text-muted">Initial Stock</label>
-                                        <input type="number" min="0" class="modal-input-luxury" name="stock" value="15">
-                                    </div>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold small text-muted">Image URL (Optional)</label>
-                                    <input type="url" class="modal-input-luxury" name="image_url" placeholder="https://... (or leave empty)">
-                                </div>
-                                <div class="mb-2">
-                                    <label class="form-label fw-bold small text-muted">Tafseel (Description)</label>
-                                    <textarea class="modal-input-luxury" name="description" rows="2" placeholder="Brief quality and utility description..."></textarea>
-                                </div>
-                            </div>
-                            <div class="modal-footer border-0 p-4 pt-0 d-flex justify-content-end gap-2">
-                                <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Cancel</button>
-                                <button type="submit" class="hero-btn hero-btn-store px-4 py-2">+ Save &amp; Add Product</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Modal 2: Edit Product -->
+            <!-- Modal: Edit Product -->
             <div class="modal fade" id="editProductModal" tabindex="-1" aria-hidden="true">
-                <div class="modal-dialog modal-dialog-centered">
-                    <div class="modal-content rounded-4 border-0 shadow-lg overflow-hidden">
-                        <div class="modal-header border-0 text-white p-4" style="background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);">
-                            <h5 class="modal-title fw-black">✏️ Edit Product Details</h5>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                <div class="modal-dialog modal-dialog-centered" style="max-width: 600px;">
+                    <div class="modal-content rounded-4 border-0 shadow-lg overflow-hidden bg-white">
+                        <div class="modal-header border-bottom p-4 bg-white">
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="fs-4">✏️</span>
+                                <h5 class="modal-title fw-black text-dark mb-0">Edit Product Details</h5>
+                            </div>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
                         <form method="POST" action="/vendor/product/edit" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
                             <input type="hidden" name="product_id" id="editProdId">
-                            <div class="modal-body p-4">
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold small text-muted">Product Title *</label>
-                                    <input type="text" class="modal-input-luxury" name="title" id="editProdTitle" required>
+                            <div class="modal-body p-4 bg-white">
+                                <div>
+                                    <label class="saas-form-label">Product Title *</label>
+                                    <input type="text" class="saas-form-input" name="title" id="editProdTitle" required>
                                 </div>
-                                <div class="row g-2 mb-3">
-                                    <div class="col-6">
-                                        <label class="form-label fw-bold small text-muted">Bikri Rate / Price (PKR) *</label>
-                                        <input type="number" step="0.01" min="1" class="modal-input-luxury fw-bold" name="price" id="editProdPrice" required>
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <label class="saas-form-label">Bikri Rate / Price (PKR) *</label>
+                                        <input type="number" step="0.01" min="1" class="saas-form-input fw-bold text-success" name="price" id="editProdPrice" required>
                                     </div>
-                                    <div class="col-6">
-                                        <label class="form-label fw-bold small text-muted">Kharid Rate / Cost (PKR)</label>
-                                        <input type="number" step="0.01" min="0" class="modal-input-luxury" name="cost_price" id="editProdCostPrice">
+                                    <div class="col-md-6">
+                                        <label class="saas-form-label">Kharid Rate / Cost (PKR)</label>
+                                        <input type="number" step="0.01" min="0" class="saas-form-input text-muted" name="cost_price" id="editProdCostPrice">
                                     </div>
                                 </div>
-                                <div class="row g-2 mb-2">
-                                    <div class="col-6">
-                                        <label class="form-label fw-bold small text-muted">Category</label>
-                                        <input type="text" class="modal-input-luxury" name="category" id="editProdCategory">
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <label class="saas-form-label">Category</label>
+                                        <input type="text" class="saas-form-input" name="category" id="editProdCategory">
                                     </div>
-                                    <div class="col-6">
-                                        <label class="form-label fw-bold small text-muted">Stock Quantity</label>
-                                        <input type="number" min="0" class="modal-input-luxury" name="stock" id="editProdStock">
+                                    <div class="col-md-6">
+                                        <label class="saas-form-label">Stock Quantity</label>
+                                        <input type="number" min="0" class="saas-form-input fw-bold" name="stock" id="editProdStock">
                                     </div>
                                 </div>
                             </div>
-                            <div class="modal-footer border-0 p-4 pt-0 d-flex justify-content-end gap-2">
-                                <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Cancel</button>
-                                <button type="submit" class="hero-btn hero-btn-store px-4 py-2">Update Product</button>
+                            <div class="modal-footer border-top p-4 pt-3 bg-light d-flex justify-content-end gap-2">
+                                <button type="button" class="btn btn-light rounded-pill px-4 fw-bold" data-bs-dismiss="modal">Cancel</button>
+                                <button type="submit" class="btn-luxury-pill">✓ Update Product</button>
                             </div>
                         </form>
                     </div>
                 </div>
             </div>
 
-            <!-- Modal 3: Upload Bijak / Wholesale Bill -->
+            <!-- Modal: Upload Bijak / Wholesale Bill -->
             <div class="modal fade" id="uploadBijakModal" tabindex="-1" aria-hidden="true">
-                <div class="modal-dialog modal-dialog-centered">
-                    <div class="modal-content rounded-4 border-0 shadow-lg overflow-hidden">
-                        <div class="modal-header border-0 text-white p-4" style="background: linear-gradient(135deg, #065f46 0%, #10b981 100%);">
-                            <h5 class="modal-title fw-black">📄 Upload Wholesale Bijak / Bill (Auto-Add Saman)</h5>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                <div class="modal-dialog modal-dialog-centered" style="max-width: 600px;">
+                    <div class="modal-content rounded-4 border-0 shadow-lg overflow-hidden bg-white">
+                        <div class="modal-header border-bottom p-4 bg-white">
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="fs-4">📄</span>
+                                <h5 class="modal-title fw-black text-dark mb-0">Upload Wholesale Bijak / Bill (Auto-Add Saman)</h5>
+                            </div>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
                         <form method="POST" action="/vendor/upload-bijak" enctype="multipart/form-data" onsubmit="sessionStorage.setItem('vendor_active_tab', 'tab-inventory');">
-                            <div class="modal-body p-4">
-                                <div class="alert alert-info py-2 small mb-3 rounded-3">
+                            <div class="modal-body p-4 bg-white">
+                                <div class="alert alert-info py-3 px-3 small mb-4 rounded-3 border-0" style="background: #eff6ff; color: #1e40af;">
                                     💡 <strong>Smart AI Scanner:</strong> Apni dukan ka wholesale bill, handwritten parchi, ya invoice ki photo upload karein. Gemini Vision bill ke tamam items, quantities, aur kharid/bikri rates parh kar seedha aapki inventory mein shamil kar dega!
                                 </div>
                                 <div class="mb-3">
-                                    <label class="form-label fw-bold small text-muted">Bill / Bijak Photo ya Document *</label>
-                                    <input type="file" class="modal-input-luxury" name="bijak_file" accept="image/*,.pdf" required>
+                                    <label class="saas-form-label">Bill / Bijak Photo ya Document *</label>
+                                    <input type="file" class="saas-form-input" name="bijak_file" accept="image/*,.pdf" required>
                                 </div>
                                 <div class="mb-2">
-                                    <label class="form-label fw-bold small text-muted">Optional Notes / Distributor Name</label>
-                                    <input type="text" class="modal-input-luxury" name="notes" placeholder="e.g. Shahi Bazar Wholesale Market, 10 items">
+                                    <label class="saas-form-label">Optional Notes / Distributor Name</label>
+                                    <input type="text" class="saas-form-input" name="notes" placeholder="e.g. Shahi Bazar Wholesale Market, 10 items batch">
                                 </div>
                             </div>
-                            <div class="modal-footer border-0 p-4 pt-0 d-flex justify-content-end gap-2">
-                                <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Cancel</button>
-                                <button type="submit" class="hero-btn hero-btn-store px-4 py-2">⚡ Scan &amp; Auto-Add to Inventory</button>
+                            <div class="modal-footer border-top p-4 pt-3 bg-light d-flex justify-content-end gap-2">
+                                <button type="button" class="btn btn-light rounded-pill px-4 fw-bold" data-bs-dismiss="modal">Cancel</button>
+                                <button type="submit" class="btn-luxury-pill">
+                                    ⚡ Scan &amp; Auto-Add to Inventory
+                                </button>
                             </div>
                         </form>
                     </div>
@@ -1785,6 +2058,20 @@
             });
         }
 
+        // 3. TOGGLE "ADD PRODUCT" FORM AND PRODUCT GRID (SMOOTH & RESPONSIVE)
+        function toggleAddProduct(show) {
+            const addWrapper = document.getElementById('addProductCardWrapper');
+            const gridWrapper = document.getElementById('productGridWrapper');
+            if (show) {
+                if (addWrapper) addWrapper.style.display = 'block';
+                if (gridWrapper) gridWrapper.style.display = 'none';
+                if (addWrapper) addWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else {
+                if (addWrapper) addWrapper.style.display = 'none';
+                if (gridWrapper) gridWrapper.style.display = 'block';
+            }
+        }
+
         // Initialize active tab from URL hash or sessionStorage on DOM load
         document.addEventListener('DOMContentLoaded', function() {
             const hash = window.location.hash ? window.location.hash.substring(1) : '';
@@ -1870,6 +2157,34 @@
                 document.execCommand("copy");
                 showToast("✓ Dukaan link copied!");
             });
+        }
+
+        function calcAddMargin() {
+            const price = parseFloat(document.getElementById('addProdPrice')?.value) || 0;
+            const cost = parseFloat(document.getElementById('addProdCost')?.value) || Math.round(price * 0.75);
+            const profit = price - cost;
+            const margin = price > 0 ? Math.round((profit / price) * 100) : 0;
+            const el = document.getElementById('addProdMarginVal');
+            if (el) {
+                el.textContent = `PKR ${profit.toLocaleString()} (${margin}% margin)`;
+                el.className = profit >= 0 ? "fs-6 text-success fw-black" : "fs-6 text-danger fw-black";
+            }
+        }
+
+        function setKhataShortcut(type, desc) {
+            const sel = document.getElementById('khataEntryTypeSelect');
+            if (sel) sel.value = type;
+            const descInput = document.getElementById('khataDescInput');
+            if (descInput && !descInput.value) descInput.value = desc;
+            document.getElementById('khataAmountInput')?.focus();
+        }
+
+        function fillDesc(text) {
+            const descInput = document.getElementById('khataDescInput');
+            if (descInput) {
+                descInput.value = text;
+                document.getElementById('khataAmountInput')?.focus();
+            }
         }
 
         function filterInventoryCards() {
