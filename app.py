@@ -2202,22 +2202,28 @@ def create_app(config_name: Optional[str] = None) -> Flask:
             from services.global_bazar_service import GlobalBazarService
             token_val = token or request.args.get("token")
             auth_data = None
+            vendor = None
             if token_val:
                 auth_data = GlobalBazarService.verify_vendor_magic_token(token_val)
-
-            vendor = None
-            if auth_data:
-                vendor = auth_data["vendor"]
+                if auth_data:
+                    vendor = auth_data["vendor"]
+                else:
+                    return render_template(
+                        "vendor_dashboard.html",
+                        error="Authentication Error: Aapka login link expire ho gaya hai ya invalid hai. Baraye meharbani WhatsApp par 'meri dukan' ya 'my shop' bhej kar naya link hasil karein.",
+                        vendor=None,
+                        products=[]
+                    ), 401
             else:
                 param_target = request.args.get("shop") or request.args.get("vendor_id") or request.args.get("phone")
                 if param_target:
                     vendor = GlobalBazarService.resolve_vendor_by_target(param_target)
 
-            if not vendor and session.get("vendor_id"):
-                vendor = GlobalBazarService.get_vendor_by_id(int(session["vendor_id"]))
-            elif not vendor and not token_val and not request.args.get("shop") and not request.args.get("vendor_id"):
-                # If accessed without token or shop param, fallback to default vendor ID
-                vendor = GlobalBazarService.get_vendor_by_id(GlobalBazarService.get_default_vendor_id())
+                if not vendor and session.get("vendor_id"):
+                    vendor = GlobalBazarService.get_vendor_by_id(int(session["vendor_id"]))
+                elif not vendor and not request.args.get("shop") and not request.args.get("vendor_id"):
+                    # If accessed without token or shop param, fallback to default vendor ID
+                    vendor = GlobalBazarService.get_vendor_by_id(GlobalBazarService.get_default_vendor_id())
 
             if vendor:
                 session["vendor_id"] = vendor["id"]

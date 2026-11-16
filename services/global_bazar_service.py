@@ -346,11 +346,12 @@ class GlobalBazarService:
         customer_url = f"{base_domain}/store?shop={vendor_id}"
 
         return (
+            f"🎉 *Aapki Online Dukaan Tayyar Hai!*\n\n"
             f"🏪 *Dukan:* {shop_name}\n"
             f"📦 *Total Saman (Inventory):* {total_items} items (Worth PKR {inv_val:,.0f})\n"
             f"💰 *Aaj Ki Sale (Daily Sale):* PKR {today_sales:,.0f} ({today_orders} orders)\n"
             f"📈 *Mahine Ki Sale (Monthly Sale):* PKR {month_sales:,.0f} ({month_orders} orders)\n\n"
-            f"🔒 *Meri Private Inventory & Khata ERP (Admin View):*\n{portal_url}\n\n"
+            f"🔒 *Dukan & Khata Dashboard Link:* (Admin View)\n{portal_url}\n\n"
             f"🌐 *Meri Customer Dukaan Link (Shareable Storefront):*\n{customer_url}"
         )
 
