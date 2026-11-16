@@ -1272,6 +1272,24 @@ class GlobalBazarService:
     # =========================================================================
 
     @classmethod
+    def _ensure_order_columns(cls, conn):
+        """Ensures GPS and COD columns exist in orders table."""
+        try:
+            c = conn.cursor()
+            cols = [r["name"] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+            if "latitude" not in cols:
+                c.execute("ALTER TABLE orders ADD COLUMN latitude FLOAT")
+            if "longitude" not in cols:
+                c.execute("ALTER TABLE orders ADD COLUMN longitude FLOAT")
+            if "maps_link" not in cols:
+                c.execute("ALTER TABLE orders ADD COLUMN maps_link TEXT")
+            if "payment_method" not in cols:
+                c.execute("ALTER TABLE orders ADD COLUMN payment_method VARCHAR(50) DEFAULT 'COD'")
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"[GlobalBazar] _ensure_order_columns notice: {e}")
+
+    @classmethod
     def create_order(
         cls,
         vendor_id: Optional[int],
@@ -1281,23 +1299,73 @@ class GlobalBazarService:
         total_amount: float,
         delivery_address: str = "WhatsApp Order",
         order_source: str = "whatsapp",
-        status: str = "confirmed"
+        status: str = "confirmed",
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        maps_link: Optional[str] = None,
+        payment_method: str = "COD"
     ) -> Optional[Dict[str, Any]]:
-        """Inserts an order into Global-Bazar-Core orders table."""
+        """Inserts an order into Global-Bazar-Core orders table with COD and Live GPS pin."""
         try:
             v_id = vendor_id or cls.get_default_vendor_id()
             now_iso = datetime.datetime.utcnow().isoformat()
+            calc_maps_link = maps_link
+            if not calc_maps_link and latitude is not None and longitude is not None:
+                calc_maps_link = f"https://www.google.com/maps/dir/?api=1&destination={float(latitude):.6f},{float(longitude):.6f}"
+
+            norm_pm = (payment_method or "COD").strip().upper()
+            if norm_pm in ("COD", "CASH ON DELIVERY", "CASH_ON_DELIVERY"):
+                norm_pm = "COD"
+
             with cls.get_db_connection() as conn:
+                cls._ensure_order_columns(conn)
                 c = conn.cursor()
                 c.execute("""
-                    INSERT INTO orders (vendor_id, order_source, customer_name, customer_phone, delivery_address, total_amount, status, items_summary, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (v_id, order_source, customer_name.strip(), customer_phone.strip(), delivery_address.strip(), float(total_amount), status, items_summary.strip(), now_iso))
+                    INSERT INTO orders (
+                        vendor_id, order_source, customer_name, customer_phone,
+                        delivery_address, total_amount, status, items_summary,
+                        created_at, latitude, longitude, maps_link, payment_method
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    v_id, order_source, customer_name.strip(), customer_phone.strip(),
+                    delivery_address.strip(), float(total_amount), status, items_summary.strip(),
+                    now_iso, latitude, longitude, calc_maps_link, norm_pm
+                ))
                 conn.commit()
                 order_id = c.lastrowid
                 row = c.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
-                logger.info(f"[GlobalBazar] Created Order #{order_id} for {customer_name} ({total_amount} PKR)")
-                return dict(row) if row else None
+                order_dict = dict(row) if row else None
+                logger.info(f"[GlobalBazar] Created Order #{order_id} for {customer_name} ({total_amount} PKR) [COD + GPS]")
+
+                # Notify vendor on WhatsApp with 1-Click Rider Navigation format
+                vendor = cls.get_vendor_by_id(v_id)
+                if vendor and vendor.get("phone"):
+                    try:
+                        from whatsapp_service import WhatsAppService
+                        shop_title = vendor.get("name") or "Dukan"
+                        rider_msg = (
+                            f"🛵 *NAYA DELIVERY ORDER - {shop_title}*\n\n"
+                            f"👤 *Gahak:* {customer_name} ({customer_phone})\n"
+                            f"📦 *Saman:* {items_summary}\n"
+                            f"💵 *COD Cash Collect:* PKR {float(total_amount):,.0f}\n"
+                            f"📍 *Pata:* {delivery_address}\n"
+                        )
+                        if calc_maps_link:
+                            rider_msg += f"🗺️ *Live GPS Route Navigation (Click to Open):*\n{calc_maps_link}\n\n"
+                        token = cls.generate_vendor_magic_token(v_id, vendor.get("phone"))
+                        base_domain = os.environ.get("VENDOR_PORTAL_BASE_URL", "http://66.45.230.232:5000")
+                        rider_msg += f"👉 *Vendor Dashboard (1-Click Rider Forward):*\n{base_domain}/vendor/auth/{token}"
+
+                        WhatsAppService.send_message(
+                            organization_id="org-enterprise-default",
+                            to_phone=vendor["phone"],
+                            message_text=rider_msg
+                        )
+                    except Exception as notify_err:
+                        logger.debug(f"Vendor WhatsApp order notification notice: {notify_err}")
+
+                return order_dict
         except Exception as e:
             logger.error(f"[GlobalBazar] Failed to create order: {e}")
             return None

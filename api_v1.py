@@ -11073,7 +11073,7 @@ def api_store_checkout():
                         # 1. Deduct stock in Global-Bazar-Core
                         GlobalBazarService.update_product_stock(gb_item["id"], quantity_delta=-it["quantity"])
 
-                        # 2. Record order in Global-Bazar-Core
+                        # 2. Record order in Global-Bazar-Core with COD & Live GPS location
                         GlobalBazarService.create_order(
                             vendor_id=v_id,
                             customer_name=name,
@@ -11081,7 +11081,10 @@ def api_store_checkout():
                             items_summary=f"{it['quantity']}x {it['name']} @ PKR {it['price']:,.0f}",
                             total_amount=it["price"] * it["quantity"],
                             delivery_address=address or "Chitral Storefront Order",
-                            order_source="storefront"
+                            order_source="storefront",
+                            latitude=float(lat) if lat is not None else None,
+                            longitude=float(lng) if lng is not None else None,
+                            payment_method="COD" if payment_method in ("cod", "cash on delivery") else payment_method
                         )
 
                         # 3. Post sale to vendor's ledger

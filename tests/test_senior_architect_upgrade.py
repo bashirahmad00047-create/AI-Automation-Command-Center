@@ -434,3 +434,107 @@ def test_cleanup_duplicates_and_fix_numeric_titles():
     assert "cleaned_duplicates" in res
     assert "fixed_numeric_titles" in res
 
+
+# =============================================================================
+# ARCHITECTURAL VERIFICATION: Multi-Vendor Phone Routing, COD + GPS, Rider Map
+# =============================================================================
+def test_multi_vendor_phone_routing():
+    """Verify distinct vendor phone numbers resolve to completely isolated shops."""
+    phone_a = "923201111222"
+    phone_b = "923203333444"
+
+    v_a = GlobalBazarService.find_or_create_vendor(name="Shop Alpha", phone=phone_a)
+    v_b = GlobalBazarService.find_or_create_vendor(name="Shop Beta", phone=phone_b)
+
+    assert v_a["id"] != v_b["id"]
+
+    # Add product for Shop Alpha
+    prod_a = GlobalBazarService.add_product(
+        vendor_id=v_a["id"],
+        title="Alpha Exclusive Item",
+        price=1200.0,
+        stock=10
+    )
+
+    # Verify Shop Beta DOES NOT see Alpha's product in its inventory
+    beta_products = GlobalBazarService.get_products(vendor_id=v_b["id"])
+    beta_titles = [p["title"] for p in beta_products]
+    assert "Alpha Exclusive Item" not in beta_titles
+
+    # Verify token isolation
+    tok_a = GlobalBazarService.generate_vendor_magic_token(v_a["id"], phone_a)
+    tok_b = GlobalBazarService.generate_vendor_magic_token(v_b["id"], phone_b)
+    assert tok_a != tok_b
+
+
+def test_cod_and_gps_checkout_flow(client):
+    """Verify Cash on Delivery (COD) + Live GPS Coordinates in create_order and API checkout."""
+    vendor = GlobalBazarService.get_vendor_by_phone("923471000668")
+    v_id = vendor["id"]
+
+    # Test create_order directly with COD and GPS
+    order = GlobalBazarService.create_order(
+        vendor_id=v_id,
+        customer_name="Sher Ali Chitrali",
+        customer_phone="03451234567",
+        items_summary="2x Pure Chitrali Walnut @ PKR 1,500",
+        total_amount=3000.0,
+        delivery_address="Shahi Bazar Chitral Near Polo Ground",
+        order_source="storefront",
+        latitude=35.85112,
+        longitude=71.78654,
+        payment_method="cod"
+    )
+
+    assert order is not None
+    assert order["payment_method"] == "COD"
+    assert abs(order["latitude"] - 35.85112) < 0.001
+    assert abs(order["longitude"] - 71.78654) < 0.001
+    assert "https://www.google.com/maps/dir/?api=1&destination=35.851120,71.786540" in order["maps_link"]
+
+    # Verify order is fetched in vendor dashboard data
+    dash_data = GlobalBazarService.get_vendor_dashboard_data(v_id)
+    assert any(o["id"] == order["id"] for o in dash_data.get("orders", []))
+
+
+def test_rider_whatsapp_forward_link_and_dashboard_card(client):
+    """Verify Vendor Dashboard renders orders with COD cash to collect and 1-Click Rider WhatsApp forward."""
+    vendor = GlobalBazarService.get_vendor_by_phone("923471000668")
+    v_id = vendor["id"]
+    token = GlobalBazarService.generate_vendor_magic_token(v_id, phone=vendor["phone"])
+
+    # Create test order with GPS
+    GlobalBazarService.create_order(
+        vendor_id=v_id,
+        customer_name="Karim Khan",
+        customer_phone="03009876543",
+        items_summary="1x Chitrali Woolen Cap @ PKR 850",
+        total_amount=850.0,
+        delivery_address="Ataliq Bazar, Chitral",
+        order_source="storefront",
+        latitude=35.8456,
+        longitude=71.7912,
+        payment_method="COD"
+    )
+
+    res = client.get(f"/vendor/auth/{token}", follow_redirects=False)
+    assert res.status_code == 200
+    html = res.data.decode("utf-8")
+
+    # 1. Full inventory on first screen
+    assert 'id="tab-inventory"' in html
+    assert 'id="tab-orders"' in html
+    assert 'id="tab-hisab"' in html
+    assert 'id="tab-store"' in html
+
+    # 2. 1-Click Rider WhatsApp forward button & Google Maps Route
+    assert "Rider Ko WhatsApp Karein" in html
+    assert "wa.me/?text=" in html
+    assert "google.com/maps/dir" in html
+    assert "COD Cash Collect" in html or "Cash to Collect (COD)" in html
+
+    # 3. Pro Upgrade modal for own WhatsApp QR
+    assert "Pro Upgrade" in html
+    assert "proUpgradeModal" in html
+
+

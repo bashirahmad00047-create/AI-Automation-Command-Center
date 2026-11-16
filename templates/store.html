@@ -1128,10 +1128,10 @@
                     <label class="form-label">Delivery Address *</label>
                     <textarea id="custAddress" class="form-textarea" rows="2" placeholder="House/Shop #, Street, Tehsil / City (e.g. Main Bazar Chitral)" required></textarea>
                     <div>
-                        <button type="button" class="gps-detect-btn" onclick="detectGPSLocation()">
-                            <span>📍</span> Detect My GPS Location
+                        <button type="button" class="gps-detect-btn" onclick="detectGPSLocation()" style="margin-top: 6px; padding: 10px 16px; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1.5px solid #3b82f6; border-radius: var(--radius-md); font-weight: 700; color: #1d4ed8; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: all 0.2s; box-shadow: 0 1px 3px rgba(37,99,235,0.12);">
+                            <span style="font-size: 1.1rem;">📍</span> Pin Live GPS Location (Google Maps)
                         </button>
-                        <div id="gpsLocationBadge" style="display:none;" class="gps-badge"></div>
+                        <div id="gpsLocationBadge" style="display:none; margin-top: 8px;" class="gps-badge"></div>
                     </div>
                 </div>
 
@@ -1139,7 +1139,7 @@
                     <label class="form-label">Payment Method</label>
                     <div class="payment-pill-group">
                         <div class="payment-pill selected" id="payPillCod" onclick="selectPaymentMethod('cod')">
-                            💵 Cash on Delivery
+                            💵 Cash on Delivery (Paisa Delivery Par Dein)
                         </div>
                         <div class="payment-pill" id="payPillEasypaisa" onclick="selectPaymentMethod('easypaisa')">
                             📱 EasyPaisa
